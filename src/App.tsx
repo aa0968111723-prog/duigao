@@ -126,7 +126,7 @@ export function App() {
 
   useEffect(() => {
     if (saveState !== "saved") return;
-    const timer = window.setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 1500);
+    const timer = window.setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 2500);
     return () => clearTimeout(timer);
   }, [saveState]);
 
