@@ -4,7 +4,7 @@
  * DragSheet, ModalSheet) — they are not overrides of the desktop layout.
  */
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (orientation: landscape) and (max-height: 520px) and (max-width: 920px) and (pointer: coarse) {
   html, body, #root {
     height: 100dvh;
     overscroll-behavior: none;
