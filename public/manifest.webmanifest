@@ -1,0 +1,33 @@
+{
+  "name": "對稿 · 社團文宣",
+  "short_name": "對稿",
+  "description": "社團活動文宣分享。上傳海報、彩黑白預覽、版本比對、圖上留言，傳到 LINE 一起看。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f0e0c",
+  "theme_color": "#141210",
+  "lang": "zh-Hant",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
