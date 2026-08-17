@@ -8,7 +8,6 @@ export type Version = {
 
 export type ReviewType = "文字" | "排版" | "圖片" | "顏色" | "資訊錯誤" | "其他";
 export type ReviewPriority = "一般" | "重要" | "急";
-export type ReviewStatus = "open" | "in_progress" | "verify" | "resolved";
 
 export type CommentPin = {
   id: string;
@@ -22,15 +21,8 @@ export type CommentPin = {
   suggestion?: string;
   problemType?: ReviewType;
   priority?: ReviewPriority;
-  /** Legacy compatibility. New UI uses status but keeps this in sync. */
   resolved: boolean;
-  status?: ReviewStatus;
-  assigneeId?: string;
-  assigneeName?: string;
-  supporters?: string[];
-  carriedFromId?: string;
   createdAt: number;
-  updatedAt?: number;
 };
 
 export type Stroke = {
