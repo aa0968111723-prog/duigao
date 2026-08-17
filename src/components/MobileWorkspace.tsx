@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { ColorMode, CompareMode, Tool } from "../lib/types";
 import type { CollabStatus } from "../lib/peer";
 import { useViewport } from "../hooks/useViewport";
@@ -41,6 +41,12 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [tab, setTab] = useState<"items" | "chat">("items");
   const [more, setMore] = useState(false);
   const [composeInset, setComposeInset] = useState(0);
+  const chatRef = useRef<HTMLInputElement>(null);
+
+  const sendChat = () => {
+    api.sendChat();
+    chatRef.current?.focus();
+  };
 
   const open = room.comments.filter((c) => !c.resolved).length;
   const hasThread = room.comments.length > 0 || room.messages.length > 0;
@@ -61,7 +67,7 @@ export function MobileWorkspace({ api, presence }: Props) {
     else setComposeInset(0);
   }, [draftPin]);
 
-  const showHint = !draftPin && room.comments.length === 0;
+  const showHint = !draftPin && !api.coachSeen && room.comments.length === 0;
 
   return (
     <div
@@ -81,6 +87,11 @@ export function MobileWorkspace({ api, presence }: Props) {
           onChange={(e) => api.setTitle(e.target.value)}
           aria-label="文宣名稱"
         />
+        {api.saveState !== "idle" && (
+          <span className={`save-status save-${api.saveState}`} title="資料自動保存在這台裝置">
+            {api.saveState === "saving" ? "儲存中…" : api.saveState === "saved" ? "已儲存" : "儲存失敗"}
+          </span>
+        )}
         {presence.status && (
           <span
             className={`m-presence is-${presence.status}`}
@@ -176,14 +187,21 @@ export function MobileWorkspace({ api, presence }: Props) {
                 </div>
                 <div className="m-chatbar">
                   <input
+                    ref={chatRef}
                     className="m-input"
                     placeholder="說點什麼…"
                     value={api.chatInput}
                     onChange={(e) => api.setChatInput(e.target.value)}
                     onFocus={() => setSnap("full")}
-                    onKeyDown={(e) => e.key === "Enter" && api.sendChat()}
+                    enterKeyHint="send"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        sendChat();
+                      }
+                    }}
                   />
-                  <button type="button" className="m-btn m-btn-primary" onClick={api.sendChat} disabled={!api.chatInput.trim()}>
+                  <button type="button" className="m-btn m-btn-primary" onClick={sendChat} disabled={!api.chatInput.trim()}>
                     送出
                   </button>
                 </div>

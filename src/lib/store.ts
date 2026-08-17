@@ -78,3 +78,21 @@ export function saveGuest(guest: Guest): void {
     /* storage may be unavailable in private mode */
   }
 }
+
+const FLAG_PREFIX = "duigao.flag.";
+
+export function loadFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(FLAG_PREFIX + key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveFlag(key: string): void {
+  try {
+    localStorage.setItem(FLAG_PREFIX + key, "1");
+  } catch {
+    /* storage may be unavailable in private mode */
+  }
+}

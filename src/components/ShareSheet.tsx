@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { ModalSheet } from "./BottomSheet";
+import type { ShowToast } from "../toast";
 
 type Props = {
   title: string;
   url: string;
   onClose: () => void;
+  onToast: ShowToast;
 };
 
 /** Share is a bottom sheet on every size: copy, LINE, or the OS share sheet. */
-export function ShareSheet({ title, url, onClose }: Props) {
+export function ShareSheet({ title, url, onClose, onToast }: Props) {
   const [copied, setCopied] = useState(false);
   const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(`一起討論「${title}」：${url}`)}`;
   const canNativeShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
@@ -17,9 +19,11 @@ export function ShareSheet({ title, url, onClose }: Props) {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
+      onToast("分享連結已複製", { tone: "success" });
       window.setTimeout(onClose, 700);
     } catch {
       setCopied(false);
+      onToast("複製失敗，請長按下方連結手動複製。", { tone: "error" });
     }
   };
 

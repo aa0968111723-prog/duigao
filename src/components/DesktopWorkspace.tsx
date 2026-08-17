@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ColorMode, CompareMode, Tool } from "../lib/types";
 import { CommentCard } from "./CommentCard";
 import { PinFields } from "./PinFields";
@@ -136,6 +136,12 @@ function SidePanel({ api }: { api: WorkspaceApi }) {
   const { room } = api;
   const [tab, setTab] = useState<"comments" | "chat">("comments");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
+  const chatRef = useRef<HTMLInputElement>(null);
+
+  const sendChat = () => {
+    api.sendChat();
+    chatRef.current?.focus();
+  };
   const openCount = room.comments.filter((c) => !c.resolved).length;
   const filtered = room.comments.filter((c) =>
     filter === "all" ? true : filter === "resolved" ? c.resolved : !c.resolved,
@@ -175,9 +181,21 @@ function SidePanel({ api }: { api: WorkspaceApi }) {
           </div>
 
           {room.comments.length === 0 && (
-            <p className="empty">選「修改點」後直接點在文宣上，寫清楚哪裡需要調整。</p>
+            <p className="empty">
+              還沒有修改意見。
+              <br />
+              選「修改點」，再點文宣上需要調整的位置。
+            </p>
           )}
-          {room.comments.length > 0 && filtered.length === 0 && <p className="empty">這個分類目前沒有修改點。</p>}
+          {room.comments.length > 0 && filtered.length === 0 && (
+            <p className="empty">
+              {filter === "resolved"
+                ? "還沒有已完成的修改點。"
+                : filter === "open"
+                  ? "太好了，目前沒有待修改的項目。"
+                  : "這個分類目前沒有修改點。"}
+            </p>
+          )}
 
           {filtered.map((c) => (
             <CommentCard
@@ -196,7 +214,13 @@ function SidePanel({ api }: { api: WorkspaceApi }) {
       ) : (
         <>
           <div className="panel-body">
-            {room.messages.length === 0 && <p className="empty">還沒有訊息，說點什麼吧。</p>}
+            {room.messages.length === 0 && (
+              <p className="empty">
+                還沒有討論。
+                <br />
+                可以直接留言給團隊。
+              </p>
+            )}
             {room.messages.map((m) => (
               <div key={m.id} className="m-msg">
                 <span className="m-msg-who" style={{ color: m.authorColor }}>
@@ -208,13 +232,19 @@ function SidePanel({ api }: { api: WorkspaceApi }) {
           </div>
           <div className="chat-input">
             <input
+              ref={chatRef}
               className="text-input"
               placeholder="輸入訊息…"
               value={api.chatInput}
               onChange={(e) => api.setChatInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && api.sendChat()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  sendChat();
+                }
+              }}
             />
-            <button className="btn btn-sm btn-primary" onClick={api.sendChat}>
+            <button className="btn btn-sm btn-primary" onClick={sendChat} disabled={!api.chatInput.trim()}>
               送出
             </button>
           </div>

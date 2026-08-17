@@ -1,3 +1,4 @@
+import type { ShowToast } from "../toast";
 import type {
   Guest,
   Point,
@@ -7,6 +8,8 @@ import type {
   Tool,
   ViewState,
 } from "../lib/types";
+
+export type SaveState = "idle" | "saving" | "saved" | "error";
 
 export type PinDraft = { versionId: string; x: number; y: number };
 
@@ -30,6 +33,8 @@ export type WorkspaceApi = {
   form: PinForm;
   selectedPinId: string | null;
   chatInput: string;
+  saveState: SaveState;
+  coachSeen: boolean;
   setTool: (t: Tool) => void;
   setView: (v: ViewState) => void;
   setForm: (patch: Partial<PinForm>) => void;
@@ -45,6 +50,8 @@ export type WorkspaceApi = {
   addFiles: (files: FileList | null) => void;
   setTitle: (title: string) => void;
   copySummary: () => void;
+  markCoachSeen: () => void;
+  showToast: ShowToast;
   openShare: () => void;
   goHome: () => void;
 };

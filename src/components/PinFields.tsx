@@ -8,6 +8,12 @@ import type { WorkspaceApi } from "./api";
  */
 export function PinFields({ api, autoFocus }: { api: WorkspaceApi; autoFocus?: boolean }) {
   const { form } = api;
+  const submitOnMetaEnter = (e: { metaKey: boolean; ctrlKey: boolean; key: string; preventDefault: () => void }) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      api.commitPin();
+    }
+  };
   const [details, setDetails] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -36,6 +42,7 @@ export function PinFields({ api, autoFocus }: { api: WorkspaceApi; autoFocus?: b
         placeholder="哪裡需要調整？例如：日期太小看不清楚"
         value={form.body}
         onChange={(e) => api.setForm({ body: e.target.value })}
+        onKeyDown={submitOnMetaEnter}
         aria-label="哪裡需要調整"
       />
 
@@ -51,6 +58,7 @@ export function PinFields({ api, autoFocus }: { api: WorkspaceApi; autoFocus?: b
             placeholder="建議怎麼改？（可不填）"
             value={form.suggestion}
             onChange={(e) => api.setForm({ suggestion: e.target.value })}
+            onKeyDown={submitOnMetaEnter}
             aria-label="建議怎麼改"
           />
           <div className="m-chiprow" role="group" aria-label="問題類型">

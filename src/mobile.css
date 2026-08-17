@@ -159,6 +159,7 @@
     color: var(--ink-dim);
     font-size: 13px;
     white-space: nowrap;
+    /* Never competes with the poster for taps; it clears after the first pin. */
     pointer-events: none;
   }
 

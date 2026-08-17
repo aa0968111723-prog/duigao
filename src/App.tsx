@@ -13,16 +13,19 @@ import {
   type ViewState,
 } from "./lib/types";
 import { roomCode, uid } from "./lib/id";
-import { listRooms, loadGuest, loadRoom, saveGuest, saveRoom } from "./lib/store";
+import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
+import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { DesktopWorkspace } from "./components/DesktopWorkspace";
 import { MobileWorkspace } from "./components/MobileWorkspace";
 import { Home } from "./components/Home";
 import { ShareSheet } from "./components/ShareSheet";
-import type { PinDraft, PinForm, WorkspaceApi } from "./components/api";
+import type { PinDraft, PinForm, SaveState, WorkspaceApi } from "./components/api";
+import "./usability.css";
 
 const EMPTY_FORM: PinForm = { body: "", suggestion: "", type: "文字", priority: "一般" };
+const COACH_FLAG = "coach.firstPin";
 
 function pickColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)];
@@ -66,15 +69,66 @@ export function App() {
   const [shareOpen, setShareOpen] = useState(false);
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
   const [peerCount, setPeerCount] = useState(0);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
 
+  const { toasts, showToast, dismiss } = useToasts();
   const isMobile = useIsMobile();
   const collabRef = useRef<Collab | null>(null);
   const roomRef = useRef<Room | null>(null);
   const viewRef = useRef<ViewState>(view);
+  const saveSeq = useRef(0);
+  const busy = useRef<Set<string>>(new Set());
+  const offlineNotified = useRef(false);
   roomRef.current = room;
   viewRef.current = view;
 
   const isGuestSession = useMemo(() => readRoomCodeFromUrl() != null, []);
+
+  const markCoachSeen = useCallback(() => {
+    setCoachSeen((seen) => {
+      if (!seen) saveFlag(COACH_FLAG);
+      return true;
+    });
+  }, []);
+
+  /**
+   * Guards against a double tap producing two entries. The key carries the
+   * payload's identity, so a genuinely different pin or message right after is
+   * never swallowed — only a repeat of the same one is.
+   */
+  const claim = useCallback((key: string, ms = 450) => {
+    if (busy.current.has(key)) return false;
+    busy.current.add(key);
+    window.setTimeout(() => busy.current.delete(key), ms);
+    return true;
+  }, []);
+
+  const trackSave = useCallback(
+    (next: Room) => {
+      const seq = ++saveSeq.current;
+      setSaveState("saving");
+      saveRoom(next)
+        .then(() => {
+          if (seq === saveSeq.current) setSaveState("saved");
+        })
+        .catch(() => {
+          if (seq !== saveSeq.current) return;
+          setSaveState("error");
+          showToast("儲存失敗，請再試一次", {
+            tone: "error",
+            action: { label: "重試", onClick: () => trackSave(roomRef.current ?? next) },
+          });
+        });
+    },
+    [showToast],
+  );
+
+  useEffect(() => {
+    if (saveState !== "saved") return;
+    const timer = window.setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 1500);
+    return () => clearTimeout(timer);
+  }, [saveState]);
 
   useEffect(() => {
     listRooms().then(setRecent).catch(() => setRecent([]));
@@ -103,6 +157,11 @@ export function App() {
       onStatus: (status) => {
         setCollabStatus(status);
         setPeerCount(collab.peerCount);
+        if ((status === "error" || status === "closed") && !offlineNotified.current) {
+          offlineNotified.current = true;
+          showToast("目前離線，內容已保存在這台裝置。");
+        }
+        if (status === "online") offlineNotified.current = false;
       },
       onMessage: (msg) => {
         if (msg.t === "snapshot") {
@@ -124,12 +183,15 @@ export function App() {
       collab.destroy();
       collabRef.current = null;
     };
-  }, [guest, applyRemoteRoom]);
+  }, [guest, applyRemoteRoom, showToast]);
 
-  const persist = useCallback((next: Room) => {
-    saveRoom(next).catch(() => undefined);
-    collabRef.current?.send({ t: "room", room: next });
-  }, []);
+  const persist = useCallback(
+    (next: Room) => {
+      trackSave(next);
+      collabRef.current?.send({ t: "room", room: next });
+    },
+    [trackSave],
+  );
 
   const updateRoom = useCallback(
     (mutate: (r: Room) => Room) => {
@@ -141,6 +203,28 @@ export function App() {
       });
     },
     [persist],
+  );
+
+  /** Apply a change and offer a few-second Undo that restores the prior room. */
+  const mutateWithUndo = useCallback(
+    (mutate: (r: Room) => Room, toastMessage: string) => {
+      const snapshot = roomRef.current;
+      if (!snapshot) return;
+      const next = { ...mutate(snapshot), updatedAt: Date.now() };
+      setRoom(next);
+      persist(next);
+      showToast(toastMessage, {
+        action: {
+          label: "復原",
+          onClick: () => {
+            setRoom(snapshot);
+            persist(snapshot);
+            showToast("已復原");
+          },
+        },
+      });
+    },
+    [persist, showToast],
   );
 
   const updateView = useCallback((next: ViewState) => {
@@ -164,29 +248,44 @@ export function App() {
   const addFiles = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
-      const current = roomRef.current ?? emptyRoom(roomCode(), "未命名文宣");
-      const created = !roomRef.current;
-      const newVersions: Version[] = [];
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith("image/")) continue;
-        const dataUrl = await fileToDataUrl(file);
-        const idx = current.versions.length + newVersions.length;
-        newVersions.push({ id: uid("v_"), label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl });
-      }
-      if (newVersions.length === 0) return;
-      const next: Room = { ...current, versions: [...current.versions, ...newVersions], updatedAt: Date.now() };
-      setRoom(next);
-      setView((v) => {
-        if (created || !v.versionId) return initialView(next);
-        if (v.compareId === v.versionId && next.versions.length >= 2) {
-          const other = next.versions.find((x) => x.id !== v.versionId);
-          if (other) return { ...v, compareId: other.id };
+      if (busy.current.has("upload")) return;
+      busy.current.add("upload");
+      try {
+        const current = roomRef.current ?? emptyRoom(roomCode(), "未命名文宣");
+        const created = !roomRef.current;
+        const newVersions: Version[] = [];
+        for (const file of Array.from(files)) {
+          if (!file.type.startsWith("image/")) continue;
+          const dataUrl = await fileToDataUrl(file);
+          const idx = current.versions.length + newVersions.length;
+          newVersions.push({ id: uid("v_"), label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl });
         }
-        return v;
-      });
-      persist(next);
+        if (newVersions.length === 0) {
+          showToast("這個檔案不是圖片，換一張文宣試試。", { tone: "error" });
+          return;
+        }
+        const next: Room = { ...current, versions: [...current.versions, ...newVersions], updatedAt: Date.now() };
+        setRoom(next);
+        setView((v) => {
+          if (created || !v.versionId) return initialView(next);
+          if (v.compareId === v.versionId && next.versions.length >= 2) {
+            const other = next.versions.find((x) => x.id !== v.versionId);
+            if (other) return { ...v, compareId: other.id };
+          }
+          return v;
+        });
+        persist(next);
+        const added = newVersions[newVersions.length - 1];
+        if (!created) {
+          showToast(newVersions.length > 1 ? `已新增 ${newVersions.length} 版` : `已新增${added.label}`, {
+            tone: "success",
+          });
+        }
+      } finally {
+        busy.current.delete("upload");
+      }
     },
-    [persist],
+    [persist, showToast],
   );
 
   const cancelPin = useCallback(() => {
@@ -205,6 +304,7 @@ export function App() {
       cancelPin();
       return;
     }
+    if (!claim(`pin:${draftPin.versionId}:${draftPin.x}:${draftPin.y}`)) return;
     const pin: CommentPin = {
       id: uid("c_"),
       versionId: draftPin.versionId,
@@ -220,18 +320,38 @@ export function App() {
       resolved: false,
       createdAt: Date.now(),
     };
+    const number = (roomRef.current?.comments.length ?? 0) + 1;
     updateRoom((r) => ({ ...r, comments: [...r.comments, pin] }));
+    markCoachSeen();
     cancelPin();
-  }, [draftPin, guest, form, updateRoom, cancelPin]);
+    showToast(`已新增修改點 ${number}`, {
+      tone: "success",
+      action: {
+        label: "復原",
+        onClick: () => {
+          updateRoom((r) => ({ ...r, comments: r.comments.filter((c) => c.id !== pin.id) }));
+          showToast("已復原");
+        },
+      },
+    });
+  }, [draftPin, guest, form, claim, updateRoom, markCoachSeen, cancelPin, showToast]);
 
   const toggleResolve = useCallback(
     (pinId: string) => {
-      updateRoom((r) => ({
-        ...r,
-        comments: r.comments.map((c) => (c.id === pinId ? { ...c, resolved: !c.resolved } : c)),
-      }));
+      const current = roomRef.current;
+      if (!current) return;
+      const index = current.comments.findIndex((c) => c.id === pinId);
+      if (index < 0) return;
+      const willResolve = !current.comments[index].resolved;
+      mutateWithUndo(
+        (r) => ({
+          ...r,
+          comments: r.comments.map((c) => (c.id === pinId ? { ...c, resolved: willResolve } : c)),
+        }),
+        `${index + 1} ${willResolve ? "已標記完成" : "已重新開啟"}`,
+      );
     },
-    [updateRoom],
+    [mutateWithUndo],
   );
 
   const addStroke = useCallback(
@@ -252,12 +372,17 @@ export function App() {
   );
 
   const eraseStroke = useCallback(
-    (strokeId: string) => updateRoom((r) => ({ ...r, strokes: r.strokes.filter((s) => s.id !== strokeId) })),
-    [updateRoom],
+    (strokeId: string) => {
+      const current = roomRef.current;
+      if (!current || !current.strokes.some((s) => s.id === strokeId)) return;
+      mutateWithUndo((r) => ({ ...r, strokes: r.strokes.filter((s) => s.id !== strokeId) }), "已刪除圈畫");
+    },
+    [mutateWithUndo],
   );
 
   const sendChat = useCallback(() => {
     if (!guest || !chatInput.trim()) return;
+    if (!claim(`chat:${chatInput.trim()}`, 300)) return;
     const msg: ChatMessage = {
       id: uid("m_"),
       authorId: guest.id,
@@ -268,7 +393,7 @@ export function App() {
     };
     updateRoom((r) => ({ ...r, messages: [...r.messages, msg] }));
     setChatInput("");
-  }, [guest, chatInput, updateRoom]);
+  }, [guest, chatInput, claim, updateRoom]);
 
   const startHosting = useCallback(() => {
     const current = roomRef.current;
@@ -300,6 +425,10 @@ export function App() {
   const copySummary = useCallback(async () => {
     const current = roomRef.current;
     if (!current) return;
+    if (current.comments.length === 0) {
+      showToast("還沒有修改點可以複製。", { tone: "error" });
+      return;
+    }
     const openCount = current.comments.filter((c) => !c.resolved).length;
     const lines = current.comments.map((c, index) => {
       const status = c.resolved ? "已完成" : "待修改";
@@ -312,10 +441,21 @@ export function App() {
     const summary = `${current.title}\n共 ${current.comments.length} 個修改點｜待修改 ${openCount}｜已完成 ${current.comments.length - openCount}\n\n${lines.join("\n\n")}`;
     try {
       await navigator.clipboard.writeText(summary);
+      showToast("修改清單已複製", { tone: "success" });
     } catch {
-      /* clipboard may be blocked */
+      showToast("複製失敗，請再試一次。", { tone: "error" });
     }
-  }, []);
+  }, [showToast]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (draftPin) cancelPin();
+      else if (selectedPinId) setSelectedPinId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [draftPin, selectedPinId, cancelPin]);
 
   const api: WorkspaceApi | null = room
     ? {
@@ -327,6 +467,8 @@ export function App() {
         form,
         selectedPinId,
         chatInput,
+        saveState,
+        coachSeen,
         setTool,
         setView: updateView,
         setForm: (patch) => setFormState((f) => ({ ...f, ...patch })),
@@ -342,6 +484,8 @@ export function App() {
         addFiles,
         setTitle: (title) => updateRoom((r) => ({ ...r, title })),
         copySummary,
+        markCoachSeen,
+        showToast,
         openShare: () => {
           startHosting();
           setShareOpen(true);
@@ -369,7 +513,7 @@ export function App() {
             placeholder="你的名字"
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && confirmName()}
+            onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && confirmName()}
             autoFocus
             enterKeyHint="go"
           />
@@ -395,12 +539,14 @@ export function App() {
                 : "正在載入夥伴分享的文宣…"}
             </p>
           </div>
+          <ToastStack toasts={toasts} onDismiss={dismiss} />
         </div>
       );
     }
     return (
       <div className="app">
         <Home recent={recent} isGuestSession={isGuestSession} onFiles={addFiles} onOpen={openRoom} />
+        <ToastStack toasts={toasts} onDismiss={dismiss} />
       </div>
     );
   }
@@ -423,15 +569,29 @@ export function App() {
               aria-label="文宣名稱"
             />
             <div className="topbar-right">
+              {saveState !== "idle" && (
+                <span className={`save-status save-${saveState}`} title="資料自動保存在這台裝置">
+                  {saveState === "saving" ? "儲存中…" : saveState === "saved" ? "已儲存" : "儲存失敗"}
+                </span>
+              )}
               {collabStatus && (
-                <span className={`badge badge-${collabStatus}`}>
+                <span
+                  className={`badge badge-${collabStatus}`}
+                  title={
+                    collabStatus === "online"
+                      ? "已與其他人同步"
+                      : collabStatus === "connecting"
+                        ? "正在建立同步連線"
+                        : "目前離線，內容已保存在這台裝置"
+                  }
+                >
                   {collabStatus === "online"
-                    ? `連線中 · ${peerCount} 人`
+                    ? peerCount > 0
+                      ? `已同步 · ${peerCount} 人`
+                      : "已同步"
                     : collabStatus === "connecting"
-                      ? "連線中…"
-                      : collabStatus === "error"
-                        ? "本機模式"
-                        : "已關閉"}
+                      ? "正在同步"
+                      : "目前離線"}
                 </span>
               )}
               <span className="me" style={{ background: guest.color }} title={guest.name}>
@@ -442,13 +602,33 @@ export function App() {
               </button>
             </div>
           </header>
+
+          {!coachSeen && room!.comments.length === 0 && (
+            <div className="coach" role="note">
+              <span className="coach-icon">💡</span>
+              <span className="coach-text">
+                第一次用嗎？選「修改點」 → 點文宣上需要調整的位置 → 留下意見。
+              </span>
+              <button className="coach-dismiss" onClick={markCoachSeen}>
+                知道了
+              </button>
+            </div>
+          )}
+
           <DesktopWorkspace api={api!} />
         </div>
       )}
 
       {shareOpen && room && (
-        <ShareSheet title={room.title} url={shareUrl} onClose={() => setShareOpen(false)} />
+        <ShareSheet
+          title={room.title}
+          url={shareUrl}
+          onClose={() => setShareOpen(false)}
+          onToast={showToast}
+        />
       )}
+
+      <ToastStack toasts={toasts} onDismiss={dismiss} />
     </>
   );
 }

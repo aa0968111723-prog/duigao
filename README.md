@@ -18,6 +18,7 @@
 - 問題分類、優先程度、建議怎麼改（選填）
 - 待修改 / 已完成、一鍵複製完整修改清單
 - 分享 Bottom Sheet：複製連結、傳到 LINE、系統分享
+- 操作回饋 toast 與「復原」、儲存狀態、首次使用引導
 - 同一連結多人同時看（WebRTC / PeerJS）
 - 彩色 / 黑白 / 對切 / 並排 / 滑動比較（手機收在「更多」）
 
@@ -36,8 +37,10 @@ src/
     PinFields.tsx          新增修改點表單（共用）
     CommentCard.tsx        修改點卡片（共用）
     Home.tsx / ShareSheet.tsx / UploadZone.tsx
+  toast.tsx                操作回饋 toast
   styles.css               共用樣式與桌機版面
   mobile.css               手機元件樣式（≤720px）
+  usability.css            toast / 儲存狀態 / 新手引導
 ```
 
 `mobile.css` 只負責手機元件本身的樣式，不再覆寫桌機版面。
