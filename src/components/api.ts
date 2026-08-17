@@ -35,6 +35,7 @@ export type WorkspaceApi = {
   chatInput: string;
   saveState: SaveState;
   coachSeen: boolean;
+  canUndo: boolean;
   setTool: (t: Tool) => void;
   setView: (v: ViewState) => void;
   setForm: (patch: Partial<PinForm>) => void;
@@ -45,6 +46,7 @@ export type WorkspaceApi = {
   toggleResolve: (id: string) => void;
   addStroke: (versionId: string, points: Point[]) => void;
   eraseStroke: (id: string) => void;
+  undo: () => void;
   setChatInput: (v: string) => void;
   sendChat: () => void;
   addFiles: (files: FileList | null) => void;
@@ -56,8 +58,21 @@ export type WorkspaceApi = {
   goHome: () => void;
 };
 
+/** Number review items within their own poster version, not across all versions. */
 export function pinNumber(room: Room, pinId: string): number {
-  return room.comments.findIndex((c) => c.id === pinId) + 1;
+  const pin = room.comments.find((c) => c.id === pinId);
+  if (!pin) return 0;
+  let n = 0;
+  for (const item of room.comments) {
+    if (item.versionId !== pin.versionId) continue;
+    n += 1;
+    if (item.id === pinId) return n;
+  }
+  return 0;
+}
+
+export function nextPinNumber(room: Room, versionId: string): number {
+  return room.comments.filter((c) => c.versionId === versionId).length + 1;
 }
 
 export function versionLabel(room: Room, versionId: string): string {

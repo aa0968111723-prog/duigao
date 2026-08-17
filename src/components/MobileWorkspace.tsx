@@ -8,7 +8,7 @@ import { PinFields } from "./PinFields";
 import { UploadZone } from "./UploadZone";
 import { Viewer } from "./Stage";
 import { IconChat, IconEraser, IconEye, IconMore, IconPen, IconPin } from "./icons";
-import type { WorkspaceApi } from "./api";
+import { nextPinNumber, type WorkspaceApi } from "./api";
 
 const TOOLS: { id: Tool; label: string; icon: (p: { className?: string }) => ReactElement }[] = [
   { id: "pan", label: "看", icon: IconEye },
@@ -112,7 +112,10 @@ export function MobileWorkspace({ api, presence }: Props) {
             key={v.id}
             type="button"
             className={`m-vchip ${v.id === view.versionId ? "is-on" : ""}`}
-            onClick={() => api.setView({ ...view, versionId: v.id, compareMode: "single" })}
+            onClick={() => {
+              api.selectPin(null);
+              api.setView({ ...view, versionId: v.id, compareMode: "single" });
+            }}
           >
             {v.label}
           </button>
@@ -165,6 +168,8 @@ export function MobileWorkspace({ api, presence }: Props) {
                     compact
                     selected={c.id === selectedPinId}
                     onSelect={() => {
+                      // Discussion owns the text; the artwork only shows one locator.
+                      api.setTool("pan");
                       api.selectPin(c.id);
                       api.setView({ ...view, versionId: c.versionId, compareMode: "single" });
                     }}
@@ -218,7 +223,10 @@ export function MobileWorkspace({ api, presence }: Props) {
                 key={t.id}
                 type="button"
                 className={`m-tool ${tool === t.id ? "is-on" : ""} ${t.id === "pin" ? "is-primary" : ""}`}
-                onClick={() => api.setTool(t.id)}
+                onClick={() => {
+                  api.setTool(t.id);
+                  if (t.id === "pan") api.selectPin(null);
+                }}
                 aria-pressed={tool === t.id}
               >
                 <Icon />
@@ -229,7 +237,11 @@ export function MobileWorkspace({ api, presence }: Props) {
           <button
             type="button"
             className="m-tool"
-            onClick={() => setSnap((s) => (s === "peek" ? "half" : "peek"))}
+            onClick={() => {
+              api.setTool("pan");
+              setTab("items");
+              setSnap((s) => (s === "peek" ? "half" : "peek"));
+            }}
           >
             <span className="m-tool-badge-wrap">
               <IconChat />
@@ -242,7 +254,7 @@ export function MobileWorkspace({ api, presence }: Props) {
 
       {draftPin && (
         <ModalSheet
-          title={`修改點 ${room.comments.length + 1}`}
+          title={`修改點 ${nextPinNumber(room, draftPin.versionId)}`}
           onClose={api.cancelPin}
           dismissible={!api.form.body.trim()}
           onHeight={setComposeInset}
@@ -323,6 +335,9 @@ export function MobileWorkspace({ api, presence }: Props) {
             <UploadZone onFiles={api.addFiles} className="m-row">
               加一個版本
             </UploadZone>
+            <button type="button" className="m-row" onClick={api.undo} disabled={!api.canUndo}>
+              復原上一個操作
+            </button>
             {room.comments.length > 0 && (
               <button type="button" className="m-row" onClick={api.copySummary}>
                 複製修改清單

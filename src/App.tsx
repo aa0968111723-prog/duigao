@@ -21,11 +21,19 @@ import { DesktopWorkspace } from "./components/DesktopWorkspace";
 import { MobileWorkspace } from "./components/MobileWorkspace";
 import { Home } from "./components/Home";
 import { ShareSheet } from "./components/ShareSheet";
-import type { PinDraft, PinForm, SaveState, WorkspaceApi } from "./components/api";
+import {
+  nextPinNumber,
+  pinNumber,
+  type PinDraft,
+  type PinForm,
+  type SaveState,
+  type WorkspaceApi,
+} from "./components/api";
 import "./usability.css";
 
 const EMPTY_FORM: PinForm = { body: "", suggestion: "", type: "文字", priority: "一般" };
 const COACH_FLAG = "coach.firstPin";
+const UNDO_LIMIT = 20;
 
 function pickColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)];
@@ -71,6 +79,7 @@ export function App() {
   const [peerCount, setPeerCount] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
+  const [undoCount, setUndoCount] = useState(0);
 
   const { toasts, showToast, dismiss } = useToasts();
   const isMobile = useIsMobile();
@@ -80,6 +89,7 @@ export function App() {
   const saveSeq = useRef(0);
   const busy = useRef<Set<string>>(new Set());
   const offlineNotified = useRef(false);
+  const undoStack = useRef<Room[]>([]);
   roomRef.current = room;
   viewRef.current = view;
 
@@ -90,6 +100,17 @@ export function App() {
       if (!seen) saveFlag(COACH_FLAG);
       return true;
     });
+  }, []);
+
+  const clearUndo = useCallback(() => {
+    undoStack.current = [];
+    setUndoCount(0);
+  }, []);
+
+  const pushUndo = useCallback((snapshot: Room) => {
+    undoStack.current.push(snapshot);
+    if (undoStack.current.length > UNDO_LIMIT) undoStack.current.shift();
+    setUndoCount(undoStack.current.length);
   }, []);
 
   /**
@@ -205,26 +226,34 @@ export function App() {
     [persist],
   );
 
-  /** Apply a change and offer a few-second Undo that restores the prior room. */
+  const undoLast = useCallback(() => {
+    const previous = undoStack.current.pop();
+    setUndoCount(undoStack.current.length);
+    if (!previous) {
+      showToast("沒有可以復原的操作");
+      return;
+    }
+    setRoom(previous);
+    persist(previous);
+    setSelectedPinId(null);
+    setDraftPin(null);
+    showToast("已復原", { tone: "success" });
+  }, [persist, showToast]);
+
+  /** Apply a change and offer a few-second Undo; history also remains in More. */
   const mutateWithUndo = useCallback(
     (mutate: (r: Room) => Room, toastMessage: string) => {
       const snapshot = roomRef.current;
       if (!snapshot) return;
+      pushUndo(snapshot);
       const next = { ...mutate(snapshot), updatedAt: Date.now() };
       setRoom(next);
       persist(next);
       showToast(toastMessage, {
-        action: {
-          label: "復原",
-          onClick: () => {
-            setRoom(snapshot);
-            persist(snapshot);
-            showToast("已復原");
-          },
-        },
+        action: { label: "復原", onClick: undoLast },
       });
     },
-    [persist, showToast],
+    [persist, pushUndo, showToast, undoLast],
   );
 
   const updateView = useCallback((next: ViewState) => {
@@ -240,10 +269,14 @@ export function App() {
     setGuest(g);
   };
 
-  const openRoom = useCallback((r: Room) => {
-    setRoom(r);
-    setView(initialView(r));
-  }, []);
+  const openRoom = useCallback(
+    (r: Room) => {
+      clearUndo();
+      setRoom(r);
+      setView(initialView(r));
+    },
+    [clearUndo],
+  );
 
   const addFiles = useCallback(
     async (files: FileList | null) => {
@@ -264,6 +297,7 @@ export function App() {
           showToast("這個檔案不是圖片，換一張文宣試試。", { tone: "error" });
           return;
         }
+        if (!created) pushUndo(current);
         const next: Room = { ...current, versions: [...current.versions, ...newVersions], updatedAt: Date.now() };
         setRoom(next);
         setView((v) => {
@@ -279,13 +313,14 @@ export function App() {
         if (!created) {
           showToast(newVersions.length > 1 ? `已新增 ${newVersions.length} 版` : `已新增${added.label}`, {
             tone: "success",
+            action: { label: "復原", onClick: undoLast },
           });
         }
       } finally {
         busy.current.delete("upload");
       }
     },
-    [persist, showToast],
+    [persist, pushUndo, showToast, undoLast],
   );
 
   const cancelPin = useCallback(() => {
@@ -320,35 +355,32 @@ export function App() {
       resolved: false,
       createdAt: Date.now(),
     };
-    const number = (roomRef.current?.comments.length ?? 0) + 1;
+    const current = roomRef.current;
+    const number = current ? nextPinNumber(current, draftPin.versionId) : 1;
+    if (current) pushUndo(current);
     updateRoom((r) => ({ ...r, comments: [...r.comments, pin] }));
     markCoachSeen();
     cancelPin();
     showToast(`已新增修改點 ${number}`, {
       tone: "success",
-      action: {
-        label: "復原",
-        onClick: () => {
-          updateRoom((r) => ({ ...r, comments: r.comments.filter((c) => c.id !== pin.id) }));
-          showToast("已復原");
-        },
-      },
+      action: { label: "復原", onClick: undoLast },
     });
-  }, [draftPin, guest, form, claim, updateRoom, markCoachSeen, cancelPin, showToast]);
+  }, [draftPin, guest, form, claim, pushUndo, updateRoom, markCoachSeen, cancelPin, showToast, undoLast]);
 
   const toggleResolve = useCallback(
     (pinId: string) => {
       const current = roomRef.current;
       if (!current) return;
-      const index = current.comments.findIndex((c) => c.id === pinId);
-      if (index < 0) return;
-      const willResolve = !current.comments[index].resolved;
+      const pin = current.comments.find((c) => c.id === pinId);
+      if (!pin) return;
+      const willResolve = !pin.resolved;
+      const number = pinNumber(current, pinId);
       mutateWithUndo(
         (r) => ({
           ...r,
           comments: r.comments.map((c) => (c.id === pinId ? { ...c, resolved: willResolve } : c)),
         }),
-        `${index + 1} ${willResolve ? "已標記完成" : "已重新開啟"}`,
+        `修改點 ${number} ${willResolve ? "已標記完成" : "已重新開啟"}`,
       );
     },
     [mutateWithUndo],
@@ -357,6 +389,8 @@ export function App() {
   const addStroke = useCallback(
     (versionId: string, points: Point[]) => {
       if (!guest || points.length < 2) return;
+      const current = roomRef.current;
+      if (current) pushUndo(current);
       const stroke: Stroke = {
         id: uid("s_"),
         versionId,
@@ -368,7 +402,7 @@ export function App() {
       };
       updateRoom((r) => ({ ...r, strokes: [...r.strokes, stroke] }));
     },
-    [guest, updateRoom],
+    [guest, pushUndo, updateRoom],
   );
 
   const eraseStroke = useCallback(
@@ -430,13 +464,14 @@ export function App() {
       return;
     }
     const openCount = current.comments.filter((c) => !c.resolved).length;
-    const lines = current.comments.map((c, index) => {
+    const lines = current.comments.map((c) => {
       const status = c.resolved ? "已完成" : "待修改";
       const type = c.problemType ?? "修改";
       const priority = c.priority ?? "一般";
       const versionLabel = current.versions.find((v) => v.id === c.versionId)?.label ?? "";
       const suggestion = c.suggestion ? `\n   建議：${c.suggestion}` : "";
-      return `#${String(index + 1).padStart(2, "0")} [${status}] [${priority}] [${type}] ${versionLabel}\n   問題：${c.body}${suggestion}`;
+      const number = pinNumber(current, c.id);
+      return `#${String(number).padStart(2, "0")} [${status}] [${priority}] [${type}] ${versionLabel}\n   問題：${c.body}${suggestion}`;
     });
     const summary = `${current.title}\n共 ${current.comments.length} 個修改點｜待修改 ${openCount}｜已完成 ${current.comments.length - openCount}\n\n${lines.join("\n\n")}`;
     try {
@@ -469,6 +504,7 @@ export function App() {
         chatInput,
         saveState,
         coachSeen,
+        canUndo: undoCount > 0,
         setTool,
         setView: updateView,
         setForm: (patch) => setFormState((f) => ({ ...f, ...patch })),
@@ -479,6 +515,7 @@ export function App() {
         toggleResolve,
         addStroke,
         eraseStroke,
+        undo: undoLast,
         setChatInput,
         sendChat,
         addFiles,
@@ -491,6 +528,7 @@ export function App() {
           setShareOpen(true);
         },
         goHome: () => {
+          clearUndo();
           setRoom(null);
           setSelectedPinId(null);
           location.hash = "";
