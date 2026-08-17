@@ -6,6 +6,9 @@ export type Version = {
   imageDataUrl: string;
 };
 
+export type ReviewType = "文字" | "排版" | "圖片" | "顏色" | "資訊錯誤" | "其他";
+export type ReviewPriority = "一般" | "重要" | "急";
+
 export type CommentPin = {
   id: string;
   versionId: string;
@@ -15,6 +18,9 @@ export type CommentPin = {
   x: number;
   y: number;
   body: string;
+  suggestion?: string;
+  problemType?: ReviewType;
+  priority?: ReviewPriority;
   resolved: boolean;
   createdAt: number;
 };
