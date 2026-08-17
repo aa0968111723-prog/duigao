@@ -1,7 +1,7 @@
 {
-  "name": "對稿 · 社團文宣",
-  "short_name": "對稿",
-  "description": "社團活動文宣分享。上傳海報、彩黑白預覽、版本比對、圖上留言，傳到 LINE 一起看。",
+  "name": "文宣討論區",
+  "short_name": "文宣討論區",
+  "description": "手機優先的團隊文宣討論工具。標記需要修改的位置、整理建議、比對版本並分享給夥伴。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
