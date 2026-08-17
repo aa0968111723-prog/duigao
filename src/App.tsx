@@ -962,6 +962,7 @@ function Stage(props: StageProps) {
             key={pin.id}
             className={`pin ${pin.resolved ? "pin-resolved" : ""} ${isSelected ? "pin-selected" : ""} ${dimmed ? "pin-dim" : ""}`}
             style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%`, ["--pin" as string]: pin.authorColor }}
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               onSelectPin(pin);
