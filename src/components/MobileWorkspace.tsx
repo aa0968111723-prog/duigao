@@ -335,6 +335,9 @@ export function MobileWorkspace({ api, presence }: Props) {
             <UploadZone onFiles={api.addFiles} className="m-row">
               加一個版本
             </UploadZone>
+            <button type="button" className="m-row" onClick={api.undo} disabled={!api.canUndo}>
+              復原上一個操作
+            </button>
             {room.comments.length > 0 && (
               <button type="button" className="m-row" onClick={api.copySummary}>
                 複製修改清單
