@@ -35,6 +35,7 @@ export type WorkspaceApi = {
   chatInput: string;
   saveState: SaveState;
   coachSeen: boolean;
+  canUndo: boolean;
   setTool: (t: Tool) => void;
   setView: (v: ViewState) => void;
   setForm: (patch: Partial<PinForm>) => void;
@@ -45,6 +46,7 @@ export type WorkspaceApi = {
   toggleResolve: (id: string) => void;
   addStroke: (versionId: string, points: Point[]) => void;
   eraseStroke: (id: string) => void;
+  undo: () => void;
   setChatInput: (v: string) => void;
   sendChat: () => void;
   addFiles: (files: FileList | null) => void;
