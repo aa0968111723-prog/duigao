@@ -1,0 +1,17 @@
+{
+  "name": "對稿 (duigao)",
+  "install": "npm install",
+  "ports": [
+    {
+      "name": "vite dev server",
+      "port": 5173
+    }
+  ],
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev",
+      "description": "Vite dev server for the 對稿 poster-proofing PWA (http://localhost:5173)."
+    }
+  ]
+}
