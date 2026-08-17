@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { Point, Version } from "../lib/types";
-import { pinNumber, type WorkspaceApi } from "./api";
+import { nextPinNumber, pinNumber, type WorkspaceApi } from "./api";
 
 type Rect = { left: number; top: number; width: number; height: number };
 
@@ -151,18 +151,33 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
     api.addStroke(version.id, pts);
   };
 
-  const pins = room.comments.filter((c) => c.versionId === version.id);
-  const strokes = room.strokes.filter((s) => s.versionId === version.id);
+  const allPins = room.comments.filter((c) => c.versionId === version.id);
+  const allStrokes = room.strokes.filter((s) => s.versionId === version.id);
+  const selectedPin = selectedPinId ? allPins.find((pin) => pin.id === selectedPinId) : undefined;
+
+  /**
+   * The poster itself stays clean in view mode. Annotation tools reveal active
+   * marks; selecting an item from the discussion only reveals that one locator.
+   * Resolved pins live in the list and never remain stamped over the artwork.
+   */
+  const editingAnnotations = tool !== "pan";
+  const pins = editingAnnotations
+    ? allPins.filter((pin) => !pin.resolved)
+    : selectedPin
+      ? [selectedPin]
+      : [];
+  const strokes = editingAnnotations ? allStrokes : [];
+
   const toPolyline = (pts: Point[]) => pts.map((p) => `${p.x * 100},${p.y * 100}`).join(" ");
   const imgStyle = ready
     ? { left: frame.left, top: frame.top, width: frame.width, height: frame.height }
     : { inset: 0 };
-  const dimOthers = selectedPinId != null || draftPin != null;
+  const dimOthers = editingAnnotations && (selectedPinId != null || draftPin != null);
 
   return (
     <div
       ref={boxRef}
-      className={`stage tool-${tool} ${interactive ? "is-interactive" : ""}`}
+      className={`stage tool-${tool} ${interactive ? "is-interactive" : ""} ${editingAnnotations ? "stage-annotations" : "stage-clean"}`}
       onClick={onClick}
       onPointerDown={onDown}
       onPointerMove={onMove}
@@ -227,16 +242,18 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
           {pins.map((pin) => {
             const n = pinNumber(room, pin.id);
             const selected = pin.id === selectedPinId;
-            // Keep the label inside the poster and the dot on the marked spot.
+            const locatorOnly = !editingAnnotations && selected;
             const tipLeft = pin.x > 0.55;
+            const showTip = selected && !compact && editingAnnotations;
             return (
               <button
                 key={pin.id}
                 type="button"
                 className={[
                   "pin",
-                  pin.resolved ? "pin-done" : "",
-                  selected ? (tipLeft ? "pin-selected pin-tip-left" : "pin-selected pin-tip-right") : "",
+                  selected ? "pin-selected" : "",
+                  locatorOnly ? "pin-locator" : "",
+                  selected && showTip ? (tipLeft ? "pin-tip-left" : "pin-tip-right") : "",
                   dimOthers && !selected ? "pin-dim" : "",
                   compact ? "pin-compact" : "",
                 ].join(" ")}
@@ -248,9 +265,9 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
                 }}
                 aria-label={`修改點 ${n}：${pin.body}`}
               >
-                {selected && tipLeft && <span className="pin-tip pin-tip-start">{pin.body}</span>}
-                <span className="pin-no">{pin.resolved ? "✓" : n}</span>
-                {selected && !tipLeft && <span className="pin-tip">{pin.body}</span>}
+                {showTip && tipLeft && <span className="pin-tip pin-tip-start">{pin.body}</span>}
+                <span className="pin-no">{n}</span>
+                {showTip && !tipLeft && <span className="pin-tip">{pin.body}</span>}
               </button>
             );
           })}
@@ -261,7 +278,7 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
               style={{ left: `${draftPin.x * 100}%`, top: `${draftPin.y * 100}%` }}
               aria-hidden
             >
-              <span className="pin-no">{room.comments.length + 1}</span>
+              <span className="pin-no">{nextPinNumber(room, version.id)}</span>
             </span>
           )}
         </div>
