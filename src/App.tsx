@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import {
   COLORS,
@@ -24,8 +25,25 @@ import {
   type ViewState,
 } from "./lib/types";
 import { roomCode, uid } from "./lib/id";
-import { listRooms, loadGuest, loadRoom, saveGuest, saveRoom } from "./lib/store";
+import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
+import { ToastStack, useToasts } from "./toast";
+import "./usability.css";
+
+type SaveState = "idle" | "saving" | "saved" | "error";
+const COACH_FLAG = "coach.firstPin";
+
+function humanSyncText(status: CollabStatus, peerCount: number): string {
+  if (status === "online") return peerCount > 0 ? `已同步 · ${peerCount} 人` : "已同步";
+  if (status === "connecting") return "正在同步";
+  return "目前離線";
+}
+
+function syncBadgeClass(status: CollabStatus): string {
+  if (status === "online") return "badge-online";
+  if (status === "connecting") return "badge-connecting";
+  return "badge-error";
+}
 
 const REVIEW_TYPES: ReviewType[] = ["文字", "排版", "圖片", "顏色", "資訊錯誤", "其他"];
 const REVIEW_PRIORITIES: ReviewPriority[] = ["一般", "重要", "急"];
@@ -89,14 +107,66 @@ export function App() {
   const [shareOpen, setShareOpen] = useState(false);
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
   const [peerCount, setPeerCount] = useState(0);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
+  const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
+
+  const { toasts, showToast, dismiss } = useToasts();
 
   const collabRef = useRef<Collab | null>(null);
   const roomRef = useRef<Room | null>(null);
   const viewRef = useRef<ViewState>(view);
+  const saveSeq = useRef(0);
+  const busy = useRef<Set<string>>(new Set());
+  const offlineNotified = useRef(false);
+  const chatInputRef = useRef<HTMLInputElement>(null);
   roomRef.current = room;
   viewRef.current = view;
 
   const isGuestSession = useMemo(() => readRoomCodeFromUrl() != null, []);
+
+  const markCoachSeen = useCallback(() => {
+    setCoachSeen((seen) => {
+      if (!seen) saveFlag(COACH_FLAG);
+      return true;
+    });
+  }, []);
+
+  const runOnce = useCallback((key: string, fn: () => void) => {
+    if (busy.current.has(key)) return;
+    busy.current.add(key);
+    try {
+      fn();
+    } finally {
+      window.setTimeout(() => busy.current.delete(key), 450);
+    }
+  }, []);
+
+  const trackSave = useCallback(
+    (next: Room) => {
+      const seq = ++saveSeq.current;
+      setSaveState("saving");
+      saveRoom(next)
+        .then(() => {
+          if (seq === saveSeq.current) setSaveState("saved");
+        })
+        .catch(() => {
+          if (seq !== saveSeq.current) return;
+          setSaveState("error");
+          showToast("儲存失敗，請再試一次", {
+            tone: "error",
+            action: { label: "重試", onClick: () => trackSave(roomRef.current ?? next) },
+          });
+        });
+    },
+    [showToast],
+  );
+
+  useEffect(() => {
+    if (saveState !== "saved") return;
+    const timer = window.setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 1500);
+    return () => clearTimeout(timer);
+  }, [saveState]);
 
   useEffect(() => {
     listRooms().then(setRecent).catch(() => setRecent([]));
@@ -125,6 +195,11 @@ export function App() {
       onStatus: (status) => {
         setCollabStatus(status);
         setPeerCount(collab.peerCount);
+        if ((status === "error" || status === "closed") && !offlineNotified.current) {
+          offlineNotified.current = true;
+          showToast("目前離線，內容已保存在這台裝置。");
+        }
+        if (status === "online") offlineNotified.current = false;
       },
       onMessage: (msg) => {
         if (msg.t === "snapshot") {
@@ -146,12 +221,15 @@ export function App() {
       collab.destroy();
       collabRef.current = null;
     };
-  }, [guest, applyRemoteRoom]);
+  }, [guest, applyRemoteRoom, showToast]);
 
-  const persist = useCallback((next: Room) => {
-    saveRoom(next).catch(() => undefined);
-    collabRef.current?.send({ t: "room", room: next });
-  }, []);
+  const persist = useCallback(
+    (next: Room) => {
+      trackSave(next);
+      collabRef.current?.send({ t: "room", room: next });
+    },
+    [trackSave],
+  );
 
   const updateRoom = useCallback(
     (mutate: (r: Room) => Room) => {
@@ -163,6 +241,28 @@ export function App() {
       });
     },
     [persist],
+  );
+
+  // Apply a change and offer a few-second Undo that restores the prior room.
+  const mutateWithUndo = useCallback(
+    (mutate: (r: Room) => Room, toastMessage: string) => {
+      const snapshot = roomRef.current;
+      if (!snapshot) return;
+      const next = { ...mutate(snapshot), updatedAt: Date.now() };
+      setRoom(next);
+      persist(next);
+      showToast(toastMessage, {
+        action: {
+          label: "復原",
+          onClick: () => {
+            setRoom(snapshot);
+            persist(snapshot);
+            showToast("已復原");
+          },
+        },
+      });
+    },
+    [persist, showToast],
   );
 
   const updateView = useCallback((next: ViewState) => {
@@ -182,8 +282,8 @@ export function App() {
     const r = emptyRoom(roomCode(), "未命名活動");
     setRoom(r);
     setView(initialView(r));
-    saveRoom(r).catch(() => undefined);
-  }, []);
+    trackSave(r);
+  }, [trackSave]);
 
   const openRoom = useCallback((r: Room) => {
     setRoom(r);
@@ -193,37 +293,50 @@ export function App() {
   const addVersions = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
-      let current = roomRef.current ?? emptyRoom(roomCode(), "未命名活動");
-      const created = !roomRef.current;
-      const newVersions: Version[] = [];
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith("image/")) continue;
-        const dataUrl = await fileToDataUrl(file);
-        const idx = current.versions.length + newVersions.length;
-        newVersions.push({
-          id: uid("v_"),
-          label: VERSION_LABELS[idx] ?? `改${idx}`,
-          imageDataUrl: dataUrl,
-        });
-      }
-      if (newVersions.length === 0) return;
-      const next: Room = {
-        ...current,
-        versions: [...current.versions, ...newVersions],
-        updatedAt: Date.now(),
-      };
-      setRoom(next);
-      setView((v) => {
-        if (created || !v.versionId) return initialView(next);
-        if (v.compareId === v.versionId && next.versions.length >= 2) {
-          const other = next.versions.find((x) => x.id !== v.versionId);
-          if (other) return { ...v, compareId: other.id };
+      if (busy.current.has("upload")) return;
+      busy.current.add("upload");
+      try {
+        const current = roomRef.current ?? emptyRoom(roomCode(), "未命名活動");
+        const created = !roomRef.current;
+        const newVersions: Version[] = [];
+        for (const file of Array.from(files)) {
+          if (!file.type.startsWith("image/")) continue;
+          const dataUrl = await fileToDataUrl(file);
+          const idx = current.versions.length + newVersions.length;
+          newVersions.push({
+            id: uid("v_"),
+            label: VERSION_LABELS[idx] ?? `改${idx}`,
+            imageDataUrl: dataUrl,
+          });
         }
-        return v;
-      });
-      persist(next);
+        if (newVersions.length === 0) {
+          showToast("這個檔案不是圖片，換一張海報試試。", { tone: "error" });
+          return;
+        }
+        const next: Room = {
+          ...current,
+          versions: [...current.versions, ...newVersions],
+          updatedAt: Date.now(),
+        };
+        setRoom(next);
+        setView((v) => {
+          if (created || !v.versionId) return initialView(next);
+          if (v.compareId === v.versionId && next.versions.length >= 2) {
+            const other = next.versions.find((x) => x.id !== v.versionId);
+            if (other) return { ...v, compareId: other.id };
+          }
+          return v;
+        });
+        persist(next);
+        const added = newVersions[newVersions.length - 1];
+        showToast(newVersions.length > 1 ? `已新增 ${newVersions.length} 版` : `已新增${added.label}`, {
+          tone: "success",
+        });
+      } finally {
+        busy.current.delete("upload");
+      }
     },
-    [persist],
+    [persist, showToast],
   );
 
   const resetPinDraft = useCallback(() => {
@@ -239,6 +352,8 @@ export function App() {
       resetPinDraft();
       return;
     }
+    if (busy.current.has("pin")) return;
+    busy.current.add("pin");
     const pin: CommentPin = {
       id: uid("c_"),
       versionId: draftPin.versionId,
@@ -254,15 +369,36 @@ export function App() {
       resolved: false,
       createdAt: Date.now(),
     };
+    const number = (roomRef.current?.comments.length ?? 0) + 1;
     updateRoom((r) => ({ ...r, comments: [...r.comments, pin] }));
+    markCoachSeen();
     resetPinDraft();
+    showToast(`已新增修改點 #${number}`, {
+      tone: "success",
+      action: {
+        label: "復原",
+        onClick: () => {
+          updateRoom((r) => ({ ...r, comments: r.comments.filter((c) => c.id !== pin.id) }));
+          showToast("已復原");
+        },
+      },
+    });
+    window.setTimeout(() => busy.current.delete("pin"), 450);
   };
 
   const toggleResolve = (pinId: string) => {
-    updateRoom((r) => ({
-      ...r,
-      comments: r.comments.map((c) => (c.id === pinId ? { ...c, resolved: !c.resolved } : c)),
-    }));
+    const current = roomRef.current;
+    if (!current) return;
+    const index = current.comments.findIndex((c) => c.id === pinId);
+    if (index < 0) return;
+    const willResolve = !current.comments[index].resolved;
+    mutateWithUndo(
+      (r) => ({
+        ...r,
+        comments: r.comments.map((c) => (c.id === pinId ? { ...c, resolved: willResolve } : c)),
+      }),
+      `#${index + 1} ${willResolve ? "已標記完成" : "已重新開啟"}`,
+    );
   };
 
   const addStroke = (versionId: string, points: Point[]) => {
@@ -280,11 +416,15 @@ export function App() {
   };
 
   const eraseStroke = (strokeId: string) => {
-    updateRoom((r) => ({ ...r, strokes: r.strokes.filter((s) => s.id !== strokeId) }));
+    const current = roomRef.current;
+    if (!current || !current.strokes.some((s) => s.id === strokeId)) return;
+    mutateWithUndo((r) => ({ ...r, strokes: r.strokes.filter((s) => s.id !== strokeId) }), "已刪除圈畫");
   };
 
   const sendChat = () => {
     if (!guest || !chatInput.trim()) return;
+    if (busy.current.has("chat")) return;
+    busy.current.add("chat");
     const msg: ChatMessage = {
       id: uid("m_"),
       authorId: guest.id,
@@ -295,7 +435,19 @@ export function App() {
     };
     updateRoom((r) => ({ ...r, messages: [...r.messages, msg] }));
     setChatInput("");
+    window.setTimeout(() => {
+      busy.current.delete("chat");
+      chatInputRef.current?.focus();
+    }, 0);
   };
+
+  const selectPin = useCallback(
+    (comment: CommentPin) => {
+      setSelectedPinId(comment.id);
+      updateView({ ...viewRef.current, versionId: comment.versionId, compareMode: "single" });
+    },
+    [updateView],
+  );
 
   const startHosting = useCallback(() => {
     const current = roomRef.current;
@@ -337,13 +489,18 @@ export function App() {
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
+      showToast("分享連結已複製", { tone: "success" });
     } catch {
-      /* clipboard may be blocked; user can copy manually */
+      showToast("複製失敗，請長按連結手動複製。", { tone: "error" });
     }
   };
 
   const copyReviewSummary = async () => {
     if (!room) return;
+    if (room.comments.length === 0) {
+      showToast("還沒有修改點可以複製。", { tone: "error" });
+      return;
+    }
     const openCount = room.comments.filter((c) => !c.resolved).length;
     const lines = room.comments.map((c, index) => {
       const status = c.resolved ? "已完成" : "待修改";
@@ -356,10 +513,22 @@ export function App() {
     const summary = `${room.title}\n共 ${room.comments.length} 個修改點｜待修改 ${openCount}｜已完成 ${room.comments.length - openCount}\n\n${lines.join("\n\n")}`;
     try {
       await navigator.clipboard.writeText(summary);
+      showToast("修改清單已複製", { tone: "success" });
     } catch {
-      /* clipboard may be blocked */
+      showToast("複製失敗，請再試一次。", { tone: "error" });
     }
   };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (shareOpen) setShareOpen(false);
+      else if (draftPin) resetPinDraft();
+      else if (selectedPinId) setSelectedPinId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [shareOpen, draftPin, selectedPinId, resetPinDraft]);
 
   const lineShareUrl = useMemo(() => {
     const text = `一起對稿「${room?.title ?? "活動海報"}」： ${shareUrl}`;
@@ -418,15 +587,23 @@ export function App() {
           />
         )}
         <div className="topbar-right">
+          {saveState !== "idle" && (
+            <span className={`save-status save-${saveState}`} title="資料自動保存在這台裝置">
+              {saveState === "saving" ? "儲存中…" : saveState === "saved" ? "已儲存" : "儲存失敗"}
+            </span>
+          )}
           {collabStatus && (
-            <span className={`badge badge-${collabStatus}`}>
-              {collabStatus === "online"
-                ? `連線中 · ${peerCount} 人`
-                : collabStatus === "connecting"
-                  ? "連線中…"
-                  : collabStatus === "error"
-                    ? "本機模式"
-                    : "已關閉"}
+            <span
+              className={`badge ${syncBadgeClass(collabStatus)}`}
+              title={
+                collabStatus === "online"
+                  ? "已與其他人同步"
+                  : collabStatus === "connecting"
+                    ? "正在建立同步連線"
+                    : "目前離線，內容已保存在這台裝置"
+              }
+            >
+              {humanSyncText(collabStatus, peerCount)}
             </span>
           )}
           <span className="me" style={{ background: guest.color }} title={guest.name}>
@@ -434,7 +611,7 @@ export function App() {
           </span>
           {hasVersions && (
             <button className="btn btn-primary" onClick={openShare}>
-              建立連結
+              分享
             </button>
           )}
         </div>
@@ -460,54 +637,70 @@ export function App() {
           )}
         </main>
       ) : (
-        <main className="workspace">
-          <Viewer
-            room={room!}
-            view={view}
-            tool={tool}
-            guest={guest}
-            draftPin={draftPin}
-            pinText={pinText}
-            pinSuggestion={pinSuggestion}
-            pinType={pinType}
-            pinPriority={pinPriority}
-            onPinTextChange={setPinText}
-            onPinSuggestionChange={setPinSuggestion}
-            onPinTypeChange={setPinType}
-            onPinPriorityChange={setPinPriority}
-            onCommitPin={commitPin}
-            onCancelPin={resetPinDraft}
-            onPlacePin={(versionId, x, y) => {
-              setDraftPin({ versionId, x, y });
-              setPinText("");
-              setPinSuggestion("");
-              setPinType("文字");
-              setPinPriority("一般");
-            }}
-            onAddStroke={addStroke}
-            onEraseStroke={eraseStroke}
-            onToggleResolve={toggleResolve}
-          />
+        <>
+          {!coachSeen && (room?.comments.length ?? 0) === 0 && (
+            <div className="coach" role="note">
+              <span className="coach-icon">💡</span>
+              <span className="coach-text">
+                第一次用嗎？選「修改點」 → 點文宣上需要調整的位置 → 留下意見。
+              </span>
+              <button className="coach-dismiss" onClick={markCoachSeen}>
+                知道了
+              </button>
+            </div>
+          )}
+          <main className="workspace">
+            <Viewer
+              room={room!}
+              view={view}
+              tool={tool}
+              guest={guest}
+              draftPin={draftPin}
+              pinText={pinText}
+              pinSuggestion={pinSuggestion}
+              pinType={pinType}
+              pinPriority={pinPriority}
+              selectedPinId={selectedPinId}
+              onPinTextChange={setPinText}
+              onPinSuggestionChange={setPinSuggestion}
+              onPinTypeChange={setPinType}
+              onPinPriorityChange={setPinPriority}
+              onCommitPin={commitPin}
+              onCancelPin={resetPinDraft}
+              onPlacePin={(versionId, x, y) => {
+                setDraftPin({ versionId, x, y });
+                setPinText("");
+                setPinSuggestion("");
+                setPinType("文字");
+                setPinPriority("一般");
+              }}
+              onAddStroke={addStroke}
+              onEraseStroke={eraseStroke}
+              onSelectPin={selectPin}
+            />
 
-          <Toolbar
-            room={room!}
-            view={view}
-            tool={tool}
-            onTool={setTool}
-            onView={updateView}
-            onAddFiles={addVersions}
-          />
+            <Toolbar
+              room={room!}
+              view={view}
+              tool={tool}
+              onTool={setTool}
+              onView={updateView}
+              onAddFiles={addVersions}
+            />
 
-          <SidePanel
-            room={room!}
-            chatInput={chatInput}
-            onChatInput={setChatInput}
-            onSendChat={sendChat}
-            onToggleResolve={toggleResolve}
-            onFocusVersion={(vid) => updateView({ ...view, versionId: vid, compareMode: "single" })}
-            onCopySummary={copyReviewSummary}
-          />
-        </main>
+            <SidePanel
+              room={room!}
+              chatInput={chatInput}
+              chatInputRef={chatInputRef}
+              selectedPinId={selectedPinId}
+              onChatInput={setChatInput}
+              onSendChat={sendChat}
+              onToggleResolve={toggleResolve}
+              onSelectPin={selectPin}
+              onCopySummary={copyReviewSummary}
+            />
+          </main>
+        </>
       )}
 
       {shareOpen && room && (
@@ -532,6 +725,8 @@ export function App() {
           </div>
         </div>
       )}
+
+      <ToastStack toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }
@@ -582,6 +777,7 @@ type ViewerProps = {
   pinSuggestion: string;
   pinType: ReviewType;
   pinPriority: ReviewPriority;
+  selectedPinId: string | null;
   onPinTextChange: (v: string) => void;
   onPinSuggestionChange: (v: string) => void;
   onPinTypeChange: (v: ReviewType) => void;
@@ -591,7 +787,7 @@ type ViewerProps = {
   onPlacePin: (versionId: string, x: number, y: number) => void;
   onAddStroke: (versionId: string, points: Point[]) => void;
   onEraseStroke: (strokeId: string) => void;
-  onToggleResolve: (pinId: string) => void;
+  onSelectPin: (comment: CommentPin) => void;
 };
 
 function Viewer(props: ViewerProps) {
@@ -646,6 +842,7 @@ function Stage(props: StageProps) {
     pinSuggestion,
     pinType,
     pinPriority,
+    selectedPinId,
     onPinTextChange,
     onPinSuggestionChange,
     onPinTypeChange,
@@ -655,7 +852,7 @@ function Stage(props: StageProps) {
     onPlacePin,
     onAddStroke,
     onEraseStroke,
-    onToggleResolve,
+    onSelectPin,
   } = props;
 
   const ref = useRef<HTMLDivElement>(null);
@@ -758,14 +955,16 @@ function Stage(props: StageProps) {
 
       {pins.map((pin) => {
         const number = room.comments.findIndex((item) => item.id === pin.id) + 1;
+        const isSelected = selectedPinId === pin.id;
+        const dimmed = selectedPinId != null && !isSelected;
         return (
           <button
             key={pin.id}
-            className={`pin ${pin.resolved ? "pin-resolved" : ""}`}
+            className={`pin ${pin.resolved ? "pin-resolved" : ""} ${isSelected ? "pin-selected" : ""} ${dimmed ? "pin-dim" : ""}`}
             style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%`, ["--pin" as string]: pin.authorColor }}
             onClick={(e) => {
               e.stopPropagation();
-              onToggleResolve(pin.id);
+              onSelectPin(pin);
             }}
             title={`${pin.authorName}｜${pin.problemType ?? "修改"}｜${pin.body}${pin.suggestion ? `｜建議：${pin.suggestion}` : ""}`}
           >
@@ -801,6 +1000,12 @@ function Stage(props: StageProps) {
               placeholder="哪裡需要改？例如：日期太小，看不清楚"
               value={pinText}
               onChange={(e) => onPinTextChange(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  onCommitPin();
+                }
+              }}
               autoFocus
             />
             <textarea
@@ -808,6 +1013,12 @@ function Stage(props: StageProps) {
               placeholder="建議怎麼改？例如：日期放大 20%，移到標題下方"
               value={pinSuggestion}
               onChange={(e) => onPinSuggestionChange(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  onCommitPin();
+                }
+              }}
             />
             <select
               className="text-input"
@@ -823,7 +1034,7 @@ function Stage(props: StageProps) {
           <div className="pin-compose-actions">
             <button className="btn btn-sm" onClick={onCancelPin}>取消</button>
             <button className="btn btn-sm btn-primary" onClick={onCommitPin} disabled={!pinText.trim()}>
-              加入修改點
+              新增修改點
             </button>
           </div>
         </div>
@@ -939,30 +1150,61 @@ function Toolbar({ room, view, tool, onTool, onView, onAddFiles }: ToolbarProps)
 type SidePanelProps = {
   room: Room;
   chatInput: string;
+  chatInputRef: RefObject<HTMLInputElement | null>;
+  selectedPinId: string | null;
   onChatInput: (v: string) => void;
   onSendChat: () => void;
   onToggleResolve: (id: string) => void;
-  onFocusVersion: (versionId: string) => void;
+  onSelectPin: (comment: CommentPin) => void;
   onCopySummary: () => void;
 };
 
 function SidePanel({
   room,
   chatInput,
+  chatInputRef,
+  selectedPinId,
   onChatInput,
   onSendChat,
   onToggleResolve,
-  onFocusVersion,
+  onSelectPin,
   onCopySummary,
 }: SidePanelProps) {
   const [tab, setTab] = useState<"comments" | "chat">("comments");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const lastLocated = useRef<string | null>(null);
   const labelFor = (versionId: string) => room.versions.find((v) => v.id === versionId)?.label ?? "";
   const openCount = room.comments.filter((c) => !c.resolved).length;
   const filteredComments = room.comments.filter((c) => {
     if (filter === "all") return true;
     return filter === "resolved" ? c.resolved : !c.resolved;
   });
+
+  // Locate the selected pin's card: reveal it (switch tab/filter if hidden),
+  // scroll it into view and focus it once per selection. Focusing also expands
+  // the mobile bottom sheet via mobile.css `.panel:focus-within`.
+  useEffect(() => {
+    if (!selectedPinId) {
+      lastLocated.current = null;
+      return;
+    }
+    setTab("comments");
+    const comment = room.comments.find((c) => c.id === selectedPinId);
+    if (!comment) return;
+    const visible = filter === "all" || (filter === "resolved" ? comment.resolved : !comment.resolved);
+    if (!visible) {
+      setFilter("all");
+      return;
+    }
+    if (lastLocated.current === selectedPinId) return;
+    lastLocated.current = selectedPinId;
+    const el = itemRefs.current.get(selectedPinId);
+    if (el) {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      el.focus({ preventScroll: true });
+    }
+  }, [selectedPinId, filter, room.comments]);
 
   return (
     <aside className="panel">
@@ -1004,22 +1246,39 @@ function SidePanel({
           </div>
 
           {room.comments.length === 0 && (
-            <p className="empty">選「修改點」後直接點在海報上，寫清楚哪裡有問題、建議怎麼改。</p>
+            <p className="empty">
+              還沒有修改意見。<br />選「修改點」，再點文宣上需要調整的位置。
+            </p>
           )}
           {room.comments.length > 0 && filteredComments.length === 0 && (
-            <p className="empty">這個分類目前沒有修改點。</p>
+            <p className="empty">
+              {filter === "resolved"
+                ? "還沒有已完成的修改點。"
+                : filter === "open"
+                  ? "太好了，目前沒有待修改的項目。"
+                  : "這個分類目前沒有修改點。"}
+            </p>
           )}
 
           {filteredComments.map((c) => {
             const number = room.comments.findIndex((item) => item.id === c.id) + 1;
+            const isSelected = selectedPinId === c.id;
             return (
-              <div key={c.id} className={`comment ${c.resolved ? "done" : ""}`}>
+              <div
+                key={c.id}
+                ref={(el) => {
+                  if (el) itemRefs.current.set(c.id, el);
+                  else itemRefs.current.delete(c.id);
+                }}
+                tabIndex={-1}
+                className={`comment ${c.resolved ? "done" : ""} ${isSelected ? "selected" : ""}`}
+                onClick={() => onSelectPin(c)}
+                title="點一下在文宣上定位這個修改點"
+              >
                 <div className="comment-head">
                   <span className="dot" style={{ background: c.authorColor }} />
                   <span className="who">#{number} · {c.authorName}</span>
-                  <button className="ver-tag" onClick={() => onFocusVersion(c.versionId)}>
-                    {labelFor(c.versionId)}
-                  </button>
+                  <span className="ver-tag">{labelFor(c.versionId)}</span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
                   <span className="badge">{c.problemType ?? "修改"}</span>
@@ -1034,7 +1293,13 @@ function SidePanel({
                     <strong style={{ color: "var(--ink)" }}>建議：</strong>{c.suggestion}
                   </div>
                 )}
-                <button className="resolve" onClick={() => onToggleResolve(c.id)}>
+                <button
+                  className="resolve"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleResolve(c.id);
+                  }}
+                >
                   {c.resolved ? "重新開啟" : "標記完成"}
                 </button>
               </div>
@@ -1043,7 +1308,11 @@ function SidePanel({
         </div>
       ) : (
         <div className="panel-body">
-          {room.messages.length === 0 && <p className="empty">還沒有訊息，說點什麼吧。</p>}
+          {room.messages.length === 0 && (
+            <p className="empty">
+              還沒有討論。<br />可以直接留言給團隊。
+            </p>
+          )}
           {room.messages.map((m) => (
             <div key={m.id} className="msg">
               <span className="dot" style={{ background: m.authorColor }} />
@@ -1059,13 +1328,21 @@ function SidePanel({
       {tab === "chat" && (
         <div className="chat-input">
           <input
+            ref={chatInputRef}
             className="text-input"
             placeholder="輸入訊息…"
             value={chatInput}
             onChange={(e) => onChatInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && onSendChat()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                onSendChat();
+              }
+            }}
           />
-          <button className="btn btn-sm btn-primary" onClick={onSendChat}>送出</button>
+          <button className="btn btn-sm btn-primary" onClick={onSendChat} disabled={!chatInput.trim()}>
+            送出
+          </button>
         </div>
       )}
     </aside>
