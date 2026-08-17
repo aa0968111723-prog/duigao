@@ -142,6 +142,9 @@
    touch-action:none from styles.css so drawing and pin placement stay precise. */
 .stage.tool-pan.is-interactive { touch-action: pan-x pan-y pinch-zoom; }
 
+/* Disabled rows remain visible so people discover Undo, but cannot be tapped. */
+.m-row:disabled { opacity: 0.42; cursor: default; }
+
 /* ---------- 手機微調 ---------- */
 @media (max-width: 720px) {
   /*
@@ -179,8 +182,16 @@
 }
 
 /* A phone held sideways should spend most of its short height on the poster. */
-@media (orientation: landscape) and (max-height: 520px) and (max-width: 920px) {
-  .m-app { --m-toolbar: calc(50px + env(safe-area-inset-bottom)); }
+@media (orientation: landscape) and (max-height: 520px) and (max-width: 920px) and (pointer: coarse) {
+  .m-app {
+    --m-toolbar: calc(50px + env(safe-area-inset-bottom));
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .m-bottom {
+    left: env(safe-area-inset-left);
+    right: env(safe-area-inset-right);
+  }
   .m-top { height: 40px; }
   .m-title { padding-block: 5px; font-size: 14px; }
   .m-share { min-height: 32px; padding-inline: 12px; }
