@@ -208,6 +208,10 @@ export function App() {
       setRoom(next);
       setView((v) => {
         if (created || !v.versionId) return initialView(next);
+        if (v.compareId === v.versionId && next.versions.length >= 2) {
+          const other = next.versions.find((x) => x.id !== v.versionId);
+          if (other) return { ...v, compareId: other.id };
+        }
         return v;
       });
       persist(next);
@@ -507,8 +511,11 @@ type ViewerProps = {
 function Viewer(props: ViewerProps) {
   const { room, view } = props;
   const primary = room.versions.find((v) => v.id === view.versionId) ?? room.versions[0];
-  const compare = room.versions.find((v) => v.id === view.compareId) ?? primary;
   if (!primary) return null;
+  let compare = room.versions.find((v) => v.id === view.compareId) ?? primary;
+  if (compare.id === primary.id && room.versions.length >= 2) {
+    compare = room.versions.find((v) => v.id !== primary.id) ?? primary;
+  }
 
   if (view.compareMode === "side") {
     return (
