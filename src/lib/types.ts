@@ -83,3 +83,7 @@ export type PeerMsg =
 export const COLORS = ["#c45c4a", "#3d6b8c", "#5a7a4a", "#8a5a3a", "#6b5a8c", "#2f6f6a"] as const;
 
 export const VERSION_LABELS = ["初稿", "改一", "改二", "改三", "改四"] as const;
+
+export const REVIEW_TYPES: ReviewType[] = ["文字", "排版", "圖片", "顏色", "資訊錯誤", "其他"];
+
+export const REVIEW_PRIORITIES: ReviewPriority[] = ["一般", "重要", "急"];

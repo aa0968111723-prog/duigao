@@ -1,6 +1,6 @@
 /*
  * 文宣討論區：操作回饋、防呆與新手體驗的獨立樣式。
- * 只新增類別，不覆寫 mobile.css 的版面規則，避免與手機 UI 的 PR 衝突。
+ * 只新增類別，不覆寫版面規則。修改點的選取樣式統一由 styles.css 提供。
  */
 
 /* ---------- toast / 操作回饋 ---------- */
@@ -18,7 +18,8 @@
 }
 
 .toast {
-  pointer-events: auto;
+  /* The message floats over the poster, so only its buttons take taps. */
+  pointer-events: none;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -38,6 +39,7 @@
 .toast-msg { flex: 1; }
 
 .toast-action {
+  pointer-events: auto;
   flex: none;
   background: transparent;
   border: 1px solid var(--accent);
@@ -51,6 +53,7 @@
 .toast-action:hover { background: rgba(196, 92, 74, 0.16); }
 
 .toast-close {
+  pointer-events: auto;
   flex: none;
   background: transparent;
   border: none;
@@ -117,43 +120,28 @@
 }
 .coach-dismiss:hover { color: var(--ink); border-color: var(--accent); }
 
-/* ---------- 修改點：選取與定位 ---------- */
-.pin-selected {
-  z-index: 5;
-  outline: 3px solid #fff;
-  outline-offset: 1px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
-}
-.pin-dim {
-  opacity: 0.32;
-  filter: saturate(0.7);
-}
-
-.comment { cursor: pointer; }
-.comment:focus-visible { outline: none; }
-.comment.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
-}
-.comment .resolve { cursor: pointer; }
-
-/* ---------- 手機微調（不動 mobile.css 版面，只調整本任務新增的元件） ---------- */
+/* ---------- 手機微調 ---------- */
 @media (max-width: 720px) {
+  /*
+   * Just above the thumb toolbar: within reach for Undo, and clear of the
+   * version chips, which are a control you tap rather than transient text.
+   */
   .toast-stack {
-    bottom: auto;
-    top: calc(var(--mobile-topbar, 56px) + 8px);
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom) + 70px);
     width: calc(100vw - 20px);
   }
+  .toast {
+    padding: 10px 10px 10px 12px;
+    font-size: 13.5px;
+  }
+  /* In the phone top bar the save state is just a coloured dot. */
   .save-status {
     font-size: 0;
     gap: 0;
   }
   .save-status::before {
-    width: 9px;
-    height: 9px;
-  }
-  .coach {
-    margin: 8px 10px 0;
-    font-size: 12.5px;
+    width: 8px;
+    height: 8px;
   }
 }

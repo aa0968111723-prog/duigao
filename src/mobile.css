@@ -1,515 +1,318 @@
-/* 文宣討論區：品牌名稱與手機優先 UI 覆寫 */
-
-.brand {
-  font-size: 0 !important;
-}
-
-.brand::after {
-  content: "文宣討論區";
-  font-size: 20px;
-  letter-spacing: 0.08em;
-}
-
-.onboard-card .brand::after {
-  font-size: 26px;
-}
+/*
+ * Phone shell for 文宣討論區.
+ * These rules style the dedicated mobile components (MobileWorkspace,
+ * DragSheet, ModalSheet) — they are not overrides of the desktop layout.
+ */
 
 @media (max-width: 720px) {
-  :root {
-    --mobile-topbar: 56px;
-    --mobile-toolbar: 108px;
-    --mobile-sheet-peek: 54px;
-  }
-
-  html,
-  body,
-  #root,
-  .app {
-    width: 100%;
+  html, body, #root {
     height: 100dvh;
-    min-height: 100dvh;
-    overflow: hidden;
-  }
-
-  body {
     overscroll-behavior: none;
   }
 
-  button,
-  input,
-  textarea,
-  select {
-    font-size: 16px;
+  .app { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ---------- onboarding / home ---------- */
+  .onboard {
+    min-height: 100dvh;
+    padding: 24px 18px calc(24px + env(safe-area-inset-bottom));
+    align-content: center;
   }
-
-  .btn,
-  .seg,
-  .chip,
-  .resolve,
-  .ver-tag,
-  .panel-tabs button {
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-
-  /* 頂部只留必要資訊 */
-  .topbar {
-    position: relative;
-    z-index: 40;
-    flex: 0 0 var(--mobile-topbar);
-    min-height: var(--mobile-topbar);
-    padding: 8px 10px;
-    gap: 8px;
-    background: rgba(20, 18, 16, 0.96);
-    backdrop-filter: blur(14px);
-  }
-
-  .topbar .brand::after {
-    font-size: 16px;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-  }
-
-  .brand-dot {
-    width: 10px;
-    height: 10px;
-    box-shadow: 0 0 0 3px rgba(196, 92, 74, 0.16);
-  }
-
-  .title-input {
-    min-width: 0;
-    max-width: none;
-    height: 40px;
-    padding: 7px 8px;
-    font-size: 14px;
-    text-overflow: ellipsis;
-  }
-
-  .topbar-right {
-    gap: 6px;
-  }
-
-  .topbar-right .badge {
-    width: 10px;
-    min-width: 10px;
-    height: 10px;
-    padding: 0;
-    border: 0;
-    border-radius: 999px;
-    font-size: 0;
-    background: #71695f;
-  }
-
-  .topbar-right .badge-online { background: #67b66f; }
-  .topbar-right .badge-connecting { background: #d4a85b; }
-  .topbar-right .badge-error { background: #71695f; }
-
-  .me {
-    width: 30px;
-    height: 30px;
-    font-size: 13px;
-  }
-
-  .topbar-right > .btn-primary {
-    width: 48px;
-    min-width: 48px;
-    min-height: 38px;
-    padding: 0 8px;
-    font-size: 0;
-    border-radius: 12px;
-  }
-
-  .topbar-right > .btn-primary::after {
-    content: "分享";
-    font-size: 13px;
-  }
-
-  /* 首頁：手機一進來就知道要做什麼 */
-  .landing {
-    flex: 1;
-    min-height: 0;
-    padding: 20px 14px calc(24px + env(safe-area-inset-bottom));
+  .home {
+    padding: calc(32px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
     gap: 20px;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
   }
+  .home-title { font-size: 25px; }
+  .home-cta { padding: 40px 20px; }
 
-  .upload-big {
-    width: 100%;
-    min-height: 48dvh;
-    padding: 28px 20px;
-    border-radius: 22px;
-  }
-
-  .upload-icon {
-    font-size: 42px;
-  }
-
-  .upload-text {
-    font-size: 18px;
-  }
-
-  .recent {
-    width: 100%;
-  }
-
-  .recent-item {
-    min-height: 58px;
-    padding: 12px 14px;
-    border-radius: 14px;
-  }
-
-  /* 海報永遠是手機主畫面 */
-  .workspace {
-    position: relative;
-    flex: 1;
-    min-height: 0;
-    display: block;
-    overflow: hidden;
-    padding-bottom: calc(var(--mobile-toolbar) + env(safe-area-inset-bottom));
-  }
-
-  .stage-wrap {
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    padding: 8px;
-    gap: 8px;
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
-    background: #090806;
-  }
-
-  .stage {
-    width: 100%;
-    min-width: 100%;
-    min-height: 100%;
-    border-radius: 16px;
-    touch-action: none;
-  }
-
-  .stage-side {
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x mandatory;
-  }
-
-  .stage-side .stage {
-    flex: 0 0 100%;
-    scroll-snap-align: center;
-  }
-
-  .stage-label {
-    left: 10px;
-    bottom: 10px;
-    padding: 4px 9px;
-    font-size: 11px;
-  }
-
-  /* 圖上修改點在手機只顯示編號，不蓋住文宣 */
-  .pin {
-    width: 34px;
-    height: 34px;
-    max-width: 34px;
-    padding: 0 4px;
-    transform: translate(-50%, -50%);
-    border-radius: 999px;
-    display: grid;
-    place-items: center;
-    font-size: 11px;
-    line-height: 1;
-    box-shadow: 0 5px 16px rgba(0, 0, 0, 0.46);
-  }
-
-  .pin-body {
-    display: block;
-    width: 25px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: clip;
-  }
-
-  .pin-resolved {
-    opacity: 0.42;
-    text-decoration: none;
-  }
-
-  /* 新增修改點改成真正的 bottom sheet */
-  .stage:has(.pin-compose)::before {
-    content: "";
+  /* ---------- app shell ---------- */
+  .m-app {
     position: fixed;
     inset: 0;
-    z-index: 70;
-    background: rgba(0, 0, 0, 0.54);
-    backdrop-filter: blur(2px);
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+    padding-top: env(safe-area-inset-top);
+    background: var(--bg);
+    --m-toolbar: calc(58px + env(safe-area-inset-bottom));
   }
 
-  .pin-compose {
-    position: fixed !important;
-    left: 0 !important;
-    right: 0 !important;
-    top: auto !important;
-    bottom: 0 !important;
-    width: 100% !important;
-    max-height: min(78dvh, 620px);
-    overflow-y: auto;
-    transform: none !important;
-    z-index: 80;
-    border: 0;
-    border-top: 1px solid var(--line);
-    border-radius: 24px 24px 0 0;
-    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
-    box-shadow: 0 -18px 50px rgba(0, 0, 0, 0.5);
+  .m-top {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 48px;
+    padding: 0 8px 0 10px;
   }
-
-  .pin-compose::before {
-    content: "";
-    display: block;
-    width: 42px;
-    height: 4px;
-    margin: 0 auto 12px;
+  .m-home {
+    flex: none;
+    width: 32px; height: 32px;
+    display: grid; place-items: center;
+    background: none; border: none; padding: 0;
+    cursor: pointer;
+  }
+  .m-home-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  .m-title {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 8px 6px;
+    font-size: 15px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    outline: none;
+  }
+  .m-title:focus { border-color: var(--line); background: #100e0c; }
+  .m-presence {
+    flex: none;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--ink-faint);
+  }
+  .m-presence.is-online { background: var(--ok); }
+  .m-presence.is-connecting { background: #d7b06a; }
+  .m-icon-btn {
+    flex: none;
+    width: 40px; height: 40px;
+    display: grid; place-items: center;
+    background: none; border: none;
+    color: var(--ink-dim);
+    cursor: pointer;
+  }
+  .m-share {
+    flex: none;
+    min-height: 36px;
+    padding: 0 14px;
+    border: none;
     border-radius: 999px;
-    background: #5a5249;
+    background: var(--raise);
+    color: var(--ink);
+    font-size: 14px;
+    cursor: pointer;
   }
 
-  .pin-input,
-  .pin-compose .text-input {
-    min-height: 48px;
-    padding: 12px;
-    border-radius: 12px;
-    font-size: 16px;
+  /* ---------- version chips ---------- */
+  .m-versions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 44px;
+    padding: 0 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .m-versions::-webkit-scrollbar { display: none; }
+  .m-vchip {
+    flex: none;
+    min-height: 34px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ink-faint);
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .m-vchip.is-on { background: var(--ink); border-color: var(--ink); color: #17140f; font-weight: 500; }
+  .m-vchip-add { padding: 0 12px; border-style: dashed; }
+
+  /* ---------- poster ---------- */
+  /* While a sheet is open the poster refits above it, so the spot you just
+     marked stays on screen even with the keyboard up. */
+  .m-stage-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    padding-bottom: max(calc(var(--m-toolbar) + var(--m-peek)), calc(var(--m-compose, 0px) + 8px));
+    transition: padding-bottom 0.2s ease;
+  }
+  .m-stage-area .stage-wrap { height: 100%; padding: 6px 8px 8px; gap: 8px; background: transparent; }
+  .m-stage-area .stage { border-radius: var(--r-md); }
+  .m-stage-area .stage-side { overflow-x: auto; scroll-snap-type: x mandatory; }
+  .m-stage-area .stage-side .stage { flex: 0 0 100%; scroll-snap-align: center; }
+
+  .pin-compact { min-width: 26px; height: 26px; }
+  .pin-compact .pin-no { width: 22px; }
+
+  .m-hint {
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--m-toolbar) + var(--m-peek) + 12px);
+    transform: translateX(-50%);
+    margin: 0;
+    max-width: calc(100% - 32px);
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(20, 18, 16, 0.92);
+    color: var(--ink-dim);
+    font-size: 13px;
+    white-space: nowrap;
+    /* Never competes with the poster for taps; it clears after the first pin. */
+    pointer-events: none;
   }
 
-  .pin-input {
-    min-height: 84px;
-  }
-
-  .pin-compose-actions {
-    position: sticky;
-    bottom: 0;
-    display: grid;
-    grid-template-columns: 0.8fr 1.2fr;
-    gap: 8px;
-    margin-top: 10px;
-    padding-top: 8px;
-    background: var(--panel);
-  }
-
-  .pin-compose-actions .btn {
-    min-height: 48px;
-    border-radius: 13px;
-  }
-
-  /* 拇指區工具列：版本列 + 四個主要操作 */
-  .toolbar {
+  /* ---------- bottom dock ---------- */
+  .m-bottom {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
-    z-index: 50;
-    height: calc(var(--mobile-toolbar) + env(safe-area-inset-bottom));
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-    display: grid;
-    grid-template-rows: 36px 1fr;
-    gap: 6px;
+    bottom: var(--kb);
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .m-sheet {
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(20, 18, 16, 0.96);
-    backdrop-filter: blur(16px);
-  }
-
-  .versions {
-    width: 100%;
-    min-width: 0;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    gap: 6px;
-    padding: 0 2px 2px;
-    scrollbar-width: none;
-  }
-
-  .versions::-webkit-scrollbar {
-    display: none;
-  }
-
-  .chip {
-    flex: 0 0 auto;
-    min-height: 34px;
-    padding: 5px 13px;
-  }
-
-  .versions .upload {
-    flex: 0 0 auto;
-    min-height: 34px;
-    padding: 4px 11px;
-  }
-
-  .toolbar > .tool-group:nth-of-type(2) {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 5px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-
-  .toolbar > .tool-group:nth-of-type(2) .seg {
-    min-width: 0;
-    min-height: 50px;
-    padding: 6px 4px;
-    font-size: 13px;
-    font-weight: 500;
-    border: 1px solid var(--line);
-    background: #15120f;
-  }
-
-  .toolbar > .tool-group:nth-of-type(2) .seg-on {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-
-  /* 手機主流程先隱藏進階檢視；平板/桌機完整保留 */
-  .toolbar > .tool-group:nth-of-type(3),
-  .toolbar > .tool-group:nth-of-type(4),
-  .toolbar > .compare-select,
-  .toolbar > .wipe-slider {
-    display: none;
-  }
-
-  /* 修改點 / 聊天變成可展開的 bottom sheet */
-  .panel {
-    position: fixed;
-    left: 8px;
-    right: 8px;
-    bottom: calc(var(--mobile-toolbar) + env(safe-area-inset-bottom) + 6px);
-    z-index: 45;
-    width: auto;
-    height: var(--mobile-sheet-peek);
-    max-height: min(52dvh, 480px);
-    min-height: var(--mobile-sheet-peek);
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    background: rgba(27, 24, 21, 0.97);
-    backdrop-filter: blur(16px);
-    box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.38);
-    transition: height 0.22s ease, border-radius 0.22s ease;
-  }
-
-  .panel:focus-within {
-    height: min(52dvh, 480px);
-    border-radius: 22px 22px 14px 14px;
-  }
-
-  .panel-tabs {
-    flex: 0 0 var(--mobile-sheet-peek);
-    min-height: var(--mobile-sheet-peek);
     background: rgba(27, 24, 21, 0.98);
+    backdrop-filter: blur(18px);
+    border-top: 1px solid var(--line-soft);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.34);
+    transition: height 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
   }
+  .m-sheet.is-dragging { transition: none; }
 
-  .panel-tabs button {
-    min-height: var(--mobile-sheet-peek);
-    padding: 10px 12px;
+  .m-sheet-handle {
+    flex: none;
+    height: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    touch-action: none;
+    cursor: grab;
+  }
+  .m-sheet .m-grip {
+    display: block;
+    width: 34px;
+    height: 4px;
+    border-radius: 999px;
+    background: #4b443c;
+  }
+  .m-sheet-summary { font-size: 13px; color: var(--ink-dim); }
+  .m-sheet-summary em { margin: 0 6px; font-style: normal; color: var(--ink-faint); }
+
+  .m-sheet-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .m-sheet-tabs { flex: none; display: flex; gap: 6px; padding: 0 12px 8px; }
+  .m-sheet-tabs button {
+    min-height: 38px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ink-faint);
     font-size: 14px;
+    cursor: pointer;
   }
+  .m-sheet-tabs button.is-on { background: var(--raise); color: var(--ink); }
 
-  .panel-body {
-    padding: 10px;
-    gap: 8px;
+  .m-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 12px 12px;
   }
+  .m-chatbar { flex: none; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line-soft); }
+  .m-empty { color: var(--ink-faint); font-size: 13px; text-align: center; padding: 20px 8px; }
 
-  .comment {
-    padding: 12px;
-    border-radius: 14px;
-  }
-
-  .comment-head {
-    margin-bottom: 8px;
-  }
-
-  .comment-body {
-    font-size: 14px;
-    line-height: 1.55;
-  }
-
-  .resolve {
-    width: 100%;
-    margin-top: 10px;
-    min-height: 42px;
-  }
-
-  .chat-input {
-    gap: 7px;
-    padding: 10px;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
-  }
-
-  .chat-input .text-input {
-    min-height: 44px;
-  }
-
-  /* 分享也用底部 Sheet，避免手機中央小視窗 */
-  .modal-backdrop {
-    place-items: end stretch;
-    padding: 0;
-  }
-
-  .modal {
-    width: 100%;
-    max-height: 82dvh;
-    overflow-y: auto;
-    border-left: 0;
-    border-right: 0;
-    border-bottom: 0;
-    border-radius: 24px 24px 0 0;
-    padding: 20px 16px calc(18px + env(safe-area-inset-bottom));
-  }
-
-  .modal::before {
-    content: "";
-    display: block;
-    width: 42px;
-    height: 4px;
-    margin: -6px auto 2px;
-    border-radius: 999px;
-    background: #5a5249;
-  }
-
-  .link-row {
+  /* ---------- thumb toolbar ---------- */
+  .m-toolbar {
+    flex: none;
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
+    height: var(--m-toolbar);
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+    background: rgba(20, 18, 16, 0.98);
+    backdrop-filter: blur(18px);
+    border-top: 1px solid var(--line-soft);
+  }
+  .m-tool {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    border: none;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--ink-faint);
+    font-size: 11px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .m-tool svg { width: 21px; height: 21px; }
+  .m-tool.is-on { background: var(--accent-soft); color: var(--ink); }
+  .m-tool.is-primary { color: #d98675; }
+  .m-tool.is-primary.is-on { background: var(--accent); color: #fff; }
+  .m-tool-badge-wrap { position: relative; display: grid; place-items: center; }
+  .m-tool-badge {
+    position: absolute;
+    top: -3px;
+    right: -9px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
   }
 
-  /* 登入頁也採手機滿版卡片 */
-  .onboard {
-    min-height: 100dvh;
-    overflow-y: auto;
-    padding: 16px;
+  /* ---------- sheets over the poster ---------- */
+  .m-scrim {
+    align-items: flex-end;
+    padding: 0;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.5) 62%);
   }
-
-  .onboard-card {
+  .m-modal {
     width: 100%;
-    max-width: 420px;
-    padding: 26px 18px;
-    border-radius: 22px;
+    max-height: min(74dvh, 560px);
+    margin-bottom: var(--kb);
+    border: none;
+    border-radius: 22px 22px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.5);
   }
+  .m-modal-head { padding: 10px 16px 6px; }
+  .m-modal .m-grip {
+    display: block;
+    width: 34px;
+    height: 4px;
+    margin: 0 auto 10px;
+    border-radius: 999px;
+    background: #4b443c;
+  }
+  .m-modal-action { padding: 10px 16px; }
 
-  .onboard-card .btn-primary,
-  .onboard-card .text-input {
-    min-height: 50px;
-  }
-}
-
-@media (min-width: 721px) and (max-width: 1024px) {
-  /* 平板仍保留桌面完整功能，只把觸控目標放大 */
-  .btn,
-  .seg,
-  .chip,
-  .panel-tabs button {
-    min-height: 40px;
-  }
+  .m-item-body { font-size: 15px; }
+  .m-item-meta { gap: 8px; }
+  .m-item-state { min-height: 38px; padding: 8px 14px; }
+  .m-close { min-width: 44px; min-height: 44px; }
+  .m-link { min-height: 40px; }
 }

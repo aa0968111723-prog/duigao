@@ -9,11 +9,13 @@ export type ToastItem = {
   action?: ToastAction;
 };
 
-type ShowOptions = {
+export type ShowOptions = {
   tone?: ToastTone;
   action?: ToastAction;
   duration?: number;
 };
+
+export type ShowToast = (message: string, opts?: ShowOptions) => string;
 
 const MAX_VISIBLE = 3;
 let counter = 0;
