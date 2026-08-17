@@ -4,7 +4,7 @@ import { CommentCard } from "./CommentCard";
 import { PinFields } from "./PinFields";
 import { UploadZone } from "./UploadZone";
 import { Viewer } from "./Stage";
-import type { WorkspaceApi } from "./api";
+import { nextPinNumber, type WorkspaceApi } from "./api";
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "pan", label: "看" },
@@ -39,7 +39,10 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             <button
               key={v.id}
               className={`chip ${v.id === view.versionId ? "chip-on" : ""}`}
-              onClick={() => api.setView({ ...view, versionId: v.id })}
+              onClick={() => {
+                api.selectPin(null);
+                api.setView({ ...view, versionId: v.id });
+              }}
             >
               {v.label}
             </button>
@@ -52,7 +55,14 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
 
         <div className="tool-group">
           {TOOLS.map((t) => (
-            <button key={t.id} className={`seg ${tool === t.id ? "seg-on" : ""}`} onClick={() => api.setTool(t.id)}>
+            <button
+              key={t.id}
+              className={`seg ${tool === t.id ? "seg-on" : ""}`}
+              onClick={() => {
+                api.setTool(t.id);
+                if (t.id === "pan") api.selectPin(null);
+              }}
+            >
               {t.label}
             </button>
           ))}
@@ -108,6 +118,10 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             onChange={(e) => api.setView({ ...view, wipe: Number(e.target.value) })}
           />
         )}
+
+        <button className="btn btn-sm" onClick={api.undo} disabled={!api.canUndo}>
+          復原
+        </button>
       </div>
 
       <SidePanel api={api} />
@@ -115,7 +129,7 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
       {draftPin && (
         <div className="compose-backdrop" onPointerDown={() => !api.form.body.trim() && api.cancelPin()}>
           <div className="compose-card" onPointerDown={(e) => e.stopPropagation()}>
-            <h3>修改點 {room.comments.length + 1}</h3>
+            <h3>修改點 {nextPinNumber(room, draftPin.versionId)}</h3>
             <PinFields api={api} autoFocus />
             <div className="compose-actions">
               <button className="btn" onClick={api.cancelPin}>
@@ -204,8 +218,9 @@ function SidePanel({ api }: { api: WorkspaceApi }) {
               pin={c}
               selected={c.id === api.selectedPinId}
               onSelect={() => {
+                api.setTool("pan");
                 api.selectPin(c.id);
-                api.setView({ ...api.view, versionId: c.versionId });
+                api.setView({ ...api.view, versionId: c.versionId, compareMode: "single" });
               }}
               onToggleResolve={() => api.toggleResolve(c.id)}
             />
