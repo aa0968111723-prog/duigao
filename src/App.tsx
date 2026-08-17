@@ -14,8 +14,9 @@ import {
   type CommentPin,
   type CompareMode,
   type Guest,
-  type PeerMsg,
   type Point,
+  type ReviewPriority,
+  type ReviewType,
   type Room,
   type Stroke,
   type Tool,
@@ -25,6 +26,9 @@ import {
 import { roomCode, uid } from "./lib/id";
 import { listRooms, loadGuest, loadRoom, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
+
+const REVIEW_TYPES: ReviewType[] = ["文字", "排版", "圖片", "顏色", "資訊錯誤", "其他"];
+const REVIEW_PRIORITIES: ReviewPriority[] = ["一般", "重要", "急"];
 
 function pickColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)];
@@ -78,6 +82,9 @@ export function App() {
   const [recent, setRecent] = useState<Room[]>([]);
   const [draftPin, setDraftPin] = useState<{ versionId: string; x: number; y: number } | null>(null);
   const [pinText, setPinText] = useState("");
+  const [pinSuggestion, setPinSuggestion] = useState("");
+  const [pinType, setPinType] = useState<ReviewType>("文字");
+  const [pinPriority, setPinPriority] = useState<ReviewPriority>("一般");
   const [chatInput, setChatInput] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
@@ -215,10 +222,17 @@ export function App() {
     [persist],
   );
 
+  const resetPinDraft = useCallback(() => {
+    setDraftPin(null);
+    setPinText("");
+    setPinSuggestion("");
+    setPinType("文字");
+    setPinPriority("一般");
+  }, []);
+
   const commitPin = () => {
     if (!draftPin || !guest || !pinText.trim()) {
-      setDraftPin(null);
-      setPinText("");
+      resetPinDraft();
       return;
     }
     const pin: CommentPin = {
@@ -230,12 +244,14 @@ export function App() {
       x: draftPin.x,
       y: draftPin.y,
       body: pinText.trim(),
+      suggestion: pinSuggestion.trim(),
+      problemType: pinType,
+      priority: pinPriority,
       resolved: false,
       createdAt: Date.now(),
     };
     updateRoom((r) => ({ ...r, comments: [...r.comments, pin] }));
-    setDraftPin(null);
-    setPinText("");
+    resetPinDraft();
   };
 
   const toggleResolve = (pinId: string) => {
@@ -322,8 +338,27 @@ export function App() {
     }
   };
 
+  const copyReviewSummary = async () => {
+    if (!room) return;
+    const openCount = room.comments.filter((c) => !c.resolved).length;
+    const lines = room.comments.map((c, index) => {
+      const status = c.resolved ? "已完成" : "待修改";
+      const type = c.problemType ?? "修改";
+      const priority = c.priority ?? "一般";
+      const versionLabel = room.versions.find((v) => v.id === c.versionId)?.label ?? "";
+      const suggestion = c.suggestion ? `\n   建議：${c.suggestion}` : "";
+      return `#${String(index + 1).padStart(2, "0")} [${status}] [${priority}] [${type}] ${versionLabel}\n   問題：${c.body}${suggestion}`;
+    });
+    const summary = `${room.title}\n共 ${room.comments.length} 個修改點｜待修改 ${openCount}｜已完成 ${room.comments.length - openCount}\n\n${lines.join("\n\n")}`;
+    try {
+      await navigator.clipboard.writeText(summary);
+    } catch {
+      /* clipboard may be blocked */
+    }
+  };
+
   const lineShareUrl = useMemo(() => {
-    const text = `一起看「${room?.title ?? "活動海報"}」： ${shareUrl}`;
+    const text = `一起對稿「${room?.title ?? "活動海報"}」： ${shareUrl}`;
     return `https://line.me/R/msg/text/?${encodeURIComponent(text)}`;
   }, [room, shareUrl]);
 
@@ -335,7 +370,9 @@ export function App() {
             <span className="brand-dot" />對稿
           </div>
           <p className="onboard-hint">
-            {isGuestSession ? "夥伴邀你一起看海報，輸入名字加入。" : "把活動海報變成一條連結，傳給夥伴一起看。"}
+            {isGuestSession
+              ? "夥伴邀你一起對稿。你不需要改設計，只要指出哪裡要改、建議怎麼改。"
+              : "把活動海報變成清楚的修改清單，讓團隊只標記、不直接改原稿。"}
           </p>
           <input
             className="text-input"
@@ -359,7 +396,13 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand" onClick={() => { setRoom(null); location.hash = ""; }}>
+        <div
+          className="brand"
+          onClick={() => {
+            setRoom(null);
+            location.hash = "";
+          }}
+        >
           <span className="brand-dot" />對稿
         </div>
         {hasRoom && (
@@ -373,7 +416,13 @@ export function App() {
         <div className="topbar-right">
           {collabStatus && (
             <span className={`badge badge-${collabStatus}`}>
-              {collabStatus === "online" ? `連線中 · ${peerCount} 人` : collabStatus === "connecting" ? "連線中…" : collabStatus === "error" ? "本機模式" : "已關閉"}
+              {collabStatus === "online"
+                ? `連線中 · ${peerCount} 人`
+                : collabStatus === "connecting"
+                  ? "連線中…"
+                  : collabStatus === "error"
+                    ? "本機模式"
+                    : "已關閉"}
             </span>
           )}
           <span className="me" style={{ background: guest.color }} title={guest.name}>
@@ -397,7 +446,9 @@ export function App() {
                 {recent.map((r) => (
                   <button key={r.id} className="recent-item" onClick={() => openRoom(r)}>
                     <span className="recent-name">{r.title}</span>
-                    <span className="recent-meta">{r.versions.length} 版 · {new Date(r.updatedAt).toLocaleDateString()}</span>
+                    <span className="recent-meta">
+                      {r.versions.length} 版 · {new Date(r.updatedAt).toLocaleDateString()}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -413,10 +464,22 @@ export function App() {
             guest={guest}
             draftPin={draftPin}
             pinText={pinText}
+            pinSuggestion={pinSuggestion}
+            pinType={pinType}
+            pinPriority={pinPriority}
             onPinTextChange={setPinText}
+            onPinSuggestionChange={setPinSuggestion}
+            onPinTypeChange={setPinType}
+            onPinPriorityChange={setPinPriority}
             onCommitPin={commitPin}
-            onCancelPin={() => { setDraftPin(null); setPinText(""); }}
-            onPlacePin={(versionId, x, y) => { setDraftPin({ versionId, x, y }); setPinText(""); }}
+            onCancelPin={resetPinDraft}
+            onPlacePin={(versionId, x, y) => {
+              setDraftPin({ versionId, x, y });
+              setPinText("");
+              setPinSuggestion("");
+              setPinType("文字");
+              setPinPriority("一般");
+            }}
             onAddStroke={addStroke}
             onEraseStroke={eraseStroke}
             onToggleResolve={toggleResolve}
@@ -438,6 +501,7 @@ export function App() {
             onSendChat={sendChat}
             onToggleResolve={toggleResolve}
             onFocusVersion={(vid) => updateView({ ...view, versionId: vid, compareMode: "single" })}
+            onCopySummary={copyReviewSummary}
           />
         </main>
       )}
@@ -446,15 +510,21 @@ export function App() {
         <div className="modal-backdrop" onClick={() => setShareOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>分享這份對稿</h3>
-            <p className="modal-hint">傳連結給夥伴，大家用手機打開就能一起看、留言。</p>
+            <p className="modal-hint">
+              傳連結給夥伴。大家用手機打開後，只要點出修改位置並寫清楚建議，不會直接改到原稿。
+            </p>
             <div className="link-row">
               <input className="text-input" readOnly value={shareUrl} onFocus={(e) => e.currentTarget.select()} />
-              <button className="btn" onClick={copyLink}>複製</button>
+              <button className="btn" onClick={copyLink}>
+                複製
+              </button>
             </div>
             <a className="btn btn-line" href={lineShareUrl} target="_blank" rel="noreferrer">
               傳到 LINE
             </a>
-            <button className="btn btn-ghost" onClick={() => setShareOpen(false)}>關閉</button>
+            <button className="btn btn-ghost" onClick={() => setShareOpen(false)}>
+              關閉
+            </button>
           </div>
         </div>
       )}
@@ -468,9 +538,16 @@ function UploadZone({ onFiles, big }: { onFiles: (f: FileList | null) => void; b
   return (
     <div
       className={`upload ${big ? "upload-big" : ""} ${drag ? "upload-drag" : ""}`}
-      onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDrag(true);
+      }}
       onDragLeave={() => setDrag(false)}
-      onDrop={(e) => { e.preventDefault(); setDrag(false); onFiles(e.dataTransfer.files); }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDrag(false);
+        onFiles(e.dataTransfer.files);
+      }}
       onClick={() => inputRef.current?.click()}
     >
       <input
@@ -479,7 +556,10 @@ function UploadZone({ onFiles, big }: { onFiles: (f: FileList | null) => void; b
         accept="image/*"
         multiple
         hidden
-        onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }}
+        onChange={(e) => {
+          onFiles(e.target.files);
+          e.target.value = "";
+        }}
       />
       <div className="upload-icon">＋</div>
       <div className="upload-text">{big ? "上傳活動海報" : "加一版"}</div>
@@ -495,7 +575,13 @@ type ViewerProps = {
   guest: Guest;
   draftPin: { versionId: string; x: number; y: number } | null;
   pinText: string;
+  pinSuggestion: string;
+  pinType: ReviewType;
+  pinPriority: ReviewPriority;
   onPinTextChange: (v: string) => void;
+  onPinSuggestionChange: (v: string) => void;
+  onPinTypeChange: (v: ReviewType) => void;
+  onPinPriorityChange: (v: ReviewPriority) => void;
   onCommitPin: () => void;
   onCancelPin: () => void;
   onPlacePin: (versionId: string, x: number, y: number) => void;
@@ -542,9 +628,27 @@ type StageProps = ViewerProps & {
 
 function Stage(props: StageProps) {
   const {
-    room, view, tool, version, interactive, wipeWith,
-    draftPin, pinText, onPinTextChange, onCommitPin, onCancelPin, onPlacePin,
-    onAddStroke, onEraseStroke, onToggleResolve,
+    room,
+    view,
+    tool,
+    version,
+    interactive,
+    wipeWith,
+    draftPin,
+    pinText,
+    pinSuggestion,
+    pinType,
+    pinPriority,
+    onPinTextChange,
+    onPinSuggestionChange,
+    onPinTypeChange,
+    onPinPriorityChange,
+    onCommitPin,
+    onCancelPin,
+    onPlacePin,
+    onAddStroke,
+    onEraseStroke,
+    onToggleResolve,
   } = props;
 
   const ref = useRef<HTMLDivElement>(null);
@@ -588,7 +692,6 @@ function Stage(props: StageProps) {
   };
 
   const toPolyline = (pts: Point[]) => pts.map((p) => `${p.x * 100},${p.y * 100}`).join(" ");
-
   const colorClass = `stage-img mode-${view.colorMode}`;
 
   return (
@@ -626,7 +729,10 @@ function Stage(props: StageProps) {
             vectorEffect="non-scaling-stroke"
             className={tool === "erase" && interactive ? "stroke-erasable" : ""}
             onPointerDown={(e) => {
-              if (tool === "erase" && interactive) { e.stopPropagation(); onEraseStroke(s.id); }
+              if (tool === "erase" && interactive) {
+                e.stopPropagation();
+                onEraseStroke(s.id);
+              }
             }}
           />
         ))}
@@ -643,36 +749,75 @@ function Stage(props: StageProps) {
         )}
       </svg>
 
-      {pins.map((pin) => (
-        <button
-          key={pin.id}
-          className={`pin ${pin.resolved ? "pin-resolved" : ""}`}
-          style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%`, ["--pin" as string]: pin.authorColor }}
-          onClick={(e) => { e.stopPropagation(); onToggleResolve(pin.id); }}
-          title={`${pin.authorName}: ${pin.body}`}
-        >
-          <span className="pin-body">{pin.body}</span>
-        </button>
-      ))}
+      {pins.map((pin) => {
+        const number = room.comments.findIndex((item) => item.id === pin.id) + 1;
+        return (
+          <button
+            key={pin.id}
+            className={`pin ${pin.resolved ? "pin-resolved" : ""}`}
+            style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%`, ["--pin" as string]: pin.authorColor }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleResolve(pin.id);
+            }}
+            title={`${pin.authorName}｜${pin.problemType ?? "修改"}｜${pin.body}${pin.suggestion ? `｜建議：${pin.suggestion}` : ""}`}
+          >
+            <span className="pin-body">#{number} {pin.body}</span>
+          </button>
+        );
+      })}
 
       {draftPin && draftPin.versionId === version.id && (
         <div
           className="pin-compose"
-          style={{ left: `${draftPin.x * 100}%`, top: `${draftPin.y * 100}%` }}
+          style={{
+            left: `${draftPin.x * 100}%`,
+            top: `${draftPin.y * 100}%`,
+            width: "min(310px, calc(100vw - 32px))",
+          }}
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <textarea
-            className="pin-input"
-            placeholder="留言…"
-            value={pinText}
-            onChange={(e) => onPinTextChange(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onCommitPin(); } }}
-            autoFocus
-          />
+          <div style={{ display: "grid", gap: 7 }}>
+            <select
+              className="text-input"
+              value={pinType}
+              onChange={(e) => onPinTypeChange(e.target.value as ReviewType)}
+              aria-label="問題類型"
+            >
+              {REVIEW_TYPES.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+            <textarea
+              className="pin-input"
+              placeholder="哪裡需要改？例如：日期太小，看不清楚"
+              value={pinText}
+              onChange={(e) => onPinTextChange(e.target.value)}
+              autoFocus
+            />
+            <textarea
+              className="pin-input"
+              placeholder="建議怎麼改？例如：日期放大 20%，移到標題下方"
+              value={pinSuggestion}
+              onChange={(e) => onPinSuggestionChange(e.target.value)}
+            />
+            <select
+              className="text-input"
+              value={pinPriority}
+              onChange={(e) => onPinPriorityChange(e.target.value as ReviewPriority)}
+              aria-label="優先程度"
+            >
+              {REVIEW_PRIORITIES.map((item) => (
+                <option key={item} value={item}>優先：{item}</option>
+              ))}
+            </select>
+          </div>
           <div className="pin-compose-actions">
             <button className="btn btn-sm" onClick={onCancelPin}>取消</button>
-            <button className="btn btn-sm btn-primary" onClick={onCommitPin}>釘上</button>
+            <button className="btn btn-sm btn-primary" onClick={onCommitPin} disabled={!pinText.trim()}>
+              加入修改點
+            </button>
           </div>
         </div>
       )}
@@ -694,8 +839,8 @@ type ToolbarProps = {
 function Toolbar({ room, view, tool, onTool, onView, onAddFiles }: ToolbarProps) {
   const tools: { id: Tool; label: string }[] = [
     { id: "pan", label: "看" },
-    { id: "pin", label: "留言" },
-    { id: "draw", label: "塗鴉" },
+    { id: "pin", label: "修改點" },
+    { id: "draw", label: "圈畫" },
     { id: "erase", label: "擦掉" },
   ];
   const colorModes: { id: ColorMode; label: string }[] = [
@@ -791,17 +936,32 @@ type SidePanelProps = {
   onSendChat: () => void;
   onToggleResolve: (id: string) => void;
   onFocusVersion: (versionId: string) => void;
+  onCopySummary: () => void;
 };
 
-function SidePanel({ room, chatInput, onChatInput, onSendChat, onToggleResolve, onFocusVersion }: SidePanelProps) {
+function SidePanel({
+  room,
+  chatInput,
+  onChatInput,
+  onSendChat,
+  onToggleResolve,
+  onFocusVersion,
+  onCopySummary,
+}: SidePanelProps) {
   const [tab, setTab] = useState<"comments" | "chat">("comments");
+  const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
   const labelFor = (versionId: string) => room.versions.find((v) => v.id === versionId)?.label ?? "";
+  const openCount = room.comments.filter((c) => !c.resolved).length;
+  const filteredComments = room.comments.filter((c) => {
+    if (filter === "all") return true;
+    return filter === "resolved" ? c.resolved : !c.resolved;
+  });
 
   return (
     <aside className="panel">
       <div className="panel-tabs">
         <button className={tab === "comments" ? "on" : ""} onClick={() => setTab("comments")}>
-          留言 {room.comments.length > 0 && <b>{room.comments.length}</b>}
+          修改點 {room.comments.length > 0 && <b>{room.comments.length}</b>}
         </button>
         <button className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
           聊天 {room.messages.length > 0 && <b>{room.messages.length}</b>}
@@ -810,20 +970,69 @@ function SidePanel({ room, chatInput, onChatInput, onSendChat, onToggleResolve, 
 
       {tab === "comments" ? (
         <div className="panel-body">
-          {room.comments.length === 0 && <p className="empty">用「留言」工具點在海報上留下想法。</p>}
-          {room.comments.map((c) => (
-            <div key={c.id} className={`comment ${c.resolved ? "done" : ""}`}>
-              <div className="comment-head">
-                <span className="dot" style={{ background: c.authorColor }} />
-                <span className="who">{c.authorName}</span>
-                <button className="ver-tag" onClick={() => onFocusVersion(c.versionId)}>{labelFor(c.versionId)}</button>
-              </div>
-              <div className="comment-body">{c.body}</div>
-              <button className="resolve" onClick={() => onToggleResolve(c.id)}>
-                {c.resolved ? "重開" : "完成"}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <button
+              className={`btn btn-sm ${filter === "open" ? "btn-primary" : ""}`}
+              onClick={() => setFilter("open")}
+            >
+              待修改 {openCount}
+            </button>
+            <button
+              className={`btn btn-sm ${filter === "resolved" ? "btn-primary" : ""}`}
+              onClick={() => setFilter("resolved")}
+            >
+              已完成 {room.comments.length - openCount}
+            </button>
+            <button
+              className={`btn btn-sm ${filter === "all" ? "btn-primary" : ""}`}
+              onClick={() => setFilter("all")}
+            >
+              全部
+            </button>
+            {room.comments.length > 0 && (
+              <button className="btn btn-sm" onClick={onCopySummary}>
+                複製清單
               </button>
-            </div>
-          ))}
+            )}
+          </div>
+
+          {room.comments.length === 0 && (
+            <p className="empty">選「修改點」後直接點在海報上，寫清楚哪裡有問題、建議怎麼改。</p>
+          )}
+          {room.comments.length > 0 && filteredComments.length === 0 && (
+            <p className="empty">這個分類目前沒有修改點。</p>
+          )}
+
+          {filteredComments.map((c) => {
+            const number = room.comments.findIndex((item) => item.id === c.id) + 1;
+            return (
+              <div key={c.id} className={`comment ${c.resolved ? "done" : ""}`}>
+                <div className="comment-head">
+                  <span className="dot" style={{ background: c.authorColor }} />
+                  <span className="who">#{number} · {c.authorName}</span>
+                  <button className="ver-tag" onClick={() => onFocusVersion(c.versionId)}>
+                    {labelFor(c.versionId)}
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
+                  <span className="badge">{c.problemType ?? "修改"}</span>
+                  <span className="badge">{c.priority ?? "一般"}</span>
+                  <span className={`badge ${c.resolved ? "badge-online" : ""}`}>
+                    {c.resolved ? "已完成" : "待修改"}
+                  </span>
+                </div>
+                <div className="comment-body"><strong>問題：</strong>{c.body}</div>
+                {c.suggestion && (
+                  <div className="comment-body" style={{ marginTop: 6, color: "var(--ink-dim)" }}>
+                    <strong style={{ color: "var(--ink)" }}>建議：</strong>{c.suggestion}
+                  </div>
+                )}
+                <button className="resolve" onClick={() => onToggleResolve(c.id)}>
+                  {c.resolved ? "重新開啟" : "標記完成"}
+                </button>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="panel-body">
