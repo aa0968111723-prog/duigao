@@ -41,7 +41,7 @@ export function useToasts() {
       const id = `toast-${++counter}`;
       const tone = opts.tone ?? "info";
       const action = opts.action;
-      const duration = opts.duration ?? (action ? 6000 : 2600);
+      const duration = opts.duration ?? (action ? 10000 : 2600);
       setToasts((list) => [...list, { id, message, tone, action }].slice(-MAX_VISIBLE));
       const timer = window.setTimeout(() => dismiss(id), duration);
       timers.current.set(id, timer);
@@ -74,7 +74,7 @@ export function ToastStack({
       {toasts.map((t) => (
         <div key={t.id} className={`toast toast-${t.tone}`}>
           <span className="toast-msg">{t.message}</span>
-          {t.action && (
+          {t.action ? (
             <button
               type="button"
               className="toast-action"
@@ -85,10 +85,11 @@ export function ToastStack({
             >
               {t.action.label}
             </button>
+          ) : (
+            <button type="button" className="toast-close" aria-label="關閉提示" onClick={() => onDismiss(t.id)}>
+              ×
+            </button>
           )}
-          <button type="button" className="toast-close" aria-label="關閉提示" onClick={() => onDismiss(t.id)}>
-            ×
-          </button>
         </div>
       ))}
     </div>
