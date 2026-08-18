@@ -202,13 +202,16 @@ begin
   if v_uid is null then
     raise exception 'auth required';
   end if;
+  if p_room_id is null then
+    raise exception 'room id required';
+  end if;
   if p_invite_token is null or length(p_invite_token) < 16 then
     raise exception 'invalid invite';
   end if;
   v_hash := encode(extensions.digest(p_invite_token, 'sha256'), 'hex');
 
   insert into public.rooms (id, owner_user_id, title, invite_hash)
-  values (coalesce(p_room_id, extensions.gen_random_uuid()), v_uid, coalesce(nullif(p_title, ''), '未命名文宣'), v_hash)
+  values (p_room_id, v_uid, coalesce(nullif(p_title, ''), '未命名文宣'), v_hash)
   on conflict (id) do nothing;
 
   insert into public.room_members (room_id, user_id, display_name, color, role)
