@@ -20,6 +20,7 @@
 - 分享 Bottom Sheet：複製連結、傳到 LINE、系統分享
 - 操作回饋 toast 與「復原」、儲存狀態、首次使用引導
 - 同一連結多人同時看（WebRTC / PeerJS）
+- 文宣與意見同步到雲端，主辦方沒開著也能打開連結
 - 彩色 / 黑白 / 對切 / 並排 / 滑動比較（手機收在「更多」）
 
 ## 畫面結構
@@ -38,6 +39,7 @@ src/
     CommentCard.tsx        修改點卡片（共用）
     Home.tsx / ShareSheet.tsx / UploadZone.tsx
   toast.tsx                操作回饋 toast
+  lib/cloud.ts             雲端鏡像：海報存 Storage、房間存 rooms
   styles.css               共用樣式與桌機版面
   mobile.css               手機元件樣式（≤720px）
   usability.css            toast / 儲存狀態 / 新手引導
@@ -60,4 +62,24 @@ npm run build   # tsc --noEmit && vite build，輸出到 dist/
 - PeerJS（WebRTC）多人同步
 - PWA：manifest + service worker、safe-area、100dvh
 
-> 文宣存在瀏覽器本機（IndexedDB）。主辦方請先打開自己的連結；若夥伴顯示載入中，請主辦再打開一次以同步。
+## 資料存放
+
+文宣同時存在兩個地方：
+
+1. **瀏覽器本機（IndexedDB）** —— 離線也能看自己開過的文宣
+2. **雲端鏡像（Supabase）** —— 讓夥伴在主辦方沒開著時也能打開連結
+
+海報圖片放 Storage，其餘房間內容放 `rooms` 資料表。資料表本身沒有開放讀寫，
+一律透過 `get_room` / `save_room` 兩個 SECURITY DEFINER 函式存取，並且一定要帶房間代碼，
+所以沒有人能把所有房間列出來。
+
+> 知道連結的人就能看到並留意見（跟直接把連結貼到群組是一樣的意思），請只放不介意群組成員看到的文宣。
+
+雲端位址與金鑰有內建預設值，也可以用環境變數覆寫：
+
+```bash
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_KEY=...
+```
+
+沒有設定或連不上時，會自動退回「本機 + PeerJS」的原本行為。

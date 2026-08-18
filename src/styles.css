@@ -83,6 +83,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 .onboard-title { font-family: "Noto Serif TC", serif; font-size: 26px; letter-spacing: 2px; }
 .onboard-hint { color: var(--ink-dim); margin: 0 0 4px; line-height: 1.7; font-size: 15px; }
+.onboard-note { color: var(--ink-faint); margin: 0; line-height: 1.8; font-size: 13.5px; text-align: left; }
 
 /* ---------- home ---------- */
 .home {
@@ -183,7 +184,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 .badge { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-dim); }
 .badge-online { color: var(--ok); border-color: #2f4a30; }
-.badge-connecting { color: #d7b06a; }
+.badge-connecting, .badge-waiting { color: #d7b06a; }
 
 .workspace {
   flex: 1;

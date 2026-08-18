@@ -53,6 +53,7 @@ export type WorkspaceApi = {
   markCoachSeen: () => void;
   showToast: ShowToast;
   openShare: () => void;
+  retryConnection: () => void;
   goHome: () => void;
 };
 

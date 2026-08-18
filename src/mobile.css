@@ -79,7 +79,8 @@
     background: var(--ink-faint);
   }
   .m-presence.is-online { background: var(--ok); }
-  .m-presence.is-connecting { background: #d7b06a; }
+  .m-presence.is-connecting,
+  .m-presence.is-waiting { background: #d7b06a; }
   .m-icon-btn {
     flex: none;
     width: 40px; height: 40px;

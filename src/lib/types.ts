@@ -3,7 +3,10 @@ export type Point = { x: number; y: number };
 export type Version = {
   id: string;
   label: string;
+  /** The local blob. Empty on copies that came from the cloud mirror. */
   imageDataUrl: string;
+  /** Public storage URL, once the poster has been mirrored. */
+  imageUrl?: string;
 };
 
 export type ReviewType = "文字" | "排版" | "圖片" | "顏色" | "資訊錯誤" | "其他";

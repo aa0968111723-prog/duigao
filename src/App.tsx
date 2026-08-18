@@ -15,6 +15,7 @@ import {
 import { roomCode, uid } from "./lib/id";
 import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
+import { cloudEnabled, fetchRoom, mergeRooms, publishRoom } from "./lib/cloud";
 import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { DesktopWorkspace } from "./components/DesktopWorkspace";
@@ -71,6 +72,7 @@ export function App() {
   const [peerCount, setPeerCount] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
+  const [cloudChecked, setCloudChecked] = useState(!cloudEnabled);
 
   const { toasts, showToast, dismiss } = useToasts();
   const isMobile = useIsMobile();
@@ -78,6 +80,8 @@ export function App() {
   const roomRef = useRef<Room | null>(null);
   const viewRef = useRef<ViewState>(view);
   const saveSeq = useRef(0);
+  const publishTimer = useRef<number | null>(null);
+  const cloudRoomRef = useRef<Room | null>(null);
   const busy = useRef<Set<string>>(new Set());
   const offlineNotified = useRef(false);
   roomRef.current = room;
@@ -149,8 +153,19 @@ export function App() {
     const code = readRoomCodeFromUrl();
     if (!code) return;
 
+    let cancelled = false;
+    // Local copy first (instant on a revisit), then the cloud mirror.
     loadRoom(code).then((existing) => {
-      if (existing) applyRemoteRoom(existing);
+      if (existing && !cancelled) applyRemoteRoom(existing);
+    });
+    fetchRoom(code).then((cloud) => {
+      if (cancelled) return;
+      setCloudChecked(true);
+      if (!cloud) return;
+      const local = roomRef.current;
+      const merged = local && local.id === cloud.id ? mergeRooms(local, cloud) : cloud;
+      applyRemoteRoom(merged);
+      saveRoom(merged).catch(() => undefined);
     });
 
     const collab = new Collab("guest", code, {
@@ -180,17 +195,50 @@ export function App() {
     collab.connect();
     collabRef.current = collab;
     return () => {
+      cancelled = true;
       collab.destroy();
       collabRef.current = null;
     };
   }, [guest, applyRemoteRoom, showToast]);
 
+  /**
+   * Mirrors the room so partners can open the link even when this device is
+   * asleep. Debounced because typing a title or dragging a stroke would
+   * otherwise publish on every keystroke.
+   */
+  const publishSoon = useCallback((next: Room) => {
+    if (!cloudEnabled) return;
+    cloudRoomRef.current = next;
+    if (publishTimer.current !== null) return;
+    publishTimer.current = window.setTimeout(() => {
+      publishTimer.current = null;
+      const pending = cloudRoomRef.current;
+      if (!pending) return;
+      publishRoom(pending).then((saved) => {
+        if (!saved) return;
+        // Keep the storage URLs we just earned so later saves skip the upload.
+        setRoom((prev) => {
+          if (!prev || prev.id !== saved.id) return prev;
+          const urls = new Map(saved.versions.map((v) => [v.id, v.imageUrl]));
+          if (prev.versions.every((v) => v.imageUrl === urls.get(v.id))) return prev;
+          const next2 = {
+            ...prev,
+            versions: prev.versions.map((v) => (urls.get(v.id) ? { ...v, imageUrl: urls.get(v.id) } : v)),
+          };
+          saveRoom(next2).catch(() => undefined);
+          return next2;
+        });
+      });
+    }, 900);
+  }, []);
+
   const persist = useCallback(
     (next: Room) => {
       trackSave(next);
       collabRef.current?.send({ t: "room", room: next });
+      publishSoon(next);
     },
-    [trackSave],
+    [trackSave, publishSoon],
   );
 
   const updateRoom = useCallback(
@@ -243,6 +291,13 @@ export function App() {
   const openRoom = useCallback((r: Room) => {
     setRoom(r);
     setView(initialView(r));
+    // Partners may have added notes while this device was closed.
+    fetchRoom(r.id).then((cloud) => {
+      if (!cloud || cloud.id !== r.id) return;
+      const merged = mergeRooms(r, cloud);
+      setRoom((prev) => (prev?.id === merged.id ? merged : prev));
+      saveRoom(merged).catch(() => undefined);
+    });
   }, []);
 
   const addFiles = useCallback(
@@ -417,6 +472,32 @@ export function App() {
     collabRef.current = collab;
   }, [applyRemoteRoom]);
 
+  // The room is served straight from this device, so host whenever one is open
+  // — waiting for a 分享 tap left every reopened room unreachable to partners.
+  useEffect(() => {
+    if (isGuestSession || !room?.id) return;
+    startHosting();
+    return () => {
+      collabRef.current?.destroy();
+      collabRef.current = null;
+      setCollabStatus(null);
+      setPeerCount(0);
+    };
+  }, [isGuestSession, room?.id, startHosting]);
+
+  // Phones suspend background tabs; re-dial as soon as we are visible again.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") collabRef.current?.retryNow();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onVisible);
+    };
+  }, []);
+
   const shareUrl = useMemo(() => {
     if (!room) return "";
     return `${location.origin}${location.pathname}#room=${room.id}`;
@@ -490,6 +571,7 @@ export function App() {
           startHosting();
           setShareOpen(true);
         },
+        retryConnection: () => collabRef.current?.retryNow(),
         goHome: () => {
           setRoom(null);
           setSelectedPinId(null);
@@ -529,15 +611,36 @@ export function App() {
 
   if (!hasVersions) {
     if (isGuestSession) {
+      const searching = !cloudChecked || (collabStatus !== "waiting" && collabStatus !== "error");
       return (
         <div className="onboard">
           <div className="onboard-card">
             <h1 className="onboard-title">文宣討論區</h1>
-            <p className="onboard-hint">
-              {collabStatus === "error"
-                ? "連不上主辦方，請對方重新打開連結後再試一次。"
-                : "正在載入夥伴分享的文宣…"}
-            </p>
+            <p className="onboard-hint">{searching ? "正在載入文宣…" : "找不到這份文宣"}</p>
+            {!searching && (
+              <>
+                <p className="onboard-note">
+                  連結可能不完整，或這份文宣還沒上傳完成。
+                  請跟分享的人確認一次，或請對方重新分享。
+                </p>
+                <button
+                  className="btn btn-primary btn-block"
+                  onClick={() => {
+                    setCloudChecked(false);
+                    collabRef.current?.retryNow();
+                    fetchRoom(readRoomCodeFromUrl() ?? "").then((cloud) => {
+                      setCloudChecked(true);
+                      if (cloud) {
+                        applyRemoteRoom(cloud);
+                        saveRoom(cloud).catch(() => undefined);
+                      }
+                    });
+                  }}
+                >
+                  再試一次
+                </button>
+              </>
+            )}
           </div>
           <ToastStack toasts={toasts} onDismiss={dismiss} />
         </div>
@@ -591,7 +694,9 @@ export function App() {
                       : "已同步"
                     : collabStatus === "connecting"
                       ? "正在同步"
-                      : "目前離線"}
+                      : collabStatus === "waiting"
+                        ? "等待連線"
+                        : "目前離線"}
                 </span>
               )}
               <span className="me" style={{ background: guest.color }} title={guest.name}>

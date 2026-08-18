@@ -7,6 +7,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { posterSrc } from "../lib/cloud";
 import type { Point, Version } from "../lib/types";
 import { pinNumber, type WorkspaceApi } from "./api";
 
@@ -90,11 +91,11 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
     img.onload = () => {
       if (!cancelled) setNatural({ w: img.naturalWidth, h: img.naturalHeight });
     };
-    img.src = version.imageDataUrl;
+    img.src = posterSrc(version);
     return () => {
       cancelled = true;
     };
-  }, [version.imageDataUrl]);
+  }, [version]);
 
   const frame = containRect(box, natural);
   const ready = frame.width > 0;
@@ -172,18 +173,18 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
       <img
         className={`stage-img mode-${view.colorMode}`}
         style={imgStyle}
-        src={version.imageDataUrl}
+        src={posterSrc(version)}
         alt={version.label}
         draggable={false}
       />
       {view.colorMode === "split" && (
-        <img className="stage-img split-gray" style={imgStyle} src={version.imageDataUrl} alt="" draggable={false} />
+        <img className="stage-img split-gray" style={imgStyle} src={posterSrc(version)} alt="" draggable={false} />
       )}
       {wipeWith && wipeWith.id !== version.id && (
         <img
           className="stage-img wipe-top"
           style={{ ...imgStyle, clipPath: `inset(0 0 0 ${view.wipe * 100}%)` }}
-          src={wipeWith.imageDataUrl}
+          src={posterSrc(wipeWith)}
           alt={wipeWith.label}
           draggable={false}
         />
