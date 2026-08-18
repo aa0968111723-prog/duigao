@@ -139,7 +139,17 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             視覺提案
           </summary>
           <div className="proposal-desktop-popover">
-            <ProposalControls roomId={room.id} versionId={view.versionId} authorName={api.guest.name} showToast={api.showToast} />
+            <ProposalControls
+              roomId={room.id}
+              versionId={view.versionId}
+              authorName={api.guest.name}
+              showToast={api.showToast}
+              pref={{
+                prefs: room.proposalPrefs ?? [],
+                userId: api.guest.id,
+                onChoose: (choice) => api.setProposalPref(view.versionId, choice),
+              }}
+            />
           </div>
         </details>
 
@@ -238,7 +248,7 @@ function SidePanel({ api }: { api: WorkspaceApi }) {
           {filtered.map((c) => (
             <CommentCard
               key={c.id}
-              room={room}
+              api={api}
               pin={c}
               selected={c.id === api.selectedPinId}
               onSelect={() => {

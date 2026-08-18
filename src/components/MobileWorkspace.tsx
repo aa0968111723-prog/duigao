@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { ColorMode, CompareMode, Tool } from "../lib/types";
 import type { CollabStatus } from "../lib/peer";
 import { useViewport } from "../hooks/useViewport";
+import { loadFlag, saveFlag } from "../lib/store";
 import { ProposalDock } from "../features/visual-proposal/ProposalDock";
 import { pruneProposalVersions } from "../features/visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "./BottomSheet";
@@ -45,6 +46,7 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [proposalMode, setProposalMode] = useState(false);
   const [dockHeight, setDockHeight] = useState(0);
   const [composeInset, setComposeInset] = useState(0);
+  const [nudge, setNudge] = useState(false);
   const chatRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -53,6 +55,27 @@ export function MobileWorkspace({ api, presence }: Props) {
       room.versions.map((v) => v.id),
     );
   }, [room.id, room.versions]);
+
+  const gaveFeedback =
+    room.comments.some((c) => c.authorId === api.guest.id) ||
+    (room.supports ?? []).some((s) => s.userId === api.guest.id) ||
+    (room.replies ?? []).some((r) => r.authorId === api.guest.id);
+
+  // A single, gentle nudge — only if the viewer has been around a while without
+  // leaving any feedback, and never more than once per room.
+  const nudgeState = useRef({ gaveFeedback, draftPin, proposalMode });
+  nudgeState.current = { gaveFeedback, draftPin, proposalMode };
+  useEffect(() => {
+    if (loadFlag(`nudge.${room.id}`)) return;
+    const t = window.setTimeout(() => {
+      const s = nudgeState.current;
+      if (!s.gaveFeedback && !s.draftPin && !s.proposalMode) {
+        setNudge(true);
+        saveFlag(`nudge.${room.id}`);
+      }
+    }, 25000);
+    return () => window.clearTimeout(t);
+  }, [room.id]);
 
   const sendChat = () => {
     api.sendChat();
@@ -144,6 +167,24 @@ export function MobileWorkspace({ api, presence }: Props) {
             {tool === "pin" ? "點文宣上要調整的位置" : "點下方「修改點」，再點文宣上要調整的位置"}
           </p>
         )}
+        {nudge && !showHint && (
+          <div className="m-nudge" role="note">
+            <span>還有哪一個地方最需要調整？</span>
+            <button
+              type="button"
+              className="m-nudge-cta"
+              onClick={() => {
+                api.setTool("pin");
+                setNudge(false);
+              }}
+            >
+              ＋ 新增修改點
+            </button>
+            <button type="button" className="m-nudge-x" aria-label="關閉提示" onClick={() => setNudge(false)}>
+              ×
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="m-bottom">
@@ -155,6 +196,11 @@ export function MobileWorkspace({ api, presence }: Props) {
             showToast={api.showToast}
             onExit={() => setProposalMode(false)}
             onHeight={setDockHeight}
+            pref={{
+              prefs: room.proposalPrefs ?? [],
+              userId: api.guest.id,
+              onChoose: (choice) => api.setProposalPref(view.versionId, choice),
+            }}
           />
         ) : (
           <>
@@ -186,7 +232,7 @@ export function MobileWorkspace({ api, presence }: Props) {
                 {room.comments.map((c) => (
                   <CommentCard
                     key={c.id}
-                    room={room}
+                    api={api}
                     pin={c}
                     compact
                     selected={c.id === selectedPinId}

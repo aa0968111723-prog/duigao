@@ -4,6 +4,7 @@ import {
   VERSION_LABELS,
   type ChatMessage,
   type CommentPin,
+  type CommentReply,
   type Guest,
   type Point,
   type Room,
@@ -384,10 +385,14 @@ export function App() {
     cloudRef.current.writes.insertComment(pin);
     markCoachSeen();
     cancelPin();
-    showToast(`已新增修改點 ${number}`, {
+    void number;
+    const count = (current?.comments.length ?? 0) + 1;
+    const people = new Set([...(current?.comments.map((c) => c.authorName) ?? []), guest.name]).size;
+    showToast("已收到你的意見 ✓", {
       tone: "success",
       action: { label: "復原", onClick: undoLast },
     });
+    showToast(`目前 ${people} 人提出 ${count} 個修改建議`);
   }, [draftPin, guest, form, claim, pushUndo, updateRoom, markCoachSeen, cancelPin, showToast, undoLast]);
 
   const toggleResolve = useCallback(
@@ -455,6 +460,65 @@ export function App() {
     cloudRef.current.writes.insertMessage(msg);
     setChatInput("");
   }, [guest, chatInput, claim, updateRoom]);
+
+  // "我也覺得": one per user per comment; tapping again removes it.
+  const toggleSupport = useCallback(
+    (commentId: string) => {
+      if (!guest) return;
+      const current = roomRef.current;
+      if (!current) return;
+      const uidNow = guest.id;
+      const existing = (current.supports ?? []).some((s) => s.commentId === commentId && s.userId === uidNow);
+      updateRoom((r) => {
+        const list = r.supports ?? [];
+        return {
+          ...r,
+          supports: existing
+            ? list.filter((s) => !(s.commentId === commentId && s.userId === uidNow))
+            : [...list, { commentId, userId: uidNow }],
+        };
+      });
+      cloudRef.current.writes.toggleSupport(commentId, !existing);
+    },
+    [guest, updateRoom],
+  );
+
+  const addReply = useCallback(
+    (commentId: string, body: string) => {
+      const text = body.trim();
+      if (!guest || !text) return;
+      if (!claim(`reply:${commentId}:${text}`, 300)) return;
+      const reply: CommentReply = {
+        id: uid("r_"),
+        commentId,
+        authorId: guest.id,
+        authorName: guest.name,
+        authorColor: guest.color,
+        body: text,
+        createdAt: Date.now(),
+      };
+      updateRoom((r) => ({ ...r, replies: [...(r.replies ?? []), reply] }));
+      cloudRef.current.writes.insertReply(reply);
+    },
+    [guest, claim, updateRoom],
+  );
+
+  // One take per user per version; tapping the current choice clears it.
+  const setProposalPref = useCallback(
+    (versionId: string, choice: string) => {
+      if (!guest) return;
+      const uidNow = guest.id;
+      const current = roomRef.current;
+      const existing = (current?.proposalPrefs ?? []).find((p) => p.versionId === versionId && p.userId === uidNow);
+      const clearing = existing?.choice === choice;
+      updateRoom((r) => {
+        const list = (r.proposalPrefs ?? []).filter((p) => !(p.versionId === versionId && p.userId === uidNow));
+        return { ...r, proposalPrefs: clearing ? list : [...list, { versionId, userId: uidNow, choice }] };
+      });
+      cloudRef.current.writes.setProposalPref(versionId, clearing ? "" : choice);
+    },
+    [guest, updateRoom],
+  );
 
   const startHosting = useCallback(() => {
     if (isCloudConfigured) return;
@@ -559,6 +623,9 @@ export function App() {
         toggleResolve,
         addStroke,
         eraseStroke,
+        toggleSupport,
+        addReply,
+        setProposalPref,
         undo: undoLast,
         setChatInput,
         sendChat,

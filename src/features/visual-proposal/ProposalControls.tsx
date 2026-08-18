@@ -3,8 +3,10 @@ import { useProposalStore } from "./store";
 import { ProposalElementControls } from "./ProposalElementControls";
 import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
 import { ProposalSummary } from "./ProposalSummary";
+import { ProposalPreference } from "./ProposalPreference";
 import { TEXT_ROLES, createImageItem, createTextItem, prepareImageFile } from "./helpers";
 import type { ShowToast } from "../../toast";
+import type { ProposalPrefBinding } from "./ProposalDock";
 import "./proposal.css";
 
 type Props = {
@@ -12,9 +14,10 @@ type Props = {
   versionId: string;
   authorName: string;
   showToast?: ShowToast;
+  pref?: ProposalPrefBinding;
 };
 
-export function ProposalControls({ roomId, versionId, authorName, showToast }: Props) {
+export function ProposalControls({ roomId, versionId, authorName, showToast, pref }: Props) {
   const proposal = useProposalStore(roomId, versionId, authorName);
   const materialRef = useRef<HTMLInputElement>(null);
   const [pickText, setPickText] = useState(false);
@@ -92,6 +95,16 @@ export function ProposalControls({ roomId, versionId, authorName, showToast }: P
               ＋
             </button>
           </div>
+
+          {pref && (
+            <ProposalPreference
+              versionId={versionId}
+              proposals={proposal.docs.map((d) => ({ id: d.id, name: d.name }))}
+              prefs={pref.prefs}
+              userId={pref.userId}
+              onChoose={pref.onChoose}
+            />
+          )}
 
           <div className="proposal-manage">
             {renaming ? (
