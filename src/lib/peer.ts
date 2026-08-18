@@ -46,13 +46,25 @@ export class Collab {
     this.open();
   }
 
-  /** Immediate retry, e.g. the user tapped 重新連線 or the tab became visible. */
+  /**
+   * Immediate retry, e.g. the user tapped 重新連線 or the tab became visible.
+   *
+   * Returns early while the link is healthy: this fires on every
+   * visibilitychange, and redialing a working link would tear the host's peer
+   * down (dropping every connected partner) or stack duplicate guest channels.
+   */
   retryNow(): void {
-    if (this.stopped) return;
+    if (this.stopped || this.isHealthy()) return;
     this.attempt = 0;
     this.clearTimer();
     this.handlers.onStatus("connecting");
     this.dial();
+  }
+
+  /** A host is reachable once its id is open; a guest needs a live channel. */
+  private isHealthy(): boolean {
+    if (!this.peer || this.peer.destroyed || !this.peer.open) return false;
+    return this.role === "host" || this.peerCount > 0;
   }
 
   private open(): void {

@@ -20,7 +20,8 @@
 --   2. If public.rooms is the LEGACY mirror shape (it lacks owner_user_id),
 --      renames it to public.legacy_room_mirror and revokes API access, so the
 --      old data stays recoverable but unreachable, and 0001 can then create
---      the canonical rooms table.
+--      the canonical rooms table. Aborts if that destination name is already
+--      taken, since continuing would leave the legacy table as public.rooms.
 --   3. Turns the legacy "posters" bucket private (uploaded test posters stay
 --      recoverable by the owner, but are no longer world-readable).
 --
@@ -66,7 +67,10 @@ begin
       select 1 from information_schema.tables
       where table_schema = 'public' and table_name = 'legacy_room_mirror'
     ) then
-      raise notice 'public.legacy_room_mirror already exists; leaving public.rooms untouched';
+      -- Abort rather than continue: 0001 creates public.rooms with
+      -- CREATE TABLE IF NOT EXISTS, so carrying on would leave the legacy
+      -- shape in place and silently skip the canonical table.
+      raise exception 'reconciliation conflict: public.rooms still has the legacy shape but public.legacy_room_mirror already exists; resolve the two by hand before re-running';
     else
       alter table public.rooms rename to legacy_room_mirror;
       alter table public.legacy_room_mirror enable row level security;
