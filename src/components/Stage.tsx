@@ -143,6 +143,28 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
     [],
   );
 
+  /**
+   * While a gesture is live, stop the browser from turning the touch into a
+   * scroll/pan (which would fire pointercancel and eat the circle). CSS
+   * touch-action already blocks it declaratively; this covers engines that
+   * still initiate a scroll from the touch stream. Passive:false is required
+   * for preventDefault to work. Outside a gesture nothing is prevented, so
+   * view-mode pinch/pan is untouched.
+   */
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const prevent = (e: TouchEvent) => {
+      if (gestureActive.current) e.preventDefault();
+    };
+    el.addEventListener("touchstart", prevent, { passive: false });
+    el.addEventListener("touchmove", prevent, { passive: false });
+    return () => {
+      el.removeEventListener("touchstart", prevent);
+      el.removeEventListener("touchmove", prevent);
+    };
+  }, []);
+
   const gestureTool = tool === "draw" || tool === "region";
 
   const onDown = (e: ReactPointerEvent) => {
@@ -182,8 +204,8 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
     scheduleLive();
   };
 
-  const onUp = () => {
-    if (!interactive || !gestureActive.current) return;
+  const endGesture = (): Point[] | null => {
+    if (!interactive || !gestureActive.current) return null;
     gestureActive.current = false;
     const pts = gesturePoints.current;
     gesturePoints.current = [];
@@ -193,6 +215,12 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
     }
     // The freehand trace disappears the moment the finger lifts.
     livePolyline.current?.setAttribute("points", "");
+    return pts;
+  };
+
+  const onUp = () => {
+    const pts = endGesture();
+    if (!pts) return;
     if (tool === "draw") {
       api.addStroke(version.id, pts);
     } else if (tool === "region") {
@@ -200,6 +228,11 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
       if (region) api.placeRegion(version.id, region);
       else api.showToast("範圍太小，再圈一次");
     }
+  };
+
+  /** The browser took the pointer (scroll/system gesture): drop the trace, keep quiet. */
+  const onCancel = () => {
+    endGesture();
   };
 
   const allPins = room.comments.filter((c) => c.versionId === version.id);
@@ -240,7 +273,7 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
-      onPointerCancel={onUp}
+      onPointerCancel={onCancel}
     >
       <img
         className={`stage-img mode-${view.colorMode}`}
