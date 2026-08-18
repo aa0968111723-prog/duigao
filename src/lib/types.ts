@@ -44,6 +44,24 @@ export type ChatMessage = {
   createdAt: number;
 };
 
+/** "我也覺得" — one per user per comment. */
+export type CommentSupport = { commentId: string; userId: string };
+
+/** A short reply attached to a review item, kept out of the main chat. */
+export type CommentReply = {
+  id: string;
+  commentId: string;
+  authorId: string;
+  authorName: string;
+  authorColor: string;
+  body: string;
+  createdAt: number;
+};
+
+/** A viewer's take on a version's proposals: like a proposal id, or keep the original. */
+export const KEEP_ORIGINAL = "__original__";
+export type ProposalPref = { versionId: string; userId: string; choice: string };
+
 export type Room = {
   id: string;
   title: string;
@@ -52,6 +70,10 @@ export type Room = {
   strokes: Stroke[];
   messages: ChatMessage[];
   updatedAt: number;
+  // Low-friction feedback (PR #13). Optional so older cached rooms stay valid.
+  supports?: CommentSupport[];
+  replies?: CommentReply[];
+  proposalPrefs?: ProposalPref[];
 };
 
 export type Guest = {

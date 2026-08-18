@@ -391,6 +391,22 @@
 }
 .proposal-hint-line { margin-top: 2px; }
 
+/* ---------- proposal preference (PR #13) ---------- */
+.proposal-pref { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+.proposal-pref-title { font-size: 12px; color: var(--ink-dim); }
+.proposal-pref-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.proposal-pref-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raise);
+  color: var(--ink-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+.proposal-pref-btn.is-on { border-color: var(--accent); background: var(--accent); color: #fff; }
+
 /* ---------- mobile proposal dock (no scrim: canvas stays draggable) ---------- */
 @media (max-width: 720px) {
   .m-app.is-proposal .m-stage-area { padding-bottom: calc(var(--m-proposal, 320px) + 8px); }

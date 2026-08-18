@@ -22,11 +22,14 @@ import {
   deleteStroke as repoDeleteStroke,
   insertComment,
   insertMessage,
+  insertReply as repoInsertReply,
   insertStroke,
   joinRoom,
   loadRoom,
   setCommentResolved,
+  setPreference,
   setRoomTitle,
+  setSupport,
   upsertProposal,
   type CloudProposal,
 } from "./roomRepository";
@@ -52,6 +55,9 @@ export type CloudWrites = {
   deleteStroke: (id: string) => void;
   insertMessage: (msg: import("../lib/types").ChatMessage) => void;
   addVersion: (label: string, sortOrder: number, imageDataUrl: string) => void;
+  toggleSupport: (commentId: string, add: boolean) => void;
+  insertReply: (reply: import("../lib/types").CommentReply) => void;
+  setProposalPref: (versionId: string, choice: string) => void;
 };
 
 type Params = {
@@ -211,6 +217,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
               proposalToStore({ id: r.id, versionId: r.version_id, authorName: r.author_name, name: r.name, payload: r.payload, revision: r.revision }),
             ]);
           },
+          onFeedbackChange: scheduleReload,
           onPresence: setOnline,
           onStatus: (connected) => {
             if (connected) void flushPending();
@@ -306,6 +313,9 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
         void v;
         scheduleReload();
       }),
+    toggleSupport: (commentId, add) => run(() => setSupport(supabase!, boundRef.current!, commentId, add)),
+    insertReply: (reply) => run(() => repoInsertReply(supabase!, boundRef.current!, reply)),
+    setProposalPref: (versionId, choice) => run(() => setPreference(supabase!, boundRef.current!, versionId, choice)),
   };
 
   return { status, online, inviteUrl, boundRoomId: boundRef.current, active: Boolean(supabase), ensureShared, writes };

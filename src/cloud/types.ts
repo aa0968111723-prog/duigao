@@ -1,4 +1,14 @@
-import type { ChatMessage, CommentPin, Point, ReviewPriority, ReviewType, Stroke } from "../lib/types";
+import type {
+  ChatMessage,
+  CommentPin,
+  CommentReply,
+  CommentSupport,
+  Point,
+  ProposalPref,
+  ReviewPriority,
+  ReviewType,
+  Stroke,
+} from "../lib/types";
 
 /** User-facing sync state. Never exposes the transport (Supabase/PeerJS/RLS). */
 export type SyncStatus = "local-only" | "connecting" | "syncing" | "synced" | "offline-pending" | "error";
@@ -130,4 +140,37 @@ export function messageFromRow(row: MessageRow): ChatMessage {
     body: row.body,
     createdAt: ms(row.created_at),
   };
+}
+
+export type SupportRow = { comment_id: string; user_id: string; room_id: string };
+export type ReplyRow = {
+  id: string;
+  room_id: string;
+  comment_id: string;
+  author_user_id: string;
+  author_name: string;
+  author_color: string;
+  body: string;
+  created_at: string;
+};
+export type PrefRow = { room_id: string; version_id: string; user_id: string; choice: string };
+
+export function supportFromRow(row: SupportRow): CommentSupport {
+  return { commentId: row.comment_id, userId: row.user_id };
+}
+
+export function replyFromRow(row: ReplyRow): CommentReply {
+  return {
+    id: row.id,
+    commentId: row.comment_id,
+    authorId: row.author_user_id,
+    authorName: row.author_name,
+    authorColor: row.author_color,
+    body: row.body,
+    createdAt: ms(row.created_at),
+  };
+}
+
+export function prefFromRow(row: PrefRow): ProposalPref {
+  return { versionId: row.version_id, userId: row.user_id, choice: row.choice };
 }

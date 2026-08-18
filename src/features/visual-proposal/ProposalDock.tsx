@@ -3,9 +3,13 @@ import { useProposalStore } from "./store";
 import { ProposalElementControls } from "./ProposalElementControls";
 import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
 import { ProposalSummary } from "./ProposalSummary";
+import { ProposalPreference } from "./ProposalPreference";
 import { TEXT_ROLES, createImageItem, createTextItem, prepareImageFile } from "./helpers";
 import type { ShowToast } from "../../toast";
+import type { ProposalPref } from "../../lib/types";
 import "./proposal.css";
+
+export type ProposalPrefBinding = { prefs: ProposalPref[]; userId: string; onChoose: (choice: string) => void };
 
 type Props = {
   roomId: string;
@@ -14,6 +18,7 @@ type Props = {
   showToast: ShowToast;
   onExit: () => void;
   onHeight?: (px: number) => void;
+  pref?: ProposalPrefBinding;
 };
 
 type Panel = "actions" | "element" | "background" | "summary";
@@ -23,7 +28,7 @@ type Panel = "actions" | "element" | "background" | "summary";
  * poster above stays draggable while these controls are visible — you can move
  * an element and tune it at the same time.
  */
-export function ProposalDock({ roomId, versionId, authorName, showToast, onExit, onHeight }: Props) {
+export function ProposalDock({ roomId, versionId, authorName, showToast, onExit, onHeight, pref }: Props) {
   const proposal = useProposalStore(roomId, versionId, authorName);
   const materialRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLElement>(null);
@@ -168,6 +173,16 @@ export function ProposalDock({ roomId, versionId, authorName, showToast, onExit,
                 </button>
               ))}
             </div>
+          )}
+
+          {pref && proposal.docs.length > 0 && (
+            <ProposalPreference
+              versionId={versionId}
+              proposals={proposal.docs.map((d) => ({ id: d.id, name: d.name }))}
+              prefs={pref.prefs}
+              userId={pref.userId}
+              onChoose={pref.onChoose}
+            />
           )}
 
           <div className="pdock-body">

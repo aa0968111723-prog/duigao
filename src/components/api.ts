@@ -1,5 +1,6 @@
 import type { ShowToast } from "../toast";
 import type {
+  CommentReply,
   Guest,
   Point,
   ReviewPriority,
@@ -46,6 +47,9 @@ export type WorkspaceApi = {
   toggleResolve: (id: string) => void;
   addStroke: (versionId: string, points: Point[]) => void;
   eraseStroke: (id: string) => void;
+  toggleSupport: (commentId: string) => void;
+  addReply: (commentId: string, body: string) => void;
+  setProposalPref: (versionId: string, choice: string) => void;
   undo: () => void;
   setChatInput: (v: string) => void;
   sendChat: () => void;
@@ -77,4 +81,24 @@ export function nextPinNumber(room: Room, versionId: string): number {
 
 export function versionLabel(room: Room, versionId: string): string {
   return room.versions.find((v) => v.id === versionId)?.label ?? "";
+}
+
+export function supportCount(room: Room, commentId: string): number {
+  return (room.supports ?? []).filter((s) => s.commentId === commentId).length;
+}
+
+export function hasSupported(room: Room, commentId: string, userId: string): boolean {
+  return (room.supports ?? []).some((s) => s.commentId === commentId && s.userId === userId);
+}
+
+export function repliesFor(room: Room, commentId: string): CommentReply[] {
+  return (room.replies ?? [])
+    .filter((r) => r.commentId === commentId)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** For the "N people提出 M 個修改建議" reassurance line after submitting. */
+export function feedbackStats(room: Room): { people: number; count: number } {
+  const people = new Set(room.comments.map((c) => c.authorName));
+  return { people: people.size, count: room.comments.length };
 }

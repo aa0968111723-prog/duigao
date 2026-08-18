@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ChatMessage, CommentPin, Guest, Point, Room, Stroke, Version } from "../lib/types";
+import type { ChatMessage, CommentPin, CommentReply, Guest, Point, Room, Stroke, Version } from "../lib/types";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
 import {
@@ -12,12 +12,18 @@ import {
 import {
   commentFromRow,
   messageFromRow,
+  prefFromRow,
+  replyFromRow,
   strokeFromRow,
+  supportFromRow,
   type CommentRow,
   type MessageRow,
+  type PrefRow,
   type ProposalRow,
+  type ReplyRow,
   type RoomRow,
   type StrokeRow,
+  type SupportRow,
   type VersionRow,
 } from "./types";
 
@@ -195,14 +201,18 @@ export async function joinRoom(supabase: SupabaseClient, roomId: string, token: 
 }
 
 export async function loadRoom(supabase: SupabaseClient, roomId: string): Promise<CloudSnapshot> {
-  const [roomRes, versionsRes, commentsRes, strokesRes, messagesRes, proposalsRes] = await Promise.all([
-    supabase.from("rooms").select("*").eq("id", roomId).single(),
-    supabase.from("versions").select("*").eq("room_id", roomId).order("sort_order", { ascending: true }),
-    supabase.from("comments").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
-    supabase.from("strokes").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
-    supabase.from("messages").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
-    supabase.from("visual_proposals").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
-  ]);
+  const [roomRes, versionsRes, commentsRes, strokesRes, messagesRes, proposalsRes, supportsRes, repliesRes, prefsRes] =
+    await Promise.all([
+      supabase.from("rooms").select("*").eq("id", roomId).single(),
+      supabase.from("versions").select("*").eq("room_id", roomId).order("sort_order", { ascending: true }),
+      supabase.from("comments").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
+      supabase.from("strokes").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
+      supabase.from("messages").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
+      supabase.from("visual_proposals").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
+      supabase.from("comment_supports").select("*").eq("room_id", roomId),
+      supabase.from("comment_replies").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
+      supabase.from("proposal_preferences").select("*").eq("room_id", roomId),
+    ]);
   if (roomRes.error) throw new CloudError(roomRes.error.message, "load");
   const roomRow = roomRes.data as RoomRow;
 
@@ -221,6 +231,9 @@ export async function loadRoom(supabase: SupabaseClient, roomId: string): Promis
     comments: ((commentsRes.data as CommentRow[] | null) ?? []).map(commentFromRow),
     strokes: ((strokesRes.data as StrokeRow[] | null) ?? []).map(strokeFromRow),
     messages: ((messagesRes.data as MessageRow[] | null) ?? []).map(messageFromRow),
+    supports: ((supportsRes.data as SupportRow[] | null) ?? []).map(supportFromRow),
+    replies: ((repliesRes.data as ReplyRow[] | null) ?? []).map(replyFromRow),
+    proposalPrefs: ((prefsRes.data as PrefRow[] | null) ?? []).map(prefFromRow),
     updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
   };
 
@@ -329,4 +342,44 @@ export async function upsertProposal(
   });
   if (error) throw new CloudError(error.message, "proposal");
   return typeof data === "number" ? data : proposal.revision + 1;
+}
+
+// ---- low-friction feedback (supports / replies / proposal preferences) -----
+
+export async function setSupport(supabase: SupabaseClient, roomId: string, commentId: string, add: boolean) {
+  if (add) {
+    const { error } = await supabase
+      .from("comment_supports")
+      .upsert({ room_id: roomId, comment_id: commentId }, { onConflict: "comment_id,user_id" });
+    if (error) throw new CloudError(error.message, "support");
+  } else {
+    // RLS delete policy limits this to the caller's own support row.
+    const { error } = await supabase.from("comment_supports").delete().eq("comment_id", commentId);
+    if (error) throw new CloudError(error.message, "support");
+  }
+}
+
+export async function insertReply(supabase: SupabaseClient, roomId: string, reply: CommentReply) {
+  const { error } = await supabase.from("comment_replies").insert({
+    id: reply.id.length === 36 ? reply.id : uuid(),
+    room_id: roomId,
+    comment_id: reply.commentId,
+    author_name: reply.authorName,
+    author_color: reply.authorColor,
+    body: reply.body,
+  });
+  if (error) throw new CloudError(error.message, "reply");
+}
+
+export async function setPreference(supabase: SupabaseClient, roomId: string, versionId: string, choice: string) {
+  if (!choice) {
+    // RLS delete policy limits this to the caller's own preference row.
+    const { error } = await supabase.from("proposal_preferences").delete().eq("version_id", versionId);
+    if (error) throw new CloudError(error.message, "preference");
+    return;
+  }
+  const { error } = await supabase
+    .from("proposal_preferences")
+    .upsert({ room_id: roomId, version_id: versionId, choice }, { onConflict: "version_id,user_id" });
+  if (error) throw new CloudError(error.message, "preference");
 }

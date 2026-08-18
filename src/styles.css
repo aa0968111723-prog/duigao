@@ -387,6 +387,60 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .m-item-state.is-done { color: var(--ink-faint); }
 .m-item-suggestion { margin: 8px 0 0 32px; font-size: 13px; line-height: 1.6; color: var(--ink-dim); }
 
+/* ---------- low-friction feedback (PR #13) ---------- */
+.m-item-actions { display: flex; gap: 8px; margin-top: 10px; }
+.m-support,
+.m-reply-toggle {
+  min-height: 34px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raise);
+  color: var(--ink-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+.m-support.is-on { border-color: var(--accent); background: rgba(196, 92, 74, 0.14); color: #f2b8ab; }
+.m-replies { margin: 8px 0 0 32px; display: flex; flex-direction: column; gap: 6px; }
+.m-reply { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink); }
+.m-reply-who { font-weight: 500; margin-right: 6px; }
+.m-replies-more { align-self: flex-start; }
+.m-reply-input { display: flex; gap: 8px; margin-top: 4px; }
+.m-reply-input .m-input { flex: 1; }
+
+.m-starters { display: flex; flex-wrap: wrap; gap: 6px; }
+.m-starter {
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--ink-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.m-starter:hover { border-color: var(--accent); color: var(--ink); }
+
+.m-nudge {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--m-toolbar, 108px) + var(--m-peek, 0px) + 12px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 8px 8px 8px 14px;
+  border-radius: 999px;
+  background: rgba(20, 18, 16, 0.96);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+.m-nudge-cta { flex: none; border: 0; border-radius: 999px; background: var(--accent); color: #fff; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.m-nudge-x { flex: none; background: none; border: 0; color: var(--ink-dim); font-size: 18px; line-height: 1; cursor: pointer; }
+
 .m-msg { padding: 2px 0; }
 .m-msg-who { font-size: 12px; font-weight: 500; }
 .m-msg p { margin: 2px 0 0; font-size: 15px; line-height: 1.5; }

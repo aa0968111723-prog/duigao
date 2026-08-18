@@ -9,6 +9,7 @@ export type SyncHandlers = {
   onMessageInsert?: (row: MessageRow) => void;
   onVersionInsert?: (row: VersionRow) => void;
   onProposalUpsert?: (row: ProposalRow) => void;
+  onFeedbackChange?: () => void;
   onPresence?: (count: number) => void;
   onStatus?: (connected: boolean) => void;
 };
@@ -59,6 +60,15 @@ export function subscribeRoom(
     )
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "visual_proposals", filter }, (p) =>
       handlers.onProposalUpsert?.(p.new as ProposalRow),
+    )
+    .on("postgres_changes", { event: "*", schema: "public", table: "comment_supports", filter }, () =>
+      handlers.onFeedbackChange?.(),
+    )
+    .on("postgres_changes", { event: "*", schema: "public", table: "comment_replies", filter }, () =>
+      handlers.onFeedbackChange?.(),
+    )
+    .on("postgres_changes", { event: "*", schema: "public", table: "proposal_preferences", filter }, () =>
+      handlers.onFeedbackChange?.(),
     )
     .on("presence", { event: "sync" }, () => {
       handlers.onPresence?.(Object.keys(channel.presenceState()).length);

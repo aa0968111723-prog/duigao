@@ -25,7 +25,8 @@ export function ShareSheet({ title, url, cloud, onClose, onToast }: Props) {
     );
   }
 
-  const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(`一起討論「${title}」：${url}`)}`;
+  const inviteText = `幫我看一下這張文宣「${title}」，點需要調整的位置留一句話就可以，不用改原稿 🙏`;
+  const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(`${inviteText}\n${url}`)}`;
 
   const copy = async () => {
     try {
@@ -41,7 +42,7 @@ export function ShareSheet({ title, url, cloud, onClose, onToast }: Props) {
 
   const nativeShare = async () => {
     try {
-      await navigator.share({ title, text: `一起討論「${title}」`, url });
+      await navigator.share({ title, text: inviteText, url });
       onClose();
     } catch {
       /* the user dismissed the OS sheet */
