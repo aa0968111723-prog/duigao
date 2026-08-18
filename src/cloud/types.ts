@@ -9,6 +9,7 @@ import type {
   ReviewType,
   Stroke,
 } from "../lib/types";
+import { normalizeRegion } from "../lib/region";
 
 /** User-facing sync state. Never exposes the transport (Supabase/PeerJS/RLS). */
 export type SyncStatus = "local-only" | "connecting" | "syncing" | "synced" | "offline-pending" | "error";
@@ -54,6 +55,8 @@ export type CommentRow = {
   author_color: string;
   x: number;
   y: number;
+  /** AnnotationRegion jsonb (0003_comment_regions); null for point comments. */
+  region: unknown;
   body: string;
   suggestion: string;
   problem_type: string | null;
@@ -102,6 +105,7 @@ const ms = (iso: string): number => {
 };
 
 export function commentFromRow(row: CommentRow): CommentPin {
+  const region = normalizeRegion(row.region);
   return {
     id: row.id,
     versionId: row.version_id,
@@ -110,6 +114,7 @@ export function commentFromRow(row: CommentRow): CommentPin {
     authorColor: row.author_color,
     x: row.x,
     y: row.y,
+    ...(region ? { region } : {}),
     body: row.body,
     suggestion: row.suggestion || undefined,
     problemType: (row.problem_type as ReviewType | null) ?? undefined,
