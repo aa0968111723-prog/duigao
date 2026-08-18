@@ -7,9 +7,10 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { posterSrc } from "../lib/cloud";
 import type { Point, Version } from "../lib/types";
-import { pinNumber, type WorkspaceApi } from "./api";
+import { regionFromPoints } from "../lib/region";
+import { VisualProposalOverlay } from "../features/visual-proposal/VisualProposalOverlay";
+import { nextPinNumber, pinNumber, type WorkspaceApi } from "./api";
 
 type Rect = { left: number; top: number; width: number; height: number };
 
@@ -71,8 +72,17 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [natural, setNatural] = useState({ w: 0, h: 0 });
-  const [live, setLive] = useState<Point[]>([]);
-  const drawing = useRef(false);
+
+  /**
+   * The live gesture (draw on desktop, 圈範圍 on mobile) never touches React
+   * state: points accumulate in a ref and the polyline is updated straight on
+   * the DOM inside one requestAnimationFrame per frame. Nothing is persisted
+   * until pointer up.
+   */
+  const gesturePoints = useRef<Point[]>([]);
+  const gestureActive = useRef(false);
+  const livePolyline = useRef<SVGPolylineElement>(null);
+  const liveRaf = useRef(0);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -91,11 +101,11 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
     img.onload = () => {
       if (!cancelled) setNatural({ w: img.naturalWidth, h: img.naturalHeight });
     };
-    img.src = posterSrc(version);
+    img.src = version.imageDataUrl;
     return () => {
       cancelled = true;
     };
-  }, [version]);
+  }, [version.imageDataUrl]);
 
   const frame = containRect(box, natural);
   const ready = frame.width > 0;
@@ -114,22 +124,66 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
     [frame.left, frame.top, frame.width, frame.height, ready],
   );
 
+  const paintLive = useCallback(() => {
+    liveRaf.current = 0;
+    const el = livePolyline.current;
+    if (!el) return;
+    const pts = gesturePoints.current;
+    el.setAttribute("points", pts.length > 1 ? pts.map((p) => `${p.x * 100},${p.y * 100}`).join(" ") : "");
+  }, []);
+
+  const scheduleLive = useCallback(() => {
+    if (!liveRaf.current) liveRaf.current = requestAnimationFrame(paintLive);
+  }, [paintLive]);
+
+  useEffect(
+    () => () => {
+      if (liveRaf.current) cancelAnimationFrame(liveRaf.current);
+    },
+    [],
+  );
+
+  /**
+   * While a gesture is live, stop the browser from turning the touch into a
+   * scroll/pan (which would fire pointercancel and eat the circle). CSS
+   * touch-action already blocks it declaratively; this covers engines that
+   * still initiate a scroll from the touch stream. Passive:false is required
+   * for preventDefault to work. Outside a gesture nothing is prevented, so
+   * view-mode pinch/pan is untouched.
+   */
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const prevent = (e: TouchEvent) => {
+      if (gestureActive.current) e.preventDefault();
+    };
+    el.addEventListener("touchstart", prevent, { passive: false });
+    el.addEventListener("touchmove", prevent, { passive: false });
+    return () => {
+      el.removeEventListener("touchstart", prevent);
+      el.removeEventListener("touchmove", prevent);
+    };
+  }, []);
+
+  const gestureTool = tool === "draw" || tool === "region";
+
   const onDown = (e: ReactPointerEvent) => {
-    if (!interactive || tool !== "draw") return;
+    if (!interactive || !gestureTool) return;
     const p = relative(e);
     if (!p) return;
-    drawing.current = true;
-    setLive([p]);
+    gestureActive.current = true;
+    gesturePoints.current = [p];
     boxRef.current?.setPointerCapture(e.pointerId);
   };
 
   /**
    * Pins are placed on `click`, the last event of a tap. Placing them earlier
    * lets the browser's follow-up mousedown blur the composer's first field,
-   * which on iOS means the keyboard never opens.
+   * which on iOS means the keyboard never opens. A finished 圈範圍 gesture also
+   * emits a click, so region mode ignores it entirely.
    */
   const onClick = (e: ReactMouseEvent) => {
-    if (!interactive) return;
+    if (!interactive || tool === "region") return;
     const p = relative(e);
     if (tool === "pin") {
       if (p) api.placePin(version.id, p.x, p.y);
@@ -139,52 +193,103 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
   };
 
   const onMove = (e: ReactPointerEvent) => {
-    if (!interactive || !drawing.current) return;
+    if (!interactive || !gestureActive.current) return;
     const p = relative(e);
-    if (p) setLive((pts) => [...pts, p]);
+    if (!p) return;
+    const pts = gesturePoints.current;
+    const last = pts[pts.length - 1];
+    // Light sampling: sub-half-percent jitters add nothing to a bounding box.
+    if (last && Math.abs(p.x - last.x) < 0.004 && Math.abs(p.y - last.y) < 0.004) return;
+    pts.push(p);
+    scheduleLive();
+  };
+
+  const endGesture = (): Point[] | null => {
+    if (!interactive || !gestureActive.current) return null;
+    gestureActive.current = false;
+    const pts = gesturePoints.current;
+    gesturePoints.current = [];
+    if (liveRaf.current) {
+      cancelAnimationFrame(liveRaf.current);
+      liveRaf.current = 0;
+    }
+    // The freehand trace disappears the moment the finger lifts.
+    livePolyline.current?.setAttribute("points", "");
+    return pts;
   };
 
   const onUp = () => {
-    if (!interactive || !drawing.current) return;
-    drawing.current = false;
-    const pts = live;
-    setLive([]);
-    api.addStroke(version.id, pts);
+    const pts = endGesture();
+    if (!pts) return;
+    if (tool === "draw") {
+      api.addStroke(version.id, pts);
+    } else if (tool === "region") {
+      const region = regionFromPoints(pts);
+      if (region) api.placeRegion(version.id, region);
+      else api.showToast("範圍太小，再圈一次");
+    }
   };
 
-  const pins = room.comments.filter((c) => c.versionId === version.id);
-  const strokes = room.strokes.filter((s) => s.versionId === version.id);
+  /** The browser took the pointer (scroll/system gesture): drop the trace, keep quiet. */
+  const onCancel = () => {
+    endGesture();
+  };
+
+  const allPins = room.comments.filter((c) => c.versionId === version.id);
+  const allStrokes = room.strokes.filter((s) => s.versionId === version.id);
+  const selectedPin = selectedPinId ? allPins.find((pin) => pin.id === selectedPinId) : undefined;
+
+  /**
+   * The poster itself stays clean in view mode. Desktop annotation tools reveal
+   * active marks; selecting an item from the discussion only reveals that one
+   * locator (a thin region box when the feedback circled an area). The mobile
+   * 圈範圍 mode shows nothing but the live gesture. Resolved pins live in the
+   * list and never remain stamped over the artwork.
+   */
+  const editingAnnotations = tool === "pin" || tool === "draw" || tool === "erase";
+  const circling = tool === "region";
+  const selectedRegionPin = !editingAnnotations && !circling && selectedPin?.region ? selectedPin : undefined;
+  const pins = editingAnnotations
+    ? allPins.filter((pin) => !pin.resolved)
+    : !circling && selectedPin && !selectedPin.region
+      ? [selectedPin]
+      : [];
+  // Legacy strokes stay hidden while viewing; the 舊圈畫 manager can preview one.
+  const previewStroke =
+    tool === "pan" && api.previewStrokeId ? allStrokes.find((s) => s.id === api.previewStrokeId) : undefined;
+  const strokes = editingAnnotations ? allStrokes : previewStroke ? [previewStroke] : [];
+
   const toPolyline = (pts: Point[]) => pts.map((p) => `${p.x * 100},${p.y * 100}`).join(" ");
   const imgStyle = ready
     ? { left: frame.left, top: frame.top, width: frame.width, height: frame.height }
     : { inset: 0 };
-  const dimOthers = selectedPinId != null || draftPin != null;
+  const dimOthers = editingAnnotations && (selectedPinId != null || draftPin != null);
 
   return (
     <div
       ref={boxRef}
-      className={`stage tool-${tool} ${interactive ? "is-interactive" : ""}`}
+      className={`stage tool-${tool} ${interactive ? "is-interactive" : ""} ${editingAnnotations ? "stage-annotations" : "stage-clean"}`}
       onClick={onClick}
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
-      onPointerCancel={onUp}
+      onPointerCancel={onCancel}
     >
       <img
         className={`stage-img mode-${view.colorMode}`}
         style={imgStyle}
-        src={posterSrc(version)}
+        src={version.imageDataUrl}
         alt={version.label}
         draggable={false}
       />
       {view.colorMode === "split" && (
-        <img className="stage-img split-gray" style={imgStyle} src={posterSrc(version)} alt="" draggable={false} />
+        <img className="stage-img split-gray" style={imgStyle} src={version.imageDataUrl} alt="" draggable={false} />
       )}
       {wipeWith && wipeWith.id !== version.id && (
         <img
           className="stage-img wipe-top"
           style={{ ...imgStyle, clipPath: `inset(0 0 0 ${view.wipe * 100}%)` }}
-          src={posterSrc(wipeWith)}
+          src={wipeWith.imageDataUrl}
           alt={wipeWith.label}
           draggable={false}
         />
@@ -212,9 +317,10 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
                 }}
               />
             ))}
-            {live.length > 1 && (
+            {gestureTool && interactive && (
               <polyline
-                points={toPolyline(live)}
+                ref={livePolyline}
+                points=""
                 fill="none"
                 stroke={guest.color}
                 strokeWidth={4}
@@ -225,19 +331,55 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
             )}
           </svg>
 
+          {selectedRegionPin?.region && (
+            <div
+              key={selectedRegionPin.id}
+              className="region-rect"
+              role="img"
+              aria-label={`修改點 ${pinNumber(room, selectedRegionPin.id)} 的範圍：${selectedRegionPin.body}`}
+              style={{
+                left: `${selectedRegionPin.region.x * 100}%`,
+                top: `${selectedRegionPin.region.y * 100}%`,
+                width: `${selectedRegionPin.region.width * 100}%`,
+                height: `${selectedRegionPin.region.height * 100}%`,
+                ["--pin" as string]: selectedRegionPin.authorColor,
+              }}
+            >
+              <span className="region-tag">{pinNumber(room, selectedRegionPin.id)}</span>
+            </div>
+          )}
+
+          {draftPin?.region && draftPin.versionId === version.id && (
+            <div
+              className="region-rect is-draft"
+              aria-hidden
+              style={{
+                left: `${draftPin.region.x * 100}%`,
+                top: `${draftPin.region.y * 100}%`,
+                width: `${draftPin.region.width * 100}%`,
+                height: `${draftPin.region.height * 100}%`,
+                ["--pin" as string]: guest.color,
+              }}
+            />
+          )}
+
+          <VisualProposalOverlay roomId={room.id} versionId={version.id} authorName={guest.name} compact={compact} />
+
           {pins.map((pin) => {
             const n = pinNumber(room, pin.id);
             const selected = pin.id === selectedPinId;
-            // Keep the label inside the poster and the dot on the marked spot.
+            const locatorOnly = !editingAnnotations && selected;
             const tipLeft = pin.x > 0.55;
+            const showTip = selected && !compact && editingAnnotations;
             return (
               <button
                 key={pin.id}
                 type="button"
                 className={[
                   "pin",
-                  pin.resolved ? "pin-done" : "",
-                  selected ? (tipLeft ? "pin-selected pin-tip-left" : "pin-selected pin-tip-right") : "",
+                  selected ? "pin-selected" : "",
+                  locatorOnly ? "pin-locator" : "",
+                  selected && showTip ? (tipLeft ? "pin-tip-left" : "pin-tip-right") : "",
                   dimOthers && !selected ? "pin-dim" : "",
                   compact ? "pin-compact" : "",
                 ].join(" ")}
@@ -249,20 +391,20 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
                 }}
                 aria-label={`修改點 ${n}：${pin.body}`}
               >
-                {selected && tipLeft && <span className="pin-tip pin-tip-start">{pin.body}</span>}
-                <span className="pin-no">{pin.resolved ? "✓" : n}</span>
-                {selected && !tipLeft && <span className="pin-tip">{pin.body}</span>}
+                {showTip && tipLeft && <span className="pin-tip pin-tip-start">{pin.body}</span>}
+                <span className="pin-no">{n}</span>
+                {showTip && !tipLeft && <span className="pin-tip">{pin.body}</span>}
               </button>
             );
           })}
 
-          {draftPin && draftPin.versionId === version.id && (
+          {draftPin && !draftPin.region && draftPin.versionId === version.id && (
             <span
               className="pin pin-draft"
               style={{ left: `${draftPin.x * 100}%`, top: `${draftPin.y * 100}%` }}
               aria-hidden
             >
-              <span className="pin-no">{room.comments.length + 1}</span>
+              <span className="pin-no">{nextPinNumber(room, version.id)}</span>
             </span>
           )}
         </div>

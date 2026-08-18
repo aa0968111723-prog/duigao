@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
   VERSION_LABELS,
+  type AnnotationRegion,
   type ChatMessage,
   type CommentPin,
+  type CommentReply,
   type Guest,
   type Point,
   type Room,
@@ -12,21 +14,32 @@ import {
   type Version,
   type ViewState,
 } from "./lib/types";
+import { regionCenter } from "./lib/region";
 import { roomCode, uid } from "./lib/id";
 import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
-import { cloudEnabled, fetchRoom, mergeRooms, publishRoom } from "./lib/cloud";
+import { isCloudConfigured } from "./cloud/config";
+import { syncStatusLabel, type SyncStatus } from "./cloud/types";
+import { useCloudRoom } from "./cloud/useCloudRoom";
 import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { DesktopWorkspace } from "./components/DesktopWorkspace";
 import { MobileWorkspace } from "./components/MobileWorkspace";
 import { Home } from "./components/Home";
 import { ShareSheet } from "./components/ShareSheet";
-import type { PinDraft, PinForm, SaveState, WorkspaceApi } from "./components/api";
+import {
+  nextPinNumber,
+  pinNumber,
+  type PinDraft,
+  type PinForm,
+  type SaveState,
+  type WorkspaceApi,
+} from "./components/api";
 import "./usability.css";
 
 const EMPTY_FORM: PinForm = { body: "", suggestion: "", type: "文字", priority: "一般" };
 const COACH_FLAG = "coach.firstPin";
+const UNDO_LIMIT = 20;
 
 function pickColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)];
@@ -43,8 +56,16 @@ function initialView(room: Room | null): ViewState {
 }
 
 function readRoomCodeFromUrl(): string | null {
-  const m = /[#?&]room=([a-z0-9]+)/i.exec(location.hash + location.search);
-  return m ? m[1] : null;
+  const m = /[#?&]room=([^&]+)/i.exec(location.hash + location.search);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+/** Map cloud sync state onto the small presence dot the mobile UI already shows. */
+function syncToPresence(status: SyncStatus): CollabStatus | null {
+  if (status === "synced") return "online";
+  if (status === "connecting" || status === "syncing") return "connecting";
+  if (status === "offline-pending" || status === "error") return "error";
+  return null;
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -66,24 +87,26 @@ export function App() {
   const [draftPin, setDraftPin] = useState<PinDraft | null>(null);
   const [form, setFormState] = useState<PinForm>(EMPTY_FORM);
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
+  const [previewStrokeId, setPreviewStrokeId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
   const [peerCount, setPeerCount] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
-  const [cloudChecked, setCloudChecked] = useState(!cloudEnabled);
+  const [undoCount, setUndoCount] = useState(0);
 
   const { toasts, showToast, dismiss } = useToasts();
   const isMobile = useIsMobile();
+  const isMobileRef = useRef(isMobile);
+  isMobileRef.current = isMobile;
   const collabRef = useRef<Collab | null>(null);
   const roomRef = useRef<Room | null>(null);
   const viewRef = useRef<ViewState>(view);
   const saveSeq = useRef(0);
-  const publishTimer = useRef<number | null>(null);
-  const cloudRoomRef = useRef<Room | null>(null);
   const busy = useRef<Set<string>>(new Set());
   const offlineNotified = useRef(false);
+  const undoStack = useRef<Room[]>([]);
   roomRef.current = room;
   viewRef.current = view;
 
@@ -94,6 +117,17 @@ export function App() {
       if (!seen) saveFlag(COACH_FLAG);
       return true;
     });
+  }, []);
+
+  const clearUndo = useCallback(() => {
+    undoStack.current = [];
+    setUndoCount(0);
+  }, []);
+
+  const pushUndo = useCallback((snapshot: Room) => {
+    undoStack.current.push(snapshot);
+    if (undoStack.current.length > UNDO_LIMIT) undoStack.current.shift();
+    setUndoCount(undoStack.current.length);
   }, []);
 
   /**
@@ -130,7 +164,7 @@ export function App() {
 
   useEffect(() => {
     if (saveState !== "saved") return;
-    const timer = window.setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 1500);
+    const timer = window.setTimeout(() => setSaveState((s) => (s === "saved" ? "idle" : s)), 2500);
     return () => clearTimeout(timer);
   }, [saveState]);
 
@@ -148,24 +182,21 @@ export function App() {
     });
   }, []);
 
+  // Cloud persistence (only active when VITE_SUPABASE_* are set). Inert in
+  // local-only mode, so the IndexedDB + PeerJS path below is unchanged.
+  const cloud = useCloudRoom({ guest, room, isGuestSession, onSnapshot: applyRemoteRoom, showToast });
+  const cloudRef = useRef(cloud);
+  cloudRef.current = cloud;
+
   useEffect(() => {
     if (!guest) return;
+    // Cloud is the source of truth when configured; PeerJS stays for local mode.
+    if (isCloudConfigured) return;
     const code = readRoomCodeFromUrl();
     if (!code) return;
 
-    let cancelled = false;
-    // Local copy first (instant on a revisit), then the cloud mirror.
     loadRoom(code).then((existing) => {
-      if (existing && !cancelled) applyRemoteRoom(existing);
-    });
-    fetchRoom(code).then((cloud) => {
-      if (cancelled) return;
-      setCloudChecked(true);
-      if (!cloud) return;
-      const local = roomRef.current;
-      const merged = local && local.id === cloud.id ? mergeRooms(local, cloud) : cloud;
-      applyRemoteRoom(merged);
-      saveRoom(merged).catch(() => undefined);
+      if (existing) applyRemoteRoom(existing);
     });
 
     const collab = new Collab("guest", code, {
@@ -195,50 +226,17 @@ export function App() {
     collab.connect();
     collabRef.current = collab;
     return () => {
-      cancelled = true;
       collab.destroy();
       collabRef.current = null;
     };
   }, [guest, applyRemoteRoom, showToast]);
 
-  /**
-   * Mirrors the room so partners can open the link even when this device is
-   * asleep. Debounced because typing a title or dragging a stroke would
-   * otherwise publish on every keystroke.
-   */
-  const publishSoon = useCallback((next: Room) => {
-    if (!cloudEnabled) return;
-    cloudRoomRef.current = next;
-    if (publishTimer.current !== null) return;
-    publishTimer.current = window.setTimeout(() => {
-      publishTimer.current = null;
-      const pending = cloudRoomRef.current;
-      if (!pending) return;
-      publishRoom(pending).then((saved) => {
-        if (!saved) return;
-        // Keep the storage URLs we just earned so later saves skip the upload.
-        setRoom((prev) => {
-          if (!prev || prev.id !== saved.id) return prev;
-          const urls = new Map(saved.versions.map((v) => [v.id, v.imageUrl]));
-          if (prev.versions.every((v) => v.imageUrl === urls.get(v.id))) return prev;
-          const next2 = {
-            ...prev,
-            versions: prev.versions.map((v) => (urls.get(v.id) ? { ...v, imageUrl: urls.get(v.id) } : v)),
-          };
-          saveRoom(next2).catch(() => undefined);
-          return next2;
-        });
-      });
-    }, 900);
-  }, []);
-
   const persist = useCallback(
     (next: Room) => {
       trackSave(next);
       collabRef.current?.send({ t: "room", room: next });
-      publishSoon(next);
     },
-    [trackSave, publishSoon],
+    [trackSave],
   );
 
   const updateRoom = useCallback(
@@ -253,26 +251,34 @@ export function App() {
     [persist],
   );
 
-  /** Apply a change and offer a few-second Undo that restores the prior room. */
+  const undoLast = useCallback(() => {
+    const previous = undoStack.current.pop();
+    setUndoCount(undoStack.current.length);
+    if (!previous) {
+      showToast("沒有可以復原的操作");
+      return;
+    }
+    setRoom(previous);
+    persist(previous);
+    setSelectedPinId(null);
+    setDraftPin(null);
+    showToast("已復原", { tone: "success" });
+  }, [persist, showToast]);
+
+  /** Apply a change and offer a few-second Undo; history also remains in More. */
   const mutateWithUndo = useCallback(
     (mutate: (r: Room) => Room, toastMessage: string) => {
       const snapshot = roomRef.current;
       if (!snapshot) return;
+      pushUndo(snapshot);
       const next = { ...mutate(snapshot), updatedAt: Date.now() };
       setRoom(next);
       persist(next);
       showToast(toastMessage, {
-        action: {
-          label: "復原",
-          onClick: () => {
-            setRoom(snapshot);
-            persist(snapshot);
-            showToast("已復原");
-          },
-        },
+        action: { label: "復原", onClick: undoLast },
       });
     },
-    [persist, showToast],
+    [persist, pushUndo, showToast, undoLast],
   );
 
   const updateView = useCallback((next: ViewState) => {
@@ -288,17 +294,14 @@ export function App() {
     setGuest(g);
   };
 
-  const openRoom = useCallback((r: Room) => {
-    setRoom(r);
-    setView(initialView(r));
-    // Partners may have added notes while this device was closed.
-    fetchRoom(r.id).then((cloud) => {
-      if (!cloud || cloud.id !== r.id) return;
-      const merged = mergeRooms(r, cloud);
-      setRoom((prev) => (prev?.id === merged.id ? merged : prev));
-      saveRoom(merged).catch(() => undefined);
-    });
-  }, []);
+  const openRoom = useCallback(
+    (r: Room) => {
+      clearUndo();
+      setRoom(r);
+      setView(initialView(r));
+    },
+    [clearUndo],
+  );
 
   const addFiles = useCallback(
     async (files: FileList | null) => {
@@ -319,6 +322,7 @@ export function App() {
           showToast("這個檔案不是圖片，換一張文宣試試。", { tone: "error" });
           return;
         }
+        if (!created) pushUndo(current);
         const next: Room = { ...current, versions: [...current.versions, ...newVersions], updatedAt: Date.now() };
         setRoom(next);
         setView((v) => {
@@ -330,27 +334,51 @@ export function App() {
           return v;
         });
         persist(next);
+        newVersions.forEach((v, i) =>
+          cloudRef.current.writes.addVersion(v.label, current.versions.length + i, v.imageDataUrl),
+        );
         const added = newVersions[newVersions.length - 1];
         if (!created) {
           showToast(newVersions.length > 1 ? `已新增 ${newVersions.length} 版` : `已新增${added.label}`, {
             tone: "success",
+            action: { label: "復原", onClick: undoLast },
           });
         }
       } finally {
         busy.current.delete("upload");
       }
     },
-    [persist, showToast],
+    [persist, pushUndo, showToast, undoLast],
   );
+
+  /**
+   * Feedback tasks are one-shot on mobile: sent or cancelled, the app returns
+   * to clean viewing. Desktop keeps its persistent pin tool; the region
+   * gesture is one-shot everywhere.
+   */
+  const finishTask = useCallback(() => {
+    setTool((t) => (t === "region" || (isMobileRef.current && t === "pin") ? "pan" : t));
+  }, []);
 
   const cancelPin = useCallback(() => {
     setDraftPin(null);
     setFormState(EMPTY_FORM);
-  }, []);
+    finishTask();
+  }, [finishTask]);
 
   const placePin = useCallback((versionId: string, x: number, y: number) => {
     setSelectedPinId(null);
+    setPreviewStrokeId(null);
     setDraftPin({ versionId, x, y });
+    setFormState(EMPTY_FORM);
+  }, []);
+
+  /** A finished 圈範圍 gesture: the freehand stroke is gone, only its region remains as a draft. */
+  const placeRegion = useCallback((versionId: string, region: AnnotationRegion) => {
+    const center = regionCenter(region);
+    setSelectedPinId(null);
+    setPreviewStrokeId(null);
+    setDraftPin({ versionId, x: center.x, y: center.y, region });
     setFormState(EMPTY_FORM);
   }, []);
 
@@ -368,6 +396,7 @@ export function App() {
       authorColor: guest.color,
       x: draftPin.x,
       y: draftPin.y,
+      ...(draftPin.region ? { region: draftPin.region } : {}),
       body: form.body.trim(),
       suggestion: form.suggestion.trim(),
       problemType: form.type,
@@ -375,35 +404,38 @@ export function App() {
       resolved: false,
       createdAt: Date.now(),
     };
-    const number = (roomRef.current?.comments.length ?? 0) + 1;
+    const current = roomRef.current;
+    const number = current ? nextPinNumber(current, draftPin.versionId) : 1;
+    if (current) pushUndo(current);
     updateRoom((r) => ({ ...r, comments: [...r.comments, pin] }));
+    cloudRef.current.writes.insertComment(pin);
     markCoachSeen();
     cancelPin();
-    showToast(`已新增修改點 ${number}`, {
+    void number;
+    const count = (current?.comments.length ?? 0) + 1;
+    const people = new Set([...(current?.comments.map((c) => c.authorName) ?? []), guest.name]).size;
+    showToast("已收到你的意見 ✓", {
       tone: "success",
-      action: {
-        label: "復原",
-        onClick: () => {
-          updateRoom((r) => ({ ...r, comments: r.comments.filter((c) => c.id !== pin.id) }));
-          showToast("已復原");
-        },
-      },
+      action: { label: "復原", onClick: undoLast },
     });
-  }, [draftPin, guest, form, claim, updateRoom, markCoachSeen, cancelPin, showToast]);
+    showToast(`目前 ${people} 人提出 ${count} 個修改建議`);
+  }, [draftPin, guest, form, claim, pushUndo, updateRoom, markCoachSeen, cancelPin, showToast, undoLast]);
 
   const toggleResolve = useCallback(
     (pinId: string) => {
       const current = roomRef.current;
       if (!current) return;
-      const index = current.comments.findIndex((c) => c.id === pinId);
-      if (index < 0) return;
-      const willResolve = !current.comments[index].resolved;
+      const pin = current.comments.find((c) => c.id === pinId);
+      if (!pin) return;
+      const willResolve = !pin.resolved;
+      const number = pinNumber(current, pinId);
+      cloudRef.current.writes.setResolved(pinId, willResolve);
       mutateWithUndo(
         (r) => ({
           ...r,
           comments: r.comments.map((c) => (c.id === pinId ? { ...c, resolved: willResolve } : c)),
         }),
-        `${index + 1} ${willResolve ? "已標記完成" : "已重新開啟"}`,
+        `修改點 ${number} ${willResolve ? "已標記完成" : "已重新開啟"}`,
       );
     },
     [mutateWithUndo],
@@ -412,6 +444,8 @@ export function App() {
   const addStroke = useCallback(
     (versionId: string, points: Point[]) => {
       if (!guest || points.length < 2) return;
+      const current = roomRef.current;
+      if (current) pushUndo(current);
       const stroke: Stroke = {
         id: uid("s_"),
         versionId,
@@ -422,14 +456,16 @@ export function App() {
         createdAt: Date.now(),
       };
       updateRoom((r) => ({ ...r, strokes: [...r.strokes, stroke] }));
+      cloudRef.current.writes.insertStroke(stroke);
     },
-    [guest, updateRoom],
+    [guest, pushUndo, updateRoom],
   );
 
   const eraseStroke = useCallback(
     (strokeId: string) => {
       const current = roomRef.current;
       if (!current || !current.strokes.some((s) => s.id === strokeId)) return;
+      cloudRef.current.writes.deleteStroke(strokeId);
       mutateWithUndo((r) => ({ ...r, strokes: r.strokes.filter((s) => s.id !== strokeId) }), "已刪除圈畫");
     },
     [mutateWithUndo],
@@ -447,10 +483,71 @@ export function App() {
       createdAt: Date.now(),
     };
     updateRoom((r) => ({ ...r, messages: [...r.messages, msg] }));
+    cloudRef.current.writes.insertMessage(msg);
     setChatInput("");
   }, [guest, chatInput, claim, updateRoom]);
 
+  // "我也覺得": one per user per comment; tapping again removes it.
+  const toggleSupport = useCallback(
+    (commentId: string) => {
+      if (!guest) return;
+      const current = roomRef.current;
+      if (!current) return;
+      const uidNow = guest.id;
+      const existing = (current.supports ?? []).some((s) => s.commentId === commentId && s.userId === uidNow);
+      updateRoom((r) => {
+        const list = r.supports ?? [];
+        return {
+          ...r,
+          supports: existing
+            ? list.filter((s) => !(s.commentId === commentId && s.userId === uidNow))
+            : [...list, { commentId, userId: uidNow }],
+        };
+      });
+      cloudRef.current.writes.toggleSupport(commentId, !existing);
+    },
+    [guest, updateRoom],
+  );
+
+  const addReply = useCallback(
+    (commentId: string, body: string) => {
+      const text = body.trim();
+      if (!guest || !text) return;
+      if (!claim(`reply:${commentId}:${text}`, 300)) return;
+      const reply: CommentReply = {
+        id: uid("r_"),
+        commentId,
+        authorId: guest.id,
+        authorName: guest.name,
+        authorColor: guest.color,
+        body: text,
+        createdAt: Date.now(),
+      };
+      updateRoom((r) => ({ ...r, replies: [...(r.replies ?? []), reply] }));
+      cloudRef.current.writes.insertReply(reply);
+    },
+    [guest, claim, updateRoom],
+  );
+
+  // One take per user per version; tapping the current choice clears it.
+  const setProposalPref = useCallback(
+    (versionId: string, choice: string) => {
+      if (!guest) return;
+      const uidNow = guest.id;
+      const current = roomRef.current;
+      const existing = (current?.proposalPrefs ?? []).find((p) => p.versionId === versionId && p.userId === uidNow);
+      const clearing = existing?.choice === choice;
+      updateRoom((r) => {
+        const list = (r.proposalPrefs ?? []).filter((p) => !(p.versionId === versionId && p.userId === uidNow));
+        return { ...r, proposalPrefs: clearing ? list : [...list, { versionId, userId: uidNow, choice }] };
+      });
+      cloudRef.current.writes.setProposalPref(versionId, clearing ? "" : choice);
+    },
+    [guest, updateRoom],
+  );
+
   const startHosting = useCallback(() => {
+    if (isCloudConfigured) return;
     const current = roomRef.current;
     if (!current || collabRef.current) return;
     const collab = new Collab("host", current.id, {
@@ -472,36 +569,26 @@ export function App() {
     collabRef.current = collab;
   }, [applyRemoteRoom]);
 
-  // The room is served straight from this device, so host whenever one is open
-  // — waiting for a 分享 tap left every reopened room unreachable to partners.
-  useEffect(() => {
-    if (isGuestSession || !room?.id) return;
-    startHosting();
-    return () => {
-      collabRef.current?.destroy();
-      collabRef.current = null;
-      setCollabStatus(null);
-      setPeerCount(0);
-    };
-  }, [isGuestSession, room?.id, startHosting]);
-
-  // Phones suspend background tabs; re-dial as soon as we are visible again.
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === "visible") collabRef.current?.retryNow();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", onVisible);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", onVisible);
-    };
-  }, []);
-
-  const shareUrl = useMemo(() => {
+  const localShareUrl = useMemo(() => {
     if (!room) return "";
     return `${location.origin}${location.pathname}#room=${room.id}`;
   }, [room]);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+
+  const openShare = useCallback(() => {
+    if (!roomRef.current) return;
+    setShareOpen(true);
+    if (isCloudConfigured) {
+      setShareUrl(null); // "正在建立分享連結…" until the cloud room is ready
+      cloudRef.current
+        .ensureShared()
+        .then((url) => setShareUrl(url ?? localShareUrl))
+        .catch(() => setShareUrl(localShareUrl));
+    } else {
+      startHosting();
+      setShareUrl(localShareUrl);
+    }
+  }, [localShareUrl, startHosting]);
 
   const copySummary = useCallback(async () => {
     const current = roomRef.current;
@@ -511,13 +598,14 @@ export function App() {
       return;
     }
     const openCount = current.comments.filter((c) => !c.resolved).length;
-    const lines = current.comments.map((c, index) => {
+    const lines = current.comments.map((c) => {
       const status = c.resolved ? "已完成" : "待修改";
       const type = c.problemType ?? "修改";
       const priority = c.priority ?? "一般";
       const versionLabel = current.versions.find((v) => v.id === c.versionId)?.label ?? "";
       const suggestion = c.suggestion ? `\n   建議：${c.suggestion}` : "";
-      return `#${String(index + 1).padStart(2, "0")} [${status}] [${priority}] [${type}] ${versionLabel}\n   問題：${c.body}${suggestion}`;
+      const number = pinNumber(current, c.id);
+      return `#${String(number).padStart(2, "0")} [${status}] [${priority}] [${type}] ${versionLabel}\n   問題：${c.body}${suggestion}`;
     });
     const summary = `${current.title}\n共 ${current.comments.length} 個修改點｜待修改 ${openCount}｜已完成 ${current.comments.length - openCount}\n\n${lines.join("\n\n")}`;
     try {
@@ -532,11 +620,24 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (draftPin) cancelPin();
+      else if (tool === "region") setTool("pan");
       else if (selectedPinId) setSelectedPinId(null);
+      else if (previewStrokeId) setPreviewStrokeId(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [draftPin, selectedPinId, cancelPin]);
+  }, [draftPin, selectedPinId, previewStrokeId, tool, cancelPin]);
+
+  /** Switching tools always drops a legacy-stroke preview, keeping view mode clean. */
+  const setToolAndClear = useCallback((t: Tool) => {
+    setTool(t);
+    setPreviewStrokeId(null);
+  }, []);
+
+  const selectPinAndClear = useCallback((id: string | null) => {
+    setSelectedPinId(id);
+    setPreviewStrokeId(null);
+  }, []);
 
   const api: WorkspaceApi | null = room
     ? {
@@ -547,34 +648,43 @@ export function App() {
         draftPin,
         form,
         selectedPinId,
+        previewStrokeId,
         chatInput,
         saveState,
         coachSeen,
-        setTool,
+        canUndo: undoCount > 0,
+        setTool: setToolAndClear,
         setView: updateView,
         setForm: (patch) => setFormState((f) => ({ ...f, ...patch })),
         placePin,
+        placeRegion,
         commitPin,
         cancelPin,
-        selectPin: setSelectedPinId,
+        setPreviewStroke: setPreviewStrokeId,
+        selectPin: selectPinAndClear,
         toggleResolve,
         addStroke,
         eraseStroke,
+        toggleSupport,
+        addReply,
+        setProposalPref,
+        undo: undoLast,
         setChatInput,
         sendChat,
         addFiles,
-        setTitle: (title) => updateRoom((r) => ({ ...r, title })),
+        setTitle: (title) => {
+          updateRoom((r) => ({ ...r, title }));
+          cloudRef.current.writes.setTitle(title);
+        },
         copySummary,
         markCoachSeen,
         showToast,
-        openShare: () => {
-          startHosting();
-          setShareOpen(true);
-        },
-        retryConnection: () => collabRef.current?.retryNow(),
+        openShare,
         goHome: () => {
+          clearUndo();
           setRoom(null);
           setSelectedPinId(null);
+          setPreviewStrokeId(null);
           location.hash = "";
         },
       }
@@ -611,36 +721,19 @@ export function App() {
 
   if (!hasVersions) {
     if (isGuestSession) {
-      const searching = !cloudChecked || (collabStatus !== "waiting" && collabStatus !== "error");
       return (
         <div className="onboard">
           <div className="onboard-card">
             <h1 className="onboard-title">文宣討論區</h1>
-            <p className="onboard-hint">{searching ? "正在載入文宣…" : "找不到這份文宣"}</p>
-            {!searching && (
-              <>
-                <p className="onboard-note">
-                  連結可能不完整，或這份文宣還沒上傳完成。
-                  請跟分享的人確認一次，或請對方重新分享。
-                </p>
-                <button
-                  className="btn btn-primary btn-block"
-                  onClick={() => {
-                    setCloudChecked(false);
-                    collabRef.current?.retryNow();
-                    fetchRoom(readRoomCodeFromUrl() ?? "").then((cloud) => {
-                      setCloudChecked(true);
-                      if (cloud) {
-                        applyRemoteRoom(cloud);
-                        saveRoom(cloud).catch(() => undefined);
-                      }
-                    });
-                  }}
-                >
-                  再試一次
-                </button>
-              </>
-            )}
+            <p className="onboard-hint">
+              {isCloudConfigured
+                ? cloud.status === "error"
+                  ? "這個分享連結可能已失效，請向主辦方取得新連結。"
+                  : "正在載入夥伴分享的文宣…"
+                : collabStatus === "error"
+                  ? "連不上主辦方，請對方重新打開連結後再試一次。"
+                  : "正在載入夥伴分享的文宣…"}
+            </p>
           </div>
           <ToastStack toasts={toasts} onDismiss={dismiss} />
         </div>
@@ -657,7 +750,13 @@ export function App() {
   return (
     <>
       {isMobile ? (
-        <MobileWorkspace api={api!} presence={{ status: collabStatus, peers: peerCount }} />
+        <MobileWorkspace
+          api={api!}
+          presence={{
+            status: isCloudConfigured ? syncToPresence(cloud.status) : collabStatus,
+            peers: isCloudConfigured ? cloud.online : peerCount,
+          }}
+        />
       ) : (
         <div className="app">
           <header className="topbar">
@@ -677,28 +776,38 @@ export function App() {
                   {saveState === "saving" ? "儲存中…" : saveState === "saved" ? "已儲存" : "儲存失敗"}
                 </span>
               )}
-              {collabStatus && (
-                <span
-                  className={`badge badge-${collabStatus}`}
-                  title={
-                    collabStatus === "online"
-                      ? "已與其他人同步"
-                      : collabStatus === "connecting"
-                        ? "正在建立同步連線"
-                        : "目前離線，內容已保存在這台裝置"
-                  }
-                >
-                  {collabStatus === "online"
-                    ? peerCount > 0
-                      ? `已同步 · ${peerCount} 人`
-                      : "已同步"
-                    : collabStatus === "connecting"
-                      ? "正在同步"
-                      : collabStatus === "waiting"
-                        ? "等待連線"
-                        : "目前離線"}
-                </span>
-              )}
+              {isCloudConfigured
+                ? cloud.status !== "local-only" && (
+                    <span
+                      className={`badge badge-${syncToPresence(cloud.status) ?? "closed"}`}
+                      title="資料保存在雲端，主辦方不用保持頁面開著"
+                      onClick={cloud.status === "error" || cloud.status === "offline-pending" ? () => window.location.reload() : undefined}
+                    >
+                      {cloud.online > 1 && cloud.status === "synced"
+                        ? `已同步 · ${cloud.online} 人`
+                        : syncStatusLabel(cloud.status)}
+                    </span>
+                  )
+                : collabStatus && (
+                    <span
+                      className={`badge badge-${collabStatus}`}
+                      title={
+                        collabStatus === "online"
+                          ? "已與其他人同步"
+                          : collabStatus === "connecting"
+                            ? "正在建立同步連線"
+                            : "目前離線，內容已保存在這台裝置"
+                      }
+                    >
+                      {collabStatus === "online"
+                        ? peerCount > 0
+                          ? `已同步 · ${peerCount} 人`
+                          : "已同步"
+                        : collabStatus === "connecting"
+                          ? "正在同步"
+                          : "目前離線"}
+                    </span>
+                  )}
               <span className="me" style={{ background: guest.color }} title={guest.name}>
                 {guest.name.slice(0, 1)}
               </span>
@@ -727,7 +836,8 @@ export function App() {
       {shareOpen && room && (
         <ShareSheet
           title={room.title}
-          url={shareUrl}
+          url={isCloudConfigured ? shareUrl : localShareUrl}
+          cloud={isCloudConfigured}
           onClose={() => setShareOpen(false)}
           onToast={showToast}
         />

@@ -1,12 +1,21 @@
 export type Point = { x: number; y: number };
 
+/**
+ * A circled area of the poster, stored as a normalized bounding box (0..1,
+ * relative to the poster itself). This is what a mobile "圈出範圍" gesture is
+ * reduced to — the freehand stroke itself is never persisted.
+ */
+export type AnnotationRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type Version = {
   id: string;
   label: string;
-  /** The local blob. Empty on copies that came from the cloud mirror. */
   imageDataUrl: string;
-  /** Public storage URL, once the poster has been mirrored. */
-  imageUrl?: string;
 };
 
 export type ReviewType = "文字" | "排版" | "圖片" | "顏色" | "資訊錯誤" | "其他";
@@ -20,6 +29,8 @@ export type CommentPin = {
   authorColor: string;
   x: number;
   y: number;
+  /** Present when the feedback points at an area instead of a single spot. x/y stay at the region's center. */
+  region?: AnnotationRegion;
   body: string;
   suggestion?: string;
   problemType?: ReviewType;
@@ -47,6 +58,24 @@ export type ChatMessage = {
   createdAt: number;
 };
 
+/** "我也覺得" — one per user per comment. */
+export type CommentSupport = { commentId: string; userId: string };
+
+/** A short reply attached to a review item, kept out of the main chat. */
+export type CommentReply = {
+  id: string;
+  commentId: string;
+  authorId: string;
+  authorName: string;
+  authorColor: string;
+  body: string;
+  createdAt: number;
+};
+
+/** A viewer's take on a version's proposals: like a proposal id, or keep the original. */
+export const KEEP_ORIGINAL = "__original__";
+export type ProposalPref = { versionId: string; userId: string; choice: string };
+
 export type Room = {
   id: string;
   title: string;
@@ -55,6 +84,10 @@ export type Room = {
   strokes: Stroke[];
   messages: ChatMessage[];
   updatedAt: number;
+  // Low-friction feedback (PR #13). Optional so older cached rooms stay valid.
+  supports?: CommentSupport[];
+  replies?: CommentReply[];
+  proposalPrefs?: ProposalPref[];
 };
 
 export type Guest = {
@@ -63,7 +96,12 @@ export type Guest = {
   color: string;
 };
 
-export type Tool = "pan" | "pin" | "draw" | "erase";
+/**
+ * "region" is the one-shot mobile 圈範圍 mode: the freehand gesture only lives
+ * in memory and collapses into an AnnotationRegion on pointer up. It is never
+ * surfaced as a persistent tool the way draw/erase are on desktop.
+ */
+export type Tool = "pan" | "pin" | "draw" | "erase" | "region";
 export type ColorMode = "color" | "gray" | "split";
 export type CompareMode = "single" | "side" | "wipe";
 

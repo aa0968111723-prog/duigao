@@ -1,21 +1,17 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
-import type { ColorMode, CompareMode, Tool } from "../lib/types";
+import { useEffect, useRef, useState } from "react";
+import type { ColorMode, CompareMode } from "../lib/types";
 import type { CollabStatus } from "../lib/peer";
 import { useViewport } from "../hooks/useViewport";
+import { loadFlag, saveFlag } from "../lib/store";
+import { ProposalDock } from "../features/visual-proposal/ProposalDock";
+import { pruneProposalVersions } from "../features/visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "./BottomSheet";
 import { CommentCard } from "./CommentCard";
 import { PinFields } from "./PinFields";
 import { UploadZone } from "./UploadZone";
 import { Viewer } from "./Stage";
-import { IconChat, IconEraser, IconEye, IconMore, IconPen, IconPin } from "./icons";
-import type { WorkspaceApi } from "./api";
-
-const TOOLS: { id: Tool; label: string; icon: (p: { className?: string }) => ReactElement }[] = [
-  { id: "pan", label: "看", icon: IconEye },
-  { id: "pin", label: "修改點", icon: IconPin },
-  { id: "draw", label: "圈畫", icon: IconPen },
-  { id: "erase", label: "擦除", icon: IconEraser },
-];
+import { IconChat, IconEye, IconMore, IconPen, IconPin } from "./icons";
+import { nextPinNumber, versionLabel, type WorkspaceApi } from "./api";
 
 const COLOR_MODES: { id: ColorMode; label: string }[] = [
   { id: "color", label: "彩色" },
@@ -40,8 +36,41 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [snap, setSnap] = useState<SheetSnap>("peek");
   const [tab, setTab] = useState<"items" | "chat">("items");
   const [more, setMore] = useState(false);
+  const [actionOpen, setActionOpen] = useState(false);
+  const [legacyOpen, setLegacyOpen] = useState(false);
+  const [proposalMode, setProposalMode] = useState(false);
+  const [dockHeight, setDockHeight] = useState(0);
   const [composeInset, setComposeInset] = useState(0);
+  const [nudge, setNudge] = useState(false);
   const chatRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    pruneProposalVersions(
+      room.id,
+      room.versions.map((v) => v.id),
+    );
+  }, [room.id, room.versions]);
+
+  const gaveFeedback =
+    room.comments.some((c) => c.authorId === api.guest.id) ||
+    (room.supports ?? []).some((s) => s.userId === api.guest.id) ||
+    (room.replies ?? []).some((r) => r.authorId === api.guest.id);
+
+  // A single, gentle nudge — only if the viewer has been around a while without
+  // leaving any feedback, and never more than once per room.
+  const nudgeState = useRef({ gaveFeedback, draftPin, proposalMode });
+  nudgeState.current = { gaveFeedback, draftPin, proposalMode };
+  useEffect(() => {
+    if (loadFlag(`nudge.${room.id}`)) return;
+    const t = window.setTimeout(() => {
+      const s = nudgeState.current;
+      if (!s.gaveFeedback && !s.draftPin && !s.proposalMode) {
+        setNudge(true);
+        saveFlag(`nudge.${room.id}`);
+      }
+    }, 25000);
+    return () => window.clearTimeout(t);
+  }, [room.id]);
 
   const sendChat = () => {
     api.sendChat();
@@ -50,6 +79,41 @@ export function MobileWorkspace({ api, presence }: Props) {
 
   const open = room.comments.filter((c) => !c.resolved).length;
   const hasThread = room.comments.length > 0 || room.messages.length > 0;
+  // The discussion is a place, not a byproduct: it opens even in an empty room.
+  const sheetVisible = hasThread || snap !== "peek";
+
+  /** The one-shot task bar sits above the toolbar, never over the poster. */
+  const task = !draftPin && (tool === "pin" || tool === "region") ? tool : null;
+
+  /** Exit any一次性任務 and clear every locator: back to the clean poster. */
+  const backToViewing = () => {
+    if (draftPin) api.cancelPin();
+    api.setTool("pan");
+    api.selectPin(null);
+    api.setPreviewStroke(null);
+  };
+
+  const startPinTask = () => {
+    setActionOpen(false);
+    setNudge(false);
+    api.selectPin(null);
+    api.setTool("pin");
+    setSnap("peek");
+  };
+
+  const startRegionTask = () => {
+    setActionOpen(false);
+    setNudge(false);
+    api.selectPin(null);
+    api.setTool("region");
+    setSnap("peek");
+  };
+
+  /** 重新圈選: drop the draft and immediately arm the circle gesture again. */
+  const recircle = () => {
+    api.cancelPin();
+    api.setTool("region");
+  };
 
   // Tapping a pin opens that item, it never resolves it.
   useEffect(() => {
@@ -67,14 +131,14 @@ export function MobileWorkspace({ api, presence }: Props) {
     else setComposeInset(0);
   }, [draftPin]);
 
-  const showHint = !draftPin && !api.coachSeen && room.comments.length === 0;
-
   return (
     <div
-      className="m-app"
+      className={`m-app ${proposalMode ? "is-proposal" : ""}`}
       style={{
-        ["--m-peek" as string]: hasThread ? "52px" : "0px",
+        ["--m-peek" as string]: sheetVisible && hasThread ? "52px" : "0px",
+        ["--m-status" as string]: task ? "44px" : "0px",
         ["--m-compose" as string]: `${composeInset}px`,
+        ["--m-proposal" as string]: `${dockHeight}px`,
       }}
     >
       <header className="m-top">
@@ -98,9 +162,6 @@ export function MobileWorkspace({ api, presence }: Props) {
             title={presence.status === "online" ? `${presence.peers} 人同時在線` : "本機模式"}
           />
         )}
-        <button type="button" className="m-icon-btn" onClick={() => setMore(true)} aria-label="更多">
-          <IconMore />
-        </button>
         <button type="button" className="m-share" onClick={api.openShare}>
           分享
         </button>
@@ -112,7 +173,10 @@ export function MobileWorkspace({ api, presence }: Props) {
             key={v.id}
             type="button"
             className={`m-vchip ${v.id === view.versionId ? "is-on" : ""}`}
-            onClick={() => api.setView({ ...view, versionId: v.id, compareMode: "single" })}
+            onClick={() => {
+              api.selectPin(null);
+              api.setView({ ...view, versionId: v.id, compareMode: "single" });
+            }}
           >
             {v.label}
           </button>
@@ -124,30 +188,63 @@ export function MobileWorkspace({ api, presence }: Props) {
 
       <div className="m-stage-area">
         <Viewer api={api} compact />
-        {showHint && (
-          <p className="m-hint">
-            {tool === "pin" ? "點文宣上要調整的位置" : "點下方「修改點」，再點文宣上要調整的位置"}
-          </p>
+        {nudge && !task && !draftPin && (
+          <div className="m-nudge" role="note">
+            <span>還有哪一個地方最需要調整？</span>
+            <button
+              type="button"
+              className="m-nudge-cta"
+              onClick={() => {
+                setNudge(false);
+                setActionOpen(true);
+              }}
+            >
+              ＋ 新增修改
+            </button>
+            <button type="button" className="m-nudge-x" aria-label="關閉提示" onClick={() => setNudge(false)}>
+              ×
+            </button>
+          </div>
         )}
       </div>
 
       <div className="m-bottom">
-        {hasThread && (
+        {proposalMode ? (
+          <ProposalDock
+            roomId={room.id}
+            versionId={view.versionId}
+            authorName={api.guest.name}
+            showToast={api.showToast}
+            onExit={() => setProposalMode(false)}
+            onHeight={setDockHeight}
+            pref={{
+              prefs: room.proposalPrefs ?? [],
+              userId: api.guest.id,
+              onChoose: (choice) => api.setProposalPref(view.versionId, choice),
+            }}
+          />
+        ) : (
+          <>
+        {sheetVisible && (
           <DragSheet
             snap={snap}
             onSnap={setSnap}
             viewportHeight={viewportHeight}
             handle={
-              <span className="m-sheet-summary">
-                修改點 {room.comments.length}
-                <em>·</em>
-                待處理 {open}
-              </span>
+              hasThread ? (
+                <span className="m-sheet-summary">
+                  修改建議 {room.comments.length}
+                  <em>·</em>
+                  待處理 {open}
+                </span>
+              ) : (
+                <span className="m-sheet-summary">還沒有討論</span>
+              )
             }
           >
             <div className="m-sheet-tabs">
               <button type="button" className={tab === "items" ? "is-on" : ""} onClick={() => setTab("items")}>
-                修改點
+                修改建議
               </button>
               <button type="button" className={tab === "chat" ? "is-on" : ""} onClick={() => setTab("chat")}>
                 聊天
@@ -156,15 +253,37 @@ export function MobileWorkspace({ api, presence }: Props) {
 
             {tab === "items" ? (
               <div className="m-list">
-                {room.comments.length === 0 && <p className="m-empty">還沒有修改點。</p>}
+                {room.comments.length === 0 && (
+                  <div className="m-discuss-empty">
+                    <p className="m-discuss-empty-title">還沒有討論</p>
+                    <p className="m-discuss-empty-sub">
+                      點文宣留下第一個修改建議，
+                      <br />
+                      或直接在這裡說一句。
+                    </p>
+                    <button
+                      type="button"
+                      className="m-btn m-btn-primary"
+                      onClick={() => {
+                        setSnap("peek");
+                        setActionOpen(true);
+                      }}
+                    >
+                      ＋ 新增修改
+                    </button>
+                  </div>
+                )}
                 {room.comments.map((c) => (
                   <CommentCard
                     key={c.id}
-                    room={room}
+                    api={api}
                     pin={c}
                     compact
                     selected={c.id === selectedPinId}
                     onSelect={() => {
+                      // Discussion owns the text; the artwork only shows this
+                      // one locator (a thin region box for circled feedback).
+                      api.setTool("pan");
                       api.selectPin(c.id);
                       api.setView({ ...view, versionId: c.versionId, compareMode: "single" });
                     }}
@@ -175,7 +294,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             ) : (
               <>
                 <div className="m-list">
-                  {room.messages.length === 0 && <p className="m-empty">還沒有訊息。</p>}
+                  {room.messages.length === 0 && <p className="m-empty">還沒有訊息，說一句就開始。</p>}
                   {room.messages.map((m) => (
                     <div key={m.id} className="m-msg">
                       <span className="m-msg-who" style={{ color: m.authorColor }}>
@@ -210,26 +329,44 @@ export function MobileWorkspace({ api, presence }: Props) {
           </DragSheet>
         )}
 
-        <nav className="m-toolbar" aria-label="主要操作">
-          {TOOLS.map((t) => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                className={`m-tool ${tool === t.id ? "is-on" : ""} ${t.id === "pin" ? "is-primary" : ""}`}
-                onClick={() => api.setTool(t.id)}
-                aria-pressed={tool === t.id}
-              >
-                <Icon />
-                <span>{t.label}</span>
-              </button>
-            );
-          })}
+        {task && (
+          <div className="m-status" role="status">
+            <span className="m-status-text">
+              {task === "region" ? "圈出要調整的範圍" : "點一下需要調整的位置"}
+            </span>
+            <button type="button" className="m-status-cancel" onClick={backToViewing}>
+              取消
+            </button>
+          </div>
+        )}
+
+        <nav className="m-toolbar m-toolbar-4" aria-label="主要操作">
+          <button
+            type="button"
+            className={`m-tool ${tool === "pan" && !draftPin ? "is-on" : ""}`}
+            onClick={backToViewing}
+            aria-pressed={tool === "pan"}
+          >
+            <IconEye />
+            <span>看</span>
+          </button>
+          <button
+            type="button"
+            className={`m-tool is-primary ${task || draftPin ? "is-on" : ""}`}
+            onClick={() => setActionOpen(true)}
+            aria-haspopup="dialog"
+          >
+            <IconPen />
+            <span>修改</span>
+          </button>
           <button
             type="button"
             className="m-tool"
-            onClick={() => setSnap((s) => (s === "peek" ? "half" : "peek"))}
+            onClick={() => {
+              api.setTool("pan");
+              setTab("items");
+              setSnap((s) => (s === "peek" ? "half" : "peek"));
+            }}
           >
             <span className="m-tool-badge-wrap">
               <IconChat />
@@ -237,19 +374,58 @@ export function MobileWorkspace({ api, presence }: Props) {
             </span>
             <span>討論</span>
           </button>
+          <button type="button" className="m-tool" onClick={() => setMore(true)} aria-haspopup="dialog">
+            <IconMore />
+            <span>更多</span>
+          </button>
         </nav>
+          </>
+        )}
       </div>
+
+      {actionOpen && (
+        <ModalSheet title="新增修改" onClose={() => setActionOpen(false)}>
+          <div className="m-action">
+            <button type="button" className="m-action-btn" onClick={startPinTask}>
+              <IconPin />
+              <span className="m-action-copy">
+                <b>點位置留意見</b>
+                <small>點一下文宣上要調整的位置</small>
+              </span>
+            </button>
+            <button type="button" className="m-action-btn" onClick={startRegionTask}>
+              <IconPen />
+              <span className="m-action-copy">
+                <b>圈出要調整的範圍</b>
+                <small>手指圈一圈，放手後留意見</small>
+              </span>
+            </button>
+          </div>
+        </ModalSheet>
+      )}
 
       {draftPin && (
         <ModalSheet
-          title={`修改點 ${room.comments.length + 1}`}
+          title={draftPin.region ? "已圈選這個範圍" : `修改點 ${nextPinNumber(room, draftPin.versionId)}`}
           onClose={api.cancelPin}
           dismissible={!api.form.body.trim()}
           onHeight={setComposeInset}
           action={
-            <button type="button" className="m-btn m-btn-primary m-btn-block" onClick={api.commitPin} disabled={!api.form.body.trim()}>
-              送出修改點
-            </button>
+            <div className="m-compose-actions">
+              {draftPin.region && (
+                <button type="button" className="m-btn" onClick={recircle}>
+                  重新圈選
+                </button>
+              )}
+              <button
+                type="button"
+                className="m-btn m-btn-primary m-btn-block"
+                onClick={api.commitPin}
+                disabled={!api.form.body.trim()}
+              >
+                送出
+              </button>
+            </div>
           }
         >
           <PinFields api={api} autoFocus />
@@ -259,6 +435,19 @@ export function MobileWorkspace({ api, presence }: Props) {
       {more && (
         <ModalSheet title="更多" onClose={() => setMore(false)}>
           <div className="m-more">
+            <button
+              type="button"
+              className="m-row"
+              onClick={() => {
+                api.setTool("pan");
+                api.selectPin(null);
+                setMore(false);
+                setProposalMode(true);
+              }}
+            >
+              視覺提案 · 素材 / 字體 / 文案 / 背景
+            </button>
+
             <div className="m-more-group">
               <span className="m-more-label">顯示</span>
               <div className="m-chiprow">
@@ -323,11 +512,63 @@ export function MobileWorkspace({ api, presence }: Props) {
             <UploadZone onFiles={api.addFiles} className="m-row">
               加一個版本
             </UploadZone>
+            {room.strokes.length > 0 && (
+              <button
+                type="button"
+                className="m-row"
+                onClick={() => {
+                  setMore(false);
+                  setLegacyOpen(true);
+                }}
+              >
+                舊圈畫（{room.strokes.length}）· 已不在看稿顯示
+              </button>
+            )}
+            <button type="button" className="m-row" onClick={api.undo} disabled={!api.canUndo}>
+              復原上一個操作
+            </button>
             {room.comments.length > 0 && (
               <button type="button" className="m-row" onClick={api.copySummary}>
                 複製修改清單
               </button>
             )}
+          </div>
+        </ModalSheet>
+      )}
+
+      {legacyOpen && (
+        <ModalSheet title="舊圈畫" onClose={() => setLegacyOpen(false)}>
+          <div className="m-more">
+            <p className="m-legacy-hint">
+              舊版的自由圈畫不再蓋在文宣上。可以逐筆查看，或刪除不需要的圈畫（可復原）。
+            </p>
+            {room.strokes.length === 0 && <p className="m-empty">沒有舊圈畫了。</p>}
+            {room.strokes.map((s) => (
+              <div key={s.id} className="m-legacy-row">
+                <span className="m-legacy-dot" style={{ background: s.color }} aria-hidden />
+                <span className="m-legacy-meta">
+                  {versionLabel(room, s.versionId) || "文宣"}
+                  <small>{new Date(s.createdAt).toLocaleDateString()}</small>
+                </span>
+                <button
+                  type="button"
+                  className="m-btn"
+                  onClick={() => {
+                    // Show just this one stroke on the poster, then leave view mode clean again.
+                    api.setTool("pan");
+                    api.selectPin(null);
+                    api.setView({ ...view, versionId: s.versionId, compareMode: "single" });
+                    api.setPreviewStroke(s.id);
+                    setLegacyOpen(false);
+                  }}
+                >
+                  查看
+                </button>
+                <button type="button" className="m-btn m-btn-danger" onClick={() => api.eraseStroke(s.id)}>
+                  刪除
+                </button>
+              </div>
+            ))}
           </div>
         </ModalSheet>
       )}

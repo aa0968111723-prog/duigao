@@ -120,6 +120,31 @@
 }
 .coach-dismiss:hover { color: var(--ink); border-color: var(--accent); }
 
+/* ---------- clean review / locator ---------- */
+/*
+ * 「看」模式不把修改內容印在作品上。從清單選取某一項時只出現
+ * 一顆輕量定位點，已完成狀態留在清單裡，不再用 ✓ 蓋住文宣。
+ */
+.pin-locator {
+  background: rgba(15, 14, 12, 0.28);
+  border-color: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 0 0 4px rgba(196, 92, 74, 0.18), 0 3px 12px rgba(0, 0, 0, 0.38);
+  animation: locator-pulse 0.8s ease-out 2;
+}
+.pin-locator .pin-no { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95); }
+
+@keyframes locator-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(196, 92, 74, 0.55), 0 3px 12px rgba(0, 0, 0, 0.38); }
+  100% { box-shadow: 0 0 0 12px rgba(196, 92, 74, 0), 0 3px 12px rgba(0, 0, 0, 0.38); }
+}
+
+/* View mode can use the browser's native pinch zoom. Annotation modes keep
+   touch-action:none from styles.css so drawing and pin placement stay precise. */
+.stage.tool-pan.is-interactive { touch-action: pan-x pan-y pinch-zoom; }
+
+/* Disabled rows remain visible so people discover Undo, but cannot be tapped. */
+.m-row:disabled { opacity: 0.42; cursor: default; }
+
 /* ---------- 手機微調 ---------- */
 @media (max-width: 720px) {
   /*
@@ -144,4 +169,39 @@
     width: 8px;
     height: 8px;
   }
+
+  /* Landscape phones with a notch need horizontal safe areas too. */
+  .m-app {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .m-bottom {
+    left: env(safe-area-inset-left);
+    right: env(safe-area-inset-right);
+  }
+}
+
+/* A phone held sideways should spend most of its short height on the poster. */
+@media (orientation: landscape) and (max-height: 520px) and (max-width: 920px) and (pointer: coarse) {
+  .m-app {
+    --m-toolbar: calc(50px + env(safe-area-inset-bottom));
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .m-bottom {
+    left: env(safe-area-inset-left);
+    right: env(safe-area-inset-right);
+  }
+  .m-top { height: 40px; }
+  .m-title { padding-block: 5px; font-size: 14px; }
+  .m-share { min-height: 32px; padding-inline: 12px; }
+  .m-icon-btn { width: 36px; height: 36px; }
+  .m-versions { height: 36px; }
+  .m-vchip { min-height: 30px; padding-inline: 11px; font-size: 12px; }
+  .m-stage-area .stage-wrap { padding: 3px 6px 5px; }
+  .m-toolbar { padding-top: 2px; }
+  .m-tool { gap: 0; font-size: 10px; }
+  .m-tool svg { width: 19px; height: 19px; }
+  .m-sheet-handle { height: 46px; gap: 5px; }
+  .m-modal { max-height: 86dvh; }
 }
