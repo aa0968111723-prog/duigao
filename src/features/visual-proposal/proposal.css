@@ -305,3 +305,152 @@
   .proposal-preview-label { top: 6px; left: 6px; }
   .proposal-finish { top: 6px; right: 6px; }
 }
+
+/* ---------- snap guides + on-canvas handle ---------- */
+.proposal-guide { position: absolute; z-index: 9; pointer-events: none; }
+.proposal-guide-v { top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(122, 199, 127, 0.9); }
+.proposal-guide-h { left: 0; right: 0; height: 0; border-top: 1px dashed rgba(122, 199, 127, 0.9); }
+.proposal-resize-handle {
+  position: absolute;
+  z-index: 11;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+/* ---------- chips, presets, management, summary ---------- */
+.proposal-chiprow { display: flex; flex-wrap: wrap; gap: 6px; }
+.proposal-chip {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raise);
+  color: var(--ink-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+.proposal-chip.is-on { border-color: var(--accent); background: var(--accent); color: #fff; }
+.proposal-role-pick { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; }
+.proposal-manage,
+.proposal-history,
+.proposal-elem-actions,
+.proposal-confirm,
+.proposal-rename,
+.proposal-summary-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.proposal-elem { display: flex; flex-direction: column; gap: 10px; }
+.proposal-elem-actions { padding-top: 4px; }
+.proposal-rename { width: 100%; }
+.proposal-rename-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0c0b09;
+  color: var(--ink);
+  padding: 8px 9px;
+  font: inherit;
+}
+.proposal-confirm { font-size: 12px; color: var(--ink-dim); }
+.proposal-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(196, 92, 74, 0.5);
+  background: rgba(196, 92, 74, 0.12);
+  color: #f0c3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.proposal-error button { margin-left: auto; background: transparent; border: 0; color: inherit; font-size: 16px; cursor: pointer; }
+.proposal-summary { display: flex; flex-direction: column; gap: 8px; }
+.proposal-summary-head { justify-content: space-between; }
+.proposal-summary-text {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: #0c0b09;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.proposal-hint-line { margin-top: 2px; }
+
+/* ---------- mobile proposal dock (no scrim: canvas stays draggable) ---------- */
+@media (max-width: 720px) {
+  .m-app.is-proposal .m-stage-area { padding-bottom: calc(var(--m-proposal, 320px) + 8px); }
+  .pdock {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 52dvh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+    background: rgba(27, 24, 21, 0.98);
+    backdrop-filter: blur(18px);
+    border-top: 1px solid var(--line-soft);
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.34);
+  }
+  .pdock-top { display: flex; align-items: center; gap: 6px; }
+  .pdock-docs { display: flex; gap: 4px; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: none; }
+  .pdock-docs::-webkit-scrollbar { display: none; }
+  .pdock-tab {
+    flex: none;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--raise);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+  .pdock-tab.is-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pdock-tab-add { border-style: dashed; }
+  .pdock-hold {
+    flex: none;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--raise);
+    color: var(--ink);
+    font-size: 13px;
+    touch-action: none;
+    user-select: none;
+  }
+  .pdock-done {
+    flex: none;
+    min-height: 34px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .pdock-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .pdock-act { min-height: 44px; border: 1px solid var(--line); border-radius: 10px; background: var(--raise); color: var(--ink); font-size: 13px; }
+  .pdock-act.is-on { border-color: var(--accent); color: #f2b8ab; }
+  .pdock-create { min-height: 46px; }
+  .pdock-body { display: flex; flex-direction: column; gap: 10px; }
+  .pdock-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .pdock-confirm { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-dim); }
+}

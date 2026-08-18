@@ -1,99 +1,195 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useProposalStore, type ProposalItem } from "./store";
+import { backgroundColorCss, clamp, hexToRgba, objectFitFor } from "./helpers";
 import "./proposal.css";
 
 type Props = {
   roomId: string;
   versionId: string;
   authorName: string;
+  compact?: boolean;
 };
 
-type DragPreview = { id: string; x: number; y: number } | null;
+const SAFE = 0.06;
+const SNAP_TARGETS = [SAFE, 0.5, 1 - SAFE];
+const SNAP_THRESHOLD = 0.018;
 
-type DragSession = {
-  id: string;
-  pointerId: number;
+type Gesture = {
+  itemId: string;
+  frame: { left: number; top: number; width: number; height: number };
+  pointers: Map<number, { x: number; y: number }>;
+  primaryId: number;
   startClientX: number;
   startClientY: number;
   startX: number;
   startY: number;
-  width: number;
-  height: number;
+  startWidth: number;
+  startRotation: number;
+  pinchDist: number;
+  pinchAngle: number;
+  mode: "drag" | "pinch";
+  moved: boolean;
 };
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
+function snapAxis(value: number): { value: number; guide: number | null } {
+  for (const target of SNAP_TARGETS) {
+    if (Math.abs(value - target) <= SNAP_THRESHOLD) return { value: target, guide: target };
+  }
+  return { value, guide: null };
 }
 
-function hexToRgba(hex: string, alpha: number) {
-  const normalized = hex.replace("#", "");
-  if (normalized.length !== 6) return `rgba(0, 0, 0, ${alpha})`;
-  const value = Number.parseInt(normalized, 16);
-  const r = (value >> 16) & 255;
-  const g = (value >> 8) & 255;
-  const b = value & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-export function VisualProposalOverlay({ roomId, versionId, authorName }: Props) {
+function angle(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+}
+
+export function VisualProposalOverlay({ roomId, versionId, authorName, compact }: Props) {
   const proposal = useProposalStore(roomId, versionId, authorName);
-  const [dragPreview, setDragPreview] = useState<DragPreview>(null);
-  const drag = useRef<DragSession | null>(null);
+  const gesture = useRef<Gesture | null>(null);
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
 
-  if (!proposal.visible || !proposal.active) return null;
+  const { active, editing, visible, compareOriginal, selectedItem } = proposal;
 
-  const active = proposal.active;
+  if (!visible || !active || compareOriginal) return null;
+
   const background = active.background;
+  const colorCss = backgroundColorCss(background);
 
-  const itemPosition = (item: ProposalItem) => {
-    if (dragPreview?.id === item.id) return { x: dragPreview.x, y: dragPreview.y };
-    return { x: item.x, y: item.y };
+  const twoPointers = (g: Gesture) => Array.from(g.pointers.values());
+
+  const rebaseline = (g: Gesture) => {
+    const pts = twoPointers(g);
+    const item = active.items.find((i) => i.id === g.itemId);
+    if (!item) return;
+    g.startWidth = item.width;
+    g.startRotation = item.rotation;
+    if (pts.length >= 2) {
+      g.mode = "pinch";
+      g.pinchDist = distance(pts[0], pts[1]) || 1;
+      g.pinchAngle = angle(pts[0], pts[1]);
+    } else {
+      g.mode = "drag";
+      g.startX = item.x;
+      g.startY = item.y;
+      const primary = g.pointers.get(g.primaryId);
+      if (primary) {
+        g.startClientX = primary.x;
+        g.startClientY = primary.y;
+      }
+    }
   };
 
-  const beginDrag = (event: ReactPointerEvent<HTMLElement>, item: ProposalItem) => {
-    if (!proposal.editing) return;
+  const onItemPointerDown = (event: ReactPointerEvent<HTMLElement>, item: ProposalItem) => {
+    if (!editing) return;
     event.stopPropagation();
     proposal.selectItem(item.id);
     const layer = event.currentTarget.closest(".proposal-layer") as HTMLElement | null;
     if (!layer) return;
     const rect = layer.getBoundingClientRect();
-    drag.current = {
-      id: item.id,
-      pointerId: event.pointerId,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startX: item.x,
-      startY: item.y,
-      width: rect.width,
-      height: rect.height,
-    };
     event.currentTarget.setPointerCapture(event.pointerId);
+    proposal.beginEdit();
+
+    let g = gesture.current;
+    if (!g || g.itemId !== item.id) {
+      g = {
+        itemId: item.id,
+        frame: { left: rect.left, top: rect.top, width: rect.width || 1, height: rect.height || 1 },
+        pointers: new Map(),
+        primaryId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: item.x,
+        startY: item.y,
+        startWidth: item.width,
+        startRotation: item.rotation,
+        pinchDist: 1,
+        pinchAngle: 0,
+        mode: "drag",
+        moved: false,
+      };
+      gesture.current = g;
+    }
+    g.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    rebaseline(g);
   };
 
-  const moveDrag = (event: ReactPointerEvent<HTMLElement>) => {
-    const session = drag.current;
-    if (!session || session.pointerId !== event.pointerId) return;
+  const onItemPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const g = gesture.current;
+    if (!g || !g.pointers.has(event.pointerId)) return;
     event.stopPropagation();
-    const x = clamp(session.startX + (event.clientX - session.startClientX) / session.width, 0, 1);
-    const y = clamp(session.startY + (event.clientY - session.startClientY) / session.height, 0, 1);
-    setDragPreview({ id: session.id, x, y });
+    g.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    g.moved = true;
+
+    if (g.mode === "pinch") {
+      const pts = twoPointers(g);
+      if (pts.length < 2) return;
+      const dist = distance(pts[0], pts[1]) || 1;
+      const ratio = dist / g.pinchDist;
+      const width = clamp(g.startWidth * ratio, 5, 100);
+      const rotation = clamp(g.startRotation + (angle(pts[0], pts[1]) - g.pinchAngle), -180, 180);
+      proposal.updateItemLive(g.itemId, { width, rotation: Math.round(rotation) });
+      return;
+    }
+
+    const rawX = g.startX + (event.clientX - g.startClientX) / g.frame.width;
+    const rawY = g.startY + (event.clientY - g.startClientY) / g.frame.height;
+    const sx = snapAxis(clamp(rawX, 0.02, 0.98));
+    const sy = snapAxis(clamp(rawY, 0.02, 0.98));
+    setGuides({ x: sx.guide, y: sy.guide });
+    proposal.updateItemLive(g.itemId, { x: sx.value, y: sy.value });
   };
 
-  const endDrag = (event: ReactPointerEvent<HTMLElement>) => {
-    const session = drag.current;
-    if (!session || session.pointerId !== event.pointerId) return;
+  const onItemPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const g = gesture.current;
+    if (!g) return;
     event.stopPropagation();
-    const preview = dragPreview;
-    if (preview?.id === session.id) proposal.updateItem(session.id, { x: preview.x, y: preview.y });
-    drag.current = null;
-    setDragPreview(null);
+    g.pointers.delete(event.pointerId);
+    if (g.pointers.size === 0) {
+      gesture.current = null;
+      setGuides({ x: null, y: null });
+      proposal.endEdit();
+    } else {
+      rebaseline(g);
+    }
+  };
+
+  // Corner resize handle (mouse / single-finger): scale width from centre distance.
+  const resize = useRef<{ id: string; cx: number; cy: number; startDist: number; startWidth: number } | null>(null);
+  const onHandleDown = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!selectedItem) return;
+    event.stopPropagation();
+    const layer = event.currentTarget.closest(".proposal-layer") as HTMLElement | null;
+    if (!layer) return;
+    const rect = layer.getBoundingClientRect();
+    const cx = rect.left + (selectedItem.x * rect.width);
+    const cy = rect.top + (selectedItem.y * rect.height);
+    const startDist = Math.hypot(event.clientX - cx, event.clientY - cy) || 1;
+    resize.current = { id: selectedItem.id, cx, cy, startDist, startWidth: selectedItem.width };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    proposal.beginEdit();
+  };
+  const onHandleMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const r = resize.current;
+    if (!r) return;
+    event.stopPropagation();
+    const dist = Math.hypot(event.clientX - r.cx, event.clientY - r.cy) || 1;
+    proposal.updateItemLive(r.id, { width: clamp(r.startWidth * (dist / r.startDist), 5, 100) });
+  };
+  const onHandleUp = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!resize.current) return;
+    event.stopPropagation();
+    resize.current = null;
+    proposal.endEdit();
   };
 
   return (
     <div
-      className={`proposal-layer ${proposal.editing ? "is-editing" : "is-preview"}`}
+      className={`proposal-layer ${editing ? "is-editing" : "is-preview"}`}
       onPointerDown={(event) => {
-        if (!proposal.editing) return;
+        if (!editing) return;
         event.stopPropagation();
         proposal.selectItem(null);
       }}
@@ -104,75 +200,45 @@ export function VisualProposalOverlay({ roomId, versionId, authorName }: Props) 
           className="proposal-background-image"
           src={background.imageDataUrl}
           alt="提案背景"
-          style={{ opacity: background.imageOpacity }}
+          style={{ opacity: background.imageOpacity, objectFit: objectFitFor(background.imageFit) }}
           draggable={false}
         />
       )}
-      {background.colorOpacity > 0 && (
-        <span
-          className="proposal-background-color"
-          style={{ background: hexToRgba(background.color, background.colorOpacity) }}
-          aria-hidden
+      {colorCss && <span className="proposal-background-color" style={{ background: colorCss }} aria-hidden />}
+
+      {editing && guides.x != null && <span className="proposal-guide proposal-guide-v" style={{ left: `${guides.x * 100}%` }} aria-hidden />}
+      {editing && guides.y != null && <span className="proposal-guide proposal-guide-h" style={{ top: `${guides.y * 100}%` }} aria-hidden />}
+
+      {active.items.map((item) => (
+        <ProposalItemView
+          key={item.id}
+          item={item}
+          selected={editing && selectedItem?.id === item.id}
+          onPointerDown={onItemPointerDown}
+          onPointerMove={onItemPointerMove}
+          onPointerUp={onItemPointerUp}
+        />
+      ))}
+
+      {editing && selectedItem && (
+        <button
+          type="button"
+          className="proposal-resize-handle"
+          style={{
+            left: `${clamp(selectedItem.x + selectedItem.width / 200, 0, 1) * 100}%`,
+            top: `${selectedItem.y * 100}%`,
+          }}
+          onPointerDown={onHandleDown}
+          onPointerMove={onHandleMove}
+          onPointerUp={onHandleUp}
+          onPointerCancel={onHandleUp}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="調整大小"
         />
       )}
 
-      {active.items.map((item) => {
-        const position = itemPosition(item);
-        const selected = proposal.selectedItem?.id === item.id;
-        const sharedStyle = {
-          left: `${position.x * 100}%`,
-          top: `${position.y * 100}%`,
-          width: `${item.width}%`,
-          opacity: item.opacity,
-          transform: `translate(-50%, -50%) rotate(${item.rotation}deg)`,
-        };
-
-        if (item.type === "image") {
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={`proposal-item proposal-image ${selected ? "is-selected" : ""}`}
-              style={sharedStyle}
-              onPointerDown={(event) => beginDrag(event, item)}
-              onPointerMove={moveDrag}
-              onPointerUp={endDrag}
-              onPointerCancel={endDrag}
-              onClick={(event) => event.stopPropagation()}
-              aria-label={`素材：${item.name}`}
-            >
-              <img src={item.imageDataUrl} alt={item.name} draggable={false} />
-            </button>
-          );
-        }
-
-        return (
-          <button
-            key={item.id}
-            type="button"
-            className={`proposal-item proposal-text ${selected ? "is-selected" : ""}`}
-            style={{
-              ...sharedStyle,
-              color: item.color,
-              fontFamily: item.fontFamily,
-              fontSize: `${item.fontSize}cqw`,
-              fontWeight: item.fontWeight,
-              textAlign: item.align,
-              background: hexToRgba(item.backdropColor, item.backdropOpacity),
-            }}
-            onPointerDown={(event) => beginDrag(event, item)}
-            onPointerMove={moveDrag}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {item.text}
-          </button>
-        );
-      })}
-
       <span className="proposal-preview-label">{active.name} · 模擬</span>
-      {proposal.editing && (
+      {editing && !compact && (
         <button
           type="button"
           className="proposal-finish"
@@ -188,3 +254,68 @@ export function VisualProposalOverlay({ roomId, versionId, authorName }: Props) 
     </div>
   );
 }
+
+type ItemViewProps = {
+  item: ProposalItem;
+  selected: boolean;
+  onPointerDown: (e: ReactPointerEvent<HTMLElement>, item: ProposalItem) => void;
+  onPointerMove: (e: ReactPointerEvent<HTMLElement>) => void;
+  onPointerUp: (e: ReactPointerEvent<HTMLElement>) => void;
+};
+
+const ProposalItemView = memo(function ProposalItemView({ item, selected, onPointerDown, onPointerMove, onPointerUp }: ItemViewProps) {
+  const shared: CSSProperties = {
+    left: `${item.x * 100}%`,
+    top: `${item.y * 100}%`,
+    width: `${item.width}%`,
+    opacity: item.opacity,
+    transform: `translate(-50%, -50%) rotate(${item.rotation}deg)`,
+  };
+
+  if (item.type === "image") {
+    return (
+      <button
+        type="button"
+        className={`proposal-item proposal-image ${selected ? "is-selected" : ""}`}
+        style={shared}
+        onPointerDown={(e) => onPointerDown(e, item)}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`素材：${item.name}`}
+        aria-pressed={selected}
+      >
+        <img src={item.imageDataUrl} alt={item.name} draggable={false} />
+      </button>
+    );
+  }
+
+  const padding = `${item.backdropPadding}em ${item.backdropPadding * 1.4}em`;
+  return (
+    <button
+      type="button"
+      className={`proposal-item proposal-text ${selected ? "is-selected" : ""}`}
+      style={{
+        ...shared,
+        color: item.color,
+        fontFamily: item.fontFamily,
+        fontSize: `${item.fontSize}cqw`,
+        fontWeight: item.fontWeight,
+        textAlign: item.align,
+        background: hexToRgba(item.backdropColor, item.backdropOpacity),
+        padding,
+        borderRadius: `${item.backdropRadius}px`,
+      }}
+      onPointerDown={(e) => onPointerDown(e, item)}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onClick={(e) => e.stopPropagation()}
+      aria-label={`文字：${item.text}`}
+      aria-pressed={selected}
+    >
+      {item.text}
+    </button>
+  );
+});

@@ -1,53 +1,43 @@
-import { useRef } from "react";
-import { useProposalStore, type ProposalAlign } from "./store";
+import { useRef, useState } from "react";
+import { useProposalStore } from "./store";
+import { ProposalElementControls } from "./ProposalElementControls";
+import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
+import { ProposalSummary } from "./ProposalSummary";
+import { TEXT_ROLES, createImageItem, createTextItem, prepareImageFile } from "./helpers";
+import type { ShowToast } from "../../toast";
 import "./proposal.css";
 
 type Props = {
   roomId: string;
   versionId: string;
   authorName: string;
-  compact?: boolean;
+  showToast?: ShowToast;
 };
 
-const FONTS = [
-  { label: "現代黑體", value: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif' },
-  { label: "系統黑體", value: 'system-ui, -apple-system, "PingFang TC", sans-serif' },
-  { label: "明體 / 襯線", value: '"Noto Serif TC", "Songti TC", "PMingLiU", serif' },
-  { label: "手寫感", value: '"DFKai-SB", "BiauKai", cursive' },
-] as const;
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-export function ProposalControls({ roomId, versionId, authorName, compact }: Props) {
+export function ProposalControls({ roomId, versionId, authorName, showToast }: Props) {
   const proposal = useProposalStore(roomId, versionId, authorName);
   const materialRef = useRef<HTMLInputElement>(null);
-  const backgroundRef = useRef<HTMLInputElement>(null);
+  const [pickText, setPickText] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const active = proposal.active;
-  const selected = proposal.selectedItem;
 
   const uploadMaterial = async (files: FileList | null) => {
     const file = files?.[0];
-    if (!file || !file.type.startsWith("image/")) return;
-    proposal.addImage(await fileToDataUrl(file), file.name);
     if (materialRef.current) materialRef.current.value = "";
-  };
-
-  const uploadBackground = async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file || !file.type.startsWith("image/")) return;
-    proposal.setBackground({ imageDataUrl: await fileToDataUrl(file), imageOpacity: 1 });
-    if (backgroundRef.current) backgroundRef.current.value = "";
+    if (!file) return;
+    try {
+      const prepared = await prepareImageFile(file);
+      proposal.addImage(createImageItem(prepared.dataUrl, prepared.name));
+      if (prepared.note) showToast?.(prepared.note);
+    } catch (err) {
+      showToast?.(err instanceof Error ? err.message : "素材讀取失敗", { tone: "error" });
+    }
   };
 
   return (
-    <section className={`proposal-controls ${compact ? "is-compact" : ""}`}>
+    <section className="proposal-controls">
       <div className="proposal-controls-head">
         <div>
           <strong>視覺提案</strong>
@@ -65,13 +55,22 @@ export function ProposalControls({ roomId, versionId, authorName, compact }: Pro
         )}
       </div>
 
+      {proposal.error && (
+        <div className="proposal-error" role="alert">
+          <span>{proposal.error}</span>
+          <button type="button" onClick={proposal.dismissError} aria-label="關閉錯誤訊息">
+            ×
+          </button>
+        </div>
+      )}
+
       {!proposal.hydrated && <p className="proposal-muted">正在載入這台裝置的提案…</p>}
 
-      {proposal.hydrated && !active ? (
+      {proposal.hydrated && !active && (
         <button type="button" className="proposal-primary" onClick={proposal.create}>
           ＋ 建立這一版的視覺提案
         </button>
-      ) : null}
+      )}
 
       {active && (
         <>
@@ -82,20 +81,85 @@ export function ProposalControls({ roomId, versionId, authorName, compact }: Pro
                   key={doc.id}
                   type="button"
                   className={doc.id === active.id ? "is-on" : ""}
+                  aria-pressed={doc.id === active.id}
                   onClick={() => proposal.selectProposal(doc.id)}
                 >
                   {doc.name}
                 </button>
               ))}
             </div>
-            <button type="button" className="proposal-icon-action" onClick={proposal.create} title="新增另一個提案">
+            <button type="button" className="proposal-icon-action" onClick={proposal.create} title="新增另一個提案" aria-label="新增另一個提案">
               ＋
             </button>
           </div>
 
+          <div className="proposal-manage">
+            {renaming ? (
+              <form
+                className="proposal-rename"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  proposal.renameProposal(active.id, renameValue);
+                  setRenaming(false);
+                }}
+              >
+                <input
+                  className="proposal-rename-input"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  aria-label="提案名稱"
+                  autoFocus
+                />
+                <button type="submit" className="proposal-quiet">
+                  儲存
+                </button>
+                <button type="button" className="proposal-quiet" onClick={() => setRenaming(false)}>
+                  取消
+                </button>
+              </form>
+            ) : confirmDelete ? (
+              <div className="proposal-confirm" role="alertdialog" aria-label="刪除提案確認">
+                <span>確定刪除「{active.name}」？原稿不會受到影響。</span>
+                <button
+                  type="button"
+                  className="proposal-danger"
+                  onClick={() => {
+                    proposal.deleteProposal(active.id);
+                    setConfirmDelete(false);
+                    showToast?.("已刪除提案", { action: { label: "復原", onClick: () => proposal.undo() } });
+                  }}
+                >
+                  刪除
+                </button>
+                <button type="button" className="proposal-quiet" onClick={() => setConfirmDelete(false)}>
+                  取消
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="proposal-quiet"
+                  onClick={() => {
+                    setRenameValue(active.name);
+                    setRenaming(true);
+                  }}
+                >
+                  重新命名
+                </button>
+                <button type="button" className="proposal-quiet" onClick={() => proposal.duplicateProposal(active.id)}>
+                  複製提案
+                </button>
+                <button type="button" className="proposal-quiet" onClick={() => setConfirmDelete(true)}>
+                  刪除提案
+                </button>
+              </>
+            )}
+          </div>
+
           <div className="proposal-action-row">
-            <button type="button" className="proposal-action" onClick={proposal.addText}>
-              Aa 文案 / 字體
+            <button type="button" className={`proposal-action ${pickText ? "is-on" : ""}`} onClick={() => setPickText((v) => !v)}>
+              Aa 文字
             </button>
             <button type="button" className="proposal-action" onClick={() => materialRef.current?.click()}>
               ＋ 素材
@@ -104,240 +168,64 @@ export function ProposalControls({ roomId, versionId, authorName, compact }: Pro
               ref={materialRef}
               className="proposal-file"
               type="file"
-              accept="image/*"
-              onChange={(event) => void uploadMaterial(event.target.files)}
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              onChange={(e) => void uploadMaterial(e.target.files)}
             />
             <button
               type="button"
               className={`proposal-action ${proposal.editing ? "is-on" : ""}`}
               onClick={() => proposal.setEditing(!proposal.editing)}
             >
-              {proposal.editing ? "完成擺放" : "移動素材"}
+              {proposal.editing ? "完成擺放" : "移動元素"}
             </button>
           </div>
 
-          <details className="proposal-section" open={!compact}>
+          {pickText && (
+            <div className="proposal-role-pick" role="group" aria-label="選擇文字類型">
+              {TEXT_ROLES.map((role) => (
+                <button
+                  key={role.key}
+                  type="button"
+                  className="proposal-chip"
+                  onClick={() => {
+                    proposal.addText(createTextItem(role.key));
+                    setPickText(false);
+                  }}
+                >
+                  {role.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <details className="proposal-section">
             <summary>背景模擬</summary>
             <div className="proposal-section-body">
-              <label className="proposal-field proposal-field-inline">
-                <span>背景色</span>
-                <input
-                  type="color"
-                  value={active.background.color}
-                  onChange={(event) => proposal.setBackground({ color: event.target.value })}
-                />
-              </label>
-              <label className="proposal-field">
-                <span>色彩覆蓋 {Math.round(active.background.colorOpacity * 100)}%</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={active.background.colorOpacity}
-                  onChange={(event) => proposal.setBackground({ colorOpacity: Number(event.target.value) })}
-                />
-              </label>
-              <div className="proposal-inline-actions">
-                <button type="button" className="proposal-action" onClick={() => backgroundRef.current?.click()}>
-                  換背景圖預覽
-                </button>
-                {active.background.imageDataUrl && (
-                  <button type="button" className="proposal-quiet" onClick={proposal.removeBackgroundImage}>
-                    移除背景圖
-                  </button>
-                )}
-                <input
-                  ref={backgroundRef}
-                  className="proposal-file"
-                  type="file"
-                  accept="image/*"
-                  onChange={(event) => void uploadBackground(event.target.files)}
-                />
-              </div>
-              {active.background.imageDataUrl && (
-                <label className="proposal-field">
-                  <span>背景圖透明度 {Math.round(active.background.imageOpacity * 100)}%</span>
-                  <input
-                    type="range"
-                    min={0.1}
-                    max={1}
-                    step={0.05}
-                    value={active.background.imageOpacity}
-                    onChange={(event) => proposal.setBackground({ imageOpacity: Number(event.target.value) })}
-                  />
-                </label>
-              )}
+              <ProposalBackgroundControls roomId={roomId} versionId={versionId} authorName={authorName} showToast={showToast} />
             </div>
           </details>
 
           <div className="proposal-selected">
-            {!selected ? (
-              <p className="proposal-muted">點「Aa 文案 / 字體」或「＋ 素材」新增，再到文宣上拖曳位置。</p>
-            ) : selected.type === "text" ? (
-              <>
-                <div className="proposal-selected-title">
-                  <strong>文案試看</strong>
-                  <button type="button" className="proposal-danger" onClick={() => proposal.deleteItem(selected.id)}>
-                    刪除
-                  </button>
-                </div>
-                <label className="proposal-field">
-                  <span>模擬文案</span>
-                  <textarea
-                    value={selected.text}
-                    rows={3}
-                    onChange={(event) => proposal.updateItem(selected.id, { text: event.target.value })}
-                  />
-                </label>
-                <div className="proposal-grid-2">
-                  <label className="proposal-field">
-                    <span>字體</span>
-                    <select
-                      value={selected.fontFamily}
-                      onChange={(event) => proposal.updateItem(selected.id, { fontFamily: event.target.value })}
-                    >
-                      {FONTS.map((font) => (
-                        <option key={font.label} value={font.value}>
-                          {font.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="proposal-field">
-                    <span>字重</span>
-                    <select
-                      value={selected.fontWeight}
-                      onChange={(event) => proposal.updateItem(selected.id, { fontWeight: Number(event.target.value) })}
-                    >
-                      <option value={400}>一般</option>
-                      <option value={500}>中等</option>
-                      <option value={700}>粗體</option>
-                      <option value={900}>特粗</option>
-                    </select>
-                  </label>
-                </div>
-                <label className="proposal-field">
-                  <span>字體大小 {selected.fontSize.toFixed(1)}</span>
-                  <input
-                    type="range"
-                    min={2}
-                    max={14}
-                    step={0.25}
-                    value={selected.fontSize}
-                    onChange={(event) => proposal.updateItem(selected.id, { fontSize: Number(event.target.value) })}
-                  />
-                </label>
-                <label className="proposal-field">
-                  <span>文字區寬度 {Math.round(selected.width)}%</span>
-                  <input
-                    type="range"
-                    min={20}
-                    max={100}
-                    step={1}
-                    value={selected.width}
-                    onChange={(event) => proposal.updateItem(selected.id, { width: Number(event.target.value) })}
-                  />
-                </label>
-                <div className="proposal-grid-2">
-                  <label className="proposal-field proposal-field-inline">
-                    <span>文字色</span>
-                    <input
-                      type="color"
-                      value={selected.color}
-                      onChange={(event) => proposal.updateItem(selected.id, { color: event.target.value })}
-                    />
-                  </label>
-                  <label className="proposal-field proposal-field-inline">
-                    <span>文字底色</span>
-                    <input
-                      type="color"
-                      value={selected.backdropColor}
-                      onChange={(event) => proposal.updateItem(selected.id, { backdropColor: event.target.value })}
-                    />
-                  </label>
-                </div>
-                <label className="proposal-field">
-                  <span>底色遮罩 {Math.round(selected.backdropOpacity * 100)}%</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={selected.backdropOpacity}
-                    onChange={(event) => proposal.updateItem(selected.id, { backdropOpacity: Number(event.target.value) })}
-                  />
-                </label>
-                <div className="proposal-align" aria-label="文字對齊">
-                  {(["left", "center", "right"] as ProposalAlign[]).map((align) => (
-                    <button
-                      key={align}
-                      type="button"
-                      className={selected.align === align ? "is-on" : ""}
-                      onClick={() => proposal.updateItem(selected.id, { align })}
-                    >
-                      {align === "left" ? "靠左" : align === "center" ? "置中" : "靠右"}
-                    </button>
-                  ))}
-                </div>
-                <label className="proposal-field">
-                  <span>旋轉 {selected.rotation}°</span>
-                  <input
-                    type="range"
-                    min={-30}
-                    max={30}
-                    step={1}
-                    value={selected.rotation}
-                    onChange={(event) => proposal.updateItem(selected.id, { rotation: Number(event.target.value) })}
-                  />
-                </label>
-              </>
-            ) : (
-              <>
-                <div className="proposal-selected-title">
-                  <strong>素材：{selected.name}</strong>
-                  <button type="button" className="proposal-danger" onClick={() => proposal.deleteItem(selected.id)}>
-                    刪除
-                  </button>
-                </div>
-                <label className="proposal-field">
-                  <span>尺寸 {Math.round(selected.width)}%</span>
-                  <input
-                    type="range"
-                    min={8}
-                    max={100}
-                    step={1}
-                    value={selected.width}
-                    onChange={(event) => proposal.updateItem(selected.id, { width: Number(event.target.value) })}
-                  />
-                </label>
-                <label className="proposal-field">
-                  <span>透明度 {Math.round(selected.opacity * 100)}%</span>
-                  <input
-                    type="range"
-                    min={0.1}
-                    max={1}
-                    step={0.05}
-                    value={selected.opacity}
-                    onChange={(event) => proposal.updateItem(selected.id, { opacity: Number(event.target.value) })}
-                  />
-                </label>
-                <label className="proposal-field">
-                  <span>旋轉 {selected.rotation}°</span>
-                  <input
-                    type="range"
-                    min={-180}
-                    max={180}
-                    step={1}
-                    value={selected.rotation}
-                    onChange={(event) => proposal.updateItem(selected.id, { rotation: Number(event.target.value) })}
-                  />
-                </label>
-              </>
-            )}
+            <ProposalElementControls roomId={roomId} versionId={versionId} authorName={authorName} showToast={showToast} />
           </div>
 
-          <p className="proposal-local-note">目前提案先保存在這台裝置；後續雲端房間會再把它納入多人同步。</p>
+          <details className="proposal-section">
+            <summary>提案摘要 / 轉成修改建議</summary>
+            <div className="proposal-section-body">
+              <ProposalSummary roomId={roomId} versionId={versionId} authorName={authorName} showToast={showToast} />
+            </div>
+          </details>
+
+          <div className="proposal-history">
+            <button type="button" className="proposal-quiet" onClick={proposal.undo} disabled={!proposal.canUndo}>
+              復原
+            </button>
+            <button type="button" className="proposal-quiet" onClick={proposal.redo} disabled={!proposal.canRedo}>
+              重做
+            </button>
+          </div>
+
+          <p className="proposal-local-note">目前提案只保存在這台裝置。</p>
         </>
       )}
     </section>
