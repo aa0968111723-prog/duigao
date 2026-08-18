@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { Point, Version } from "../lib/types";
+import { regionFromPoints } from "../lib/region";
 import { VisualProposalOverlay } from "../features/visual-proposal/VisualProposalOverlay";
 import { nextPinNumber, pinNumber, type WorkspaceApi } from "./api";
 
@@ -71,8 +72,17 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [natural, setNatural] = useState({ w: 0, h: 0 });
-  const [live, setLive] = useState<Point[]>([]);
-  const drawing = useRef(false);
+
+  /**
+   * The live gesture (draw on desktop, 圈範圍 on mobile) never touches React
+   * state: points accumulate in a ref and the polyline is updated straight on
+   * the DOM inside one requestAnimationFrame per frame. Nothing is persisted
+   * until pointer up.
+   */
+  const gesturePoints = useRef<Point[]>([]);
+  const gestureActive = useRef(false);
+  const livePolyline = useRef<SVGPolylineElement>(null);
+  const liveRaf = useRef(0);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -114,22 +124,44 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
     [frame.left, frame.top, frame.width, frame.height, ready],
   );
 
+  const paintLive = useCallback(() => {
+    liveRaf.current = 0;
+    const el = livePolyline.current;
+    if (!el) return;
+    const pts = gesturePoints.current;
+    el.setAttribute("points", pts.length > 1 ? pts.map((p) => `${p.x * 100},${p.y * 100}`).join(" ") : "");
+  }, []);
+
+  const scheduleLive = useCallback(() => {
+    if (!liveRaf.current) liveRaf.current = requestAnimationFrame(paintLive);
+  }, [paintLive]);
+
+  useEffect(
+    () => () => {
+      if (liveRaf.current) cancelAnimationFrame(liveRaf.current);
+    },
+    [],
+  );
+
+  const gestureTool = tool === "draw" || tool === "region";
+
   const onDown = (e: ReactPointerEvent) => {
-    if (!interactive || tool !== "draw") return;
+    if (!interactive || !gestureTool) return;
     const p = relative(e);
     if (!p) return;
-    drawing.current = true;
-    setLive([p]);
+    gestureActive.current = true;
+    gesturePoints.current = [p];
     boxRef.current?.setPointerCapture(e.pointerId);
   };
 
   /**
    * Pins are placed on `click`, the last event of a tap. Placing them earlier
    * lets the browser's follow-up mousedown blur the composer's first field,
-   * which on iOS means the keyboard never opens.
+   * which on iOS means the keyboard never opens. A finished 圈範圍 gesture also
+   * emits a click, so region mode ignores it entirely.
    */
   const onClick = (e: ReactMouseEvent) => {
-    if (!interactive) return;
+    if (!interactive || tool === "region") return;
     const p = relative(e);
     if (tool === "pin") {
       if (p) api.placePin(version.id, p.x, p.y);
@@ -139,17 +171,35 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
   };
 
   const onMove = (e: ReactPointerEvent) => {
-    if (!interactive || !drawing.current) return;
+    if (!interactive || !gestureActive.current) return;
     const p = relative(e);
-    if (p) setLive((pts) => [...pts, p]);
+    if (!p) return;
+    const pts = gesturePoints.current;
+    const last = pts[pts.length - 1];
+    // Light sampling: sub-half-percent jitters add nothing to a bounding box.
+    if (last && Math.abs(p.x - last.x) < 0.004 && Math.abs(p.y - last.y) < 0.004) return;
+    pts.push(p);
+    scheduleLive();
   };
 
   const onUp = () => {
-    if (!interactive || !drawing.current) return;
-    drawing.current = false;
-    const pts = live;
-    setLive([]);
-    api.addStroke(version.id, pts);
+    if (!interactive || !gestureActive.current) return;
+    gestureActive.current = false;
+    const pts = gesturePoints.current;
+    gesturePoints.current = [];
+    if (liveRaf.current) {
+      cancelAnimationFrame(liveRaf.current);
+      liveRaf.current = 0;
+    }
+    // The freehand trace disappears the moment the finger lifts.
+    livePolyline.current?.setAttribute("points", "");
+    if (tool === "draw") {
+      api.addStroke(version.id, pts);
+    } else if (tool === "region") {
+      const region = regionFromPoints(pts);
+      if (region) api.placeRegion(version.id, region);
+      else api.showToast("範圍太小，再圈一次");
+    }
   };
 
   const allPins = room.comments.filter((c) => c.versionId === version.id);
@@ -157,17 +207,24 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
   const selectedPin = selectedPinId ? allPins.find((pin) => pin.id === selectedPinId) : undefined;
 
   /**
-   * The poster itself stays clean in view mode. Annotation tools reveal active
-   * marks; selecting an item from the discussion only reveals that one locator.
-   * Resolved pins live in the list and never remain stamped over the artwork.
+   * The poster itself stays clean in view mode. Desktop annotation tools reveal
+   * active marks; selecting an item from the discussion only reveals that one
+   * locator (a thin region box when the feedback circled an area). The mobile
+   * 圈範圍 mode shows nothing but the live gesture. Resolved pins live in the
+   * list and never remain stamped over the artwork.
    */
-  const editingAnnotations = tool !== "pan";
+  const editingAnnotations = tool === "pin" || tool === "draw" || tool === "erase";
+  const circling = tool === "region";
+  const selectedRegionPin = !editingAnnotations && !circling && selectedPin?.region ? selectedPin : undefined;
   const pins = editingAnnotations
     ? allPins.filter((pin) => !pin.resolved)
-    : selectedPin
+    : !circling && selectedPin && !selectedPin.region
       ? [selectedPin]
       : [];
-  const strokes = editingAnnotations ? allStrokes : [];
+  // Legacy strokes stay hidden while viewing; the 舊圈畫 manager can preview one.
+  const previewStroke =
+    tool === "pan" && api.previewStrokeId ? allStrokes.find((s) => s.id === api.previewStrokeId) : undefined;
+  const strokes = editingAnnotations ? allStrokes : previewStroke ? [previewStroke] : [];
 
   const toPolyline = (pts: Point[]) => pts.map((p) => `${p.x * 100},${p.y * 100}`).join(" ");
   const imgStyle = ready
@@ -227,9 +284,10 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
                 }}
               />
             ))}
-            {live.length > 1 && (
+            {gestureTool && interactive && (
               <polyline
-                points={toPolyline(live)}
+                ref={livePolyline}
+                points=""
                 fill="none"
                 stroke={guest.color}
                 strokeWidth={4}
@@ -239,6 +297,38 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
               />
             )}
           </svg>
+
+          {selectedRegionPin?.region && (
+            <div
+              key={selectedRegionPin.id}
+              className="region-rect"
+              role="img"
+              aria-label={`修改點 ${pinNumber(room, selectedRegionPin.id)} 的範圍：${selectedRegionPin.body}`}
+              style={{
+                left: `${selectedRegionPin.region.x * 100}%`,
+                top: `${selectedRegionPin.region.y * 100}%`,
+                width: `${selectedRegionPin.region.width * 100}%`,
+                height: `${selectedRegionPin.region.height * 100}%`,
+                ["--pin" as string]: selectedRegionPin.authorColor,
+              }}
+            >
+              <span className="region-tag">{pinNumber(room, selectedRegionPin.id)}</span>
+            </div>
+          )}
+
+          {draftPin?.region && draftPin.versionId === version.id && (
+            <div
+              className="region-rect is-draft"
+              aria-hidden
+              style={{
+                left: `${draftPin.region.x * 100}%`,
+                top: `${draftPin.region.y * 100}%`,
+                width: `${draftPin.region.width * 100}%`,
+                height: `${draftPin.region.height * 100}%`,
+                ["--pin" as string]: guest.color,
+              }}
+            />
+          )}
 
           <VisualProposalOverlay roomId={room.id} versionId={version.id} authorName={guest.name} compact={compact} />
 
@@ -275,7 +365,7 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
             );
           })}
 
-          {draftPin && draftPin.versionId === version.id && (
+          {draftPin && !draftPin.region && draftPin.versionId === version.id && (
             <span
               className="pin pin-draft"
               style={{ left: `${draftPin.x * 100}%`, top: `${draftPin.y * 100}%` }}

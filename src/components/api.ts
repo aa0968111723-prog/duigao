@@ -1,5 +1,6 @@
 import type { ShowToast } from "../toast";
 import type {
+  AnnotationRegion,
   CommentReply,
   Guest,
   Point,
@@ -12,7 +13,8 @@ import type {
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
-export type PinDraft = { versionId: string; x: number; y: number };
+/** A pending piece of feedback. When it came from a 圈範圍 gesture, `region` is set and x/y are its center. */
+export type PinDraft = { versionId: string; x: number; y: number; region?: AnnotationRegion };
 
 export type PinForm = {
   body: string;
@@ -33,6 +35,8 @@ export type WorkspaceApi = {
   draftPin: PinDraft | null;
   form: PinForm;
   selectedPinId: string | null;
+  /** Legacy stroke being previewed from the 舊圈畫 manager; null keeps view mode clean. */
+  previewStrokeId: string | null;
   chatInput: string;
   saveState: SaveState;
   coachSeen: boolean;
@@ -41,8 +45,11 @@ export type WorkspaceApi = {
   setView: (v: ViewState) => void;
   setForm: (patch: Partial<PinForm>) => void;
   placePin: (versionId: string, x: number, y: number) => void;
+  /** A finished 圈範圍 gesture: opens the composer with the computed region. */
+  placeRegion: (versionId: string, region: AnnotationRegion) => void;
   commitPin: () => void;
   cancelPin: () => void;
+  setPreviewStroke: (id: string | null) => void;
   selectPin: (id: string | null) => void;
   toggleResolve: (id: string) => void;
   addStroke: (versionId: string, points: Point[]) => void;
