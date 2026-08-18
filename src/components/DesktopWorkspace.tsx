@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { ColorMode, CompareMode, Tool } from "../lib/types";
+import { ProposalControls } from "../features/visual-proposal/ProposalControls";
 import { CommentCard } from "./CommentCard";
 import { PinFields } from "./PinFields";
 import { UploadZone } from "./UploadZone";
@@ -118,6 +119,21 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             onChange={(e) => api.setView({ ...view, wipe: Number(e.target.value) })}
           />
         )}
+
+        <details className="proposal-desktop-wrap">
+          <summary
+            className="btn btn-sm"
+            onClick={() => {
+              api.setTool("pan");
+              api.selectPin(null);
+            }}
+          >
+            視覺提案
+          </summary>
+          <div className="proposal-desktop-popover">
+            <ProposalControls roomId={room.id} versionId={view.versionId} authorName={api.guest.name} />
+          </div>
+        </details>
 
         <button className="btn btn-sm" onClick={api.undo} disabled={!api.canUndo}>
           復原
