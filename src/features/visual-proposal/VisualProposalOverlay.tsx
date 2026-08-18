@@ -49,6 +49,7 @@ function angle(a: { x: number; y: number }, b: { x: number; y: number }) {
 export function VisualProposalOverlay({ roomId, versionId, authorName, compact }: Props) {
   const proposal = useProposalStore(roomId, versionId, authorName);
   const gesture = useRef<Gesture | null>(null);
+  const resize = useRef<{ id: string; cx: number; cy: number; startDist: number; startWidth: number } | null>(null);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
 
   const { active, editing, visible, compareOriginal, selectedItem } = proposal;
@@ -157,7 +158,6 @@ export function VisualProposalOverlay({ roomId, versionId, authorName, compact }
   };
 
   // Corner resize handle (mouse / single-finger): scale width from centre distance.
-  const resize = useRef<{ id: string; cx: number; cy: number; startDist: number; startWidth: number } | null>(null);
   const onHandleDown = (event: ReactPointerEvent<HTMLElement>) => {
     if (!selectedItem) return;
     event.stopPropagation();
