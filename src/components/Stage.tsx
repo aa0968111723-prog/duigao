@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { Point, Version } from "../lib/types";
+import { VisualProposalOverlay } from "../features/visual-proposal/VisualProposalOverlay";
 import { nextPinNumber, pinNumber, type WorkspaceApi } from "./api";
 
 type Rect = { left: number; top: number; width: number; height: number };
@@ -238,6 +239,8 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
               />
             )}
           </svg>
+
+          <VisualProposalOverlay roomId={room.id} versionId={version.id} authorName={guest.name} compact={compact} />
 
           {pins.map((pin) => {
             const n = pinNumber(room, pin.id);

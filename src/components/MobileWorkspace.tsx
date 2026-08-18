@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { ColorMode, CompareMode, Tool } from "../lib/types";
 import type { CollabStatus } from "../lib/peer";
 import { useViewport } from "../hooks/useViewport";
+import { ProposalDock } from "../features/visual-proposal/ProposalDock";
+import { pruneProposalVersions } from "../features/visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "./BottomSheet";
 import { CommentCard } from "./CommentCard";
 import { PinFields } from "./PinFields";
@@ -40,8 +42,17 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [snap, setSnap] = useState<SheetSnap>("peek");
   const [tab, setTab] = useState<"items" | "chat">("items");
   const [more, setMore] = useState(false);
+  const [proposalMode, setProposalMode] = useState(false);
+  const [dockHeight, setDockHeight] = useState(0);
   const [composeInset, setComposeInset] = useState(0);
   const chatRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    pruneProposalVersions(
+      room.id,
+      room.versions.map((v) => v.id),
+    );
+  }, [room.id, room.versions]);
 
   const sendChat = () => {
     api.sendChat();
@@ -67,14 +78,15 @@ export function MobileWorkspace({ api, presence }: Props) {
     else setComposeInset(0);
   }, [draftPin]);
 
-  const showHint = !draftPin && !api.coachSeen && room.comments.length === 0;
+  const showHint = !draftPin && !proposalMode && !api.coachSeen && room.comments.length === 0;
 
   return (
     <div
-      className="m-app"
+      className={`m-app ${proposalMode ? "is-proposal" : ""}`}
       style={{
         ["--m-peek" as string]: hasThread ? "52px" : "0px",
         ["--m-compose" as string]: `${composeInset}px`,
+        ["--m-proposal" as string]: `${dockHeight}px`,
       }}
     >
       <header className="m-top">
@@ -135,6 +147,17 @@ export function MobileWorkspace({ api, presence }: Props) {
       </div>
 
       <div className="m-bottom">
+        {proposalMode ? (
+          <ProposalDock
+            roomId={room.id}
+            versionId={view.versionId}
+            authorName={api.guest.name}
+            showToast={api.showToast}
+            onExit={() => setProposalMode(false)}
+            onHeight={setDockHeight}
+          />
+        ) : (
+          <>
         {hasThread && (
           <DragSheet
             snap={snap}
@@ -250,6 +273,8 @@ export function MobileWorkspace({ api, presence }: Props) {
             <span>討論</span>
           </button>
         </nav>
+          </>
+        )}
       </div>
 
       {draftPin && (
@@ -271,6 +296,19 @@ export function MobileWorkspace({ api, presence }: Props) {
       {more && (
         <ModalSheet title="更多" onClose={() => setMore(false)}>
           <div className="m-more">
+            <button
+              type="button"
+              className="m-row"
+              onClick={() => {
+                api.setTool("pan");
+                api.selectPin(null);
+                setMore(false);
+                setProposalMode(true);
+              }}
+            >
+              視覺提案 · 素材 / 字體 / 文案 / 背景
+            </button>
+
             <div className="m-more-group">
               <span className="m-more-label">顯示</span>
               <div className="m-chiprow">
@@ -346,6 +384,7 @@ export function MobileWorkspace({ api, presence }: Props) {
           </div>
         </ModalSheet>
       )}
+
     </div>
   );
 }

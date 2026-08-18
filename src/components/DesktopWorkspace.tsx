@@ -1,5 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ColorMode, CompareMode, Tool } from "../lib/types";
+import { ProposalControls } from "../features/visual-proposal/ProposalControls";
+import { pruneProposalVersions } from "../features/visual-proposal/store";
 import { CommentCard } from "./CommentCard";
 import { PinFields } from "./PinFields";
 import { UploadZone } from "./UploadZone";
@@ -28,6 +30,13 @@ const COMPARE_MODES: { id: CompareMode; label: string }[] = [
 /** Desktop keeps the familiar three-pane layout: stage, toolbar, side panel. */
 export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   const { room, view, tool, draftPin } = api;
+
+  useEffect(() => {
+    pruneProposalVersions(
+      room.id,
+      room.versions.map((v) => v.id),
+    );
+  }, [room.id, room.versions]);
 
   return (
     <main className="workspace">
@@ -118,6 +127,21 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             onChange={(e) => api.setView({ ...view, wipe: Number(e.target.value) })}
           />
         )}
+
+        <details className="proposal-desktop-wrap">
+          <summary
+            className="btn btn-sm"
+            onClick={() => {
+              api.setTool("pan");
+              api.selectPin(null);
+            }}
+          >
+            視覺提案
+          </summary>
+          <div className="proposal-desktop-popover">
+            <ProposalControls roomId={room.id} versionId={view.versionId} authorName={api.guest.name} showToast={api.showToast} />
+          </div>
+        </details>
 
         <button className="btn btn-sm" onClick={api.undo} disabled={!api.canUndo}>
           復原
