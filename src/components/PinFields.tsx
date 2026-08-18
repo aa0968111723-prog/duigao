@@ -61,9 +61,17 @@ export function PinFields({ api, autoFocus }: { api: WorkspaceApi; autoFocus?: b
             type="button"
             className={`m-chip ${reason === r.label ? "is-on" : ""}`}
             onClick={() => {
+              // A chip alone is valid feedback: prefill the note with it, but
+              // never clobber something the person typed themselves.
               const next = reason === r.label ? null : r.label;
+              const body = form.body.trim();
+              const untouched = !body || body === reason;
               setReason(next);
-              if (next) api.setForm({ type: r.type });
+              if (next) {
+                api.setForm(untouched ? { type: r.type, body: next } : { type: r.type });
+              } else if (untouched) {
+                api.setForm({ body: "" });
+              }
             }}
           >
             {r.label}

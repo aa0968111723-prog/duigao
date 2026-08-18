@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
   VERSION_LABELS,
+  type AnnotationRegion,
   type ChatMessage,
   type CommentPin,
   type CommentReply,
@@ -13,6 +14,7 @@ import {
   type Version,
   type ViewState,
 } from "./lib/types";
+import { regionCenter } from "./lib/region";
 import { roomCode, uid } from "./lib/id";
 import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
@@ -85,6 +87,7 @@ export function App() {
   const [draftPin, setDraftPin] = useState<PinDraft | null>(null);
   const [form, setFormState] = useState<PinForm>(EMPTY_FORM);
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
+  const [previewStrokeId, setPreviewStrokeId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
@@ -95,6 +98,8 @@ export function App() {
 
   const { toasts, showToast, dismiss } = useToasts();
   const isMobile = useIsMobile();
+  const isMobileRef = useRef(isMobile);
+  isMobileRef.current = isMobile;
   const collabRef = useRef<Collab | null>(null);
   const roomRef = useRef<Room | null>(null);
   const viewRef = useRef<ViewState>(view);
@@ -346,14 +351,34 @@ export function App() {
     [persist, pushUndo, showToast, undoLast],
   );
 
+  /**
+   * Feedback tasks are one-shot on mobile: sent or cancelled, the app returns
+   * to clean viewing. Desktop keeps its persistent pin tool; the region
+   * gesture is one-shot everywhere.
+   */
+  const finishTask = useCallback(() => {
+    setTool((t) => (t === "region" || (isMobileRef.current && t === "pin") ? "pan" : t));
+  }, []);
+
   const cancelPin = useCallback(() => {
     setDraftPin(null);
     setFormState(EMPTY_FORM);
-  }, []);
+    finishTask();
+  }, [finishTask]);
 
   const placePin = useCallback((versionId: string, x: number, y: number) => {
     setSelectedPinId(null);
+    setPreviewStrokeId(null);
     setDraftPin({ versionId, x, y });
+    setFormState(EMPTY_FORM);
+  }, []);
+
+  /** A finished 圈範圍 gesture: the freehand stroke is gone, only its region remains as a draft. */
+  const placeRegion = useCallback((versionId: string, region: AnnotationRegion) => {
+    const center = regionCenter(region);
+    setSelectedPinId(null);
+    setPreviewStrokeId(null);
+    setDraftPin({ versionId, x: center.x, y: center.y, region });
     setFormState(EMPTY_FORM);
   }, []);
 
@@ -371,6 +396,7 @@ export function App() {
       authorColor: guest.color,
       x: draftPin.x,
       y: draftPin.y,
+      ...(draftPin.region ? { region: draftPin.region } : {}),
       body: form.body.trim(),
       suggestion: form.suggestion.trim(),
       problemType: form.type,
@@ -594,11 +620,24 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (draftPin) cancelPin();
+      else if (tool === "region") setTool("pan");
       else if (selectedPinId) setSelectedPinId(null);
+      else if (previewStrokeId) setPreviewStrokeId(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [draftPin, selectedPinId, cancelPin]);
+  }, [draftPin, selectedPinId, previewStrokeId, tool, cancelPin]);
+
+  /** Switching tools always drops a legacy-stroke preview, keeping view mode clean. */
+  const setToolAndClear = useCallback((t: Tool) => {
+    setTool(t);
+    setPreviewStrokeId(null);
+  }, []);
+
+  const selectPinAndClear = useCallback((id: string | null) => {
+    setSelectedPinId(id);
+    setPreviewStrokeId(null);
+  }, []);
 
   const api: WorkspaceApi | null = room
     ? {
@@ -609,17 +648,20 @@ export function App() {
         draftPin,
         form,
         selectedPinId,
+        previewStrokeId,
         chatInput,
         saveState,
         coachSeen,
         canUndo: undoCount > 0,
-        setTool,
+        setTool: setToolAndClear,
         setView: updateView,
         setForm: (patch) => setFormState((f) => ({ ...f, ...patch })),
         placePin,
+        placeRegion,
         commitPin,
         cancelPin,
-        selectPin: setSelectedPinId,
+        setPreviewStroke: setPreviewStrokeId,
+        selectPin: selectPinAndClear,
         toggleResolve,
         addStroke,
         eraseStroke,
@@ -642,6 +684,7 @@ export function App() {
           clearUndo();
           setRoom(null);
           setSelectedPinId(null);
+          setPreviewStrokeId(null);
           location.hash = "";
         },
       }
