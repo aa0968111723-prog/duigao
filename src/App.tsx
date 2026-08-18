@@ -19,6 +19,7 @@ import { roomCode, uid } from "./lib/id";
 import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
+import { readInviteFromUrl } from "./cloud/invite";
 import { syncStatusLabel, type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
 import { ToastStack, useToasts } from "./toast";
@@ -188,10 +189,22 @@ export function App() {
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
 
+  // Cache-first load for cloud guests: a room seen before renders instantly
+  // from IndexedDB while auth + join + the fresh cloud snapshot catch up.
+  useEffect(() => {
+    if (!guest || !isCloudConfigured || !isGuestSession) return;
+    const url = readInviteFromUrl();
+    if (!url?.invite) return;
+    loadRoom(url.roomId).then((cached) => {
+      if (cached && !roomRef.current) applyRemoteRoom(cached);
+    });
+  }, [guest, isGuestSession, applyRemoteRoom]);
+
   useEffect(() => {
     if (!guest) return;
-    // Cloud is the source of truth when configured; PeerJS stays for local mode.
-    if (isCloudConfigured) return;
+    // Cloud is the source of truth when configured; PeerJS stays for local
+    // mode and for legacy #room=<code> links that carry no invite token.
+    if (isCloudConfigured && readInviteFromUrl()?.invite) return;
     const code = readRoomCodeFromUrl();
     if (!code) return;
 
@@ -569,6 +582,37 @@ export function App() {
     collabRef.current = collab;
   }, [applyRemoteRoom]);
 
+  /**
+   * Local mode serves the room straight from this device, so host whenever a
+   * room is open — waiting for a 分享 tap left every reopened room unreachable
+   * to partners. (With cloud configured, Supabase serves the room instead.)
+   */
+  useEffect(() => {
+    if (isCloudConfigured || isGuestSession || !room?.id) return;
+    startHosting();
+    return () => {
+      collabRef.current?.destroy();
+      collabRef.current = null;
+      setCollabStatus(null);
+      setPeerCount(0);
+    };
+  }, [isGuestSession, room?.id, startHosting]);
+
+  // Phones freeze background tabs and drop sockets; re-dial the peer link the
+  // moment we are visible or online again. Harmless when no peer is in use.
+  useEffect(() => {
+    const revive = () => {
+      if (document.visibilityState === "visible") collabRef.current?.retryNow();
+    };
+    const onOnline = () => collabRef.current?.retryNow();
+    document.addEventListener("visibilitychange", revive);
+    window.addEventListener("online", onOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", revive);
+      window.removeEventListener("online", onOnline);
+    };
+  }, []);
+
   const localShareUrl = useMemo(() => {
     if (!room) return "";
     return `${location.origin}${location.pathname}#room=${room.id}`;
@@ -721,19 +765,43 @@ export function App() {
 
   if (!hasVersions) {
     if (isGuestSession) {
+      // Cloud serves invite links; plain #room= links ride the peer channel.
+      const cloudGuest = isCloudConfigured && Boolean(readInviteFromUrl()?.invite);
+      const stalled = cloudGuest
+        ? cloud.status === "error"
+        : collabStatus === "waiting" || collabStatus === "error";
+      const badLink = cloudGuest && cloud.inviteInvalid;
       return (
         <div className="onboard">
           <div className="onboard-card">
             <h1 className="onboard-title">文宣討論區</h1>
             <p className="onboard-hint">
-              {isCloudConfigured
-                ? cloud.status === "error"
-                  ? "這個分享連結可能已失效，請向主辦方取得新連結。"
-                  : "正在載入夥伴分享的文宣…"
-                : collabStatus === "error"
-                  ? "連不上主辦方，請對方重新打開連結後再試一次。"
-                  : "正在載入夥伴分享的文宣…"}
+              {!stalled
+                ? "正在載入文宣…"
+                : badLink
+                  ? "分享連結無效或已失效"
+                  : "目前暫時無法載入這個討論，請稍後再試。"}
             </p>
+            {stalled && (
+              <>
+                <p className="onboard-note">
+                  {badLink
+                    ? "請向分享的人要一個新的連結。"
+                    : "可能是網路不太穩，會自動重試；稍後再打開這個連結也可以。"}
+                </p>
+                {!badLink && (
+                  <button
+                    className="btn btn-primary btn-block"
+                    onClick={() => {
+                      if (cloudGuest) cloudRef.current.retry();
+                      else collabRef.current?.retryNow();
+                    }}
+                  >
+                    再試一次
+                  </button>
+                )}
+              </>
+            )}
           </div>
           <ToastStack toasts={toasts} onDismiss={dismiss} />
         </div>
@@ -794,8 +862,8 @@ export function App() {
                       title={
                         collabStatus === "online"
                           ? "已與其他人同步"
-                          : collabStatus === "connecting"
-                            ? "正在建立同步連線"
+                          : collabStatus === "connecting" || collabStatus === "waiting"
+                            ? "正在建立同步連線，會自動重試"
                             : "目前離線，內容已保存在這台裝置"
                       }
                     >
@@ -805,7 +873,9 @@ export function App() {
                           : "已同步"
                         : collabStatus === "connecting"
                           ? "正在同步"
-                          : "目前離線"}
+                          : collabStatus === "waiting"
+                            ? "等待連線"
+                            : "目前離線"}
                     </span>
                   )}
               <span className="me" style={{ background: guest.color }} title={guest.name}>

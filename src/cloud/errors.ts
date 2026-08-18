@@ -22,3 +22,13 @@ export function isRevisionConflict(err: unknown): boolean {
 export function isInvalidInvite(err: unknown): boolean {
   return messageOf(err).includes("invalid invite");
 }
+
+/**
+ * A retried insert that already landed (the reply was lost, not the write).
+ * Queued tasks treat this as success so reconnects never duplicate entities
+ * and never re-queue forever.
+ */
+export function isDuplicateKey(err: unknown): boolean {
+  const m = messageOf(err);
+  return m.includes("duplicate key") || m.includes("23505");
+}
