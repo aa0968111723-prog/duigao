@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useProposalStore } from "./store";
 import { ProposalElementControls } from "./ProposalElementControls";
 import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
@@ -79,9 +79,11 @@ export function ProposalDock({ roomId, versionId, authorName, showToast, onExit,
   };
 
   const holdOriginal = {
-    onPointerDown: () => proposal.setCompareOriginal(true),
+    onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      proposal.setCompareOriginal(true);
+    },
     onPointerUp: () => proposal.setCompareOriginal(false),
-    onPointerLeave: () => proposal.setCompareOriginal(false),
     onPointerCancel: () => proposal.setCompareOriginal(false),
   };
 
