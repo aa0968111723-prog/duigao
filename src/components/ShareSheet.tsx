@@ -4,16 +4,28 @@ import type { ShowToast } from "../toast";
 
 type Props = {
   title: string;
-  url: string;
+  url: string | null;
+  cloud?: boolean;
   onClose: () => void;
   onToast: ShowToast;
 };
 
 /** Share is a bottom sheet on every size: copy, LINE, or the OS share sheet. */
-export function ShareSheet({ title, url, onClose, onToast }: Props) {
+export function ShareSheet({ title, url, cloud, onClose, onToast }: Props) {
   const [copied, setCopied] = useState(false);
-  const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(`一起討論「${title}」：${url}`)}`;
   const canNativeShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+
+  if (url == null) {
+    return (
+      <ModalSheet title="分享給夥伴" onClose={onClose}>
+        <div className="m-more">
+          <p className="m-share-note">正在建立分享連結…</p>
+        </div>
+      </ModalSheet>
+    );
+  }
+
+  const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(`一起討論「${title}」：${url}`)}`;
 
   const copy = async () => {
     try {
@@ -39,7 +51,11 @@ export function ShareSheet({ title, url, onClose, onToast }: Props) {
   return (
     <ModalSheet title="分享給夥伴" onClose={onClose}>
       <div className="m-more">
-        <p className="m-share-note">夥伴打開連結、輸入名字就能一起看，不會改到原稿。</p>
+        <p className="m-share-note">
+          {cloud
+            ? "分享連結已建立，主辦方不用保持頁面開著。夥伴打開連結、輸入名字就能一起看。"
+            : "夥伴打開連結、輸入名字就能一起看，不會改到原稿。"}
+        </p>
         <button type="button" className="m-row m-row-primary" onClick={copy}>
           {copied ? "已複製連結" : "複製連結"}
         </button>

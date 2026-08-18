@@ -15,6 +15,9 @@ import {
 import { roomCode, uid } from "./lib/id";
 import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
+import { isCloudConfigured } from "./cloud/config";
+import { syncStatusLabel, type SyncStatus } from "./cloud/types";
+import { useCloudRoom } from "./cloud/useCloudRoom";
 import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { DesktopWorkspace } from "./components/DesktopWorkspace";
@@ -50,8 +53,16 @@ function initialView(room: Room | null): ViewState {
 }
 
 function readRoomCodeFromUrl(): string | null {
-  const m = /[#?&]room=([a-z0-9]+)/i.exec(location.hash + location.search);
-  return m ? m[1] : null;
+  const m = /[#?&]room=([^&]+)/i.exec(location.hash + location.search);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+/** Map cloud sync state onto the small presence dot the mobile UI already shows. */
+function syncToPresence(status: SyncStatus): CollabStatus | null {
+  if (status === "synced") return "online";
+  if (status === "connecting" || status === "syncing") return "connecting";
+  if (status === "offline-pending" || status === "error") return "error";
+  return null;
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -165,8 +176,16 @@ export function App() {
     });
   }, []);
 
+  // Cloud persistence (only active when VITE_SUPABASE_* are set). Inert in
+  // local-only mode, so the IndexedDB + PeerJS path below is unchanged.
+  const cloud = useCloudRoom({ guest, room, isGuestSession, onSnapshot: applyRemoteRoom, showToast });
+  const cloudRef = useRef(cloud);
+  cloudRef.current = cloud;
+
   useEffect(() => {
     if (!guest) return;
+    // Cloud is the source of truth when configured; PeerJS stays for local mode.
+    if (isCloudConfigured) return;
     const code = readRoomCodeFromUrl();
     if (!code) return;
 
@@ -309,6 +328,9 @@ export function App() {
           return v;
         });
         persist(next);
+        newVersions.forEach((v, i) =>
+          cloudRef.current.writes.addVersion(v.label, current.versions.length + i, v.imageDataUrl),
+        );
         const added = newVersions[newVersions.length - 1];
         if (!created) {
           showToast(newVersions.length > 1 ? `已新增 ${newVersions.length} 版` : `已新增${added.label}`, {
@@ -359,6 +381,7 @@ export function App() {
     const number = current ? nextPinNumber(current, draftPin.versionId) : 1;
     if (current) pushUndo(current);
     updateRoom((r) => ({ ...r, comments: [...r.comments, pin] }));
+    cloudRef.current.writes.insertComment(pin);
     markCoachSeen();
     cancelPin();
     showToast(`已新增修改點 ${number}`, {
@@ -375,6 +398,7 @@ export function App() {
       if (!pin) return;
       const willResolve = !pin.resolved;
       const number = pinNumber(current, pinId);
+      cloudRef.current.writes.setResolved(pinId, willResolve);
       mutateWithUndo(
         (r) => ({
           ...r,
@@ -401,6 +425,7 @@ export function App() {
         createdAt: Date.now(),
       };
       updateRoom((r) => ({ ...r, strokes: [...r.strokes, stroke] }));
+      cloudRef.current.writes.insertStroke(stroke);
     },
     [guest, pushUndo, updateRoom],
   );
@@ -409,6 +434,7 @@ export function App() {
     (strokeId: string) => {
       const current = roomRef.current;
       if (!current || !current.strokes.some((s) => s.id === strokeId)) return;
+      cloudRef.current.writes.deleteStroke(strokeId);
       mutateWithUndo((r) => ({ ...r, strokes: r.strokes.filter((s) => s.id !== strokeId) }), "已刪除圈畫");
     },
     [mutateWithUndo],
@@ -426,10 +452,12 @@ export function App() {
       createdAt: Date.now(),
     };
     updateRoom((r) => ({ ...r, messages: [...r.messages, msg] }));
+    cloudRef.current.writes.insertMessage(msg);
     setChatInput("");
   }, [guest, chatInput, claim, updateRoom]);
 
   const startHosting = useCallback(() => {
+    if (isCloudConfigured) return;
     const current = roomRef.current;
     if (!current || collabRef.current) return;
     const collab = new Collab("host", current.id, {
@@ -451,10 +479,26 @@ export function App() {
     collabRef.current = collab;
   }, [applyRemoteRoom]);
 
-  const shareUrl = useMemo(() => {
+  const localShareUrl = useMemo(() => {
     if (!room) return "";
     return `${location.origin}${location.pathname}#room=${room.id}`;
   }, [room]);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+
+  const openShare = useCallback(() => {
+    if (!roomRef.current) return;
+    setShareOpen(true);
+    if (isCloudConfigured) {
+      setShareUrl(null); // "正在建立分享連結…" until the cloud room is ready
+      cloudRef.current
+        .ensureShared()
+        .then((url) => setShareUrl(url ?? localShareUrl))
+        .catch(() => setShareUrl(localShareUrl));
+    } else {
+      startHosting();
+      setShareUrl(localShareUrl);
+    }
+  }, [localShareUrl, startHosting]);
 
   const copySummary = useCallback(async () => {
     const current = roomRef.current;
@@ -519,14 +563,14 @@ export function App() {
         setChatInput,
         sendChat,
         addFiles,
-        setTitle: (title) => updateRoom((r) => ({ ...r, title })),
+        setTitle: (title) => {
+          updateRoom((r) => ({ ...r, title }));
+          cloudRef.current.writes.setTitle(title);
+        },
         copySummary,
         markCoachSeen,
         showToast,
-        openShare: () => {
-          startHosting();
-          setShareOpen(true);
-        },
+        openShare,
         goHome: () => {
           clearUndo();
           setRoom(null);
@@ -572,9 +616,13 @@ export function App() {
           <div className="onboard-card">
             <h1 className="onboard-title">文宣討論區</h1>
             <p className="onboard-hint">
-              {collabStatus === "error"
-                ? "連不上主辦方，請對方重新打開連結後再試一次。"
-                : "正在載入夥伴分享的文宣…"}
+              {isCloudConfigured
+                ? cloud.status === "error"
+                  ? "這個分享連結可能已失效，請向主辦方取得新連結。"
+                  : "正在載入夥伴分享的文宣…"
+                : collabStatus === "error"
+                  ? "連不上主辦方，請對方重新打開連結後再試一次。"
+                  : "正在載入夥伴分享的文宣…"}
             </p>
           </div>
           <ToastStack toasts={toasts} onDismiss={dismiss} />
@@ -592,7 +640,13 @@ export function App() {
   return (
     <>
       {isMobile ? (
-        <MobileWorkspace api={api!} presence={{ status: collabStatus, peers: peerCount }} />
+        <MobileWorkspace
+          api={api!}
+          presence={{
+            status: isCloudConfigured ? syncToPresence(cloud.status) : collabStatus,
+            peers: isCloudConfigured ? cloud.online : peerCount,
+          }}
+        />
       ) : (
         <div className="app">
           <header className="topbar">
@@ -612,26 +666,38 @@ export function App() {
                   {saveState === "saving" ? "儲存中…" : saveState === "saved" ? "已儲存" : "儲存失敗"}
                 </span>
               )}
-              {collabStatus && (
-                <span
-                  className={`badge badge-${collabStatus}`}
-                  title={
-                    collabStatus === "online"
-                      ? "已與其他人同步"
-                      : collabStatus === "connecting"
-                        ? "正在建立同步連線"
-                        : "目前離線，內容已保存在這台裝置"
-                  }
-                >
-                  {collabStatus === "online"
-                    ? peerCount > 0
-                      ? `已同步 · ${peerCount} 人`
-                      : "已同步"
-                    : collabStatus === "connecting"
-                      ? "正在同步"
-                      : "目前離線"}
-                </span>
-              )}
+              {isCloudConfigured
+                ? cloud.status !== "local-only" && (
+                    <span
+                      className={`badge badge-${syncToPresence(cloud.status) ?? "closed"}`}
+                      title="資料保存在雲端，主辦方不用保持頁面開著"
+                      onClick={cloud.status === "error" || cloud.status === "offline-pending" ? () => window.location.reload() : undefined}
+                    >
+                      {cloud.online > 1 && cloud.status === "synced"
+                        ? `已同步 · ${cloud.online} 人`
+                        : syncStatusLabel(cloud.status)}
+                    </span>
+                  )
+                : collabStatus && (
+                    <span
+                      className={`badge badge-${collabStatus}`}
+                      title={
+                        collabStatus === "online"
+                          ? "已與其他人同步"
+                          : collabStatus === "connecting"
+                            ? "正在建立同步連線"
+                            : "目前離線，內容已保存在這台裝置"
+                      }
+                    >
+                      {collabStatus === "online"
+                        ? peerCount > 0
+                          ? `已同步 · ${peerCount} 人`
+                          : "已同步"
+                        : collabStatus === "connecting"
+                          ? "正在同步"
+                          : "目前離線"}
+                    </span>
+                  )}
               <span className="me" style={{ background: guest.color }} title={guest.name}>
                 {guest.name.slice(0, 1)}
               </span>
@@ -660,7 +726,8 @@ export function App() {
       {shareOpen && room && (
         <ShareSheet
           title={room.title}
-          url={shareUrl}
+          url={isCloudConfigured ? shareUrl : localShareUrl}
+          cloud={isCloudConfigured}
           onClose={() => setShareOpen(false)}
           onToast={showToast}
         />

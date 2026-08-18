@@ -352,6 +352,58 @@ function persist(roomId: string) {
       states.set(roomId, { ...snapshot(roomId), error: friendlyDbError(err) });
       emit(roomId);
     });
+  pushChangedDocs(roomId);
+}
+
+/* ---------- cloud bridge (additive; inert until a sync is registered) ---------- */
+
+type CloudDocPush = (doc: VisualProposal) => void;
+let cloudSync: { roomId: string; push: CloudDocPush } | null = null;
+const lastPushed = new Map<string, Map<string, VisualProposal>>();
+
+/** Wire (or clear) cloud sync for a room. `push` receives each changed proposal. */
+export function setProposalCloudSync(roomId: string, push: CloudDocPush | null): void {
+  if (!push) {
+    if (cloudSync?.roomId === roomId) cloudSync = null;
+    return;
+  }
+  cloudSync = { roomId, push };
+  // Seed baseline from current docs so we do not re-push what is already known.
+  const map = new Map<string, VisualProposal>();
+  for (const doc of snapshot(roomId).docs) map.set(doc.id, doc);
+  lastPushed.set(roomId, map);
+}
+
+function pushChangedDocs(roomId: string) {
+  if (!cloudSync || cloudSync.roomId !== roomId) return;
+  const map = lastPushed.get(roomId) ?? new Map<string, VisualProposal>();
+  for (const doc of snapshot(roomId).docs) {
+    if (map.get(doc.id) !== doc) {
+      map.set(doc.id, doc);
+      cloudSync.push(doc);
+    }
+  }
+  lastPushed.set(roomId, map);
+}
+
+/** Snapshot of a room's proposals (used to migrate local proposals to the cloud). */
+export function getProposalDocs(roomId: string): VisualProposal[] {
+  return snapshot(roomId).docs;
+}
+
+/** Merge proposals loaded from the cloud into the store without echoing them back. */
+export function applyCloudProposals(roomId: string, incoming: VisualProposal[]): void {
+  if (incoming.length === 0) return;
+  const current = snapshot(roomId);
+  const byId = new Map(current.docs.map((d) => [d.id, d] as const));
+  for (const doc of incoming) byId.set(doc.id, doc);
+  const docs = [...byId.values()];
+  states.set(roomId, { ...current, docs, hydrated: true });
+  const map = lastPushed.get(roomId) ?? new Map<string, VisualProposal>();
+  for (const doc of incoming) map.set(doc.id, byId.get(doc.id)!);
+  lastPushed.set(roomId, map);
+  emit(roomId);
+  void savePersisted(snapshot(roomId)).catch(() => undefined);
 }
 
 function set(roomId: string, next: ProposalRuntimeState) {
