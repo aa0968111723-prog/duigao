@@ -13,7 +13,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isInvalidInvite, isRevisionConflict } from "./errors";
+import { isDuplicateKey, isInvalidInvite, isRevisionConflict } from "./errors";
 import { buildInviteUrl, generateInviteToken, readInviteFromUrl } from "./invite";
 import { getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -90,6 +90,8 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   const [status, setStatus] = useState<SyncStatus>(isCloudConfigured ? "connecting" : "local-only");
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteInvalid, setInviteInvalid] = useState(false);
+  const [bindNonce, setBindNonce] = useState(0);
 
   const boundRef = useRef<string | null>(null); // cloud room id
   const unsubRef = useRef<Unsubscribe | null>(null);
@@ -126,8 +128,9 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     for (const task of queue) {
       try {
         await task();
-      } catch {
-        pending.current.push(task);
+      } catch (err) {
+        // The write already landed on a previous attempt: done, not an error.
+        if (!isDuplicateKey(err)) pending.current.push(task);
       }
     }
     setStatus(pending.current.length ? "offline-pending" : "synced");
@@ -140,7 +143,11 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
       setStatus("syncing");
       task()
         .then(() => setStatus(pending.current.length ? "offline-pending" : "synced"))
-        .catch(() => {
+        .catch((err) => {
+          if (isDuplicateKey(err)) {
+            setStatus(pending.current.length ? "offline-pending" : "synced");
+            return;
+          }
           pending.current.push(task);
           setStatus("offline-pending");
         });
@@ -171,6 +178,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
 
     let cancelled = false;
     setStatus("connecting");
+    setInviteInvalid(false);
     (async () => {
       try {
         await ensureSession(supabase);
@@ -227,6 +235,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
       } catch (err) {
         if (cancelled) return;
         if (isInvalidInvite(err)) {
+          setInviteInvalid(true);
           showToast("這個分享連結已失效，請向主辦方取得新連結", { tone: "error" });
         }
         setStatus("error");
@@ -241,14 +250,40 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
       boundRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, guest?.id, isGuestSession, room?.id]);
+  }, [supabase, guest?.id, isGuestSession, room?.id, bindNonce]);
 
-  // Retry queued writes when the browser regains connectivity.
+  /**
+   * Self-heal after phone freezes / network loss: whenever the tab is visible
+   * or online again, push queued writes out and pull the latest snapshot, so
+   * coming back from LINE never leaves the room stale or stuck.
+   */
   useEffect(() => {
-    const onOnline = () => void flushPending();
-    window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
-  }, [flushPending]);
+    const revive = () => {
+      void flushPending();
+      if (boundRef.current) void reload();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") revive();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", revive);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", revive);
+    };
+  }, [flushPending, reload]);
+
+  /** 再試一次: reload when bound, otherwise redo auth + join + load from scratch. */
+  const retry = useCallback(() => {
+    setInviteInvalid(false);
+    if (boundRef.current) {
+      void flushPending();
+      void reload();
+    } else {
+      setStatus("connecting");
+      setBindNonce((n) => n + 1);
+    }
+  }, [flushPending, reload]);
 
   const ensureShared = useCallback(async (): Promise<string | null> => {
     if (!supabase || !guest || !room) return null;
@@ -318,5 +353,15 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     setProposalPref: (versionId, choice) => run(() => setPreference(supabase!, boundRef.current!, versionId, choice)),
   };
 
-  return { status, online, inviteUrl, boundRoomId: boundRef.current, active: Boolean(supabase), ensureShared, writes };
+  return {
+    status,
+    online,
+    inviteUrl,
+    inviteInvalid,
+    boundRoomId: boundRef.current,
+    active: Boolean(supabase),
+    ensureShared,
+    retry,
+    writes,
+  };
 }
