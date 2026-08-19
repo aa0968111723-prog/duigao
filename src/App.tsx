@@ -19,7 +19,7 @@ import { roomCode, uid } from "./lib/id";
 import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
-import { readInviteFromUrl } from "./cloud/invite";
+import { readRoomLink } from "./cloud/invite";
 import { syncStatusLabel, type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
 import { ToastStack, useToasts } from "./toast";
@@ -27,7 +27,7 @@ import { useIsMobile } from "./hooks/useIsMobile";
 import { DesktopWorkspace } from "./components/DesktopWorkspace";
 import { MobileWorkspace } from "./components/MobileWorkspace";
 import { Home } from "./components/Home";
-import { ShareSheet } from "./components/ShareSheet";
+import { ShareSheet, type ShareState } from "./components/ShareSheet";
 import {
   nextPinNumber,
   pinNumber,
@@ -54,11 +54,6 @@ function initialView(room: Room | null): ViewState {
   const first = room?.versions[0]?.id ?? "";
   const second = room?.versions[1]?.id ?? first;
   return { versionId: first, compareId: second, colorMode: "color", compareMode: "single", split: 0.5, wipe: 0.5 };
-}
-
-function readRoomCodeFromUrl(): string | null {
-  const m = /[#?&]room=([^&]+)/i.exec(location.hash + location.search);
-  return m ? decodeURIComponent(m[1]) : null;
 }
 
 /** Map cloud sync state onto the small presence dot the mobile UI already shows. */
@@ -111,7 +106,16 @@ export function App() {
   roomRef.current = room;
   viewRef.current = view;
 
-  const isGuestSession = useMemo(() => readRoomCodeFromUrl() != null, []);
+  /**
+   * How this tab was opened. Read once: `main.tsx` has already upgraded a
+   * legacy owner link to its cloud invite URL before the first render.
+   */
+  const roomLink = useMemo(() => readRoomLink(), []);
+  const isGuestSession = roomLink.kind !== "none";
+  /** An old `#room=<6碼>` link this device cannot upgrade (a partner's phone). */
+  const isLegacyLink = roomLink.kind === "legacy";
+  /** Cloud drives this session; a legacy link can only ride the peer channel. */
+  const cloudSession = isCloudConfigured && !isLegacyLink;
 
   const markCoachSeen = useCallback(() => {
     setCoachSeen((seen) => {
@@ -192,20 +196,18 @@ export function App() {
   // Cache-first load for cloud guests: a room seen before renders instantly
   // from IndexedDB while auth + join + the fresh cloud snapshot catch up.
   useEffect(() => {
-    if (!guest || !isCloudConfigured || !isGuestSession) return;
-    const url = readInviteFromUrl();
-    if (!url?.invite) return;
-    loadRoom(url.roomId).then((cached) => {
+    if (!guest || !isCloudConfigured || roomLink.kind !== "cloud") return;
+    loadRoom(roomLink.roomId).then((cached) => {
       if (cached && !roomRef.current) applyRemoteRoom(cached);
     });
-  }, [guest, isGuestSession, applyRemoteRoom]);
+  }, [guest, roomLink, applyRemoteRoom]);
 
   useEffect(() => {
     if (!guest) return;
     // Cloud is the source of truth when configured; PeerJS stays for local
     // mode and for legacy #room=<code> links that carry no invite token.
-    if (isCloudConfigured && readInviteFromUrl()?.invite) return;
-    const code = readRoomCodeFromUrl();
+    if (isCloudConfigured && roomLink.kind === "cloud") return;
+    const code = roomLink.kind === "none" ? null : roomLink.roomId;
     if (!code) return;
 
     loadRoom(code).then((existing) => {
@@ -242,7 +244,7 @@ export function App() {
       collab.destroy();
       collabRef.current = null;
     };
-  }, [guest, applyRemoteRoom, showToast]);
+  }, [guest, roomLink, applyRemoteRoom, showToast]);
 
   const persist = useCallback(
     (next: Room) => {
@@ -613,26 +615,43 @@ export function App() {
     };
   }, []);
 
-  const localShareUrl = useMemo(() => {
-    if (!room) return "";
-    return `${location.origin}${location.pathname}#room=${room.id}`;
-  }, [room]);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareState, setShareState] = useState<ShareState>({ kind: "creating" });
 
+  /**
+   * A share link is only worth handing out if it still opens after the host
+   * closes the page — that means cloud `#room=<uuid>&invite=<token>` and
+   * nothing else. When the cloud room cannot be created we say so and offer a
+   * retry; we never quietly fall back to a legacy `#room=<6碼>` URL, which
+   * dies the moment this device goes away (PR #16).
+   */
   const openShare = useCallback(() => {
-    if (!roomRef.current) return;
+    const current = roomRef.current;
+    if (!current) return;
     setShareOpen(true);
+
+    if (isLegacyLink) {
+      setShareState({ kind: "legacy-guest" });
+      return;
+    }
     if (isCloudConfigured) {
-      setShareUrl(null); // "正在建立分享連結…" until the cloud room is ready
+      setShareState({ kind: "creating" });
       cloudRef.current
         .ensureShared()
-        .then((url) => setShareUrl(url ?? localShareUrl))
-        .catch(() => setShareUrl(localShareUrl));
-    } else {
-      startHosting();
-      setShareUrl(localShareUrl);
+        .then((res) => setShareState(res.ok ? { kind: "ready", url: res.url } : { kind: "failed" }))
+        .catch(() => setShareState({ kind: "failed" }));
+      return;
     }
-  }, [localShareUrl, startHosting]);
+    if (import.meta.env.DEV) {
+      // Dev-only peer link for local testing, labelled as temporary. Written
+      // against `import.meta.env.DEV` on purpose: the legacy URL is compiled
+      // out of production bundles entirely, not merely branched around.
+      startHosting();
+      setShareState({ kind: "local", url: `${location.origin}${location.pathname}#room=${current.id}` });
+      return;
+    }
+    // Deployed without VITE_SUPABASE_* — there is no permanent link to give.
+    setShareState({ kind: "unavailable" });
+  }, [isLegacyLink, startHosting]);
 
   const copySummary = useCallback(async () => {
     const current = roomRef.current;
@@ -765,12 +784,18 @@ export function App() {
 
   if (!hasVersions) {
     if (isGuestSession) {
-      // Cloud serves invite links; plain #room= links ride the peer channel.
-      const cloudGuest = isCloudConfigured && Boolean(readInviteFromUrl()?.invite);
+      // Cloud serves invite links; legacy #room=<6碼> links ride the peer channel.
+      const cloudGuest = cloudSession && roomLink.kind === "cloud";
       const stalled = cloudGuest
         ? cloud.status === "error"
         : collabStatus === "waiting" || collabStatus === "error";
       const badLink = cloudGuest && cloud.inviteInvalid;
+      /**
+       * A legacy link with the host offline can never load: there is no cloud
+       * room behind it and no local mapping to upgrade it with. Say that once
+       * instead of looping a generic retry the partner cannot win.
+       */
+      const legacyStalled = isLegacyLink && stalled;
       return (
         <div className="onboard">
           <div className="onboard-card">
@@ -778,27 +803,37 @@ export function App() {
             <p className="onboard-hint">
               {!stalled
                 ? "正在載入文宣…"
-                : badLink
-                  ? "分享連結無效或已失效"
-                  : "目前暫時無法載入這個討論，請稍後再試。"}
+                : legacyStalled
+                  ? "這是舊版分享連結"
+                  : badLink
+                    ? "分享連結無效或已失效"
+                    : "目前暫時無法載入這個討論，請稍後再試。"}
             </p>
             {stalled && (
               <>
                 <p className="onboard-note">
-                  {badLink
-                    ? "請向分享的人要一個新的連結。"
-                    : "可能是網路不太穩，會自動重試；稍後再打開這個連結也可以。"}
+                  {legacyStalled
+                    ? "舊版連結需要主辦方保持頁面開著才打得開。請向主辦方取得新版分享連結，新版連結在主辦方關掉頁面後也能打開。"
+                    : badLink
+                      ? "請向分享的人要一個新的連結。"
+                      : "可能是網路不太穩，會自動重試；稍後再打開這個連結也可以。"}
                 </p>
-                {!badLink && (
-                  <button
-                    className="btn btn-primary btn-block"
-                    onClick={() => {
-                      if (cloudGuest) cloudRef.current.retry();
-                      else collabRef.current?.retryNow();
-                    }}
-                  >
-                    再試一次
+                {legacyStalled ? (
+                  <button className="btn btn-block" onClick={() => collabRef.current?.retryNow()}>
+                    主辦方在線的話，再試一次
                   </button>
+                ) : (
+                  !badLink && (
+                    <button
+                      className="btn btn-primary btn-block"
+                      onClick={() => {
+                        if (cloudGuest) cloudRef.current.retry();
+                        else collabRef.current?.retryNow();
+                      }}
+                    >
+                      再試一次
+                    </button>
+                  )
                 )}
               </>
             )}
@@ -821,8 +856,8 @@ export function App() {
         <MobileWorkspace
           api={api!}
           presence={{
-            status: isCloudConfigured ? syncToPresence(cloud.status) : collabStatus,
-            peers: isCloudConfigured ? cloud.online : peerCount,
+            status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
+            peers: cloudSession ? cloud.online : peerCount,
           }}
         />
       ) : (
@@ -844,7 +879,7 @@ export function App() {
                   {saveState === "saving" ? "儲存中…" : saveState === "saved" ? "已儲存" : "儲存失敗"}
                 </span>
               )}
-              {isCloudConfigured
+              {cloudSession
                 ? cloud.status !== "local-only" && (
                     <span
                       className={`badge badge-${syncToPresence(cloud.status) ?? "closed"}`}
@@ -906,8 +941,8 @@ export function App() {
       {shareOpen && room && (
         <ShareSheet
           title={room.title}
-          url={isCloudConfigured ? shareUrl : localShareUrl}
-          cloud={isCloudConfigured}
+          state={shareState}
+          onRetry={openShare}
           onClose={() => setShareOpen(false)}
           onToast={showToast}
         />

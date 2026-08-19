@@ -1,0 +1,318 @@
+#!/usr/bin/env node
+/**
+ * PR #16 acceptance run for the share-link contract.
+ *
+ * Drives the real production bundle in Chromium at the two Android viewports
+ * this app targets (390×844, 430×932) plus a LINE in-app user agent, and
+ * asserts the whole rule set:
+ *
+ *   A  a new share link is `#room=<uuid>&invite=<token>`, and a partner can
+ *      still open it after the host closes the page entirely
+ *   B  a failed cloud create shows retry and hands out no URL at all
+ *   C  a production build without Supabase env never claims sharing worked
+ *   D  legacy `#room=<6碼>` links: owner auto-upgrade, guest gets the
+ *      "ask for a new link" message instead of an unwinnable retry loop
+ *   +  PR #12's invite model still holds (wrong / missing invite ⇒ no access)
+ *
+ * The cloud side runs against `mock-supabase.mjs` — a local stand-in for the
+ * Supabase endpoints this app uses, so the run needs no network and no real
+ * project. It exercises the app's own logic end to end; it is not a test of
+ * Supabase itself.
+ *
+ * Usage:  npm i -D playwright && npx playwright install chromium
+ *         node scripts/e2e/share-flow.mjs
+ *         (CHROMIUM_PATH=/path/to/chrome to reuse an existing browser)
+ */
+import { execFileSync } from "node:child_process";
+import http from "node:http";
+import { existsSync, readFile, mkdtempSync, rmSync } from "node:fs";
+import { readFile as read } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, extname, normalize } from "node:path";
+import { deflateSync } from "node:zlib";
+import { start as startMock } from "./mock-supabase.mjs";
+
+const MOCK_PORT = 54399;
+const APP_PORT = 4173;
+const NOCLOUD_PORT = 4174;
+const APP = `http://127.0.0.1:${APP_PORT}/`;
+const APP_NOCLOUD = `http://127.0.0.1:${NOCLOUD_PORT}/`;
+const LINE_UA =
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Line/13.20.0";
+const ANDROID_UA =
+  "Mozilla/5.0 (Linux; Android 13; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+
+let chromium;
+try {
+  ({ chromium } = await import("playwright"));
+} catch {
+  console.error("playwright is not installed. Run: npm i -D playwright && npx playwright install chromium");
+  process.exit(2);
+}
+
+// ---------------------------------------------------------------- fixtures
+/** A small greyscale PNG, so the run needs no binary fixture in the repo. */
+function makePoster(w = 600, h = 800) {
+  const crc = (buf) => {
+    let c = ~0;
+    for (const b of buf) {
+      c ^= b;
+      for (let i = 0; i < 8; i++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+  };
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const rows = [];
+  for (let y = 0; y < h; y++) {
+    const row = Buffer.alloc(w + 1);
+    for (let x = 0; x < w; x++) row[x + 1] = Math.floor((x * 255) / w);
+    rows.push(row);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 0; // greyscale
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(Buffer.concat(rows))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+const POSTER = makePoster();
+
+// ------------------------------------------------------------------ servers
+const TYPES = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".webmanifest": "application/manifest+json",
+  ".png": "image/png",
+};
+function serveStatic(root, port) {
+  const server = http.createServer(async (req, res) => {
+    const p = new URL(req.url, "http://x").pathname;
+    const file = join(root, normalize(p === "/" ? "/index.html" : p));
+    try {
+      const buf = await read(file);
+      res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
+      res.end(buf);
+    } catch {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(await read(join(root, "index.html")));
+    }
+  });
+  return new Promise((resolve) => server.listen(port, () => resolve(server)));
+}
+
+// ------------------------------------------------------------------ harness
+const results = [];
+const check = (name, pass, detail = "") => {
+  results.push({ name, pass, detail });
+  console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
+};
+
+const phone = (width, height, userAgent) => ({
+  viewport: { width, height },
+  deviceScaleFactor: 3,
+  isMobile: true,
+  hasTouch: true,
+  userAgent,
+});
+
+async function newRoomWithPoster(page, appUrl, name) {
+  await page.goto(appUrl, { waitUntil: "domcontentloaded" });
+  await page.fill("input.text-input", name);
+  await page.click("button.btn-primary");
+  await page.setInputFiles('input[type="file"]', { name: "poster.png", mimeType: "image/png", buffer: POSTER });
+  await page.waitForSelector("button.m-share, header .btn-primary", { timeout: 15000 });
+}
+
+async function openShareSheet(page) {
+  const mobileShare = await page.$("button.m-share");
+  if (mobileShare) await mobileShare.click();
+  else await page.click("header .btn-primary:has-text('分享')");
+  await page.waitForSelector(".m-share-note", { timeout: 20000 });
+}
+
+const noHorizontalOverflow = (page) =>
+  page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+
+// ------------------------------------------------------------------- builds
+const out = mkdtempSync(join(tmpdir(), "duigao-e2e-"));
+const cloudDist = join(out, "cloud");
+const nocloudDist = join(out, "nocloud");
+console.log("building bundles…");
+execFileSync("npx", ["vite", "build", "--outDir", cloudDist, "--emptyOutDir"], {
+  stdio: "pipe",
+  env: {
+    ...process.env,
+    // A build pointed at the local mock. `http://127.0.0.1` is accepted by the
+    // config check precisely so a local Supabase stack can be used this way.
+    VITE_SUPABASE_URL: `http://127.0.0.1:${MOCK_PORT}`,
+    VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_e2e_mock_key_000000",
+  },
+});
+execFileSync("npx", ["vite", "build", "--outDir", nocloudDist, "--emptyOutDir"], {
+  stdio: "pipe",
+  // A production build with the cloud env deliberately absent (case C). Blank
+  // strings override any .env file, which a plain `delete` would not.
+  env: { ...process.env, VITE_SUPABASE_URL: "", VITE_SUPABASE_PUBLISHABLE_KEY: "" },
+});
+
+const mock = await startMock(MOCK_PORT);
+const app = await serveStatic(cloudDist, APP_PORT);
+const nocloud = await serveStatic(nocloudDist, NOCLOUD_PORT);
+
+// CHROMIUM_PATH lets a pre-installed Chromium be used (CI images, sandboxes)
+// instead of the copy `npx playwright install` would download.
+const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+
+try {
+  // ------------------------------------------------------------ A: new share
+  const ctxA = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const A = await ctxA.newPage();
+  await newRoomWithPoster(A, APP, "主辦方A");
+  check("A. 390×844 建房後版面沒有水平溢出", await noHorizontalOverflow(A));
+
+  await openShareSheet(A);
+  await A.waitForSelector("input.m-share-url", { timeout: 30000 });
+  const shareUrl = await A.inputValue("input.m-share-url");
+  const shareNote = (await A.textContent(".m-share-note")) ?? "";
+  check(
+    "A. 分享 URL 是 #room=<uuid>&invite=<token>",
+    /#room=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&invite=[A-Za-z0-9_-]{20,}$/.test(shareUrl),
+    shareUrl.replace(/invite=.*/, "invite=<redacted>"),
+  );
+  check("A. 分享文案宣告永久連結", shareNote.includes("分享連結已建立"));
+
+  const localRoomId = await A.evaluate(() =>
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith("duigao.cloudmap."))
+      .map((k) => k.slice("duigao.cloudmap.".length))[0],
+  );
+  check("A. owner 本機留下 local→cloud mapping", Boolean(localRoomId), `local room ${localRoomId}`);
+
+  // -------------------------------------------- D: legacy owner auto-upgrade
+  // A fresh open of the old link (as it arrives from LINE), not a same-document
+  // hash change: the upgrade runs at boot, before React reads the address bar.
+  await A.goto(`${APP}#room=${localRoomId}`, { waitUntil: "domcontentloaded" });
+  await A.reload({ waitUntil: "domcontentloaded" });
+  await A.waitForFunction(() => location.hash.includes("&invite="), null, { timeout: 15000 }).catch(() => {});
+  const upgraded = await A.evaluate(() => location.hash);
+  const cloudRoomId = shareUrl.split("#room=")[1].split("&")[0];
+  check(
+    "D. 舊版 #room=<6碼> 在 owner 裝置自動升級成 room+invite",
+    upgraded.startsWith(`#room=${cloudRoomId}`) && upgraded.includes("&invite="),
+    upgraded.replace(/invite=.*/, "invite=<redacted>"),
+  );
+
+  // A closes the page entirely — the host is now offline.
+  await ctxA.close();
+
+  // ------------------------------------------------ A: guest opens from LINE
+  const ctxB = await browser.newContext(phone(430, 932, LINE_UA));
+  const B = await ctxB.newPage();
+  await B.goto(shareUrl, { waitUntil: "domcontentloaded" });
+  await B.fill("input.text-input", "夥伴B");
+  await B.click("button.btn-primary");
+  const loaded = await B.waitForSelector("button.m-share", { timeout: 30000 }).catch(() => null);
+  const bodyText = (await B.textContent("body")) ?? "";
+  check(
+    "A. 主辦方關頁後，夥伴從 LINE 開連結仍載入房間",
+    Boolean(loaded) && !bodyText.includes("目前暫時無法載入"),
+    bodyText.includes("目前暫時無法載入") ? "still showing the generic failure" : "room rendered",
+  );
+  check("A. 430×932 夥伴視圖沒有水平溢出", await noHorizontalOverflow(B));
+  check(
+    "A. 夥伴看到的海報真的從雲端 Storage 載入",
+    await B.evaluate(() => {
+      const img = [...document.images].find((i) => i.src.includes("/storage/"));
+      return Boolean(img && img.complete && img.naturalWidth > 0);
+    }),
+  );
+  await ctxB.close();
+
+  // ------------------------------------------ security: invite still required
+  const ctxF = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const F = await ctxF.newPage();
+  await F.goto(shareUrl.replace(/invite=.*/, "invite=this-token-is-wrong-but-long-enough"), {
+    waitUntil: "domcontentloaded",
+  });
+  await F.fill("input.text-input", "冒充者F");
+  await F.click("button.btn-primary");
+  await F.waitForSelector("text=分享連結無效或已失效", { timeout: 30000 }).catch(() => {});
+  const fText = (await F.textContent(".onboard-card")) ?? "";
+  check("安全. 竄改 invite 進不了房間", fText.includes("分享連結無效或已失效") && !(await F.$("button.m-share")));
+  await ctxF.close();
+
+  const ctxG = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const G = await ctxG.newPage();
+  await G.goto(shareUrl.replace(/&invite=.*/, ""), { waitUntil: "domcontentloaded" });
+  await G.fill("input.text-input", "冒充者G");
+  await G.click("button.btn-primary");
+  await G.waitForTimeout(4000);
+  check(
+    "安全. 只知道 room id、沒有 invite 也讀不到房間",
+    !(await G.$("button.m-share")) && !((await G.textContent("body")) ?? "").includes("初稿"),
+  );
+  await ctxG.close();
+
+  // ----------------------------------------- B: cloud create failure path
+  const ctxC = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const C = await ctxC.newPage();
+  await C.route("**/rpc/create_room_with_invite", (route) =>
+    route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "boom" }) }),
+  );
+  await newRoomWithPoster(C, APP, "主辦方C");
+  await openShareSheet(C);
+  await C.waitForSelector("text=暫時無法建立分享連結", { timeout: 30000 }).catch(() => {});
+  const cText = (await C.textContent(".m-more")) ?? "";
+  const cHtml = (await C.innerHTML(".m-more")) ?? "";
+  check("B. cloud 建立失敗顯示「暫時無法建立分享連結」", cText.includes("暫時無法建立分享連結"));
+  check("B. cloud 建立失敗提供「再試一次」", cText.includes("再試一次"));
+  check("B. cloud 建立失敗不提供任何可複製連結", !(await C.$("input.m-share-url")) && !/#room=/.test(cHtml));
+  await ctxC.close();
+
+  // ------------------------------------ C: production build without cloud env
+  const ctxD = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const D = await ctxD.newPage();
+  await newRoomWithPoster(D, APP_NOCLOUD, "主辦方D");
+  await openShareSheet(D);
+  const dText = (await D.textContent(".m-more")) ?? "";
+  const dHtml = (await D.innerHTML(".m-more")) ?? "";
+  check("C. 沒有 cloud env 的 production build 不宣稱分享已建立", !dText.includes("分享連結已建立"));
+  check("C. 沒有 cloud env 時說明分享服務無法使用", dText.includes("分享服務目前無法使用"));
+  check("C. 沒有 cloud env 時不產生 #room= 連結", !/#room=/.test(dHtml) && !(await D.$("input.m-share-url")));
+  await ctxD.close();
+
+  // --------------------------- D: legacy guest, no mapping, host not online
+  const ctxE = await browser.newContext(phone(390, 844, LINE_UA));
+  const E = await ctxE.newPage();
+  await E.goto(`${APP}#room=k7m2xq`, { waitUntil: "domcontentloaded" });
+  await E.fill("input.text-input", "夥伴E");
+  await E.click("button.btn-primary");
+  await E.waitForSelector("text=這是舊版分享連結", { timeout: 60000 }).catch(() => {});
+  const eText = (await E.textContent(".onboard-card")) ?? "";
+  check("D. 舊版連結 + host 離線 → 顯示「這是舊版分享連結」", eText.includes("這是舊版分享連結"));
+  check("D. 舊版連結不再給 generic「目前暫時無法載入」重試", !eText.includes("目前暫時無法載入"));
+  check("D. 舊版連結指引向主辦方索取新版連結", eText.includes("取得新版分享連結"));
+  await ctxE.close();
+} finally {
+  await browser.close();
+  for (const s of [mock, app, nocloud]) s.close();
+  rmSync(out, { recursive: true, force: true });
+}
+
+const failed = results.filter((r) => !r.pass);
+console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+process.exit(failed.length ? 1 : 0);
