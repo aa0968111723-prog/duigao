@@ -432,9 +432,10 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .m-item-suggestion { margin: 8px 0 0 32px; font-size: 13px; line-height: 1.6; color: var(--ink-dim); }
 
 /* ---------- low-friction feedback (PR #13) ---------- */
-.m-item-actions { display: flex; gap: 8px; margin-top: 10px; }
+.m-item-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .m-support,
-.m-reply-toggle {
+.m-reply-toggle,
+.m-item-propose {
   min-height: 34px;
   padding: 5px 12px;
   border: 1px solid var(--line);
@@ -445,6 +446,33 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   cursor: pointer;
 }
 .m-support.is-on { border-color: var(--accent); background: rgba(196, 92, 74, 0.14); color: #f2b8ab; }
+.m-item-propose { border-style: dashed; }
+
+/* ---------- 修改點 ⇄ 視覺提案 linkage (PR #20) ---------- */
+.m-item-proposals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0 32px;
+}
+.m-item-proposals-label { color: var(--ink-faint); font-size: 12px; }
+.m-item-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--raise);
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.m-item-proposal small { color: var(--ink-faint); font-size: 11px; }
+.m-item-proposal.is-accepted { border-color: rgba(122, 199, 127, 0.7); }
+.m-item-proposal.is-rejected { opacity: 0.7; }
 .m-replies { margin: 8px 0 0 32px; display: flex; flex-direction: column; gap: 6px; }
 .m-reply { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink); }
 .m-reply-who { font-weight: 500; margin-right: 6px; }

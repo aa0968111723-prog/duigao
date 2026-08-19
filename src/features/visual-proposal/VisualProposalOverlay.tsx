@@ -1,12 +1,12 @@
 import { memo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { useProposalStore, type ProposalItem } from "./store";
-import { backgroundColorCss, clamp, hexToRgba, objectFitFor } from "./helpers";
+import { useProposalStore, type ProposalAuthor, type ProposalItem } from "./store";
+import { backgroundColorCss, clamp, hexToRgba, objectFitFor, proposalTypeLabel } from "./helpers";
 import "./proposal.css";
 
 type Props = {
   roomId: string;
   versionId: string;
-  authorName: string;
+  author: ProposalAuthor;
   compact?: boolean;
 };
 
@@ -46,18 +46,22 @@ function angle(a: { x: number; y: number }, b: { x: number; y: number }) {
   return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
 }
 
-export function VisualProposalOverlay({ roomId, versionId, authorName, compact }: Props) {
-  const proposal = useProposalStore(roomId, versionId, authorName);
+export function VisualProposalOverlay({ roomId, versionId, author, compact }: Props) {
+  const proposal = useProposalStore(roomId, versionId, author);
   const gesture = useRef<Gesture | null>(null);
   const resize = useRef<{ id: string; cx: number; cy: number; startDist: number; startWidth: number } | null>(null);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
 
-  const { active, editing, visible, compareOriginal, selectedItem } = proposal;
+  const { active, editing, visible, viewMode, compareSplit, selectedItem } = proposal;
 
-  if (!visible || !active || compareOriginal) return null;
+  // 原稿 mode draws nothing at all: the poster underneath is the whole point.
+  if (!visible || !active) return null;
 
   const background = active.background;
   const colorCss = backgroundColorCss(background);
+  const comparing = viewMode === "compare";
+  // 對照: the proposal only paints to the right of the split, original shows left.
+  const clip = comparing ? { clipPath: `inset(0 0 0 ${compareSplit * 100}%)` } : undefined;
 
   const twoPointers = (g: Gesture) => Array.from(g.pointers.values());
 
@@ -187,38 +191,50 @@ export function VisualProposalOverlay({ roomId, versionId, authorName, compact }
 
   return (
     <div
-      className={`proposal-layer ${editing ? "is-editing" : "is-preview"}`}
+      className={`proposal-layer ${editing ? "is-editing" : "is-preview"} ${comparing ? "is-comparing" : ""}`}
       onPointerDown={(event) => {
         if (!editing) return;
         event.stopPropagation();
         proposal.selectItem(null);
       }}
-      aria-label={`${active.name} 視覺提案層`}
+      aria-label={`${active.title} 視覺提案層`}
     >
-      {background.imageDataUrl && (
-        <img
-          className="proposal-background-image"
-          src={background.imageDataUrl}
-          alt="提案背景"
-          style={{ opacity: background.imageOpacity, objectFit: objectFitFor(background.imageFit) }}
-          draggable={false}
-        />
+      <div className="proposal-paint" style={clip}>
+        {background.imageDataUrl && (
+          <img
+            className="proposal-background-image"
+            src={background.imageDataUrl}
+            alt="提案背景"
+            style={{ opacity: background.imageOpacity, objectFit: objectFitFor(background.imageFit) }}
+            draggable={false}
+          />
+        )}
+        {colorCss && <span className="proposal-background-color" style={{ background: colorCss }} aria-hidden />}
+
+        {active.items
+          .filter((item) => item.visible)
+          .map((item) => (
+            <ProposalItemView
+              key={item.id}
+              item={item}
+              selected={editing && selectedItem?.id === item.id}
+              onPointerDown={onItemPointerDown}
+              onPointerMove={onItemPointerMove}
+              onPointerUp={onItemPointerUp}
+            />
+          ))}
+      </div>
+
+      {comparing && (
+        <>
+          <span className="proposal-compare-line" style={{ left: `${compareSplit * 100}%` }} aria-hidden />
+          <span className="proposal-compare-tag proposal-compare-tag-left">原稿</span>
+          <span className="proposal-compare-tag proposal-compare-tag-right">提案</span>
+        </>
       )}
-      {colorCss && <span className="proposal-background-color" style={{ background: colorCss }} aria-hidden />}
 
       {editing && guides.x != null && <span className="proposal-guide proposal-guide-v" style={{ left: `${guides.x * 100}%` }} aria-hidden />}
       {editing && guides.y != null && <span className="proposal-guide proposal-guide-h" style={{ top: `${guides.y * 100}%` }} aria-hidden />}
-
-      {active.items.map((item) => (
-        <ProposalItemView
-          key={item.id}
-          item={item}
-          selected={editing && selectedItem?.id === item.id}
-          onPointerDown={onItemPointerDown}
-          onPointerMove={onItemPointerMove}
-          onPointerUp={onItemPointerUp}
-        />
-      ))}
 
       {editing && selectedItem && (
         <button
@@ -237,7 +253,10 @@ export function VisualProposalOverlay({ roomId, versionId, authorName, compact }
         />
       )}
 
-      <span className="proposal-preview-label">{active.name} · 模擬</span>
+      <span className={`proposal-preview-label ${active.status === "accepted" ? "is-accepted" : ""}`}>
+        {active.status === "accepted" ? "已採用 · " : ""}
+        {active.title} · {proposalTypeLabel(active.type)}
+      </span>
       {editing && !compact && (
         <button
           type="button"
@@ -272,22 +291,39 @@ const ProposalItemView = memo(function ProposalItemView({ item, selected, onPoin
     transform: `translate(-50%, -50%) rotate(${item.rotation}deg)`,
   };
 
+  const handlers = {
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => onPointerDown(e, item),
+    onPointerMove,
+    onPointerUp,
+    onPointerCancel: onPointerUp,
+    onClick: (e: { stopPropagation: () => void }) => e.stopPropagation(),
+  };
+
   if (item.type === "image") {
     return (
       <button
         type="button"
         className={`proposal-item proposal-image ${selected ? "is-selected" : ""}`}
         style={shared}
-        onPointerDown={(e) => onPointerDown(e, item)}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onClick={(e) => e.stopPropagation()}
+        {...handlers}
         aria-label={`素材：${item.name}`}
         aria-pressed={selected}
       >
         <img src={item.imageDataUrl} alt={item.name} draggable={false} />
       </button>
+    );
+  }
+
+  if (item.type === "shape") {
+    return (
+      <button
+        type="button"
+        className={`proposal-item proposal-shape ${selected ? "is-selected" : ""}`}
+        style={{ ...shared, height: `${item.height}%`, background: item.color, borderRadius: `${item.radius}px` }}
+        {...handlers}
+        aria-label="色塊"
+        aria-pressed={selected}
+      />
     );
   }
 
@@ -307,11 +343,7 @@ const ProposalItemView = memo(function ProposalItemView({ item, selected, onPoin
         padding,
         borderRadius: `${item.backdropRadius}px`,
       }}
-      onPointerDown={(e) => onPointerDown(e, item)}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      onClick={(e) => e.stopPropagation()}
+      {...handlers}
       aria-label={`文字：${item.text}`}
       aria-pressed={selected}
     >

@@ -142,7 +142,7 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             <ProposalControls
               roomId={room.id}
               versionId={view.versionId}
-              authorName={api.guest.name}
+              author={api.guest}
               showToast={api.showToast}
               pref={{
                 prefs: room.proposalPrefs ?? [],

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { CommentPin } from "../lib/types";
+import type { VisualProposal } from "../features/visual-proposal/store";
+import { proposalStatusLabel, proposalTypeLabel } from "../features/visual-proposal/helpers";
 import { hasSupported, pinNumber, repliesFor, supportCount, versionLabel, type WorkspaceApi } from "./api";
 
 type Props = {
@@ -9,13 +11,28 @@ type Props = {
   compact?: boolean;
   onSelect?: () => void;
   onToggleResolve: () => void;
+  /** Visual proposals already bound to this 修改點. */
+  relatedProposals?: VisualProposal[];
+  /** Turn this 修改點 into a visual proposal. Absent on surfaces without the editor. */
+  onCreateProposal?: () => void;
+  onOpenProposal?: (proposalId: string) => void;
 };
 
 /**
  * One review item. Number / note / status / author stay primary; below them are
  * the two low-friction actions: 我也覺得 and 回覆 (a short thread, collapsed).
  */
-export function CommentCard({ api, pin, selected, compact, onSelect, onToggleResolve }: Props) {
+export function CommentCard({
+  api,
+  pin,
+  selected,
+  compact,
+  onSelect,
+  onToggleResolve,
+  relatedProposals,
+  onCreateProposal,
+  onOpenProposal,
+}: Props) {
   const { room, guest } = api;
   const n = pinNumber(room, pin.id);
   const label = versionLabel(room, pin.versionId);
@@ -92,7 +109,39 @@ export function CommentCard({ api, pin, selected, compact, onSelect, onToggleRes
         >
           回覆{replies.length > 0 ? ` ${replies.length}` : ""}
         </button>
+        {onCreateProposal && (
+          <button
+            type="button"
+            className="m-item-propose"
+            onClick={(e) => {
+              stop(e);
+              onCreateProposal();
+            }}
+          >
+            建立視覺提案
+          </button>
+        )}
       </div>
+
+      {relatedProposals && relatedProposals.length > 0 && (
+        <div className="m-item-proposals" onClick={stop}>
+          <span className="m-item-proposals-label">相關提案 {relatedProposals.length}</span>
+          {relatedProposals.map((doc) => (
+            <button
+              key={doc.id}
+              type="button"
+              className={`m-item-proposal is-${doc.status}`}
+              onClick={() => onOpenProposal?.(doc.id)}
+            >
+              {doc.title}
+              <small>
+                {proposalTypeLabel(doc.type)} · {proposalStatusLabel(doc.status)}
+                {doc.supports.length > 0 ? ` · 👍${doc.supports.length}` : ""}
+              </small>
+            </button>
+          ))}
+        </div>
+      )}
 
       {(replies.length > 0 || showReply) && (
         <div className="m-replies" onClick={stop}>

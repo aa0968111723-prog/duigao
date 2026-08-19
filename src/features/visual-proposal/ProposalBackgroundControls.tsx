@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { useProposalStore, type BgImageFit, type GradientKind } from "./store";
+import { useProposalStore, type BgImageFit, type GradientKind, type ProposalAuthor } from "./store";
 import { prepareImageFile } from "./helpers";
 import { LiveColor, LiveRange } from "./controls-kit";
 import type { ShowToast } from "../../toast";
@@ -7,7 +7,7 @@ import type { ShowToast } from "../../toast";
 type Props = {
   roomId: string;
   versionId: string;
-  authorName: string;
+  author: ProposalAuthor;
   showToast?: ShowToast;
 };
 
@@ -23,8 +23,8 @@ const FITS: { key: BgImageFit; label: string }[] = [
   { key: "contain", label: "完整" },
 ];
 
-export function ProposalBackgroundControls({ roomId, versionId, authorName, showToast }: Props) {
-  const proposal = useProposalStore(roomId, versionId, authorName);
+export function ProposalBackgroundControls({ roomId, versionId, author, showToast }: Props) {
+  const proposal = useProposalStore(roomId, versionId, author);
   const fileRef = useRef<HTMLInputElement>(null);
   const active = proposal.active;
   if (!active) return null;
