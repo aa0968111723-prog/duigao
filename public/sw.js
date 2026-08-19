@@ -1,5 +1,5 @@
 /* 對稿 PWA service worker — cache shell for offline reopen */
-const CACHE = "duigao-v1";
+const CACHE = "duigao-v2";
 const PRECACHE = ["./", "./index.html", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

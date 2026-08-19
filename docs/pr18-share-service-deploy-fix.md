@@ -1,35 +1,56 @@
 # PR #18：分享服務部署修復
 
-## 現象
-正式站按「分享」顯示「分享服務目前無法使用」。
+## 最新根因
 
-## 已確認
-- Supabase `duigao` 專案存在且 ACTIVE_HEALTHY。
-- 專案 URL 與 publishable key 都可取得。
-- production migrations 已套用：create_rooms_and_poster_storage、reconcile_cloud_architecture、cloud_rooms、feedback、comment_regions。
-- 目前前端只在 build-time 讀取 `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY`；正式 Zeabur build 沒帶到時，Cloud 會被判定 unavailable。
+正式站按「分享」時，ShareSheet 進入 `unavailable`。目前程式只有在 production bundle 判定 `isCloudConfigured === false` 時才會進入此狀態。
 
-## 目標
-1. Zeabur 正式部署必須帶入 Cloud env，否則 deployment 直接失敗，不再部署一個「分享按鈕必壞」的版本。
-2. 不 hardcode Supabase URL / publishable key 到 source code。
-3. 保留 PR #17 的安全分享：只有 `#room=<uuid>&invite=<token>` 才算永久分享成功。
-4. 使用者端錯誤文案要區分：部署未設定 vs 暫時網路/後端錯誤。
-5. 加入 production health self-check / diagnostics，方便確認 Cloud 真正可用。
+再次檢查正式 Supabase Auth logs 後，使用者本次重試沒有任何新的 `/signup` / anonymous-auth 請求，因此失敗發生在 Auth 之前：**目前 Zeabur 正在服務的 Vite bundle 沒有拿到 `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY`。**
 
-## 實作要求
-- 檢查 package scripts / Zeabur build path，讓 production build 執行 `npm run check:cloud-env` 或等價 gate。
-- 若 repo 可使用 Zeabur 設定檔，新增最小設定；不要綁死 secret values。
-- 建立 `cloudDeploymentStatus` / diagnostics：production 缺 env 時清楚回報 configuration missing；env 有但連不到時回報 service unavailable。
-- ShareSheet 不暴露 Supabase 等工程名詞。
-- 增加 build/e2e 測試：有 env 可以建立 invite URL；缺 env build gate fail；錯 env 不假成功。
-- 不改 PR #14 手機操作，不改視覺提案，不改資料模型。
+Zeabur Dashboard 顯示變數存在，不代表目前已部署的舊 bundle 已包含它們；Vite 的 `VITE_*` 是 build-time 注入，變數變更後必須重新 build/redeploy。
 
-## 部署端必要設定
-Zeabur service build environment 必須提供：
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_PUBLISHABLE_KEY`
+## 本 PR 修復
 
-值從既有 Supabase `duigao` 專案取得。不要 commit 真值到 GitHub。
+1. `npm run build` 改成 strict cloud-env gate：
+   - 缺 `VITE_SUPABASE_URL` → build fail
+   - 缺 `VITE_SUPABASE_PUBLISHABLE_KEY` → build fail
+   - placeholder / secret key / 不合法 URL → build fail
+2. 新增 `npm run build:local`，需要 local-only artifact 時才明確使用，不讓 production 默默退化。
+3. 新增 `zbpack.json`：
+   - `build_command = npm run build`
+   - `output_dir = dist`
+   確保 Zeabur Git deployment 真的走 strict production build。
+4. 保留永久分享安全模型：只有成功建立 cloud invite 後才允許複製 / LINE / 系統分享。
+5. 不 fallback 成 `#room=<6碼>`。
 
-## 完成標準
-正式 Zeabur 重新部署後，主辦方按分享能得到帶 `&invite=` 的 URL；關掉主辦方頁面後，另一台手機仍可從 LINE 開啟同一房間。
+## Supabase 第二階段檢查
+
+正式 project：`uanurolzzgshxrqbooix`
+
+Cloud env build 成功後，再檢查 Anonymous Sign-In：App 依賴 `signInAnonymously()`。如果 Auth provider 關閉，應看到 `anonymous_provider_disabled`；開啟後才會繼續 `create_room_with_invite`。
+
+## 部署驗收
+
+### A. Build-time env
+Zeabur deployment log 必須出現：
+
+`✔ cloud env ready`
+
+如果看不到，deployment 不應成功。
+
+### B. Auth
+重新部署後第一次按分享，Supabase Auth log 必須出現新的 `/signup` anonymous request。
+
+### C. Permanent room
+成功後 URL 必須為：
+
+`#room=<uuid>&invite=<token>`
+
+### D. Host-offline
+A 建房並分享後完全關頁；B 從 LINE 打開仍可載入文宣、修改建議、討論與視覺提案。
+
+## 不在本 PR 處理
+
+- 原稿素材庫
+- UI 大改
+- 視覺提案新增功能
+- Cloud schema 重構
