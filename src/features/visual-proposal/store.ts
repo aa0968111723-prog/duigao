@@ -6,6 +6,29 @@ export type TextRole = "title" | "subtitle" | "body" | "date" | "place" | "cta" 
 export type GradientKind = "none" | "vertical" | "horizontal" | "diagonal";
 export type BgImageFit = "cover" | "contain";
 
+/** What a proposal is about. Drives the badge on the proposal card only — never the editor. */
+export type ProposalType = "text" | "font" | "background" | "asset" | "layout" | "color";
+
+/** Where a proposal sits in the discussion. 已採用 is the one everyone needs to spot fast. */
+export type ProposalStatus = "draft" | "discussing" | "accepted" | "rejected";
+
+/** 原稿 / 提案 / 對照 — the whole viewing model on mobile. */
+export type ProposalViewMode = "original" | "proposal" | "compare";
+
+/** Whoever is looking: needed for 我支持這個提案 and proposal comments. */
+export type ProposalAuthor = { id: string; name: string; color: string };
+
+export type ProposalSupport = { userId: string; userName: string; createdAt: number };
+
+export type ProposalComment = {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorColor: string;
+  body: string;
+  createdAt: number;
+};
+
 export type ProposalBackground = {
   color: string;
   colorOpacity: number;
@@ -18,16 +41,22 @@ export type ProposalBackground = {
   imageFit: BgImageFit;
 };
 
-export type ProposalTextItem = {
+/** Fields every proposal element shares: position, size, opacity, visibility. */
+type ProposalItemBase = {
   id: string;
-  type: "text";
-  role: TextRole;
-  text: string;
   x: number;
   y: number;
   width: number;
   rotation: number;
   opacity: number;
+  /** Hidden elements stay in the proposal but are not drawn — cheaper than delete + undo. */
+  visible: boolean;
+};
+
+export type ProposalTextItem = ProposalItemBase & {
+  type: "text";
+  role: TextRole;
+  text: string;
   fontFamily: string;
   fontStyle: string;
   fontSize: number;
@@ -40,25 +69,41 @@ export type ProposalTextItem = {
   backdropRadius: number;
 };
 
-export type ProposalImageItem = {
-  id: string;
+export type ProposalImageItem = ProposalItemBase & {
   type: "image";
   name: string;
   imageDataUrl: string;
-  x: number;
-  y: number;
-  width: number;
-  rotation: number;
-  opacity: number;
 };
 
-export type ProposalItem = ProposalTextItem | ProposalImageItem;
+/** A plain colour block: the cheapest way to say "put something solid here". */
+export type ProposalShapeItem = ProposalItemBase & {
+  type: "shape";
+  color: string;
+  /** Percentage of the poster height (width is a percentage of its width). */
+  height: number;
+  radius: number;
+};
+
+export type ProposalItem = ProposalTextItem | ProposalImageItem | ProposalShapeItem;
 
 export type VisualProposal = {
   id: string;
   versionId: string;
+  /**
+   * Legacy cloud column (`visual_proposals.name`). It always mirrors `title`;
+   * `title` is the single field the UI reads and writes.
+   */
   name: string;
+  title: string;
+  description: string;
+  type: ProposalType;
+  status: ProposalStatus;
+  createdBy: string;
   authorName: string;
+  /** The 修改點 this proposal answers, when it was started from one. */
+  linkedCommentId?: string;
+  supports: ProposalSupport[];
+  comments: ProposalComment[];
   items: ProposalItem[];
   background: ProposalBackground;
   createdAt: number;
@@ -75,9 +120,10 @@ type HistorySnapshot = { docs: VisualProposal[]; activeByVersion: Record<string,
 
 type ProposalRuntimeState = PersistedProposalState & {
   hydrated: boolean;
-  visible: boolean;
+  viewMode: ProposalViewMode;
   editing: boolean;
-  compareOriginal: boolean;
+  /** 0..1 wipe position used by the 對照 view. */
+  compareSplit: number;
   selectedItemId: string | null;
   undo: HistorySnapshot[];
   redo: HistorySnapshot[];
@@ -86,12 +132,16 @@ type ProposalRuntimeState = PersistedProposalState & {
 
 type ProposalItemPatch =
   | Partial<Omit<ProposalTextItem, "id" | "type">>
-  | Partial<Omit<ProposalImageItem, "id" | "type">>;
+  | Partial<Omit<ProposalImageItem, "id" | "type">>
+  | Partial<Omit<ProposalShapeItem, "id" | "type">>;
 
 const DB_NAME = "duigao-visual-proposals";
 const DB_VERSION = 1;
 const STORE = "rooms";
 const HISTORY_LIMIT = 25;
+
+const PROPOSAL_TYPES: ProposalType[] = ["text", "font", "background", "asset", "layout", "color"];
+const PROPOSAL_STATUSES: ProposalStatus[] = ["draft", "discussing", "accepted", "rejected"];
 
 const EMPTY_BACKGROUND: ProposalBackground = {
   color: "#000000",
@@ -116,9 +166,9 @@ function emptyState(roomId: string): ProposalRuntimeState {
     docs: [],
     activeByVersion: {},
     hydrated: false,
-    visible: false,
+    viewMode: "proposal",
     editing: false,
-    compareOriginal: false,
+    compareSplit: 0.5,
     selectedItemId: null,
     undo: [],
     redo: [],
@@ -171,21 +221,33 @@ function normalizeBackground(raw: unknown): ProposalBackground {
   };
 }
 
-function normalizeItem(raw: unknown): ProposalItem | null {
+export function normalizeItem(raw: unknown): ProposalItem | null {
   const item = raw as Partial<ProposalItem> & { type?: string };
   if (!item || typeof item.id !== "string") return null;
-  const base = {
+  const base: ProposalItemBase = {
     id: item.id,
     x: clampNum((item as ProposalItem).x, 0, 1, 0.5),
     y: clampNum((item as ProposalItem).y, 0, 1, 0.5),
     width: clampNum((item as ProposalItem).width, 4, 100, 35),
     rotation: clampNum((item as ProposalItem).rotation, -180, 180, 0),
     opacity: clampNum((item as ProposalItem).opacity, 0.05, 1, 1),
+    // Anything persisted before 2.0 has no `visible` flag and was always drawn.
+    visible: (item as ProposalItem).visible !== false,
   };
   if (item.type === "image") {
     const img = item as Partial<ProposalImageItem>;
     if (typeof img.imageDataUrl !== "string") return null;
     return { ...base, type: "image", name: img.name ?? "素材", imageDataUrl: img.imageDataUrl };
+  }
+  if (item.type === "shape") {
+    const shape = item as Partial<ProposalShapeItem>;
+    return {
+      ...base,
+      type: "shape",
+      color: typeof shape.color === "string" ? shape.color : "#c45c4a",
+      height: clampNum(shape.height, 2, 100, 18),
+      radius: clampNum(shape.radius, 0, 60, 10),
+    };
   }
   const txt = item as Partial<ProposalTextItem>;
   return {
@@ -210,21 +272,70 @@ function normalizeItem(raw: unknown): ProposalItem | null {
   };
 }
 
-function normalizeDoc(raw: unknown): VisualProposal | null {
+function normalizeSupports(raw: unknown): ProposalSupport[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: ProposalSupport[] = [];
+  for (const entry of raw) {
+    const s = entry as Partial<ProposalSupport>;
+    if (!s || typeof s.userId !== "string" || seen.has(s.userId)) continue;
+    seen.add(s.userId);
+    out.push({
+      userId: s.userId,
+      userName: typeof s.userName === "string" ? s.userName : "夥伴",
+      createdAt: typeof s.createdAt === "number" ? s.createdAt : Date.now(),
+    });
+  }
+  return out;
+}
+
+function normalizeComments(raw: unknown): ProposalComment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ProposalComment[] = [];
+  for (const entry of raw) {
+    const c = entry as Partial<ProposalComment>;
+    if (!c || typeof c.id !== "string" || typeof c.body !== "string") continue;
+    out.push({
+      id: c.id,
+      authorId: typeof c.authorId === "string" ? c.authorId : "",
+      authorName: typeof c.authorName === "string" ? c.authorName : "夥伴",
+      authorColor: typeof c.authorColor === "string" ? c.authorColor : "#3d6b8c",
+      body: c.body,
+      createdAt: typeof c.createdAt === "number" ? c.createdAt : Date.now(),
+    });
+  }
+  return out.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export function normalizeDoc(raw: unknown): VisualProposal | null {
   const doc = raw as Partial<VisualProposal>;
   if (!doc || typeof doc.id !== "string" || typeof doc.versionId !== "string") return null;
   const items = Array.isArray(doc.items)
     ? doc.items.map(normalizeItem).filter((i): i is ProposalItem => i != null)
     : [];
+  // Pre-2.0 proposals only had `name`; it becomes the title and keeps mirroring it.
+  const title =
+    (typeof doc.title === "string" && doc.title.trim()) || (typeof doc.name === "string" && doc.name.trim()) || "提案";
+  const now = Date.now();
   return {
     id: doc.id,
     versionId: doc.versionId,
-    name: typeof doc.name === "string" ? doc.name : "提案",
+    name: title,
+    title,
+    description: typeof doc.description === "string" ? doc.description : "",
+    type: PROPOSAL_TYPES.includes(doc.type as ProposalType) ? (doc.type as ProposalType) : "layout",
+    status: PROPOSAL_STATUSES.includes(doc.status as ProposalStatus) ? (doc.status as ProposalStatus) : "draft",
+    createdBy: typeof doc.createdBy === "string" ? doc.createdBy : "",
     authorName: typeof doc.authorName === "string" ? doc.authorName : "夥伴",
+    ...(typeof doc.linkedCommentId === "string" && doc.linkedCommentId
+      ? { linkedCommentId: doc.linkedCommentId }
+      : {}),
+    supports: normalizeSupports(doc.supports),
+    comments: normalizeComments(doc.comments),
     items,
     background: normalizeBackground(doc.background),
-    createdAt: typeof doc.createdAt === "number" ? doc.createdAt : Date.now(),
-    updatedAt: typeof doc.updatedAt === "number" ? doc.updatedAt : Date.now(),
+    createdAt: typeof doc.createdAt === "number" ? doc.createdAt : now,
+    updatedAt: typeof doc.updatedAt === "number" ? doc.updatedAt : now,
   };
 }
 
@@ -422,19 +533,40 @@ function pushUndo(state: ProposalRuntimeState): Pick<ProposalRuntimeState, "undo
 
 /* ---------- active-doc resolution ---------- */
 
-function nextProposalName(docs: VisualProposal[], versionId: string) {
+function nextProposalTitle(docs: VisualProposal[], versionId: string) {
   const count = docs.filter((doc) => doc.versionId === versionId).length;
   const letter = String.fromCharCode(65 + Math.min(count, 25));
   return `提案 ${letter}`;
 }
 
-function newProposal(versionId: string, authorName: string, docs: VisualProposal[]): VisualProposal {
+export type NewProposalOptions = {
+  type?: ProposalType;
+  title?: string;
+  description?: string;
+  linkedCommentId?: string;
+};
+
+function newProposal(
+  versionId: string,
+  author: ProposalAuthor,
+  docs: VisualProposal[],
+  options: NewProposalOptions = {},
+): VisualProposal {
   const now = Date.now();
+  const title = options.title?.trim() || nextProposalTitle(docs, versionId);
   return {
     id: uid("vp_"),
     versionId,
-    name: nextProposalName(docs, versionId),
-    authorName,
+    name: title,
+    title,
+    description: options.description ?? "",
+    type: options.type ?? "layout",
+    status: "draft",
+    createdBy: author.id,
+    authorName: author.name,
+    ...(options.linkedCommentId ? { linkedCommentId: options.linkedCommentId } : {}),
+    supports: [],
+    comments: [],
     items: [],
     background: { ...EMPTY_BACKGROUND },
     createdAt: now,
@@ -442,11 +574,16 @@ function newProposal(versionId: string, authorName: string, docs: VisualProposal
   };
 }
 
+/** Editing anything implies you want to see it: leave 原稿 for 提案, keep 對照 as-is. */
+function viewAfterEdit(mode: ProposalViewMode): ProposalViewMode {
+  return mode === "original" ? "proposal" : mode;
+}
+
 /** Apply a mutation to the active proposal for a version, creating one if needed. */
 function editActive(
   state: ProposalRuntimeState,
   versionId: string,
-  authorName: string,
+  author: ProposalAuthor,
   mutate: (doc: VisualProposal) => VisualProposal,
   selectedItemId?: string | null,
 ): ProposalRuntimeState {
@@ -454,7 +591,7 @@ function editActive(
   let activeId = state.activeByVersion[versionId];
   let active = docs.find((doc) => doc.id === activeId && doc.versionId === versionId);
   if (!active) {
-    active = newProposal(versionId, authorName, docs);
+    active = newProposal(versionId, author, docs);
     activeId = active.id;
     docs = [...docs, active];
   }
@@ -463,14 +600,31 @@ function editActive(
     ...state,
     docs: docs.map((doc) => (doc.id === active!.id ? nextDoc : doc)),
     activeByVersion: { ...state.activeByVersion, [versionId]: activeId },
-    visible: true,
+    viewMode: viewAfterEdit(state.viewMode),
     selectedItemId: selectedItemId === undefined ? state.selectedItemId : selectedItemId,
   };
 }
 
+/* ---------- read-only helpers usable outside the editor ---------- */
+
+/** All proposals in a room, for surfaces that only need to read (e.g. 修改點卡片). */
+export function useRoomProposals(roomId: string): { hydrated: boolean; docs: VisualProposal[] } {
+  useEffect(() => {
+    ensureChannel();
+    void hydrate(roomId);
+  }, [roomId]);
+
+  const state = useSyncExternalStore(
+    useCallback((listener) => subscribe(roomId, listener), [roomId]),
+    useCallback(() => snapshot(roomId), [roomId]),
+    useCallback(() => snapshot(roomId), [roomId]),
+  );
+  return { hydrated: state.hydrated, docs: state.docs };
+}
+
 /* ---------- public store hook ---------- */
 
-export function useProposalStore(roomId: string, versionId: string, authorName: string) {
+export function useProposalStore(roomId: string, versionId: string, author: ProposalAuthor) {
   useEffect(() => {
     ensureChannel();
     void hydrate(roomId);
@@ -482,6 +636,10 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
     useCallback(() => snapshot(roomId), [roomId]),
   );
 
+  const authorId = author.id;
+  const authorName = author.name;
+  const authorColor = author.color;
+
   const docs = state.docs.filter((doc) => doc.versionId === versionId);
   const activeId = state.activeByVersion[versionId];
   const active = docs.find((doc) => doc.id === activeId) ?? docs[0];
@@ -492,10 +650,30 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
     (mutate: (doc: VisualProposal) => VisualProposal, selectedItemId?: string | null) => {
       const current = snapshot(roomId);
       const withHistory = { ...current, ...pushUndo(current) };
-      set(roomId, { ...editActive(withHistory, versionId, authorName, mutate, selectedItemId), editing: true });
+      set(roomId, {
+        ...editActive(withHistory, versionId, { id: authorId, name: authorName, color: authorColor }, mutate, selectedItemId),
+        editing: true,
+      });
       persist(roomId);
     },
-    [roomId, versionId, authorName],
+    [roomId, versionId, authorId, authorName, authorColor],
+  );
+
+  /**
+   * Discussion writes (support / comment / status / meta) target one proposal by
+   * id and never enter the undo stack — undoing someone's 支持 would be odd.
+   */
+  const commitDoc = useCallback(
+    (id: string, mutate: (doc: VisualProposal) => VisualProposal) => {
+      const current = snapshot(roomId);
+      if (!current.docs.some((doc) => doc.id === id)) return;
+      set(roomId, {
+        ...current,
+        docs: current.docs.map((doc) => (doc.id === id ? { ...mutate(doc), updatedAt: Date.now() } : doc)),
+      });
+      persist(roomId);
+    },
+    [roomId],
   );
 
   /* continuous gesture: begin -> live* -> end (single history step, persist once) */
@@ -508,9 +686,12 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
     (mutate: (doc: VisualProposal) => VisualProposal, selectedItemId?: string | null) => {
       const point = checkpoints.get(roomId);
       if (point) point.dirty = true;
-      set(roomId, { ...editActive(snapshot(roomId), versionId, authorName, mutate, selectedItemId), editing: true });
+      set(roomId, {
+        ...editActive(snapshot(roomId), versionId, { id: authorId, name: authorName, color: authorColor }, mutate, selectedItemId),
+        editing: true,
+      });
     },
-    [roomId, versionId, authorName],
+    [roomId, versionId, authorId, authorName, authorColor],
   );
 
   const endEdit = useCallback(() => {
@@ -526,79 +707,146 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
     persist(roomId);
   }, [roomId]);
 
-  const create = useCallback(() => {
-    let createdId = "";
-    const current = snapshot(roomId);
-    const doc = newProposal(versionId, authorName, current.docs);
-    createdId = doc.id;
-    set(roomId, {
-      ...current,
-      ...pushUndo(current),
-      docs: [...current.docs, doc],
-      activeByVersion: { ...current.activeByVersion, [versionId]: doc.id },
-      visible: true,
-      editing: true,
-      selectedItemId: null,
-    });
-    persist(roomId);
-    return createdId;
-  }, [roomId, versionId, authorName]);
+  const create = useCallback(
+    (options: NewProposalOptions = {}) => {
+      const current = snapshot(roomId);
+      const doc = newProposal(versionId, { id: authorId, name: authorName, color: authorColor }, current.docs, options);
+      set(roomId, {
+        ...current,
+        ...pushUndo(current),
+        docs: [...current.docs, doc],
+        activeByVersion: { ...current.activeByVersion, [versionId]: doc.id },
+        viewMode: "proposal",
+        editing: true,
+        selectedItemId: null,
+      });
+      persist(roomId);
+      return doc.id;
+    },
+    [roomId, versionId, authorId, authorName, authorColor],
+  );
 
   const selectProposal = useCallback(
     (id: string) => {
       const current = snapshot(roomId);
+      const target = current.docs.find((doc) => doc.id === id);
+      if (!target) return;
       set(roomId, {
         ...current,
-        activeByVersion: { ...current.activeByVersion, [versionId]: id },
-        visible: true,
+        activeByVersion: { ...current.activeByVersion, [target.versionId]: id },
+        viewMode: viewAfterEdit(current.viewMode),
         selectedItemId: null,
-      });
-      persist(roomId);
-    },
-    [roomId, versionId],
-  );
-
-  const renameProposal = useCallback(
-    (id: string, name: string) => {
-      const current = snapshot(roomId);
-      set(roomId, {
-        ...current,
-        ...pushUndo(current),
-        docs: current.docs.map((doc) => (doc.id === id ? { ...doc, name: name.trim() || doc.name, updatedAt: Date.now() } : doc)),
       });
       persist(roomId);
     },
     [roomId],
   );
 
+  const renameProposal = useCallback(
+    (id: string, title: string) => {
+      const next = title.trim();
+      if (!next) return;
+      commitDoc(id, (doc) => ({ ...doc, title: next, name: next }));
+    },
+    [commitDoc],
+  );
+
+  const setDescription = useCallback(
+    (id: string, description: string) => commitDoc(id, (doc) => ({ ...doc, description })),
+    [commitDoc],
+  );
+
+  const setType = useCallback(
+    (id: string, type: ProposalType) => commitDoc(id, (doc) => ({ ...doc, type })),
+    [commitDoc],
+  );
+
+  const setStatus = useCallback(
+    (id: string, status: ProposalStatus) => commitDoc(id, (doc) => ({ ...doc, status })),
+    [commitDoc],
+  );
+
+  const linkComment = useCallback(
+    (id: string, commentId: string | null) =>
+      commitDoc(id, (doc) => {
+        const { linkedCommentId: _drop, ...rest } = doc;
+        return commentId ? { ...rest, linkedCommentId: commentId } : rest;
+      }),
+    [commitDoc],
+  );
+
+  /** 我支持這個提案 — one per person, tapping again takes it back. */
+  const toggleSupport = useCallback(
+    (id: string) =>
+      commitDoc(id, (doc) => {
+        const has = doc.supports.some((s) => s.userId === authorId);
+        return {
+          ...doc,
+          supports: has
+            ? doc.supports.filter((s) => s.userId !== authorId)
+            : [...doc.supports, { userId: authorId, userName: authorName, createdAt: Date.now() }],
+        };
+      }),
+    [commitDoc, authorId, authorName],
+  );
+
+  const addComment = useCallback(
+    (id: string, body: string) => {
+      const text = body.trim();
+      if (!text) return;
+      commitDoc(id, (doc) => ({
+        ...doc,
+        // First reply moves a 草稿 into 討論中 on its own; nobody has to remember.
+        status: doc.status === "draft" ? "discussing" : doc.status,
+        comments: [
+          ...doc.comments,
+          {
+            id: uid("pc_"),
+            authorId,
+            authorName,
+            authorColor,
+            body: text,
+            createdAt: Date.now(),
+          },
+        ],
+      }));
+    },
+    [commitDoc, authorId, authorName, authorColor],
+  );
+
   const duplicateProposal = useCallback(
     (id: string) => {
-      let createdId = "";
       const current = snapshot(roomId);
       const source = current.docs.find((doc) => doc.id === id);
       if (!source) return "";
+      const title = `${source.title} 複製`;
       const copy: VisualProposal = {
         ...source,
         id: uid("vp_"),
-        name: `${source.name} 複製`,
-        items: source.items.map((item) => ({ ...item, id: uid(item.type === "text" ? "vpt_" : "vpi_") })),
+        name: title,
+        title,
+        status: "draft",
+        createdBy: authorId,
+        authorName,
+        supports: [],
+        comments: [],
+        items: source.items.map((item) => ({ ...item, id: uid(itemPrefix(item.type)) })),
         background: { ...source.background },
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      createdId = copy.id;
       set(roomId, {
         ...current,
         ...pushUndo(current),
         docs: [...current.docs, copy],
         activeByVersion: { ...current.activeByVersion, [source.versionId]: copy.id },
-        visible: true,
+        viewMode: "proposal",
         selectedItemId: null,
       });
       persist(roomId);
-      return createdId;
+      return copy.id;
     },
-    [roomId],
+    [roomId, authorId, authorName],
   );
 
   const deleteProposal = useCallback(
@@ -625,24 +873,35 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
     [roomId],
   );
 
-  const setVisible = useCallback(
-    (visible: boolean) => {
+  const setViewMode = useCallback(
+    (viewMode: ProposalViewMode) => {
       const current = snapshot(roomId);
-      set(roomId, { ...current, visible, editing: visible ? current.editing : false, selectedItemId: visible ? current.selectedItemId : null });
+      set(roomId, {
+        ...current,
+        viewMode,
+        // Only 提案 is editable: 原稿 must stay clean and 對照 must stay readable.
+        editing: viewMode === "proposal" ? current.editing : false,
+        selectedItemId: viewMode === "proposal" ? current.selectedItemId : null,
+      });
     },
+    [roomId],
+  );
+
+  const setCompareSplit = useCallback(
+    (compareSplit: number) => set(roomId, { ...snapshot(roomId), compareSplit: Math.min(1, Math.max(0, compareSplit)) }),
     [roomId],
   );
 
   const setEditing = useCallback(
     (editing: boolean) => {
       const current = snapshot(roomId);
-      set(roomId, { ...current, editing, visible: editing ? true : current.visible, selectedItemId: editing ? current.selectedItemId : null });
+      set(roomId, {
+        ...current,
+        editing,
+        viewMode: editing ? "proposal" : current.viewMode,
+        selectedItemId: editing ? current.selectedItemId : null,
+      });
     },
-    [roomId],
-  );
-
-  const setCompareOriginal = useCallback(
-    (compareOriginal: boolean) => set(roomId, { ...snapshot(roomId), compareOriginal }),
     [roomId],
   );
 
@@ -655,6 +914,11 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
 
   const addImage = useCallback(
     (item: ProposalImageItem) => commit((doc) => ({ ...doc, items: [...doc.items, item] }), item.id),
+    [commit],
+  );
+
+  const addShape = useCallback(
+    (item: ProposalShapeItem) => commit((doc) => ({ ...doc, items: [...doc.items, item] }), item.id),
     [commit],
   );
 
@@ -676,6 +940,15 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
     [live],
   );
 
+  const toggleItemVisible = useCallback(
+    (id: string) => {
+      const item = active?.items.find((i) => i.id === id);
+      if (!item) return;
+      updateItem(id, { visible: !item.visible });
+    },
+    [active, updateItem],
+  );
+
   const deleteItem = useCallback((id: string) => commit((doc) => ({ ...doc, items: doc.items.filter((item) => item.id !== id) }), null), [commit]);
 
   const duplicateItem = useCallback(
@@ -684,7 +957,7 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
       if (!source) return;
       const copy = {
         ...source,
-        id: uid(source.type === "text" ? "vpt_" : "vpi_"),
+        id: uid(itemPrefix(source.type)),
         x: Math.min(0.95, source.x + 0.04),
         y: Math.min(0.95, source.y + 0.04),
       } as ProposalItem;
@@ -760,27 +1033,39 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
   return {
     hydrated: state.hydrated,
     docs,
+    allDocs: state.docs,
     active,
     selectedItem,
-    visible: state.visible,
-    editing: state.editing,
-    compareOriginal: state.compareOriginal,
+    viewMode: state.viewMode,
+    compareSplit: state.compareSplit,
+    /** The proposal layer is drawn unless the viewer asked for the clean original. */
+    visible: state.viewMode !== "original",
+    editing: state.editing && state.viewMode === "proposal",
     canUndo: state.undo.length > 0,
     canRedo: state.redo.length > 0,
     error: state.error,
+    userId: authorId,
     create,
     selectProposal,
     renameProposal,
+    setDescription,
+    setType,
+    setStatus,
+    linkComment,
+    toggleSupport,
+    addComment,
     duplicateProposal,
     deleteProposal,
-    setVisible,
+    setViewMode,
+    setCompareSplit,
     setEditing,
-    setCompareOriginal,
     selectItem,
     addText,
     addImage,
+    addShape,
     updateItem,
     updateItemLive,
+    toggleItemVisible,
     beginEdit,
     endEdit,
     deleteItem,
@@ -794,6 +1079,10 @@ export function useProposalStore(roomId: string, versionId: string, authorName: 
     redo,
     dismissError,
   };
+}
+
+function itemPrefix(type: ProposalItem["type"]): string {
+  return type === "text" ? "vpt_" : type === "image" ? "vpi_" : "vps_";
 }
 
 /** Remove proposals whose poster version no longer exists (called by the room owner). */

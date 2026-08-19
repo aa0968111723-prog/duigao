@@ -3,15 +3,15 @@ import type { ColorMode, CompareMode } from "../lib/types";
 import type { CollabStatus } from "../lib/peer";
 import { useViewport } from "../hooks/useViewport";
 import { loadFlag, saveFlag } from "../lib/store";
-import { ProposalDock } from "../features/visual-proposal/ProposalDock";
-import { pruneProposalVersions } from "../features/visual-proposal/store";
+import { ProposalDock, type ProposalIntent } from "../features/visual-proposal/ProposalDock";
+import { pruneProposalVersions, useProposalStore, useRoomProposals } from "../features/visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "./BottomSheet";
 import { CommentCard } from "./CommentCard";
 import { PinFields } from "./PinFields";
 import { UploadZone } from "./UploadZone";
 import { Viewer } from "./Stage";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "./icons";
-import { nextPinNumber, versionLabel, type WorkspaceApi } from "./api";
+import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "./api";
 
 const COLOR_MODES: { id: ColorMode; label: string }[] = [
   { id: "color", label: "彩色" },
@@ -38,11 +38,59 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [more, setMore] = useState(false);
   const [actionOpen, setActionOpen] = useState(false);
   const [legacyOpen, setLegacyOpen] = useState(false);
-  const [proposalMode, setProposalMode] = useState(false);
+  /** null = not in 視覺提案 mode. The intent says how the mode was entered. */
+  const [proposalSession, setProposalSession] = useState<{ intent: ProposalIntent | null } | null>(null);
   const [dockHeight, setDockHeight] = useState(0);
   const [composeInset, setComposeInset] = useState(0);
   const [nudge, setNudge] = useState(false);
   const chatRef = useRef<HTMLInputElement>(null);
+  const proposalMode = proposalSession != null;
+
+  // Read-only view of every proposal in the room, so 修改點卡 can show its own.
+  const roomProposals = useRoomProposals(room.id);
+  const proposalStore = useProposalStore(room.id, view.versionId, api.guest);
+
+  /** 修改點 → 提案: open the dock with a proposal already bound to that pin. */
+  const proposeFromPin = (commentId: string) => {
+    const target = room.comments.find((c) => c.id === commentId);
+    if (!target) return;
+    api.setTool("pan");
+    api.selectPin(null);
+    // The proposal belongs to the poster version the 修改點 lives on.
+    if (target.versionId !== view.versionId) {
+      api.setView({ ...view, versionId: target.versionId, compareMode: "single" });
+    }
+    setProposalSession({ intent: { kind: "create", linkedCommentId: commentId } });
+  };
+
+  /** 修改點卡的「相關提案」→ open that exact proposal, switching version if needed. */
+  const openProposal = (proposalId: string) => {
+    const doc = roomProposals.docs.find((d) => d.id === proposalId);
+    if (!doc) return;
+    api.setTool("pan");
+    api.selectPin(null);
+    if (doc.versionId !== view.versionId) api.setView({ ...view, versionId: doc.versionId, compareMode: "single" });
+    proposalStore.selectProposal(proposalId);
+    setProposalSession({ intent: { kind: "open", proposalId } });
+  };
+
+  /** 提案卡的「來自修改點 N」→ leave the dock and select that pin in the discussion. */
+  const proposalPinBinding = {
+    labelFor: (commentId: string) => {
+      const n = pinNumber(room, commentId);
+      return n > 0 ? `修改點 ${n}` : null;
+    },
+    onOpen: (commentId: string) => {
+      const target = room.comments.find((c) => c.id === commentId);
+      setProposalSession(null);
+      if (!target) return;
+      api.setTool("pan");
+      api.setView({ ...view, versionId: target.versionId, compareMode: "single" });
+      api.selectPin(commentId);
+      setTab("items");
+      setSnap("half");
+    },
+  };
 
   useEffect(() => {
     pruneProposalVersions(
@@ -55,6 +103,8 @@ export function MobileWorkspace({ api, presence }: Props) {
     room.comments.some((c) => c.authorId === api.guest.id) ||
     (room.supports ?? []).some((s) => s.userId === api.guest.id) ||
     (room.replies ?? []).some((r) => r.authorId === api.guest.id);
+
+  const versionProposalCount = roomProposals.docs.filter((d) => d.versionId === view.versionId).length;
 
   // A single, gentle nudge — only if the viewer has been around a while without
   // leaving any feedback, and never more than once per room.
@@ -209,14 +259,16 @@ export function MobileWorkspace({ api, presence }: Props) {
       </div>
 
       <div className="m-bottom">
-        {proposalMode ? (
+        {proposalSession ? (
           <ProposalDock
             roomId={room.id}
             versionId={view.versionId}
-            authorName={api.guest.name}
+            author={api.guest}
             showToast={api.showToast}
-            onExit={() => setProposalMode(false)}
+            onExit={() => setProposalSession(null)}
             onHeight={setDockHeight}
+            intent={proposalSession.intent}
+            pin={proposalPinBinding}
             pref={{
               prefs: room.proposalPrefs ?? [],
               userId: api.guest.id,
@@ -288,6 +340,9 @@ export function MobileWorkspace({ api, presence }: Props) {
                       api.setView({ ...view, versionId: c.versionId, compareMode: "single" });
                     }}
                     onToggleResolve={() => api.toggleResolve(c.id)}
+                    relatedProposals={roomProposals.docs.filter((d) => d.linkedCommentId === c.id)}
+                    onCreateProposal={() => proposeFromPin(c.id)}
+                    onOpenProposal={openProposal}
                   />
                 ))}
               </div>
@@ -442,10 +497,10 @@ export function MobileWorkspace({ api, presence }: Props) {
                 api.setTool("pan");
                 api.selectPin(null);
                 setMore(false);
-                setProposalMode(true);
+                setProposalSession({ intent: null });
               }}
             >
-              視覺提案 · 素材 / 字體 / 文案 / 背景
+              視覺提案{versionProposalCount > 0 ? ` · 這一版 ${versionProposalCount} 個` : " · 覆蓋在原稿上試看"}
             </button>
 
             <div className="m-more-group">

@@ -5,9 +5,8 @@ import type { ShowToast } from "../toast";
 import {
   applyCloudProposals,
   getProposalDocs,
+  normalizeDoc,
   setProposalCloudSync,
-  type ProposalBackground,
-  type ProposalItem,
   type VisualProposal,
 } from "../features/visual-proposal/store";
 import { isCloudConfigured } from "./config";
@@ -35,17 +34,6 @@ import {
 } from "./roomRepository";
 import { subscribeRoom, type Unsubscribe } from "./roomSync";
 import type { SyncStatus } from "./types";
-
-const DEFAULT_BG: ProposalBackground = {
-  color: "#000000",
-  colorOpacity: 0,
-  gradient: "none",
-  gradientFrom: "#000000",
-  gradientTo: "#c45c4a",
-  gradientOpacity: 0,
-  imageOpacity: 1,
-  imageFit: "cover",
-};
 
 export type CloudWrites = {
   setTitle: (title: string) => void;
@@ -76,17 +64,39 @@ type Params = {
   showToast: ShowToast;
 };
 
+/**
+ * Visual proposal 2.0 keeps its extra fields (type / status / description /
+ * supports / discussion / linked pin) inside the existing `payload` jsonb, so
+ * the cloud schema, RLS and RPCs are untouched. The row columns still win for
+ * identity and name.
+ */
 function proposalToStore(p: CloudProposal): VisualProposal {
-  const payload = p.payload as { items?: ProposalItem[]; background?: ProposalBackground };
-  return {
+  const payload = (p.payload ?? {}) as Record<string, unknown>;
+  const doc = normalizeDoc({
+    ...payload,
     id: p.id,
     versionId: p.versionId,
     name: p.name,
+    title: typeof payload.title === "string" && payload.title.trim() ? payload.title : p.name,
     authorName: p.authorName,
-    items: Array.isArray(payload.items) ? payload.items : [],
-    background: payload.background ?? DEFAULT_BG,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+  });
+  // id and versionId are always supplied above, so normalization cannot reject it.
+  return doc!;
+}
+
+function proposalToPayload(doc: VisualProposal): Record<string, unknown> {
+  return {
+    items: doc.items,
+    background: doc.background,
+    title: doc.title,
+    description: doc.description,
+    type: doc.type,
+    status: doc.status,
+    createdBy: doc.createdBy,
+    linkedCommentId: doc.linkedCommentId ?? null,
+    supports: doc.supports,
+    comments: doc.comments,
+    createdAt: doc.createdAt,
   };
 }
 
@@ -212,8 +222,8 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
                 id: doc.id,
                 versionId: doc.versionId,
                 authorName: doc.authorName,
-                name: doc.name,
-                payload: { items: doc.items, background: doc.background },
+                name: doc.title,
+                payload: proposalToPayload(doc),
                 revision: expected,
               });
               revisions.current.set(doc.id, next);
@@ -328,8 +338,8 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
         id: d.id,
         versionId: d.versionId,
         authorName: d.authorName,
-        name: d.name,
-        payload: { items: d.items, background: d.background },
+        name: d.title,
+        payload: proposalToPayload(d),
         revision: 1,
       }));
       const { roomId } = await createRoom(supabase, { room, proposals: localProposals }, guest, token);
@@ -345,8 +355,8 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
             id: doc.id,
             versionId: doc.versionId,
             authorName: doc.authorName,
-            name: doc.name,
-            payload: { items: doc.items, background: doc.background },
+            name: doc.title,
+            payload: proposalToPayload(doc),
             revision: expected,
           });
           revisions.current.set(doc.id, next);

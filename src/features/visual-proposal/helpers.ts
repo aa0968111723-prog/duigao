@@ -4,12 +4,40 @@ import type {
   GradientKind,
   ProposalBackground,
   ProposalImageItem,
+  ProposalShapeItem,
+  ProposalStatus,
   ProposalTextItem,
+  ProposalType,
   TextRole,
 } from "./store";
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/** Proposal kinds, in the order they read best on a phone. Labels are the only UI copy. */
+export const PROPOSAL_TYPES: { key: ProposalType; label: string }[] = [
+  { key: "text", label: "文字提案" },
+  { key: "font", label: "字體提案" },
+  { key: "background", label: "背景提案" },
+  { key: "asset", label: "素材提案" },
+  { key: "layout", label: "排版提案" },
+  { key: "color", label: "色彩提案" },
+];
+
+export function proposalTypeLabel(type: ProposalType): string {
+  return PROPOSAL_TYPES.find((t) => t.key === type)?.label ?? "排版提案";
+}
+
+export const PROPOSAL_STATUSES: { key: ProposalStatus; label: string }[] = [
+  { key: "draft", label: "草稿" },
+  { key: "discussing", label: "討論中" },
+  { key: "accepted", label: "已採用" },
+  { key: "rejected", label: "不採用" },
+];
+
+export function proposalStatusLabel(status: ProposalStatus): string {
+  return PROPOSAL_STATUSES.find((s) => s.key === status)?.label ?? "草稿";
 }
 
 export function hexToRgba(hex: string, alpha: number): string {
@@ -102,6 +130,7 @@ export function createTextItem(role: TextRole): ProposalTextItem {
     width: preset.width,
     rotation: 0,
     opacity: 1,
+    visible: true,
     fontFamily: style.stack,
     fontStyle: style.key,
     fontSize: preset.fontSize,
@@ -126,6 +155,24 @@ export function createImageItem(imageDataUrl: string, name: string): ProposalIma
     width: 32,
     rotation: 0,
     opacity: 1,
+    visible: true,
+  };
+}
+
+/** A colour block — the simplest "cover this / add a band here" proposal element. */
+export function createShapeItem(color = "#c45c4a"): ProposalShapeItem {
+  return {
+    id: uid("vps_"),
+    type: "shape",
+    color,
+    x: 0.5,
+    y: 0.5,
+    width: 60,
+    height: 18,
+    radius: 10,
+    rotation: 0,
+    opacity: 0.9,
+    visible: true,
   };
 }
 

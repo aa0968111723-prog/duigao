@@ -1,4 +1,4 @@
-import { useProposalStore } from "./store";
+import { useProposalStore, type ProposalAuthor } from "./store";
 import { FONT_STYLES, fontStyleByKey } from "./helpers";
 import { LiveColor, LiveRange } from "./controls-kit";
 import type { ShowToast } from "../../toast";
@@ -6,12 +6,12 @@ import type { ShowToast } from "../../toast";
 type Props = {
   roomId: string;
   versionId: string;
-  authorName: string;
+  author: ProposalAuthor;
   showToast?: ShowToast;
 };
 
-export function ProposalElementControls({ roomId, versionId, authorName, showToast }: Props) {
-  const proposal = useProposalStore(roomId, versionId, authorName);
+export function ProposalElementControls({ roomId, versionId, author, showToast }: Props) {
+  const proposal = useProposalStore(roomId, versionId, author);
   const selected = proposal.selectedItem;
 
   if (!selected) {
@@ -37,11 +37,79 @@ export function ProposalElementControls({ roomId, versionId, authorName, showToa
       <button type="button" className="proposal-quiet" onClick={() => proposal.resetItemPosition(selected.id)}>
         重設位置
       </button>
+      <button type="button" className="proposal-quiet" onClick={() => proposal.toggleItemVisible(selected.id)}>
+        {selected.visible ? "暫時隱藏" : "重新顯示"}
+      </button>
       <button type="button" className="proposal-danger" onClick={remove}>
         刪除
       </button>
     </div>
   );
+
+  if (selected.type === "shape") {
+    return (
+      <div className="proposal-elem">
+        <div className="proposal-selected-title">
+          <strong>色塊</strong>
+        </div>
+        <div className="proposal-grid-2">
+          <LiveColor
+            label="顏色"
+            ariaLabel="色塊顏色"
+            value={selected.color}
+            onBegin={proposal.beginEdit}
+            onLive={(v) => proposal.updateItemLive(selected.id, { color: v })}
+            onEnd={proposal.endEdit}
+          />
+          <LiveRange
+            label={`圓角 ${Math.round(selected.radius)}`}
+            ariaLabel="色塊圓角"
+            value={selected.radius}
+            min={0}
+            max={60}
+            step={1}
+            onBegin={proposal.beginEdit}
+            onLive={(v) => proposal.updateItemLive(selected.id, { radius: v })}
+            onEnd={proposal.endEdit}
+          />
+        </div>
+        <LiveRange
+          label={`寬度 ${Math.round(selected.width)}%`}
+          ariaLabel="色塊寬度"
+          value={selected.width}
+          min={5}
+          max={100}
+          step={1}
+          onBegin={proposal.beginEdit}
+          onLive={(v) => proposal.updateItemLive(selected.id, { width: v })}
+          onEnd={proposal.endEdit}
+        />
+        <LiveRange
+          label={`高度 ${Math.round(selected.height)}%`}
+          ariaLabel="色塊高度"
+          value={selected.height}
+          min={2}
+          max={100}
+          step={1}
+          onBegin={proposal.beginEdit}
+          onLive={(v) => proposal.updateItemLive(selected.id, { height: v })}
+          onEnd={proposal.endEdit}
+        />
+        <LiveRange
+          label={`透明度 ${Math.round(selected.opacity * 100)}%`}
+          ariaLabel="色塊透明度"
+          value={selected.opacity}
+          min={0.05}
+          max={1}
+          step={0.05}
+          onBegin={proposal.beginEdit}
+          onLive={(v) => proposal.updateItemLive(selected.id, { opacity: v })}
+          onEnd={proposal.endEdit}
+        />
+        {common}
+      </div>
+    );
+  }
 
   if (selected.type === "image") {
     return (

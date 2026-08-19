@@ -363,7 +363,7 @@ export function Stage({ api, version, interactive, wipeWith, compact }: StagePro
             />
           )}
 
-          <VisualProposalOverlay roomId={room.id} versionId={version.id} authorName={guest.name} compact={compact} />
+          <VisualProposalOverlay roomId={room.id} versionId={version.id} author={guest} compact={compact} />
 
           {pins.map((pin) => {
             const n = pinNumber(room, pin.id);

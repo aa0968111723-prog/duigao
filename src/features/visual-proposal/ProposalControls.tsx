@@ -1,10 +1,18 @@
 import { useRef, useState } from "react";
-import { useProposalStore } from "./store";
+import { useProposalStore, type ProposalAuthor } from "./store";
 import { ProposalElementControls } from "./ProposalElementControls";
 import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
 import { ProposalSummary } from "./ProposalSummary";
 import { ProposalPreference } from "./ProposalPreference";
-import { TEXT_ROLES, createImageItem, createTextItem, prepareImageFile } from "./helpers";
+import {
+  PROPOSAL_STATUSES,
+  PROPOSAL_TYPES,
+  TEXT_ROLES,
+  createImageItem,
+  createShapeItem,
+  createTextItem,
+  prepareImageFile,
+} from "./helpers";
 import type { ShowToast } from "../../toast";
 import type { ProposalPrefBinding } from "./ProposalDock";
 import "./proposal.css";
@@ -12,13 +20,13 @@ import "./proposal.css";
 type Props = {
   roomId: string;
   versionId: string;
-  authorName: string;
+  author: ProposalAuthor;
   showToast?: ShowToast;
   pref?: ProposalPrefBinding;
 };
 
-export function ProposalControls({ roomId, versionId, authorName, showToast, pref }: Props) {
-  const proposal = useProposalStore(roomId, versionId, authorName);
+export function ProposalControls({ roomId, versionId, author, showToast, pref }: Props) {
+  const proposal = useProposalStore(roomId, versionId, author);
   const materialRef = useRef<HTMLInputElement>(null);
   const [pickText, setPickText] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -47,16 +55,34 @@ export function ProposalControls({ roomId, versionId, authorName, showToast, pre
           <p>只做模擬，不會修改原始文宣。</p>
         </div>
         {active && (
-          <div className="proposal-view-switch" aria-label="原稿與提案切換">
-            <button type="button" className={!proposal.visible ? "is-on" : ""} onClick={() => proposal.setVisible(false)}>
+          <div className="proposal-view-switch" aria-label="原稿 / 提案 / 對照">
+            <button type="button" className={proposal.viewMode === "original" ? "is-on" : ""} onClick={() => proposal.setViewMode("original")}>
               原稿
             </button>
-            <button type="button" className={proposal.visible ? "is-on" : ""} onClick={() => proposal.setVisible(true)}>
+            <button type="button" className={proposal.viewMode === "proposal" ? "is-on" : ""} onClick={() => proposal.setViewMode("proposal")}>
               提案
+            </button>
+            <button type="button" className={proposal.viewMode === "compare" ? "is-on" : ""} onClick={() => proposal.setViewMode("compare")}>
+              對照
             </button>
           </div>
         )}
       </div>
+
+      {proposal.viewMode === "compare" && (
+        <label className="proposal-field">
+          <span>對照位置</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={proposal.compareSplit}
+            aria-label="對照位置"
+            onChange={(e) => proposal.setCompareSplit(Number(e.target.value))}
+          />
+        </label>
+      )}
 
       {proposal.error && (
         <div className="proposal-error" role="alert">
@@ -70,7 +96,7 @@ export function ProposalControls({ roomId, versionId, authorName, showToast, pre
       {!proposal.hydrated && <p className="proposal-muted">正在載入這台裝置的提案…</p>}
 
       {proposal.hydrated && !active && (
-        <button type="button" className="proposal-primary" onClick={proposal.create}>
+        <button type="button" className="proposal-primary" onClick={() => proposal.create()}>
           ＋ 建立這一版的視覺提案
         </button>
       )}
@@ -87,19 +113,63 @@ export function ProposalControls({ roomId, versionId, authorName, showToast, pre
                   aria-pressed={doc.id === active.id}
                   onClick={() => proposal.selectProposal(doc.id)}
                 >
-                  {doc.name}
+                  {doc.title}
                 </button>
               ))}
             </div>
-            <button type="button" className="proposal-icon-action" onClick={proposal.create} title="新增另一個提案" aria-label="新增另一個提案">
+            <button type="button" className="proposal-icon-action" onClick={() => proposal.create()} title="新增另一個提案" aria-label="新增另一個提案">
               ＋
             </button>
           </div>
 
+          <div className="proposal-field">
+            <span>提案類型</span>
+            <div className="proposal-chiprow" role="group" aria-label="提案類型">
+              {PROPOSAL_TYPES.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  className={`proposal-chip ${active.type === t.key ? "is-on" : ""}`}
+                  aria-pressed={active.type === t.key}
+                  onClick={() => proposal.setType(active.id, t.key)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="proposal-field">
+            <span>狀態</span>
+            <div className="proposal-chiprow" role="group" aria-label="提案狀態">
+              {PROPOSAL_STATUSES.map((st) => (
+                <button
+                  key={st.key}
+                  type="button"
+                  className={`proposal-chip ${active.status === st.key ? "is-on" : ""}`}
+                  aria-pressed={active.status === st.key}
+                  onClick={() => proposal.setStatus(active.id, st.key)}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="proposal-field">
+            <span>說明</span>
+            <textarea
+              rows={2}
+              value={active.description}
+              aria-label="提案說明"
+              onChange={(e) => proposal.setDescription(active.id, e.target.value)}
+            />
+          </label>
+
           {pref && (
             <ProposalPreference
               versionId={versionId}
-              proposals={proposal.docs.map((d) => ({ id: d.id, name: d.name }))}
+              proposals={proposal.docs.map((d) => ({ id: d.id, name: d.title }))}
               prefs={pref.prefs}
               userId={pref.userId}
               onChoose={pref.onChoose}
@@ -132,7 +202,7 @@ export function ProposalControls({ roomId, versionId, authorName, showToast, pre
               </form>
             ) : confirmDelete ? (
               <div className="proposal-confirm" role="alertdialog" aria-label="刪除提案確認">
-                <span>確定刪除「{active.name}」？原稿不會受到影響。</span>
+                <span>確定刪除「{active.title}」？原稿不會受到影響。</span>
                 <button
                   type="button"
                   className="proposal-danger"
@@ -154,7 +224,7 @@ export function ProposalControls({ roomId, versionId, authorName, showToast, pre
                   type="button"
                   className="proposal-quiet"
                   onClick={() => {
-                    setRenameValue(active.name);
+                    setRenameValue(active.title);
                     setRenaming(true);
                   }}
                 >
@@ -176,6 +246,9 @@ export function ProposalControls({ roomId, versionId, authorName, showToast, pre
             </button>
             <button type="button" className="proposal-action" onClick={() => materialRef.current?.click()}>
               ＋ 素材
+            </button>
+            <button type="button" className="proposal-action" onClick={() => proposal.addShape(createShapeItem())}>
+              ＋ 色塊
             </button>
             <input
               ref={materialRef}
@@ -214,18 +287,18 @@ export function ProposalControls({ roomId, versionId, authorName, showToast, pre
           <details className="proposal-section">
             <summary>背景模擬</summary>
             <div className="proposal-section-body">
-              <ProposalBackgroundControls roomId={roomId} versionId={versionId} authorName={authorName} showToast={showToast} />
+              <ProposalBackgroundControls roomId={roomId} versionId={versionId} author={author} showToast={showToast} />
             </div>
           </details>
 
           <div className="proposal-selected">
-            <ProposalElementControls roomId={roomId} versionId={versionId} authorName={authorName} showToast={showToast} />
+            <ProposalElementControls roomId={roomId} versionId={versionId} author={author} showToast={showToast} />
           </div>
 
           <details className="proposal-section">
             <summary>提案摘要 / 轉成修改建議</summary>
             <div className="proposal-section-body">
-              <ProposalSummary roomId={roomId} versionId={versionId} authorName={authorName} showToast={showToast} />
+              <ProposalSummary roomId={roomId} versionId={versionId} author={author} showToast={showToast} />
             </div>
           </details>
 

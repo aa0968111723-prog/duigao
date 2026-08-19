@@ -17,7 +17,7 @@
 - 點位置留意見、圈出範圍（AnnotationRegion）；看稿永遠是乾淨原稿
 - 低摩擦回饋：快速原因、一句話、我也覺得、回覆；分類／優先／建議選填
 - 待修改 / 已完成、一鍵複製完整修改清單
-- 視覺提案（素材 / 字體 / 文案 / 背景）與提案表態
+- 視覺提案 2.0：覆蓋在原稿上的提案層（文字／素材／色塊），提案卡有類型、狀態、支持與留言；原稿 / 提案 / 對照三種檢視；可從修改點直接開提案
 - 分享 Bottom Sheet：複製連結、傳到 LINE、系統分享
 - 操作回饋 toast 與「復原」、儲存狀態、首次使用引導
 - 雲端房間（Supabase）：分享後主辦方關掉頁面，夥伴仍能隨時打開同一房
@@ -40,7 +40,7 @@ src/
     Home.tsx / ShareSheet.tsx / UploadZone.tsx
   toast.tsx                操作回饋 toast
   cloud/                   唯一的雲端層：auth、invite、repository、realtime、offline queue
-  features/visual-proposal/ 視覺提案（A/B/C、素材、偏好）
+  features/visual-proposal/ 視覺提案：提案層、提案卡（支持／留言／狀態）、比較、與修改點連動
   styles.css               共用樣式與桌機版面
   mobile.css               手機元件樣式（≤720px）
   usability.css            toast / 儲存狀態 / 新手引導
@@ -126,6 +126,9 @@ VITE_SUPABASE_PUBLISHABLE_KEY=...    # publishable（anon）key，絕不放 serv
 2. `0002_feedback.sql` — 我也覺得、回覆、提案表態
 3. `0003_comment_regions.sql` — 修改建議的圈選範圍
 4. `0004_reconcile_cloud_architecture.sql` — 移除早期簡化版 `get_room`/`save_room` 鏡像（全新專案為 no-op）
+
+視覺提案 2.0 的新欄位（類型、狀態、說明、支持、留言、綁定的修改點）都放在既有的
+`visual_proposals.payload` jsonb 裡，**不需要新的 migration**。
 
 > 若專案曾部署過早期鏡像（有 `get_room`/`save_room`），請先跑 `0004` 再跑 `0001`–`0003`，
 > 並在 Dashboard 開啟 **Authentication → Allow anonymous sign-ins**。

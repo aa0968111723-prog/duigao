@@ -1,11 +1,11 @@
-import { useProposalStore, type VisualProposal } from "./store";
-import { fontStyleLabel, textRoleLabel } from "./helpers";
+import { useProposalStore, type ProposalAuthor, type VisualProposal } from "./store";
+import { fontStyleLabel, proposalStatusLabel, proposalTypeLabel, textRoleLabel } from "./helpers";
 import type { ShowToast } from "../../toast";
 
 type Props = {
   roomId: string;
   versionId: string;
-  authorName: string;
+  author: ProposalAuthor;
   showToast?: ShowToast;
 };
 
@@ -19,15 +19,23 @@ function describePosition(x: number, y: number): string {
 function overview(doc: VisualProposal): string {
   const texts = doc.items.filter((i) => i.type === "text").length;
   const images = doc.items.filter((i) => i.type === "image").length;
+  const shapes = doc.items.filter((i) => i.type === "shape").length;
   const bg = doc.background;
   const bgActive = bg.imageDataUrl || bg.colorOpacity > 0 || (bg.gradient !== "none" && bg.gradientOpacity > 0);
-  const parts = [`背景 ${bgActive ? 1 : 0}`, `文字 ${texts}`, `素材 ${images}`];
-  return `${doc.name}（作者：${doc.authorName}）\n改動：${parts.join("・")}`;
+  const parts = [`背景 ${bgActive ? 1 : 0}`, `文字 ${texts}`, `素材 ${images}`, `色塊 ${shapes}`];
+  const head = `${doc.title}（${proposalTypeLabel(doc.type)}・${proposalStatusLabel(doc.status)}・作者：${doc.authorName}）`;
+  const desc = doc.description.trim() ? `\n想解決：${doc.description.trim()}` : "";
+  return `${head}${desc}\n改動：${parts.join("・")}`;
 }
 
 function suggestions(doc: VisualProposal): string[] {
   const lines: string[] = [];
   for (const item of doc.items) {
+    if (!item.visible) continue;
+    if (item.type === "shape") {
+      lines.push(`在${describePosition(item.x, item.y)}加一塊色塊（${item.color}），約 ${Math.round(item.width)}% 寬`);
+      continue;
+    }
     if (item.type === "text") {
       const role = textRoleLabel(item.role);
       lines.push(`${role}文案改為：「${item.text.trim() || "（未填）"}」`);
@@ -44,8 +52,8 @@ function suggestions(doc: VisualProposal): string[] {
   return lines;
 }
 
-export function ProposalSummary({ roomId, versionId, authorName, showToast }: Props) {
-  const proposal = useProposalStore(roomId, versionId, authorName);
+export function ProposalSummary({ roomId, versionId, author, showToast }: Props) {
+  const proposal = useProposalStore(roomId, versionId, author);
   const active = proposal.active;
   if (!active) return null;
 
