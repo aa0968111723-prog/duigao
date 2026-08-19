@@ -53,7 +53,9 @@ src/
 ```bash
 npm install
 npm run dev
-npm run build   # tsc --noEmit && vite build，輸出到 dist/
+npm run build            # cloud env 檢查 + tsc --noEmit + vite build，輸出到 dist/
+npm run check:cloud-env  # 只檢查部署 env，未就緒時 exit 1（給 CI / 部署流程用）
+npm run test:share-e2e   # 分享連結驗收（見 scripts/e2e/README.md）
 ```
 
 ## 技術
@@ -85,15 +87,36 @@ npm run build   # tsc --noEmit && vite build，輸出到 dist/
 必須透過連結加入成為房間成員（匿名身分，只需輸入名字），所有資料表與
 Storage 都以 RLS 限制在成員之內；猜到房間 id 也讀不到內容。
 
+**分享連結只有這一種格式。** 建立雲端房間失敗時，UI 顯示「暫時無法建立分享連結」
+與「再試一次」，不會退回任何看似成功、其實需要主辦方保持頁面開著的連結。
+
+### 舊版 `#room=<6碼>` 連結
+
+雲端房間之前的連結沒有 invite，只有在主辦方頁面還開著時才連得上：
+
+- 主辦方自己的裝置上有 local→cloud 對應，開啟舊連結會**自動換成新版 invite 連結**
+- 夥伴的新裝置沒有對應，主辦方又不在線時，畫面直接說明「這是舊版分享連結，
+  請向主辦方取得新版連結」，不再無止境地 generic retry
+- 主辦方在線時仍保留 PeerJS best-effort 相容
+
 ### 雲端設定
 
 ```bash
-VITE_SUPABASE_URL=...                # Supabase 專案 URL
+VITE_SUPABASE_URL=...                # Supabase 專案 URL（本機 stack 可用 http://127.0.0.1:54321）
 VITE_SUPABASE_PUBLISHABLE_KEY=...    # publishable（anon）key，絕不放 service-role
 ```
 
-金鑰**不寫在程式碼裡**，只透過環境變數（見 `.env.example`）。
-未設定時整個 app 以「IndexedDB + PeerJS」本機模式運作，不會白屏。
+金鑰**不寫在程式碼裡**，只透過部署平台的環境變數注入（見 `.env.example`）。
+
+`npm run build` 會先跑 `scripts/check-cloud-env.mjs`：env 沒就緒時印出明確警告
+（值只顯示遮罩後的指紋，log 可以安心貼）。部署流程請改用
+`npm run check:cloud-env`（或 `REQUIRE_CLOUD_ENV=1`），env 沒設定就讓 build 失敗，
+而不是默默出一個不能分享的版本。
+
+- **dev（`npm run dev`）沒設定 env**：以「IndexedDB + PeerJS」本機模式運作，
+  分享會給一條標示為「本機測試連結」的暫時連結
+- **production build 沒設定 env**：分享沒有永久連結可以給，UI 直接說明服務無法使用，
+  絕不宣稱「分享連結已建立」；console 也會印出缺哪個變數
 
 ### Supabase 專案初始化
 

@@ -1,8 +1,25 @@
-export { isCloudConfigured } from "./config";
+export {
+  cloudConfigIssues,
+  cloudConfigStatus,
+  isCloudConfigured,
+  isCloudDeploymentBroken,
+  isProductionBuild,
+  type CloudConfigStatus,
+} from "./config";
 export { getSupabase } from "./client";
 export { ensureSession } from "./auth";
 export { CloudError, isInvalidInvite, isRevisionConflict } from "./errors";
-export { buildInviteUrl, generateInviteToken, newRoomId, readInviteFromUrl, type UrlInvite } from "./invite";
+export {
+  buildInviteUrl,
+  generateInviteToken,
+  newRoomId,
+  readInviteFromUrl,
+  readRoomLink,
+  replaceUrlWithInvite,
+  type RoomLink,
+  type UrlInvite,
+} from "./invite";
+export { upgradeLegacyShareUrl } from "./legacy";
 export { getCloudMapping, saveCloudMapping, type CloudMapping } from "./mapping";
 export { signedUrl } from "./assets";
 export {
@@ -22,4 +39,5 @@ export {
 } from "./roomRepository";
 export { subscribeRoom, type SyncHandlers, type Unsubscribe } from "./roomSync";
 export { syncStatusLabel, type SyncStatus } from "./types";
+export { useCloudRoom, type ShareResult } from "./useCloudRoom";
 export { signedUrl as cloudSignedUrl } from "./assets";

@@ -14,7 +14,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict } from "./errors";
-import { buildInviteUrl, generateInviteToken, readInviteFromUrl } from "./invite";
+import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { getCloudMapping, saveCloudMapping } from "./mapping";
 import {
   addVersion as repoAddVersion,
@@ -59,6 +59,14 @@ export type CloudWrites = {
   insertReply: (reply: import("../lib/types").CommentReply) => void;
   setProposalPref: (versionId: string, choice: string) => void;
 };
+
+/**
+ * The result of asking for a permanent share link. Failure never carries a URL
+ * — the caller has nothing safe to fall back to by design.
+ */
+export type ShareResult =
+  | { ok: true; url: string }
+  | { ok: false; reason: "not-configured" | "no-room" | "failed" };
 
 type Params = {
   guest: Guest | null;
@@ -158,14 +166,21 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   // Bind: join (guest with invite) or reconnect (owner via mapping), then load + subscribe.
   useEffect(() => {
     if (!supabase || !guest) return;
-    const url = readInviteFromUrl();
+    const link = readRoomLink();
     const mapping = room ? getCloudMapping(room.id) : null;
 
     let targetRoomId: string | null = null;
     let token: string | null = null;
-    if (isGuestSession && url) {
-      targetRoomId = url.roomId;
-      token = url.invite;
+    if (isGuestSession) {
+      // Only a cloud link (`#room=<uuid>&invite=<token>`) can join a cloud
+      // room. A legacy `#room=<6碼>` link carries no invite, so it must not
+      // touch the cloud at all — it stays on the PeerJS compatibility path.
+      if (link.kind !== "cloud") {
+        setStatus("local-only");
+        return;
+      }
+      targetRoomId = link.roomId;
+      token = link.invite;
     } else if (mapping) {
       targetRoomId = mapping.roomId;
       token = mapping.token;
@@ -285,13 +300,24 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     }
   }, [flushPending, reload]);
 
-  const ensureShared = useCallback(async (): Promise<string | null> => {
-    if (!supabase || !guest || !room) return null;
+  /**
+   * Creates (or re-reads) the room's permanent cloud share link. The only
+   * success shape is a `#room=<uuid>&invite=<token>` URL: callers must never
+   * fall back to a legacy host-must-stay-online URL when this fails (PR #16).
+   */
+  const ensureShared = useCallback(async (): Promise<ShareResult> => {
+    if (!supabase) return { ok: false, reason: "not-configured" };
+    if (!guest || !room) return { ok: false, reason: "no-room" };
     if (boundRef.current) {
-      const mapping = getCloudMapping(room.id);
-      const token = mapping?.token;
+      const token = getCloudMapping(room.id)?.token;
       const url = token ? buildInviteUrl(boundRef.current, token) : inviteUrl;
-      return url;
+      // Bound as a guest without the raw token (never persisted for guests):
+      // there is no link to hand out, so say so instead of inventing one.
+      return url ? { ok: true, url } : { ok: false, reason: "failed" };
+    }
+    if (isGuestSession) {
+      // A guest re-sharing must not fork a second cloud room off their copy.
+      return { ok: false, reason: "no-room" };
     }
     setStatus("syncing");
     try {
@@ -327,13 +353,13 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
         });
       });
       setStatus("synced");
-      return url;
+      return { ok: true, url };
     } catch {
       setStatus("error");
       showToast("建立分享連結失敗，內容仍保存在這台裝置。", { tone: "error" });
-      return null;
+      return { ok: false, reason: "failed" };
     }
-  }, [supabase, guest, room, inviteUrl, reload, run, showToast]);
+  }, [supabase, guest, room, isGuestSession, inviteUrl, reload, run, showToast]);
 
   const writes: CloudWrites = {
     setTitle: (title) => run(() => setRoomTitle(supabase!, boundRef.current!, title)),

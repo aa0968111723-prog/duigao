@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build": "node scripts/check-cloud-env.mjs && tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check:cloud-env": "node scripts/check-cloud-env.mjs --strict",
+    "test:share-e2e": "node scripts/e2e/share-flow.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
