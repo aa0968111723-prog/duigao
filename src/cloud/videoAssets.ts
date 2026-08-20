@@ -72,7 +72,10 @@ export function uploadVideoWithProgress(
       // Same semantics as storage-js's { upsert: true }: re-uploading the same
       // version after a failed attempt must overwrite, not 409.
       xhr.setRequestHeader("x-upsert", "true");
-      xhr.setRequestHeader("cache-control", "3600");
+      // storage-js sends `max-age=<n>`; a bare number is not a directive, and a
+      // response with an unparseable Cache-Control falls back to heuristic
+      // caching — unbounded, for bytes that are supposed to be private.
+      xhr.setRequestHeader("cache-control", "max-age=3600");
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && e.total > 0) onProgress(Math.min(1, e.loaded / e.total));

@@ -252,6 +252,10 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
         boundRef.current = targetRoomId;
         setInviteUrl(token ? buildInviteUrl(targetRoomId, token) : null);
         await reload();
+        // The snapshot that just landed re-keys the room to its cloud id, which
+        // re-runs this effect. Subscribing now would leave a channel the next
+        // cleanup no longer knows about.
+        if (cancelled) return;
         setProposalCloudSync(targetRoomId, (doc) => {
           run(async () => {
             const expected = revisions.current.get(doc.id) ?? 0;
@@ -423,8 +427,14 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     async (target: Room): Promise<{ roomId: string; url: string } | null> => {
       if (!supabase || !guest) return null;
       if (boundRef.current) {
-        const existing = getCloudMapping(target.id)?.token;
-        return existing ? { roomId: boundRef.current, url: buildInviteUrl(boundRef.current, existing) } : null;
+        // Already bound — that is the whole requirement for an upload, because
+        // Storage authorises on membership. A guest has no stored token (theirs
+        // lives in the URL and is never persisted), so the URL is best-effort.
+        const token = getCloudMapping(target.id)?.token;
+        return {
+          roomId: boundRef.current,
+          url: token ? buildInviteUrl(boundRef.current, token) : (inviteUrl ?? ""),
+        };
       }
       const mapped = getCloudMapping(target.id);
       if (mapped) {
@@ -456,7 +466,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
    * room; the next attempt starts from a fresh local id, creates a SECOND cloud
    * room, and the first one is unreachable forever.
    */
-  const forgetCloudRoom = useCallback((localRoomId: string) => {
+  const forgetCloudRoom = useCallback((localRoomId: string): string | null => {
     const mapped = getCloudMapping(localRoomId);
     clearCloudMapping(localRoomId);
     if (mapped) clearCloudMapping(mapped.roomId);
@@ -465,6 +475,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     boundRef.current = null;
     setInviteUrl(null);
     setStatus(isCloudConfigured ? "connecting" : "local-only");
+    return mapped?.roomId ?? null;
   }, []);
 
   /**

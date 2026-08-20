@@ -20,6 +20,12 @@ type Props = {
   onRepick?: () => void;
   onCancel: () => void;
   onSubmit: () => void;
+  /**
+   * How much of the screen this sheet (plus the keyboard under it) is taking.
+   * The workspace feeds it into the bottom-stack inset so the toolbar is not
+   * left underneath the keyboard.
+   */
+  onHeight?: (px: number) => void;
 };
 
 export function anchorHeading(anchor: VideoAnchor): string {
@@ -28,12 +34,13 @@ export function anchorHeading(anchor: VideoAnchor): string {
     : `${formatTime(anchor.time)} 這一刻`;
 }
 
-export function VideoCommentComposer({ api, anchor, onRepick, onCancel, onSubmit }: Props) {
+export function VideoCommentComposer({ api, anchor, onRepick, onCancel, onSubmit, onHeight }: Props) {
   const canSend = Boolean(api.form.body.trim());
   return (
     <ModalSheet
       title={anchorHeading(anchor)}
       onClose={onCancel}
+      onHeight={onHeight}
       // Half-typed feedback must not vanish to a stray backdrop tap; Escape and
       // 關閉 still work, matching the poster composer exactly.
       dismissible={!canSend}

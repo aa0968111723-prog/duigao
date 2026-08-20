@@ -24,8 +24,6 @@ export type TimelineMarker = {
 
 type Props = {
   duration: number;
-  /** Only for the slider's announced value; painting stays off React. */
-  currentTime: number;
   /** Registers a per-frame playhead listener. Returns an unsubscribe. */
   subscribe: (listener: (seconds: number) => void) => () => void;
   markers: TimelineMarker[];
@@ -40,7 +38,6 @@ const clampFraction = (value: number): number => Math.max(0, Math.min(1, value))
 
 export function VideoTimeline({
   duration,
-  currentTime,
   subscribe,
   markers,
   selectedId,
@@ -56,12 +53,27 @@ export function VideoTimeline({
   // One subscription for the life of the component. The listener touches the
   // DOM directly — no state, no reconciliation, no re-render.
   useEffect(() => {
+    let announced = -1;
     const paint = (seconds: number) => {
       if (scrubbing.current) return; // the finger wins while it is down
       const fraction = duration > 0 ? clampFraction(seconds / duration) : 0;
       const pct = `${fraction * 100}%`;
       if (headRef.current) headRef.current.style.left = pct;
       if (progressRef.current) progressRef.current.style.width = pct;
+      // The slider's announced position has to be the real one, but it is not
+      // worth a render — so it is written here, on the same DOM-only path, and
+      // only when the whole second actually changes.
+      const whole = Math.max(0, Math.round(seconds));
+      if (whole !== announced && trackRef.current) {
+        announced = whole;
+        trackRef.current.setAttribute("aria-valuenow", String(whole));
+        trackRef.current.setAttribute(
+          "aria-valuetext",
+          duration > 0
+            ? `${formatTime(seconds)}，全長 ${formatTime(duration)}`
+            : `${formatTime(seconds)}，長度未知`,
+        );
+      }
     };
     return subscribe(paint);
   }, [subscribe, duration]);
@@ -114,7 +126,7 @@ export function VideoTimeline({
   };
 
   return (
-    <div className="v-timeline">
+    <div className="v-timeline" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endScrub} onPointerCancel={endScrub}>
       <div
         ref={trackRef}
         className="v-track"
@@ -127,12 +139,10 @@ export function VideoTimeline({
         aria-label="影片時間軸"
         aria-valuemin={0}
         aria-valuemax={Math.max(0, Math.round(duration))}
-        aria-valuenow={Math.max(0, Math.round(currentTime))}
-        aria-valuetext={
-          duration > 0
-            ? `${formatTime(currentTime)}，全長 ${formatTime(duration)}`
-            : `${formatTime(currentTime)}，長度未知`
-        }
+        // Initial values only; the paint callback keeps them current without
+        // dragging the playhead through React.
+        aria-valuenow={0}
+        aria-valuetext={duration > 0 ? `0:00，全長 ${formatTime(duration)}` : "0:00，長度未知"}
         onKeyDown={(e) => {
           if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
             e.preventDefault();

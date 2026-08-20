@@ -20,7 +20,7 @@ import {
 } from "./lib/types";
 import { regionCenter } from "./lib/region";
 import { roomCode, uid } from "./lib/id";
-import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
+import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { readRoomLink } from "./cloud/invite";
@@ -31,6 +31,7 @@ import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { RoomWorkspace } from "./components/RoomWorkspace";
 import { Home } from "./components/Home";
+import { UploadZone } from "./components/UploadZone";
 import { ShareSheet, type ShareState } from "./components/ShareSheet";
 import {
   nextPinNumber,
@@ -42,7 +43,7 @@ import {
   type VideoUploadState,
   type WorkspaceApi,
 } from "./components/api";
-import { acceptVideoFile } from "./features/video-review/media";
+import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
 import "./usability.css";
@@ -57,6 +58,27 @@ function pickColor(): string {
 
 /** Distinguishes "the user cancelled" from a genuine upload failure. */
 class CancelledUpload extends Error {}
+
+/**
+ * What to actually show someone when an upload fails.
+ *
+ * Backend text — PostgREST, Storage, Postgres constraint names, RLS wording —
+ * is English, leaks schema details and never says what to do next, so it is not
+ * copy. The messages this app authors are Traditional Chinese, and that is the
+ * test: anything without a Han character came from a machine, not from us.
+ */
+function userFacingMessage(err: unknown): string {
+  const fallback = "影片上傳失敗，請檢查網路後再試一次。";
+  const raw = err instanceof Error ? err.message : "";
+  if (!raw || raw === "cloud-room-failed") return fallback;
+  if (!/[一-鿿]/.test(raw)) {
+    // Keep the real reason where a developer can find it; show a sentence the
+    // person can act on.
+    console.warn("[video] upload failed:", raw);
+    return fallback;
+  }
+  return raw;
+}
 
 function emptyRoom(id: string, title: string, mediaType: MediaType = "image"): Room {
   return {
@@ -336,6 +358,10 @@ export function App() {
   const openRoom = useCallback(
     (r: Room) => {
       clearUndo();
+      // An upload state belongs to the room it was started in; carrying it over
+      // would show another room a red banner about something that never
+      // happened there.
+      setVideoUpload({ state: "idle" });
       setRoom(r);
       setView(initialView(r));
     },
@@ -416,6 +442,15 @@ export function App() {
         return;
       }
 
+      // A guest whose join is still in flight has no bound room yet. Uploading
+      // would fall through to "create a room", which for a room that already
+      // holds a cut is refused with a sentence about migration — true, and
+      // completely beside the point for the person waiting three seconds.
+      if (isGuestSession && !cloudRef.current.boundRoomId && (roomRef.current?.versions.length ?? 0) > 0) {
+        showToast("還在連線，等一下再試一次。");
+        return;
+      }
+
       busy.current.add("upload");
       const existing = roomRef.current;
       const isNewRoom = !existing;
@@ -432,6 +467,9 @@ export function App() {
       // exists: the cloud room is created first, and that takes a moment on a
       // slow connection.
       let abandoned = false;
+      // Both ids the room may answer to while this upload is in flight; the
+      // cloud id joins once the room exists (binding re-keys the room to it).
+      const belongsToThisUpload = new Set([base.id]);
       let handleCancel: (() => void) | null = null;
       const cancel = () => {
         abandoned = true;
@@ -448,7 +486,7 @@ export function App() {
         // Binding to the cloud swaps the room's identity from the local code to
         // the cloud UUID (the snapshot that lands next IS the room). Both ids
         // therefore mean "still the room this upload belongs to".
-        const belongsToThisUpload = new Set([base.id, cloudRoom.roomId]);
+        belongsToThisUpload.add(cloudRoom.roomId);
 
         const handle = cloudRef.current.uploadVideo(
           {
@@ -467,6 +505,13 @@ export function App() {
 
         const version = await handle.done;
         setVideoUpload({ state: "idle" });
+        if (abandoned) {
+          // Cancelled while the row was being written: the cut is in the cloud
+          // and will be there next time, but the person is already somewhere
+          // else and must not be dragged into a room they walked away from.
+          showToast("已取消上傳");
+          return;
+        }
 
         // The user may have walked away while this was in flight. The cut is
         // safely in the cloud either way; what must NOT happen is yanking them
@@ -498,14 +543,20 @@ export function App() {
           // id tied to an empty cloud room — the next attempt would make a
           // second one and orphan this.
           if (isNewRoom) {
-            cloudRef.current.forgetCloudRoom(base.id);
+            // The bind already cached an empty snapshot; leaving it behind puts
+            // a room in 最近討論 that opens to nothing.
+            const cloudId = cloudRef.current.forgetCloudRoom(base.id);
+            deleteRoom(base.id).catch(() => undefined);
+            if (cloudId) deleteRoom(cloudId).catch(() => undefined);
             if ((roomRef.current?.versions.length ?? 0) === 0) setRoom(null);
           }
+        } else if (!belongsToThisUpload.has(roomRef.current?.id ?? "")) {
+          // The upload failed after the person had already moved on. Telling
+          // whichever room they are in now that something failed there would be
+          // a lie; the success path already knows this, and so must this one.
+          showToast(userFacingMessage(err), { tone: "error" });
         } else {
-          const message =
-            err instanceof Error && err.message !== "cloud-room-failed"
-              ? err.message
-              : "影片上傳失敗，請檢查網路後再試一次。";
+          const message = userFacingMessage(err);
           setVideoUpload({ state: "error", message, progress: 0, cancel: () => setVideoUpload({ state: "idle" }) });
           showToast(message, { tone: "error" });
         }
@@ -572,6 +623,27 @@ export function App() {
     },
     [guest, form, claim, pushUndo, updateRoom, showToast, undoLast],
   );
+
+  /**
+   * Give up on a video room that never got its first cut.
+   *
+   * Three things have to go, or the next attempt starts from a fresh local id
+   * and quietly creates a SECOND empty cloud room: the mapping, the cached
+   * snapshot the cloud bind already wrote, and the room in state.
+   */
+  const abandonEmptyVideoRoom = useCallback(() => {
+    const current = roomRef.current;
+    videoCancelRef.current?.();
+    setVideoUpload({ state: "idle" });
+    if (current) {
+      const cloudId = cloudRef.current.forgetCloudRoom(current.id);
+      deleteRoom(current.id).catch(() => undefined);
+      if (cloudId && cloudId !== current.id) deleteRoom(cloudId).catch(() => undefined);
+    }
+    clearUndo();
+    setRoom(null);
+    location.hash = "";
+  }, [clearUndo]);
 
   /** The playing version's signed URL expired; mint another for the same path. */
   const refreshVideoUrl = useCallback(async (): Promise<string | null> => {
@@ -824,6 +896,19 @@ export function App() {
     };
   }, [isGuestSession, room?.id, startHosting]);
 
+  /**
+   * Closing the tab mid-upload.
+   *
+   * The request would be killed by the browser anyway; aborting it ourselves is
+   * what lets the cleanup path run, so a half-uploaded object does not sit in a
+   * private bucket that nothing will ever reference.
+   */
+  useEffect(() => {
+    const stop = () => videoCancelRef.current?.();
+    window.addEventListener("pagehide", stop);
+    return () => window.removeEventListener("pagehide", stop);
+  }, []);
+
   // Phones freeze background tabs and drop sockets; re-dial the peer link the
   // moment we are visible or online again. Harmless when no peer is in use.
   useEffect(() => {
@@ -1001,6 +1086,9 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Video rooms have their own Escape ladder (draft → range pick →
+      // selection). Running both would cancel two things per press.
+      if (roomRef.current && roomMediaType(roomRef.current) === "video") return;
       if (draftPin) cancelPin();
       else if (tool === "region") setTool("pan");
       else if (selectedPinId) setSelectedPinId(null);
@@ -1070,6 +1158,7 @@ export function App() {
         ...(video ? { video } : {}),
         goHome: () => {
           videoCancelRef.current?.();
+          setVideoUpload({ state: "idle" });
           clearUndo();
           setRoom(null);
           setSelectedPinId(null);
@@ -1111,6 +1200,7 @@ export function App() {
 
   if (!hasVersions && uploadingFirstVideo) {
     const pct = Math.round((videoUpload.state === "error" ? 0 : videoUpload.progress) * 100);
+    const failed = videoUpload.state === "error";
     return (
       <div className="onboard">
         <div className="onboard-card">
@@ -1129,8 +1219,26 @@ export function App() {
               <span className="v-upload-fill" style={{ width: `${pct}%` }} />
             </span>
           )}
-          <p className="onboard-note">影片會直接存進雲端，夥伴用連結就能打開，你不用一直開著頁面。</p>
-          {videoUpload.state !== "error" && (
+          <p className="onboard-note">
+            {failed
+              ? "影片沒有上傳成功。可以再選一次檔案，房間和分享連結會沿用這一間。"
+              : "影片會直接存進雲端，夥伴用連結就能打開，你不用一直開著頁面。"}
+          </p>
+          {failed ? (
+            <>
+              <UploadZone
+                onFiles={addVideoFile}
+                accept={VIDEO_ACCEPT}
+                multiple={false}
+                className="btn btn-primary btn-block"
+              >
+                重新選一支影片
+              </UploadZone>
+              <button className="btn btn-block" onClick={abandonEmptyVideoRoom}>
+                回首頁
+              </button>
+            </>
+          ) : (
             <button className="btn btn-block" onClick={videoUpload.cancel}>
               取消
             </button>
@@ -1158,7 +1266,9 @@ export function App() {
       return (
         <div className="onboard">
           <div className="onboard-card">
-            <h1 className="onboard-title">文宣討論區</h1>
+            {/* The link does not say what is behind it, so the title stays the
+                neutral one rather than promising a poster. */}
+            <h1 className="onboard-title">對稿討論區</h1>
             <p className="onboard-hint">
               {!stalled
                 ? "正在載入…"

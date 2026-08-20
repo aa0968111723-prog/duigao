@@ -18,8 +18,17 @@
  *      card is the poster frame, and the HTML never contains the invite
  *   H  a partner opens that link with the host's page CLOSED, sees the markers,
  *      can reply and 我也覺得
+ *   R  the host's page STAYS OPEN and sees the partner's new comment appear on
+ *      the timeline without reloading — the room is bound to realtime from the
+ *      moment it is created, not only after a share
  *   I  poster rooms are untouched: the image entry still takes images, pins
  *      still work, and nothing about that flow changed
+ *   N  a failed first upload leaves a way out, and retrying reuses the room it
+ *      already created instead of quietly leaving an empty one behind
+ *   P  a guest who joined by link can add a cut of their own — Storage
+ *      authorises on membership, not on owning the invite
+ *   Q  cancelling the first upload leaves nothing behind, and backend English
+ *      never reaches the screen
  *
  * The video fixture is recorded in-page from a canvas, so no binary file is
  * committed — the same principle as share-flow.mjs's generated PNG.
@@ -34,7 +43,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
-import { start as startMock, requestLog, rows } from "./mock-supabase.mjs";
+import { readFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+import { start as startMock, requestLog, rows, faults, cloudRooms } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54405;
 const APP_PORT = 4177;
@@ -154,6 +165,44 @@ async function recordWebm(page, seconds) {
   }, seconds);
 }
 
+/**
+ * Run the app's own media rules — the ones no browser journey reaches.
+ *
+ * `rejectByDuration` in particular cannot be proven by the recorded fixture:
+ * MediaRecorder writes no duration into a WebM header, so that path is exactly
+ * the one where the limit is deliberately skipped. Calling the module directly
+ * is the only honest way to show the ceiling exists.
+ */
+async function checkMediaRules(page) {
+  const ts = await import("typescript");
+  const source = await readFile(join(import.meta.dirname, "..", "..", "src", "features", "video-review", "media.ts"), "utf8");
+  const js = ts.default.transpileModule(source, {
+    compilerOptions: { module: ts.default.ModuleKind.ESNext, target: ts.default.ScriptTarget.ES2022 },
+  }).outputText;
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(js, "utf8").toString("base64")}`;
+
+  return await page.evaluate(async (url) => {
+    const m = await import(url);
+    const file = (name, type, size) => {
+      const f = new File([new Uint8Array(8)], name, { type });
+      Object.defineProperty(f, "size", { value: size });
+      return f;
+    };
+    return {
+      tooBig: m.acceptVideoFile(file("big.mp4", "video/mp4", 101 * 1024 * 1024)),
+      wrongType: m.acceptVideoFile(file("clip.avi", "video/x-msvideo", 1000)),
+      notVideo: m.acceptVideoFile(file("poster.png", "image/png", 1000)),
+      good: m.acceptVideoFile(file("cut.mp4", "video/mp4", 5 * 1024 * 1024)),
+      tooLong: m.rejectByDuration(2 * 60 * 60 + 1),
+      okLength: m.rejectByDuration(90),
+      unknownLength: m.rejectByDuration(0),
+      times: [m.formatTime(13.42), m.formatTime(90), m.formatTime(3671)],
+      posterAt: [m.posterTimeFor(120), m.posterTimeFor(0.6), m.posterTimeFor(0)],
+      limitHint: m.VIDEO_LIMIT_HINT,
+    };
+  }, dataUrl);
+}
+
 // ------------------------------------------------------------------- steps --
 
 async function enterName(page, appUrl, name) {
@@ -200,6 +249,14 @@ async function fileComment(page, which) {
   await page.waitForSelector(".m-action-btn", { timeout: 10000 });
   await page.locator(".m-action-btn").nth(which === "point" ? 0 : 1).click();
 }
+
+/**
+ * How many cloud rooms exist — including empty ones.
+ *
+ * Counting through child tables would miss exactly the room this leg is about:
+ * one created for an upload that never landed has no versions and no comments.
+ */
+const countRooms = () => cloudRooms.size;
 
 /** Raise the discussion sheet so its cards are actually reachable. */
 async function openDiscussion(page) {
@@ -253,6 +310,8 @@ try {
 
   // --------------------------------------------------- A: create + play ----
   const ctxA = await browser.newContext(phone(390, 844, ANDROID_UA));
+  // The copy-list leg reads what the app wrote; without this Chromium refuses.
+  await ctxA.grantPermissions(["clipboard-read", "clipboard-write"], { origin: APP.replace(/\/$/, "") });
   const A = await ctxA.newPage();
   await enterName(A, APP, "主辦方A");
   requestLog.length = 0;
@@ -419,10 +478,64 @@ try {
     afterSwitch <= newDuration + 0.2,
     `after=${afterSwitch.toFixed(2)} duration=${newDuration.toFixed(2)}`,
   );
+
   await openDiscussion(A);
   const otherCutComments = await A.locator("article.m-item").count();
   check("F. 版本各自的討論不會混在一起", otherCutComments === 0, `改一的討論數 ${otherCutComments}`);
+
+  // The spec's actual sentence (§20): A 在 00:35，切 B 也在 00:35。Only a cut
+  // long enough to hold the moment can show that, so park inside the短 cut and
+  // switch back to the long one.
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 3.2;
+  });
+  await A.waitForTimeout(300);
+  const beforeBack = await currentTime(A);
+  await A.locator(".m-vchip").nth(0).click();
+  await playerReady(A);
+  await A.waitForTimeout(900);
+  const afterBack = await currentTime(A);
+  check(
+    "F. 切到夠長的版本會停在同一個時間（§20 本文）",
+    Math.abs(afterBack - beforeBack) < 0.5,
+    `before=${beforeBack.toFixed(2)} after=${afterBack.toFixed(2)}`,
+  );
+
+  // 3.3 needs an end that outlives the current cut: the range was filed on the
+  // long version, so viewing it against the short one is where a separately
+  // clamped width would draw past the track.
+  await A.locator(".m-vchip").nth(1).click();
+  await playerReady(A);
+  await A.waitForTimeout(600);
+  const overflowSafe = await A.evaluate(() =>
+    Array.from(document.querySelectorAll(".v-marker-range")).every((el) => {
+      const left = parseFloat(el.style.left) || 0;
+      const width = parseFloat(el.style.width) || 0;
+      return left + width <= 100.5;
+    }),
+  );
+  check("F. 範圍在較短的版本上也不會畫出軌道", overflowSafe);
+  await A.locator(".m-vchip").nth(0).click();
+  await playerReady(A);
+  await A.waitForTimeout(500);
   void shortDuration;
+
+  // ------------------------------------------- copy list keeps the times ---
+  await A.evaluate(() => navigator.clipboard.writeText("").catch(() => undefined));
+  await A.click(".m-toolbar .m-tool:has-text('更多')");
+  await A.waitForSelector(".m-more", { timeout: 10000 });
+  await A.click(".m-more .m-row:has-text('複製修改清單')");
+  await A.waitForTimeout(600);
+  const summary = await A.evaluate(() => navigator.clipboard.readText().catch(() => ""));
+  check(
+    "K. 複製的修改清單帶時間碼（不然對不回畫面）",
+    /\d+:\d{2}/.test(summary),
+    summary.split("\n").slice(0, 3).join(" / ").slice(0, 120),
+  );
+  check("K. 片段的清單寫成起訖", /\d+:\d{2}–\d+:\d{2}/.test(summary) || !summary.includes("轉場"), "");
+  await A.keyboard.press("Escape");
+  await A.waitForTimeout(300);
 
   // ------------------------------------------------------ G: share card ----
   await A.locator(".m-vchip").nth(0).click();
@@ -460,6 +573,76 @@ try {
 
   await A.keyboard.press("Escape");
 
+  const mappingKeys = await A.evaluate(() =>
+    Object.keys(localStorage).filter((k) => k.startsWith("duigao.cloudmap.")),
+  );
+  const roomIdInUrl = (shareUrl.match(/#room=([0-9a-f-]{36})/) || [])[1];
+  check(
+    "L. 房間的雲端身分同時記在本機碼與雲端 UUID 底下",
+    mappingKeys.some((k) => k.endsWith(roomIdInUrl)) && mappingKeys.length >= 2,
+    mappingKeys.join(", "),
+  );
+  check(
+    "L. 用雲端 id 重開房間仍然是雲端房（不會掉回本機模式）",
+    await A.evaluate((id) => {
+      const raw = localStorage.getItem(`duigao.cloudmap.${id}`);
+      if (!raw) return false;
+      const m = JSON.parse(raw);
+      return m.roomId === id && typeof m.token === "string" && m.token.length > 16;
+    }, roomIdInUrl),
+  );
+
+  // ------------------------------ R: the host is still watching ------------
+  // A video room reaches the cloud when it is CREATED (its Storage path needs a
+  // room id), which is a different bind path from the poster app's share-time
+  // migration. This leg exists because that difference once left the room
+  // writable but deaf: comments went up, nothing came back down.
+  const ctxR = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const R = await ctxR.newPage();
+  await R.goto(shareUrl, { waitUntil: "domcontentloaded" });
+  await R.fill("input.text-input", "夥伴R");
+  await R.click("button.btn-primary");
+  await playerReady(R);
+
+  const markersBefore = await A.locator(".v-marker").count();
+  await R.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 1.2;
+  });
+  await R.waitForTimeout(300);
+  await fileComment(R, "point");
+  await submitComposer(R, "開頭這句聽不清楚");
+
+  // No reload, no navigation: the host's page has to hear about it by itself.
+  const heard = await A.waitForFunction(
+    (before) => document.querySelectorAll(".v-marker").length > before,
+    markersBefore,
+    { timeout: 20000 },
+  )
+    .then(() => true)
+    .catch(() => false);
+  check("R. 主辦方不重整就看到夥伴新增的時間點 marker", heard, `before=${markersBefore}`);
+
+  if (heard) {
+    await openDiscussion(A);
+    const texts = await A.locator("article.m-item .m-item-body").allInnerTexts();
+    check("R. 那則留言也出現在主辦方的討論列表", texts.some((t) => t.includes("聽不清楚")), texts.join(" / ").slice(0, 90));
+  }
+
+  // Resolving on one side reaches the other the same way (§28's list).
+  const resolvedBefore = await R.locator(".v-marker.is-done").count();
+  await openDiscussion(A);
+  await A.locator("article.m-item").filter({ hasText: "聽不清楚" }).locator(".m-item-state").first().click();
+  const resolveHeard = await R.waitForFunction(
+    (before) => document.querySelectorAll(".v-marker.is-done").length > before,
+    resolvedBefore,
+    { timeout: 20000 },
+  )
+    .then(() => true)
+    .catch(() => false);
+  check("R. 標記完成也會即時同步到另一個人的時間軸", resolveHeard);
+  await ctxR.close();
+
   // --------------------------------------- H: partner opens, host closed ---
   await ctxA.close();
   const ctxB = await browser.newContext(phone(430, 932, LINE_UA));
@@ -489,7 +672,56 @@ try {
   await B.locator("article.m-item").first().click();
   await B.waitForTimeout(600);
   check("H. 夥伴點討論卡也會跳到對的時間", (await currentTime(B)) > 0.3);
+
+  // ------------------------------------------- P: a guest adds a cut -------
+  const chipsBeforeGuest = await B.locator(".m-vchip").count();
+  const versionsBeforeGuest = rows.versions.length;
+  await B.setInputFiles('.m-vchip-add input[type="file"]', {
+    name: "guest-cut.webm",
+    mimeType: "video/webm",
+    buffer: SHORT,
+  });
+  const guestAdded = await B.waitForFunction(
+    (n) => document.querySelectorAll(".m-vchip").length > n,
+    chipsBeforeGuest,
+    { timeout: 90000 },
+  )
+    .then(() => true)
+    .catch(() => false);
+  check("P. 夥伴（不是主辦方）也能新增一版", guestAdded, `chips ${chipsBeforeGuest} → ${await B.locator(".m-vchip").count()}`);
+
+  const guestVersion = rows.versions[rows.versions.length - 1];
+  check(
+    "P. 夥伴上傳的影片放在同一個房間底下（不是另外開一間）",
+    rows.versions.length === versionsBeforeGuest + 1 &&
+      typeof guestVersion?.video_path === "string" &&
+      guestVersion.video_path.includes(guestVersion.room_id),
+    guestVersion?.video_path ?? "沒有新版本",
+  );
   await ctxB.close();
+
+  // -------------------------------------------- M: desktop can share -------
+  // BLOCKER 6 was a desktop player with no way to hand the link over. Every
+  // other leg runs on a phone, so this is the only place that would catch it
+  // coming back.
+  const ctxD = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+  const D = await ctxD.newPage();
+  await D.goto(shareUrl, { waitUntil: "domcontentloaded" });
+  await D.fill("input.text-input", "桌機夥伴");
+  await D.click("button.btn-primary");
+  await playerReady(D);
+  check("M. 桌機影片工作區有播放器與時間軸", (await D.isVisible("video.v-video")) && (await D.isVisible(".v-track")));
+  check("M. 桌機有回首頁與標題", (await D.isVisible("header.topbar .brand")) && (await D.isVisible("header.topbar input.title-input")));
+  check("M. 桌機討論在右側", await D.isVisible(".v-desktop-side"));
+  await D.click("header.topbar .btn-primary:has-text('分享')");
+  await D.waitForSelector("input.m-share-url", { timeout: 30000 });
+  const desktopUrl = await D.inputValue("input.m-share-url");
+  check(
+    "M. 桌機拿得到永久分享連結",
+    /#room=[0-9a-f-]{36}&invite=[A-Za-z0-9_-]{20,}/.test(desktopUrl),
+    desktopUrl.slice(0, 80),
+  );
+  await ctxD.close();
 
   // ------------------------------------------------ I: image regression ----
   const ctxC = await browser.newContext(phone(390, 844, ANDROID_UA));
@@ -515,7 +747,117 @@ try {
   await C.keyboard.press("Escape");
   await ctxC.close();
 
+  // ------------------------------------------------ J: the media rules -----
+  const ctxRules = await browser.newContext();
+  const rulesPage = await ctxRules.newPage();
+  await rulesPage.goto(APP, { waitUntil: "domcontentloaded" });
+  const rules = await checkMediaRules(rulesPage);
+  await ctxRules.close();
+
+  check("J. 超過 100MB 會被擋下並說出上限", rules.tooBig.ok === false && rules.tooBig.reason.includes("100 MB"), rules.tooBig.reason);
+  check("J. 不支援的影片格式會建議轉 MP4", rules.wrongType.ok === false && rules.wrongType.reason.includes("MP4"), rules.wrongType.reason);
+  check("J. 不是影片的檔案會被擋下", rules.notVideo.ok === false);
+  check("J. 正常的 MP4 會過", rules.good.ok === true);
+  check(
+    "J. 超過 120 分鐘會被擋下（fixture 讀不到長度，只有直接呼叫才驗得到）",
+    typeof rules.tooLong === "string" && rules.tooLong.includes("120"),
+    String(rules.tooLong),
+  );
+  check("J. 正常長度不會被擋", rules.okLength === null);
+  check("J. 讀不到長度時放行（不因 codec 怪癖懲罰使用者）", rules.unknownLength === null);
+  check("J. 時間格式", rules.times.join(" ") === "0:13 1:30 1:01:11", rules.times.join(" "));
+  check(
+    "J. 封面取樣時間：長片取 3 秒、短片取中間",
+    rules.posterAt[0] === 3 && Math.abs(rules.posterAt[1] - 0.3) < 0.001 && rules.posterAt[2] === 0,
+    rules.posterAt.join(" / "),
+  );
+  check("J. 首頁寫得出上限提示", rules.limitHint.includes("100 MB") && rules.limitHint.includes("120"), rules.limitHint);
+
+  // --------------------------------- N: a first upload that fails ----------
+  // The room reaches the cloud BEFORE the bytes do, so a failure here is the
+  // one that can strand a person on a screen with nothing on it — and, if they
+  // reload, leave an empty cloud room behind and make a second one.
+  const roomsBefore = countRooms();
+  const ctxN = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const N = await ctxN.newPage();
+  await enterName(N, APP, "上傳失敗的人");
+  faults.videoUpload = true;
+  await uploadVideo(N, SHORT);
+  await N.waitForSelector(".onboard-card", { timeout: 60000 });
+  await N.waitForFunction(
+    () => document.querySelector(".onboard-hint")?.textContent?.includes("失敗") ?? false,
+    null,
+    { timeout: 60000 },
+  ).catch(() => null);
+
+  const failureText = await N.innerText(".onboard-card");
+  check("N. 上傳失敗會說出來，而不是停在進度條", failureText.includes("失敗"), failureText.split("\n")[1] ?? "");
+  const buttons = await N.locator(".onboard-card button, .onboard-card .btn").allInnerTexts();
+  check(
+    "N. 失敗畫面有出口（重新選檔／回首頁），不是死路",
+    buttons.some((b) => b.includes("重新選")) && buttons.some((b) => b.includes("回首頁")),
+    buttons.join(" / "),
+  );
+
+  const roomsAfterFailure = countRooms();
+  faults.videoUpload = false;
+  await N.setInputFiles('.onboard-card input[type="file"]', {
+    name: "retry.webm",
+    mimeType: "video/webm",
+    buffer: SHORT,
+  });
+  await playerReady(N);
+  const roomsAfterRetry = countRooms();
+  check("N. 失敗後重試會播得起來", await N.isVisible("video.v-video"));
+  check(
+    "N. 重試沿用同一間雲端房，不會多開一間",
+    roomsAfterRetry === roomsAfterFailure,
+    `失敗後 ${roomsAfterFailure} 間、重試後 ${roomsAfterRetry} 間（一開始 ${roomsBefore} 間）`,
+  );
+  await ctxN.close();
+
+  // --------------------------- Q: cancel, and what an error may say --------
+  const ctxQ = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const Q = await ctxQ.newPage();
+  await enterName(Q, APP, "會反悔的人");
+  const roomsBeforeCancel = countRooms();
+  await uploadVideo(Q, LONG);
+  await Q.waitForSelector(".onboard-card .btn", { timeout: 60000 });
+  await Q.click(".onboard-card .btn:has-text('取消')");
+  await Q.waitForSelector(".home-picks", { timeout: 30000 });
+  check("Q. 取消第一支上傳會回到首頁", await Q.isVisible(".home-picks"));
+
+  const recentTitles = await Q.locator(".home-recent-item").allInnerTexts();
+  check(
+    "Q. 取消後不會在最近討論留下打不開的空房",
+    !recentTitles.some((t) => t.includes("未命名影片")),
+    recentTitles.join(" / ") || "（沒有最近討論）",
+  );
+  void roomsBeforeCancel;
+
+  // Backend English — RLS wording, PostgREST codes — is not user copy.
+  faults.videoUpload = true;
+  await uploadVideo(Q, SHORT);
+  await Q.waitForFunction(
+    () => document.querySelector(".onboard-hint")?.textContent?.includes("失敗") ?? false,
+    null,
+    { timeout: 60000 },
+  ).catch(() => null);
+  const shown = await Q.innerText(".onboard-card");
+  faults.videoUpload = false;
+  check(
+    "Q. 後端的英文錯誤不會變成使用者文案",
+    !/row-level|violates|PGRST|permission denied|injected/i.test(shown),
+    shown.replace(/\n/g, " ").slice(0, 90),
+  );
+  check("Q. 取而代之的是可以照做的中文", shown.includes("影片上傳失敗") || shown.includes("再試"), "");
+  await ctxQ.close();
+
   console.log(`\n${results.filter((r) => r.pass).length}/${results.length} checks passed`);
+  console.log(
+    "\n注意：這個 harness 的 mock 沒有 websocket 以外的真實後端行為，" +
+      "Safari 的 Range seek、iPhone HEVC、LINE in-app 首次播放手勢與三種直向尺寸仍需真機驗收。",
+  );
   if (results.some((r) => !r.pass)) process.exitCode = 1;
 } finally {
   await browser.close();

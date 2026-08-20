@@ -193,26 +193,15 @@ export async function createRoom(
     const newId = uuid();
     versionIdMap.set(v.id, newId);
     if (v.kind === "video") {
-      // Video versions are uploaded straight to Storage when they are added
-      // (a cut never travels as a data URL), so migrating one is a row copy.
-      // Their id therefore must NOT be remapped — the bytes already sit under
-      // the old id's path, and rewriting the id would orphan them.
-      versionIdMap.set(v.id, v.id);
-      versionRows.push({
-        id: v.id,
-        room_id: roomId,
-        label: v.label,
-        sort_order: i,
-        media_kind: "video",
-        image_path: null,
-        video_path: v.videoPath ?? null,
-        mime_type: v.mimeType ?? null,
-        duration_seconds: v.duration ?? null,
-        file_size: v.fileSize ?? null,
-        width: v.width ?? null,
-        height: v.height ?? null,
-      });
-      continue;
+      // Video versions never travel this path: a cut is uploaded straight into
+      // its cloud room's folder, so there is no local-room migration to do, and
+      // copying the row would leave video_path under the OLD room id — which
+      // membership RLS then refuses to read.
+      //
+      // Refusing outright rather than skipping: a skipped version leaves its
+      // comments and strokes pointing at a row that was never inserted, and
+      // losing feedback silently is worse than a migration that says no.
+      throw new CloudError("影片房間不需要搬移，請直接分享", "versions");
     }
     const { path, mime } = await uploadVersion(supabase, roomId, newId, v.imageDataUrl);
     versionRows.push({ id: newId, room_id: roomId, label: v.label, sort_order: i, image_path: path, mime_type: mime });

@@ -47,6 +47,27 @@ export async function loadRoom(id: string): Promise<Room | undefined> {
   }
 }
 
+/**
+ * Drop a cached room.
+ *
+ * Used when a room is abandoned before it ever held anything — an empty video
+ * room left in the cache would show up in 最近討論 as a room that cannot be
+ * opened, because there is nothing in it to open.
+ */
+export async function deleteRoom(id: string): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(ROOMS, "readwrite");
+      tx.objectStore(ROOMS).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
 export async function listRooms(): Promise<Room[]> {
   const db = await openDb();
   try {

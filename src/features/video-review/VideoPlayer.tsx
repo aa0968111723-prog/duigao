@@ -21,6 +21,14 @@ export type PlayerHandle = {
   pause: () => void;
   /** The live time, without waiting for a render. Used when a comment is filed. */
   currentTime: () => number;
+  /**
+   * A seek that is waiting for the new source's metadata, or null.
+   *
+   * Switching versions twice quickly would otherwise read 0 from a <video>
+   * that has only just been swapped, and the moment the reviewer was holding
+   * would be lost.
+   */
+  pendingTarget: () => number | null;
   duration: () => number;
   isPaused: () => boolean;
 };
@@ -85,6 +93,14 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
   const [clock, setClock] = useState(0);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
+  /**
+   * iOS hands volume to the hardware buttons and ignores `video.volume`
+   * entirely. A slider there would move and change nothing — worse than no
+   * slider — so it starts hidden and appears only once the element has proved
+   * it obeys. Showing it first and retracting it would flash a dead control
+   * and jump the width of the control row.
+   */
+  const [volumeWorks, setVolumeWorks] = useState(false);
   const [rate, setRate] = useState(1);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [buffering, setBuffering] = useState(false);
@@ -151,6 +167,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
       },
       pause: () => videoRef.current?.pause(),
       currentTime: () => videoRef.current?.currentTime ?? clockRef.current,
+      pendingTarget: () => pendingSeek.current?.seconds ?? null,
       duration: () => {
         const v = videoRef.current;
         return v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : duration;
@@ -305,6 +322,11 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
               onDurationChange?.(known);
             }
             v.playbackRate = rate;
+            // One probe per source, on the element that will actually play.
+            const before = v.volume;
+            v.volume = before === 1 ? 0.5 : 1;
+            setVolumeWorks(v.volume !== before);
+            v.volume = before;
             // A cut switched to at 00:35 lands on a cut that may be shorter:
             // clamp instead of assigning past the end, which browsers handle
             // inconsistently (some stall silently).
@@ -394,6 +416,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
         >
           <span aria-hidden>{muted ? "🔇" : "🔊"}</span>
         </button>
+        {volumeWorks && (
         <input
           className="v-volume"
           type="range"
@@ -414,6 +437,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
             setMuted(v.muted);
           }}
         />
+        )}
         <button type="button" className="v-ctl v-ctl-rate" onClick={cycleRate} aria-label={`播放速度 ${rate} 倍`}>
           {rate}×
         </button>

@@ -137,13 +137,22 @@ export function VideoWorkspace({ api, presence }: Props) {
   /** Tapping a card or a marker: go to that moment and select it. */
   const focusComment = useCallback(
     (pin: CommentPin) => {
-      if (pin.versionId !== view.versionId) {
-        api.setView({ ...view, versionId: pin.versionId, compareMode: "single" });
-      }
+      const target = anchorStart(pin);
       api.selectPin(pin.id);
-      seekTo(anchorStart(pin));
+      if (pin.versionId !== view.versionId) {
+        // Cross-version: the seek belongs to the cut that is about to load, so
+        // it travels with the source rather than hitting the outgoing element.
+        setRangePick(null);
+        setStartAt(target);
+        liveTimeRef.current = target;
+        setLiveTime(target);
+        publishFrame(target);
+        api.setView({ ...view, versionId: pin.versionId, compareMode: "single" });
+        return;
+      }
+      seekTo(target);
     },
-    [api, view, seekTo],
+    [api, view, seekTo, publishFrame],
   );
 
   const selectMarker = useCallback(
@@ -201,6 +210,7 @@ export function VideoWorkspace({ api, presence }: Props) {
   const cancelDraft = useCallback(() => {
     setDraft(null);
     setRangePick(null);
+    setComposeInset(0);
     api.cancelPin();
   }, [api]);
 
@@ -209,6 +219,7 @@ export function VideoWorkspace({ api, presence }: Props) {
     api.video?.commitVideoComment(draft);
     setDraft(null);
     setRangePick(null);
+    setComposeInset(0);
   }, [draft, api]);
 
   /**
@@ -219,7 +230,11 @@ export function VideoWorkspace({ api, presence }: Props) {
   const switchVersion = useCallback(
     (versionId: string) => {
       if (versionId === view.versionId) return;
-      const at = playerRef.current?.currentTime() ?? liveTimeRef.current;
+      // A pending seek outranks the element's clock: right after a switch the
+      // new <video> reads 0 while the moment we are carrying is the one the
+      // reviewer actually asked for.
+      const at =
+        playerRef.current?.pendingTarget() ?? playerRef.current?.currentTime() ?? liveTimeRef.current;
       const next = room.versions.find((v) => v.id === versionId);
       const cap = next?.duration && next.duration > 0 ? next.duration : undefined;
       // A shorter cut clamps rather than refusing; an unknown length resumes at
@@ -227,6 +242,10 @@ export function VideoWorkspace({ api, presence }: Props) {
       const target = cap ? Math.min(at, Math.max(0, cap - 0.1)) : at;
       playerRef.current?.pause();
       api.selectPin(null);
+      // A half-picked range belongs to the cut it was started on: its start was
+      // read off THAT timeline, so carrying it into another cut would file a
+      // range whose beginning nobody ever saw here.
+      setRangePick(null);
       // The resume point travels WITH the new source. Seeking here would land
       // on the outgoing element, and the new cut would start at 0:00 (§20).
       setStartAt(target);
@@ -244,6 +263,14 @@ export function VideoWorkspace({ api, presence }: Props) {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // Space is how a keyboard presses the button it is focused on, so it is
+      // left alone for anything that would consume it. A slider is focusable
+      // but does NOT use Space — and the timeline is the control people leave
+      // focus on, so treating it as "busy" would kill the shortcut for the rest
+      // of the session after a single scrub.
+      if (el?.closest('button, a, select, summary, [role="button"]')) {
+        if (e.key !== "Escape") return;
+      }
       if (e.key === " " || e.code === "Space") {
         e.preventDefault();
         const p = playerRef.current;
@@ -294,7 +321,6 @@ export function VideoWorkspace({ api, presence }: Props) {
   const timeline = (
     <VideoTimeline
       duration={duration || version.duration || 0}
-      currentTime={liveTime}
       subscribe={subscribeFrame}
       markers={markers}
       selectedId={api.selectedPinId}
@@ -378,6 +404,7 @@ export function VideoWorkspace({ api, presence }: Props) {
           }}
           onCancel={cancelDraft}
           onSubmit={submitDraft}
+          onHeight={setComposeInset}
         />
       )}
 
@@ -411,14 +438,15 @@ export function VideoWorkspace({ api, presence }: Props) {
               : "正在準備影片…"}
       </span>
       {upload.state === "uploading" && (
-        <>
-          <span className="v-upload-bar" aria-hidden>
-            <span className="v-upload-fill" style={{ width: `${Math.round(upload.progress * 100)}%` }} />
-          </span>
-          <button type="button" className="m-status-cancel" onClick={upload.cancel}>
-            取消
-          </button>
-        </>
+        <span className="v-upload-bar" aria-hidden>
+          <span className="v-upload-fill" style={{ width: `${Math.round(upload.progress * 100)}%` }} />
+        </span>
+      )}
+      {/* A banner with no way to dismiss it is a banner that stays forever. */}
+      {(upload.state === "uploading" || upload.state === "preparing" || upload.state === "error") && (
+        <button type="button" className="m-status-cancel" onClick={upload.cancel}>
+          {upload.state === "error" ? "知道了" : "取消"}
+        </button>
       )}
     </div>
   );
@@ -609,24 +637,6 @@ export function VideoWorkspace({ api, presence }: Props) {
       </div>
 
       {sheets}
-      <ComposeInsetProbe draft={draft} onInset={setComposeInset} />
-      <span hidden aria-hidden>
-        {guest.name}
-      </span>
     </div>
   );
 }
-
-/**
- * The composer sheet reports its own height so the bottom stack can get out of
- * the keyboard's way; when there is no composer the inset has to go back to
- * zero, or the toolbar stays pushed up after sending.
- */
-function ComposeInsetProbe({ draft, onInset }: { draft: VideoAnchor | null; onInset: (px: number) => void }) {
-  useEffect(() => {
-    if (!draft) onInset(0);
-  }, [draft, onInset]);
-  return null;
-}
-
-export type { Version };
