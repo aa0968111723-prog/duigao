@@ -18,6 +18,9 @@
  *      card is the poster frame, and the HTML never contains the invite
  *   H  a partner opens that link with the host's page CLOSED, sees the markers,
  *      can reply and 我也覺得
+ *   R  the host's page STAYS OPEN and sees the partner's new comment appear on
+ *      the timeline without reloading — the room is bound to realtime from the
+ *      moment it is created, not only after a share
  *   I  poster rooms are untouched: the image entry still takes images, pins
  *      still work, and nothing about that flow changed
  *
@@ -574,6 +577,57 @@ try {
       return m.roomId === id && typeof m.token === "string" && m.token.length > 16;
     }, roomIdInUrl),
   );
+
+  // ------------------------------ R: the host is still watching ------------
+  // A video room reaches the cloud when it is CREATED (its Storage path needs a
+  // room id), which is a different bind path from the poster app's share-time
+  // migration. This leg exists because that difference once left the room
+  // writable but deaf: comments went up, nothing came back down.
+  const ctxR = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const R = await ctxR.newPage();
+  await R.goto(shareUrl, { waitUntil: "domcontentloaded" });
+  await R.fill("input.text-input", "夥伴R");
+  await R.click("button.btn-primary");
+  await playerReady(R);
+
+  const markersBefore = await A.locator(".v-marker").count();
+  await R.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 1.2;
+  });
+  await R.waitForTimeout(300);
+  await fileComment(R, "point");
+  await submitComposer(R, "開頭這句聽不清楚");
+
+  // No reload, no navigation: the host's page has to hear about it by itself.
+  const heard = await A.waitForFunction(
+    (before) => document.querySelectorAll(".v-marker").length > before,
+    markersBefore,
+    { timeout: 20000 },
+  )
+    .then(() => true)
+    .catch(() => false);
+  check("R. 主辦方不重整就看到夥伴新增的時間點 marker", heard, `before=${markersBefore}`);
+
+  if (heard) {
+    await openDiscussion(A);
+    const texts = await A.locator("article.m-item .m-item-body").allInnerTexts();
+    check("R. 那則留言也出現在主辦方的討論列表", texts.some((t) => t.includes("聽不清楚")), texts.join(" / ").slice(0, 90));
+  }
+
+  // Resolving on one side reaches the other the same way (§28's list).
+  const resolvedBefore = await R.locator(".v-marker.is-done").count();
+  await openDiscussion(A);
+  await A.locator("article.m-item").filter({ hasText: "聽不清楚" }).locator(".m-item-state").first().click();
+  const resolveHeard = await R.waitForFunction(
+    (before) => document.querySelectorAll(".v-marker.is-done").length > before,
+    resolvedBefore,
+    { timeout: 20000 },
+  )
+    .then(() => true)
+    .catch(() => false);
+  check("R. 標記完成也會即時同步到另一個人的時間軸", resolveHeard);
+  await ctxR.close();
 
   // --------------------------------------- H: partner opens, host closed ---
   await ctxA.close();
