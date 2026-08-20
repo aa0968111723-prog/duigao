@@ -29,13 +29,31 @@ const MIGRATIONS = join(ROOT, "supabase", "migrations");
 const SHIM = join(dirname(fileURLToPath(import.meta.url)), "supabase-shim.sql");
 const PORT = 55432;
 
-const PG_BIN = ["/usr/lib/postgresql/16/bin", "/usr/lib/postgresql/15/bin", "/usr/local/pgsql/bin"].find((d) =>
-  existsSync(join(d, "initdb")),
-);
+const IS_WINDOWS = process.platform === "win32";
+const EXE = IS_WINDOWS ? ".exe" : "";
+
+/**
+ * Where to find a throwaway PostgreSQL. PG_BIN wins, so a developer can point
+ * this at any local build (including an unpacked portable one) without
+ * installing anything system-wide.
+ */
+const PG_CANDIDATES = [
+  process.env.PG_BIN,
+  "/usr/lib/postgresql/16/bin",
+  "/usr/lib/postgresql/15/bin",
+  "/usr/local/pgsql/bin",
+  "C:/Program Files/PostgreSQL/16/bin",
+  "C:/Program Files/PostgreSQL/15/bin",
+  "D:/pgsql-dl/x/pgsql/bin",
+  "D:/pgsql/bin",
+].filter(Boolean);
+
+const PG_BIN = PG_CANDIDATES.find((d) => existsSync(join(d, `initdb${EXE}`)));
 if (!PG_BIN) {
-  console.log("略過：找不到 PostgreSQL 執行檔（initdb / pg_ctl）。");
+  console.log("略過：找不到 PostgreSQL 執行檔（initdb / pg_ctl）。設定 PG_BIN 可指定路徑。");
   process.exit(0);
 }
+const bin = (name) => join(PG_BIN, `${name}${EXE}`);
 
 let failures = 0;
 let checks = 0;
@@ -67,12 +85,16 @@ if (asUser) {
   chownSync(dataDir, asUser.uid, asUser.gid);
   chownSync(sock, asUser.uid, asUser.gid);
 }
-const PG_USER = asUser?.name ?? process.env.USER ?? "postgres";
+const PG_USER = asUser?.name ?? process.env.USER ?? process.env.USERNAME ?? "postgres";
 const spawnOpts = asUser ? { uid: asUser.uid, gid: asUser.gid } : {};
-const env = { ...process.env, PGHOST: sock, PGPORT: String(PORT), PGDATABASE: "duigao", PGUSER: PG_USER, HOME: sock };
+// Windows has no unix sockets, so the cluster listens on loopback there. The
+// port is still private to this run and the cluster is deleted at the end.
+const PGHOST = IS_WINDOWS ? "127.0.0.1" : sock;
+const LISTEN = IS_WINDOWS ? `-p ${PORT} -c listen_addresses='127.0.0.1'` : `-p ${PORT} -k ${sock} -c listen_addresses=''`;
+const env = { ...process.env, PGHOST, PGPORT: String(PORT), PGDATABASE: "duigao", PGUSER: PG_USER, HOME: sock };
 
 function psql(sql, { expectError = false } = {}) {
-  const res = spawnSync(join(PG_BIN, "psql"), ["-v", "ON_ERROR_STOP=1", "-X", "-q", "-A", "-t", "-c", sql], {
+  const res = spawnSync(bin("psql"), ["-v", "ON_ERROR_STOP=1", "-X", "-q", "-A", "-t", "-c", sql], {
     env,
     encoding: "utf8",
     ...spawnOpts,
@@ -84,7 +106,7 @@ function psql(sql, { expectError = false } = {}) {
 }
 
 function psqlFile(file) {
-  const res = spawnSync(join(PG_BIN, "psql"), ["-v", "ON_ERROR_STOP=1", "-X", "-q", "-f", file], {
+  const res = spawnSync(bin("psql"), ["-v", "ON_ERROR_STOP=1", "-X", "-q", "-f", file], {
     env,
     encoding: "utf8",
     ...spawnOpts,
@@ -95,18 +117,18 @@ function psqlFile(file) {
 
 let started = false;
 try {
-  execFileSync(join(PG_BIN, "initdb"), ["-D", dataDir, "-U", PG_USER, "--auth=trust", "-E", "UTF8"], {
+  execFileSync(bin("initdb"), ["-D", dataDir, "-U", PG_USER, "--auth=trust", "-E", "UTF8"], {
     stdio: "pipe",
     env,
     ...spawnOpts,
   });
   execFileSync(
-    join(PG_BIN, "pg_ctl"),
-    ["-D", dataDir, "-o", `-p ${PORT} -k ${sock} -c listen_addresses=''`, "-w", "-l", join(dataDir, "log"), "start"],
+    bin("pg_ctl"),
+    ["-D", dataDir, "-o", LISTEN, "-w", "-l", join(dataDir, "log"), "start"],
     { stdio: "pipe", env, ...spawnOpts },
   );
   started = true;
-  execFileSync(join(PG_BIN, "createdb"), ["duigao"], { env, stdio: "pipe", ...spawnOpts });
+  execFileSync(bin("createdb"), ["duigao"], { env, stdio: "pipe", ...spawnOpts });
 
   section("套用 migrations");
   psqlFile(SHIM);
@@ -119,6 +141,8 @@ try {
   // re-run. 0005 is written to be idempotent; prove it.
   psqlFile(join(MIGRATIONS, "0005_share_previews.sql"));
   ok("0005 可以重複套用（idempotent）", true);
+  psqlFile(join(MIGRATIONS, "0006_video_rooms.sql"));
+  ok("0006 可以重複套用（idempotent）", true);
 
   // ------------------------------------------------------------- fixtures
   const owner = psql("insert into auth.users default values returning id;").out;
@@ -253,6 +277,192 @@ try {
     );
   }
 
+  section("影片房：rooms.media_type 與舊房間相容");
+  {
+    ok(
+      "舊房間自動是 image（欄位有 default）",
+      psql(`select media_type from public.rooms where id = '${roomId}'::uuid;`).out === "image",
+    );
+    ok(
+      "media_type 只收 image / video",
+      as(owner, `update public.rooms set media_type = 'audio' where id = '${roomId}'::uuid;`).failed,
+    );
+    ok(
+      "成員可以把房間改成 video",
+      !as(owner, `update public.rooms set media_type = 'video' where id = '${roomId}'::uuid;`).failed,
+    );
+    psql(`update public.rooms set media_type = 'image' where id = '${roomId}'::uuid;`);
+  }
+
+  section("影片版本：versions 擴充欄位與完整性");
+  const videoVersionId = psql("select gen_random_uuid();").out;
+  {
+    const insertVideo = `insert into public.versions
+        (id, room_id, label, sort_order, media_kind, image_path, video_path, mime_type, duration_seconds, file_size)
+      values ('${videoVersionId}'::uuid, '${roomId}'::uuid, '初剪', 1, 'video',
+        'rooms/${roomId}/versions/${videoVersionId}/poster.jpg',
+        'rooms/${roomId}/videos/${videoVersionId}/original.mp4', 'video/mp4', 84.5, 12345678);`;
+    ok("成員可以新增影片版本", !as(owner, insertVideo).failed);
+
+    const noVideoPath = psql("select gen_random_uuid();").out;
+    ok(
+      "video 版本缺 video_path 會被擋下",
+      as(
+        owner,
+        `insert into public.versions (id, room_id, label, sort_order, media_kind, image_path)
+         values ('${noVideoPath}'::uuid, '${roomId}'::uuid, '壞的', 9, 'video', 'rooms/x/poster.jpg');`,
+      ).failed,
+    );
+
+    const noImagePath = psql("select gen_random_uuid();").out;
+    ok(
+      "image 版本缺 image_path 會被擋下",
+      as(
+        owner,
+        `insert into public.versions (id, room_id, label, sort_order, media_kind)
+         values ('${noImagePath}'::uuid, '${roomId}'::uuid, '壞的', 9, 'image');`,
+      ).failed,
+    );
+
+    const zeroDuration = psql("select gen_random_uuid();").out;
+    ok(
+      "duration 0 會被擋下（讀不到長度要寫 NULL）",
+      as(
+        owner,
+        `insert into public.versions (id, room_id, label, sort_order, media_kind, video_path, duration_seconds)
+         values ('${zeroDuration}'::uuid, '${roomId}'::uuid, '壞的', 9, 'video', 'rooms/x/v.mp4', 0);`,
+      ).failed,
+    );
+
+    const nullDuration = psql("select gen_random_uuid();").out;
+    ok(
+      "duration 讀不到時寫 NULL 是允許的",
+      !as(
+        owner,
+        `insert into public.versions (id, room_id, label, sort_order, media_kind, video_path)
+         values ('${nullDuration}'::uuid, '${roomId}'::uuid, '長度未知', 8, 'video', 'rooms/x/v2.mp4');`,
+      ).failed,
+    );
+    psql(`delete from public.versions where id = '${nullDuration}'::uuid;`);
+
+    ok(
+      "非成員仍讀不到影片版本的 video_path",
+      as(stranger, `select count(*) from public.versions where id = '${videoVersionId}'::uuid;`).out === "0",
+    );
+  }
+
+  section("時間錨點：comments 新欄位與舊資料相容");
+  {
+    // The exact shape an older client still writes: no anchor_type, no times.
+    const legacyPoint = psql("select gen_random_uuid();").out;
+    ok(
+      "舊前端的點評（不帶 anchor_type）仍然寫得進去",
+      !as(
+        owner,
+        `insert into public.comments (id, room_id, version_id, author_name, x, y, body)
+         values ('${legacyPoint}'::uuid, '${roomId}'::uuid, '${versionId}'::uuid, '夥伴', 0.4, 0.6, '這裡看不清楚');`,
+      ).failed,
+    );
+    ok(
+      "它會被記成 image-point",
+      psql(`select anchor_type from public.comments where id = '${legacyPoint}'::uuid;`).out === "image-point",
+    );
+
+    const legacyRegion = psql("select gen_random_uuid();").out;
+    ok(
+      "舊前端的圈範圍（帶 region、不帶 anchor_type）仍然寫得進去",
+      !as(
+        owner,
+        `insert into public.comments (id, room_id, version_id, author_name, x, y, region, body)
+         values ('${legacyRegion}'::uuid, '${roomId}'::uuid, '${versionId}'::uuid, '夥伴', 0.5, 0.5,
+                 '{"x":0.1,"y":0.1,"width":0.3,"height":0.2}'::jsonb, '這一塊要調整');`,
+      ).failed,
+    );
+    ok(
+      "trigger 會把它導正成 image-region",
+      psql(`select anchor_type from public.comments where id = '${legacyRegion}'::uuid;`).out === "image-region",
+    );
+
+    const pointId = psql("select gen_random_uuid();").out;
+    ok(
+      "影片時間點留言",
+      !as(
+        owner,
+        `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, body)
+         values ('${pointId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-point', 13.42, '字幕出現太慢');`,
+      ).failed,
+    );
+
+    const rangeId = psql("select gen_random_uuid();").out;
+    ok(
+      "影片片段留言",
+      !as(
+        owner,
+        `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, end_time_seconds, body)
+         values ('${rangeId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-range', 22, 27.5, '這段轉場太突然');`,
+      ).failed,
+    );
+
+    const badRange = psql("select gen_random_uuid();").out;
+    ok(
+      "end 小於等於 start 的片段會被擋下",
+      as(
+        owner,
+        `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, end_time_seconds, body)
+         values ('${badRange}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-range', 27, 22, '反過來的');`,
+      ).failed,
+    );
+
+    const noTime = psql("select gen_random_uuid();").out;
+    ok(
+      "影片錨點沒有時間會被擋下",
+      as(
+        owner,
+        `insert into public.comments (id, room_id, version_id, author_name, anchor_type, body)
+         values ('${noTime}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-point', '沒有時間');`,
+      ).failed,
+    );
+
+    const timedImage = psql("select gen_random_uuid();").out;
+    ok(
+      "圖片錨點帶時間會被擋下",
+      as(
+        owner,
+        `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, body)
+         values ('${timedImage}'::uuid, '${roomId}'::uuid, '${versionId}'::uuid, '夥伴', 'image-point', 5, '不該有時間');`,
+      ).failed,
+    );
+
+    ok(
+      "非成員讀不到影片留言的時間",
+      as(stranger, `select count(*) from public.comments where version_id = '${videoVersionId}'::uuid;`).out === "0",
+    );
+  }
+
+  section("影片沒有動到既有的分享安全面");
+  {
+    ok(
+      "get_share_preview 的輸出欄位沒有變（沒有 media_type、沒有 room_id）",
+      psql(
+        `select array_to_string(p.proargnames, ',') from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.proname = 'get_share_preview';`,
+      ).out === "p_preview_id,title,description,image_path,updated_at",
+    );
+    ok(
+      "room-assets 仍然是私有的（影片也在裡面）",
+      psql("select public from storage.buckets where id = 'room-assets';").out === "f",
+    );
+    ok(
+      "room-assets 沒有被鎖成只收特定 mime（會擋掉既有圖片）",
+      psql("select allowed_mime_types is null from storage.buckets where id = 'room-assets';").out === "t",
+    );
+    ok(
+      "room-assets 有明確的檔案大小上限",
+      Number(psql("select coalesce(file_size_limit, 0) from storage.buckets where id = 'room-assets';").out) > 0,
+    );
+  }
+
   section("既有規則沒有被動到");
   {
     ok(
@@ -273,7 +483,7 @@ try {
 } finally {
   if (started) {
     try {
-      execFileSync(join(PG_BIN, "pg_ctl"), ["-D", dataDir, "-m", "immediate", "stop"], { stdio: "pipe", env, ...spawnOpts });
+      execFileSync(bin("pg_ctl"), ["-D", dataDir, "-m", "immediate", "stop"], { stdio: "pipe", env, ...spawnOpts });
     } catch {
       /* already gone */
     }

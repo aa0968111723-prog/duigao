@@ -156,6 +156,31 @@ comment on column public.comments.anchor_type is
 comment on column public.comments.time_seconds is
   'Seconds into the version''s video. Numeric on purpose: the timeline seeks, sorts and measures with it.';
 
+-- A client that predates this migration keeps inserting region comments without
+-- an anchor_type, and the column default would file them as plain points. The
+-- CHECK deliberately does NOT forbid that combination — rejecting writes from a
+-- still-deployed client would look like sync failure to the person using it —
+-- so a trigger states the derivation instead, and the data stays self-consistent
+-- through the mixed-version window.
+create or replace function public.derive_comment_anchor()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.region is not null and new.anchor_type = 'image-point' then
+    new.anchor_type := 'image-region';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists comments_derive_anchor on public.comments;
+create trigger comments_derive_anchor
+  before insert or update on public.comments
+  for each row execute function public.derive_comment_anchor();
+
 -- Video discussion is read in time order far more often than in insert order.
 create index if not exists idx_comments_version_time
   on public.comments (version_id, time_seconds)

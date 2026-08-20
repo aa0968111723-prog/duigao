@@ -24,6 +24,8 @@ export type TimelineMarker = {
 
 type Props = {
   duration: number;
+  /** Only for the slider's announced value; painting stays off React. */
+  currentTime: number;
   /** Registers a per-frame playhead listener. Returns an unsubscribe. */
   subscribe: (listener: (seconds: number) => void) => () => void;
   markers: TimelineMarker[];
@@ -38,6 +40,7 @@ const clampFraction = (value: number): number => Math.max(0, Math.min(1, value))
 
 export function VideoTimeline({
   duration,
+  currentTime,
   subscribe,
   markers,
   selectedId,
@@ -124,7 +127,12 @@ export function VideoTimeline({
         aria-label="影片時間軸"
         aria-valuemin={0}
         aria-valuemax={Math.max(0, Math.round(duration))}
-        aria-valuetext={duration > 0 ? `全長 ${formatTime(duration)}` : "長度未知"}
+        aria-valuenow={Math.max(0, Math.round(currentTime))}
+        aria-valuetext={
+          duration > 0
+            ? `${formatTime(currentTime)}，全長 ${formatTime(duration)}`
+            : `${formatTime(currentTime)}，長度未知`
+        }
         onKeyDown={(e) => {
           if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
             e.preventDefault();
@@ -182,9 +190,14 @@ const Markers = memo(function Markers({
   return (
     <>
       {markers.map((m) => {
-        const left = clampFraction(m.start / duration) * 100;
+        // Clamp the two ENDS, then measure between them. Clamping the width
+        // separately lets a range whose end outlives a shorter cut draw past
+        // the track — which happens the moment someone switches versions.
+        const startFraction = clampFraction(m.start / duration);
         const isRange = typeof m.end === "number" && m.end > m.start;
-        const width = isRange ? clampFraction((m.end! - m.start) / duration) * 100 : 0;
+        const endFraction = isRange ? clampFraction(m.end! / duration) : startFraction;
+        const left = startFraction * 100;
+        const width = Math.max(0, endFraction - startFraction) * 100;
         const label = isRange
           ? `修改點 ${m.number}，${formatTime(m.start)} 到 ${formatTime(m.end!)}`
           : `修改點 ${m.number}，${formatTime(m.start)}`;

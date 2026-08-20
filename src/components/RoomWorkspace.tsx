@@ -1,5 +1,6 @@
 import { roomMediaType } from "../lib/types";
 import type { CollabStatus } from "../lib/peer";
+import type { SyncStatus } from "../cloud/types";
 import { ImageWorkspace } from "../features/image-review/ImageWorkspace";
 import { VideoWorkspace } from "../features/video-review/VideoWorkspace";
 import type { WorkspaceApi } from "./api";
@@ -18,13 +19,16 @@ import type { WorkspaceApi } from "./api";
 export function RoomWorkspace({
   api,
   presence,
+  cloud,
 }: {
   api: WorkspaceApi;
   presence: { status: CollabStatus | null; peers: number };
+  /** Desktop sync badge; null in local-only mode. */
+  cloud?: { status: SyncStatus; online: number } | null;
 }) {
   return roomMediaType(api.room) === "video" ? (
     <VideoWorkspace api={api} presence={presence} />
   ) : (
-    <ImageWorkspace api={api} presence={presence} />
+    <ImageWorkspace api={api} presence={presence} cloud={cloud} />
   );
 }

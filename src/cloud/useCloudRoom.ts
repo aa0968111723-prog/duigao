@@ -15,7 +15,7 @@ import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
-import { getCloudMapping, saveCloudMapping } from "./mapping";
+import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
   addVersion as repoAddVersion,
   createRoom,
@@ -215,9 +215,14 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
       setStatus("local-only");
       return;
     }
-    if (boundRef.current === targetRoomId) return;
+    // Bound AND listening is the state worth skipping. Bound-but-unsubscribed
+    // happens when a video room was just created here (ensureCloudRoom binds
+    // first so its upload can authorise), and that room still needs realtime.
+    if (boundRef.current === targetRoomId && unsubRef.current) return;
 
     let cancelled = false;
+    unsubRef.current?.();
+    unsubRef.current = null;
     setStatus("connecting");
     setInviteInvalid(false);
     (async () => {
@@ -428,6 +433,22 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   );
 
   /**
+   * Forget a cloud room this device created but never filled.
+   *
+   * Without this, a failed first upload leaves the mapping pointing at an empty
+   * room; the next attempt starts from a fresh local id, creates a SECOND cloud
+   * room, and the first one is unreachable forever.
+   */
+  const forgetCloudRoom = useCallback((localRoomId: string) => {
+    clearCloudMapping(localRoomId);
+    unsubRef.current?.();
+    unsubRef.current = null;
+    boundRef.current = null;
+    setInviteUrl(null);
+    setStatus(isCloudConfigured ? "connecting" : "local-only");
+  }, []);
+
+  /**
    * Upload one cut and write its row. Progress is reported in real bytes; the
    * caller owns the UI state machine and the cancel button.
    */
@@ -521,6 +542,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     active: Boolean(supabase),
     ensureShared,
     ensureCloudRoom,
+    forgetCloudRoom,
     uploadVideo,
     refreshVideoUrl,
     retry,

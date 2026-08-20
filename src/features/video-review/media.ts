@@ -30,8 +30,28 @@ export const VIDEO_ACCEPT = "video/mp4,video/webm,video/quicktime,video/*";
  */
 export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
-/** Anything longer is a film, not a cut under review; also bounds the timeline. */
+/**
+ * Anything longer is a film, not a cut under review; also bounds the timeline.
+ * Enforced after probing (a duration is not knowable from the file entry), and
+ * only when the browser actually reported one — an unmeasurable video is still
+ * allowed through, because refusing it would punish the user for a codec quirk.
+ */
 export const MAX_VIDEO_SECONDS = 2 * 60 * 60;
+
+/** Human form of the current ceilings, for the picker and the README. */
+export const VIDEO_LIMIT_HINT = `一支上限 ${formatBytes(MAX_VIDEO_BYTES)}、${Math.round(MAX_VIDEO_SECONDS / 60)} 分鐘`;
+
+/**
+ * The check that needs the video's own metadata. Returns a reason to refuse,
+ * or null to carry on.
+ */
+export function rejectByDuration(duration: number): string | null {
+  if (!Number.isFinite(duration) || duration <= 0) return null; // unknown: allow
+  if (duration > MAX_VIDEO_SECONDS) {
+    return `影片太長了（${formatTime(duration)}），目前上限 ${Math.round(MAX_VIDEO_SECONDS / 60)} 分鐘。`;
+  }
+  return null;
+}
 
 export type VideoMeta = {
   /** Seconds. 0 when the browser refused to tell us (streams, odd codecs). */

@@ -10,6 +10,7 @@ import {
   fallbackPoster,
   posterTimeFor,
   probeVideo,
+  rejectByDuration,
 } from "../features/video-review/media";
 
 /**
@@ -59,12 +60,17 @@ export function uploadVideoVersion(
     const ext = extForVideoMime(input.mime);
     const path = videoPath(input.roomId, input.versionId, ext);
     let videoLanded = false;
+    let rowLanded = false;
     let posterPath: string | null = null;
 
     try {
       onPhase("preparing", 0);
       const meta = await probeVideo(objectUrl);
       if (cancelled) throw new CloudError("upload-cancelled", "storage");
+      // The only check that needs the file's own metadata; refusing here costs
+      // the user nothing, refusing after a 100MB upload would cost them a lot.
+      const tooLong = rejectByDuration(meta.duration);
+      if (tooLong) throw new CloudError(tooLong, "storage");
 
       // The cover comes from the local file: capturing it later from a signed
       // URL would need CORS and would taint the canvas on some browsers.
@@ -108,12 +114,16 @@ export function uploadVideoVersion(
         height: meta.height || null,
       });
 
+      rowLanded = true;
+
       return {
         id: input.versionId,
         label: input.label,
         kind: "video",
         imageDataUrl: posterPath ? await signedOrEmpty(supabase, posterPath) : "",
-        videoUrl: await signedVideoUrl(supabase, path),
+        // Best-effort: the row already exists, so a signing hiccup must not be
+        // allowed to unwind an upload that succeeded. The player re-signs.
+        videoUrl: await signedVideoUrl(supabase, path).catch(() => ""),
         videoPath: path,
         duration: meta.duration > 0 ? meta.duration : undefined,
         mimeType: input.mime,
@@ -123,8 +133,12 @@ export function uploadVideoVersion(
       };
     } catch (err) {
       // Nothing half-created survives: a stored object with no row is invisible
-      // to the app and would sit in the bucket forever.
-      if (videoLanded) await removeQuietly(supabase, [path, ...(posterPath ? [posterPath] : [])]);
+      // to the app and would sit in the bucket forever. Once the row exists the
+      // opposite is true — deleting the object would leave a version pointing
+      // at nothing — so cleanup stops the moment the row lands.
+      if (videoLanded && !rowLanded) {
+        await removeQuietly(supabase, [path, ...(posterPath ? [posterPath] : [])]);
+      }
       throw err;
     } finally {
       URL.revokeObjectURL(objectUrl);

@@ -1,7 +1,7 @@
 import type { Room } from "../lib/types";
 import { roomMediaType } from "../lib/types";
 import { UploadZone } from "./UploadZone";
-import { VIDEO_ACCEPT } from "../features/video-review/media";
+import { VIDEO_ACCEPT, VIDEO_LIMIT_HINT } from "../features/video-review/media";
 
 type Props = {
   recent: Room[];
@@ -53,7 +53,7 @@ export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvail
             </span>
             <span className="home-pick-copy">
               <b>影片對稿</b>
-              <small>短片、動畫、宣傳影片</small>
+              <small>短片、動畫、宣傳影片（{VIDEO_LIMIT_HINT}）</small>
             </span>
           </UploadZone>
         ) : (

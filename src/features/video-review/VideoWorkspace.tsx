@@ -47,6 +47,22 @@ export function VideoWorkspace({ api, presence }: Props) {
   const [rangePick, setRangePick] = useState<RangePick | null>(null);
   const [liveTime, setLiveTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  /**
+   * Where the NEW cut should pick up after a version switch (spec §20).
+   *
+   * Held in state, not applied imperatively: at the moment 改一 is tapped the
+   * outgoing <video> is still mounted, so a seek would land on the wrong file.
+   */
+  const [startAt, setStartAt] = useState<number | undefined>(undefined);
+  /**
+   * The live clock, without re-rendering to hold it.
+   *
+   * `liveTime` state only moves while something on screen actually shows a
+   * time (the action sheet, a range being picked). Otherwise the number lives
+   * here and the discussion list is left alone — a playing video must not
+   * re-render every card four times a second (spec §16).
+   */
+  const liveTimeRef = useRef(0);
 
   const version = useMemo(
     () => room.versions.find((v) => v.id === view.versionId) ?? room.versions[0],
@@ -72,11 +88,21 @@ export function VideoWorkspace({ api, presence }: Props) {
   }, []);
 
   // While picking the end of a range, the live end has to follow the video —
-  // that IS the interaction. It is throttled to the player's 4×/s state beat.
+  // that IS the interaction. Everything else reads the ref.
+  const showsClock = actionOpen || rangePick !== null;
+  const showsClockRef = useRef(showsClock);
+  showsClockRef.current = showsClock;
+
   const onTimeUpdate = useCallback((t: number) => {
-    setLiveTime(t);
+    liveTimeRef.current = t;
+    if (showsClockRef.current) setLiveTime(t);
     setRangePick((pick) => (pick && pick.end !== t ? { ...pick, end: t } : pick));
   }, []);
+
+  // Opening the sheet needs the current time immediately, not at the next beat.
+  useEffect(() => {
+    if (showsClock) setLiveTime(liveTimeRef.current);
+  }, [showsClock]);
 
   const videoComments = useMemo(
     () => (version ? videoCommentsOf(room, version.id) : []),
@@ -101,7 +127,8 @@ export function VideoWorkspace({ api, presence }: Props) {
   const seekTo = useCallback(
     (seconds: number, play = false) => {
       playerRef.current?.seek(seconds, { play });
-      setLiveTime(seconds);
+      liveTimeRef.current = seconds;
+      if (showsClockRef.current) setLiveTime(seconds);
       publishFrame(seconds);
     },
     [publishFrame],
@@ -143,20 +170,20 @@ export function VideoWorkspace({ api, presence }: Props) {
   const startPoint = useCallback(() => {
     setActionOpen(false);
     playerRef.current?.pause();
-    const at = playerRef.current?.currentTime() ?? liveTime;
+    const at = playerRef.current?.currentTime() ?? liveTimeRef.current;
     setRangePick(null);
     setDraft(makePoint(at, duration));
     setSnap("peek");
-  }, [liveTime, duration]);
+  }, [duration]);
 
   /** 選一段留意見: lock the start now, let the video (or a scrub) find the end. */
   const startRange = useCallback(() => {
     setActionOpen(false);
-    const at = playerRef.current?.currentTime() ?? liveTime;
+    const at = playerRef.current?.currentTime() ?? liveTimeRef.current;
     setDraft(null);
     setRangePick({ start: at, end: null });
     setSnap("peek");
-  }, [liveTime]);
+  }, []);
 
   const confirmRange = useCallback(() => {
     if (!rangePick) return;
@@ -192,21 +219,24 @@ export function VideoWorkspace({ api, presence }: Props) {
   const switchVersion = useCallback(
     (versionId: string) => {
       if (versionId === view.versionId) return;
-      const at = playerRef.current?.currentTime() ?? liveTime;
+      const at = playerRef.current?.currentTime() ?? liveTimeRef.current;
       const next = room.versions.find((v) => v.id === versionId);
       const cap = next?.duration && next.duration > 0 ? next.duration : undefined;
+      // A shorter cut clamps rather than refusing; an unknown length resumes at
+      // the same moment and the player clamps again once metadata lands.
       const target = cap ? Math.min(at, Math.max(0, cap - 0.1)) : at;
-      api.selectPin(null);
-      api.setView({ ...view, versionId, compareMode: "single" });
-      setDuration(cap ?? 0);
-      setLiveTime(target);
-      // The player holds this until the new file's metadata is in, then clamps
-      // it to that cut's real length — no guessed timeout, no seek past the end.
       playerRef.current?.pause();
-      playerRef.current?.seek(target);
+      api.selectPin(null);
+      // The resume point travels WITH the new source. Seeking here would land
+      // on the outgoing element, and the new cut would start at 0:00 (§20).
+      setStartAt(target);
+      setDuration(cap ?? 0);
+      liveTimeRef.current = target;
+      setLiveTime(target);
       publishFrame(target);
+      api.setView({ ...view, versionId, compareMode: "single" });
     },
-    [view, api, room.versions, liveTime, publishFrame],
+    [view, api, room.versions, publishFrame],
   );
 
   // Space / arrows, but never while the viewer is typing feedback.
@@ -253,6 +283,7 @@ export function VideoWorkspace({ api, presence }: Props) {
       poster={version.imageDataUrl}
       mimeType={version.mimeType}
       knownDuration={version.duration}
+      startAt={startAt}
       onNeedsFreshUrl={api.video?.refreshVideoUrl}
       onTimeUpdate={onTimeUpdate}
       onDurationChange={setDuration}
@@ -263,6 +294,7 @@ export function VideoWorkspace({ api, presence }: Props) {
   const timeline = (
     <VideoTimeline
       duration={duration || version.duration || 0}
+      currentTime={liveTime}
       subscribe={subscribeFrame}
       markers={markers}
       selectedId={api.selectedPinId}
@@ -272,14 +304,19 @@ export function VideoWorkspace({ api, presence }: Props) {
     />
   );
 
-  const discussion = (
-    <VideoDiscussion
-      api={api}
-      versionId={version.id}
-      selectedId={api.selectedPinId}
-      onSelect={focusComment}
-      compact={isMobile}
-    />
+  // Memoized on what it actually shows: a playing video must not re-render
+  // every card, and the clock deliberately is not one of these inputs (§16).
+  const discussion = useMemo(
+    () => (
+      <VideoDiscussion
+        api={api}
+        versionId={version.id}
+        selectedId={api.selectedPinId}
+        onSelect={focusComment}
+        compact={isMobile}
+      />
+    ),
+    [api, version.id, focusComment, isMobile],
   );
 
   const moreSheet = more && (
@@ -390,6 +427,47 @@ export function VideoWorkspace({ api, presence }: Props) {
     // Desktop: player + timeline on the left, discussion on the right. Not a
     // multi-track editor — this is still a conversation about a cut.
     return (
+      <div className="app v-desktop-app">
+        <header className="topbar">
+          <button className="brand" onClick={api.goHome}>
+            <span className="brand-dot" />
+            影片對稿
+          </button>
+          <input
+            className="title-input"
+            value={room.title}
+            onChange={(e) => api.setTitle(e.target.value)}
+            aria-label="影片名稱"
+          />
+          <div className="topbar-right">
+            {api.saveState !== "idle" && (
+              <span className={`save-status save-${api.saveState}`}>
+                {api.saveState === "saving" ? "儲存中…" : api.saveState === "saved" ? "已儲存" : "儲存失敗"}
+              </span>
+            )}
+            {presence.status && (
+              <span
+                className={`badge badge-${presence.status}`}
+                title={presence.status === "online" ? `${presence.peers} 人同時在線` : "同步狀態"}
+              >
+                {presence.status === "online"
+                  ? presence.peers > 1
+                    ? `已同步 · ${presence.peers} 人`
+                    : "已同步"
+                  : presence.status === "connecting"
+                    ? "正在同步"
+                    : "目前離線"}
+              </span>
+            )}
+            <span className="me" style={{ background: guest.color }} title={guest.name}>
+              {guest.name.slice(0, 1)}
+            </span>
+            <button className="btn btn-primary" onClick={api.openShare}>
+              分享
+            </button>
+          </div>
+        </header>
+
       <div className="v-desktop">
         <section className="v-desktop-main">
           <VideoVersionSelector
@@ -423,6 +501,7 @@ export function VideoWorkspace({ api, presence }: Props) {
           {discussion}
         </aside>
         {sheets}
+      </div>
       </div>
     );
   }

@@ -23,3 +23,17 @@ export function saveCloudMapping(localRoomId: string, mapping: CloudMapping): vo
     /* storage may be unavailable */
   }
 }
+
+/**
+ * Drop the local→cloud mapping for a room this device gave up on.
+ *
+ * Only used when a room was created for an upload that never completed: keeping
+ * the mapping would tie the local id to an empty cloud room forever.
+ */
+export function clearCloudMapping(localRoomId: string): void {
+  try {
+    localStorage.removeItem(`${PREFIX}${localRoomId}`);
+  } catch {
+    /* storage may be unavailable in private mode */
+  }
+}

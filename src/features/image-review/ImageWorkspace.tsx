@@ -1,6 +1,6 @@
 import type { CollabStatus } from "../../lib/peer";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { syncStatusLabel } from "../../cloud/types";
+import { syncStatusLabel, type SyncStatus } from "../../cloud/types";
 import type { WorkspaceApi } from "../../components/api";
 import { MobileWorkspace } from "./MobileWorkspace";
 import { DesktopWorkspace } from "./DesktopWorkspace";
@@ -17,8 +17,11 @@ import { DesktopWorkspace } from "./DesktopWorkspace";
 type Props = {
   api: WorkspaceApi;
   presence: { status: CollabStatus | null; peers: number };
-  /** Cloud badge state, when the room is cloud-backed. */
-  cloud?: { active: boolean; status: string; online: number; onRetry: () => void };
+  /**
+   * Cloud sync badge for the desktop header. Absent in local-only mode, where
+   * the peer-connection badge in `presence` is the only one there has ever been.
+   */
+  cloud?: { status: SyncStatus; online: number } | null;
 };
 
 export function ImageWorkspace({ api, presence, cloud }: Props) {
@@ -46,18 +49,20 @@ export function ImageWorkspace({ api, presence, cloud }: Props) {
               {api.saveState === "saving" ? "儲存中…" : api.saveState === "saved" ? "已儲存" : "儲存失敗"}
             </span>
           )}
-          {cloud?.active
+          {cloud
             ? cloud.status !== "local-only" && (
                 <span
                   className={`badge badge-${presence.status ?? "closed"}`}
                   title="資料保存在雲端，主辦方不用保持頁面開著"
                   onClick={
-                    cloud.status === "error" || cloud.status === "offline-pending" ? cloud.onRetry : undefined
+                    cloud.status === "error" || cloud.status === "offline-pending"
+                      ? () => window.location.reload()
+                      : undefined
                   }
                 >
                   {cloud.online > 1 && cloud.status === "synced"
                     ? `已同步 · ${cloud.online} 人`
-                    : syncStatusLabel(cloud.status as never)}
+                    : syncStatusLabel(cloud.status)}
                 </span>
               )
             : presence.status && (

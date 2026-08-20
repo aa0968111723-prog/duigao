@@ -41,6 +41,14 @@ type Props = {
   mimeType?: string;
   /** Known from the version row; lets the timeline exist before metadata loads. */
   knownDuration?: number;
+  /**
+   * Where to pick up when this source loads, clamped to its real length.
+   *
+   * Switching cuts is the reason this is a prop rather than an imperative call:
+   * the seek belongs to the NEW file, and at the moment the user taps 改一 the
+   * old <video> is still the mounted one.
+   */
+  startAt?: number;
   /** Re-sign the storage URL. Called once when playback fails on an expired URL. */
   onNeedsFreshUrl?: () => Promise<string | null>;
   /** Fires ~4×/s while playing, plus on every seek. Not once per frame. */
@@ -61,6 +69,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
     poster,
     mimeType,
     knownDuration,
+    startAt,
     onNeedsFreshUrl,
     onTimeUpdate,
     onDurationChange,
@@ -75,6 +84,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
   const [duration, setDuration] = useState(knownDuration ?? 0);
   const [clock, setClock] = useState(0);
   const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
   const [rate, setRate] = useState(1);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [buffering, setBuffering] = useState(false);
@@ -89,17 +99,30 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
   const refreshed = useRef(false);
   /** A seek asked for before the metadata arrived (e.g. switching cuts). */
   const pendingSeek = useRef<{ seconds: number; play: boolean } | null>(null);
+  // Read inside the source-change effect, which must depend on srcKey alone.
+  const startAtRef = useRef(startAt);
+  startAtRef.current = startAt;
+  const knownDurationRef = useRef(knownDuration);
+  knownDurationRef.current = knownDuration;
   const frameRef = useRef(onFrame);
   frameRef.current = onFrame;
   const clockRef = useRef(0);
 
+  // A new source means a new everything: nothing measured about the previous
+  // cut may leak into this one's clock, timeline or resume point.
   useEffect(() => {
     refreshed.current = false;
+    pendingSeek.current = startAtRef.current != null ? { seconds: startAtRef.current, play: false } : null;
+    clockRef.current = 0;
     setFailure(null);
+    setClock(0);
+    setPlaying(false);
+    setDuration(knownDurationRef.current ?? 0);
     // Adopt whatever URL is current for the NEW path. Reading it from a ref
     // keeps this effect keyed on identity alone, so a re-signed URL for the
     // same video never restarts playback.
     setPlaybackSrc(latestSrc.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [srcKey]);
 
   useEffect(() => {
@@ -361,12 +384,36 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
             const v = videoRef.current;
             if (!v) return;
             v.muted = !v.muted;
+            if (!v.muted && v.volume === 0) {
+              v.volume = 1;
+              setVolume(1);
+            }
             setMuted(v.muted);
           }}
           aria-label={muted ? "取消靜音" : "靜音"}
         >
           <span aria-hidden>{muted ? "🔇" : "🔊"}</span>
         </button>
+        <input
+          className="v-volume"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={muted ? 0 : volume}
+          aria-label="音量"
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setVolume(next);
+            const v = videoRef.current;
+            if (!v) return;
+            v.volume = next;
+            // Dragging away from zero is how a phone user unmutes; making them
+            // find the mute button again would be a puzzle, not a control.
+            v.muted = next === 0;
+            setMuted(v.muted);
+          }}
+        />
         <button type="button" className="v-ctl v-ctl-rate" onClick={cycleRate} aria-label={`播放速度 ${rate} 倍`}>
           {rate}×
         </button>

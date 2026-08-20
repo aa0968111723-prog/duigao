@@ -329,27 +329,6 @@
   display: none;
 }
 
-/* The time is what a video comment IS about, so it leads the card. */
-.m-item-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.m-item-anchor {
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--accent, #c45c4a);
-  letter-spacing: 0.02em;
-}
-
-.m-item.is-done .m-item-anchor {
-  color: var(--ink-dim, #b6ada0);
-}
-
 .v-compose-hint {
   margin: 0 0 10px;
   font-size: 13px;
@@ -362,73 +341,6 @@
   font-size: 13px;
   color: var(--ink-dim, #b6ada0);
   line-height: 1.6;
-}
-
-/* ---------------------------------------------------------- home entries -- */
-
-.home-picks {
-  display: grid;
-  gap: 12px;
-  width: 100%;
-  max-width: 420px;
-  margin: 0 auto;
-}
-
-.home-pick {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 18px;
-  border-radius: var(--r-lg, 18px);
-  border: 1px solid var(--line, #2b2724);
-  background: var(--panel, #17150f);
-  cursor: pointer;
-  text-align: left;
-  min-height: 76px;
-}
-
-.home-pick:active {
-  transform: scale(0.995);
-}
-
-.home-pick.is-disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.home-pick-icon {
-  font-size: 24px;
-  width: 44px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
-  flex: none;
-}
-
-.home-pick-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.home-pick-copy b {
-  font-size: 16px;
-  color: var(--ink, #f4efe6);
-}
-
-.home-pick-copy small {
-  font-size: 12.5px;
-  color: var(--ink-dim, #b6ada0);
-  line-height: 1.5;
-}
-
-.home-recent-kind {
-  margin-right: 6px;
-  opacity: 0.7;
 }
 
 /* ----------------------------------------------------------- desktop ------ */
@@ -503,5 +415,56 @@
 
   .v-timeline {
     padding: 6px 2px 2px;
+  }
+}
+
+/* Portrait phones (spec §32: 360×800 / 390×844 / 430×932).
+
+   The frame is capped by viewport height rather than aspect ratio here: a
+   vertical 9:16 cut on a 360px screen would otherwise be taller than the
+   screen, and the timeline — the thing this workspace is for — would be the
+   part that fell off the bottom. */
+@media (orientation: portrait) and (max-width: 480px) {
+  .v-frame {
+    aspect-ratio: auto;
+    height: min(46vh, 62vw * 16 / 9);
+    max-height: 46vh;
+  }
+
+  .v-app .v-stage-area {
+    padding: 6px 8px 0;
+  }
+
+  .v-controls {
+    gap: 0;
+  }
+
+  .v-ctl {
+    min-width: 40px;
+  }
+}
+
+/* The narrowest supported phone: keep every control on one row. */
+@media (orientation: portrait) and (max-width: 372px) {
+  .v-clock {
+    font-size: 12px;
+  }
+
+  .v-ctl {
+    min-width: 36px;
+    font-size: 13px;
+  }
+}
+
+.v-volume {
+  width: 74px;
+  accent-color: var(--accent, #c45c4a);
+}
+
+@media (max-width: 420px) {
+  /* A slider that small is a worse target than the mute button it sits next
+     to; phones have hardware volume anyway. */
+  .v-volume {
+    display: none;
   }
 }

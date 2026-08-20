@@ -43,6 +43,7 @@ import {
   type WorkspaceApi,
 } from "./components/api";
 import { acceptVideoFile } from "./features/video-review/media";
+import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
 import "./usability.css";
 
@@ -53,6 +54,9 @@ const UNDO_LIMIT = 20;
 function pickColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)];
 }
+
+/** Distinguishes "the user cancelled" from a genuine upload failure. */
+class CancelledUpload extends Error {}
 
 function emptyRoom(id: string, title: string, mediaType: MediaType = "image"): Room {
   return {
@@ -109,6 +113,8 @@ export function App() {
   const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
   const [undoCount, setUndoCount] = useState(0);
   const [videoUpload, setVideoUpload] = useState<VideoUploadState>({ state: "idle" });
+  /** Cancels an upload in flight. Held in a ref so leaving the room can call it. */
+  const videoCancelRef = useRef<(() => void) | null>(null);
 
   const { toasts, showToast, dismiss } = useToasts();
   const isMobile = useIsMobile();
@@ -422,13 +428,23 @@ export function App() {
       const versionId = crypto.randomUUID();
       const index = base.versions.length;
       const label = VIDEO_VERSION_LABELS[index] ?? `改${index}`;
+      // Cancelling has to work from the first frame, not only once the XHR
+      // exists: the cloud room is created first, and that takes a moment on a
+      // slow connection.
+      let abandoned = false;
       let handleCancel: (() => void) | null = null;
-      const cancel = () => handleCancel?.();
+      const cancel = () => {
+        abandoned = true;
+        handleCancel?.();
+        setVideoUpload({ state: "idle" });
+      };
+      videoCancelRef.current = cancel;
       setVideoUpload({ state: "preparing", progress: 0, cancel });
 
       try {
         const cloudRoom = await cloudRef.current.ensureCloudRoom(base);
         if (!cloudRoom) throw new Error("cloud-room-failed");
+        if (abandoned) throw new CancelledUpload();
 
         const handle = cloudRef.current.uploadVideo(
           {
@@ -448,13 +464,22 @@ export function App() {
         const version = await handle.done;
         setVideoUpload({ state: "idle" });
 
+        // The user may have walked away while this was in flight. The cut is
+        // safely in the cloud either way; what must NOT happen is yanking them
+        // back into a room they left, or writing over the room they opened next.
+        const stillHere = roomRef.current;
+        if (!stillHere || stillHere.id !== base.id) {
+          showToast(`${label}已經上傳好了，之後打開這個影片就看得到。`, { tone: "success" });
+          return;
+        }
+
         // Adopt it locally right away so the player can start while the cloud
         // snapshot catches up; the snapshot then replaces this with the same
         // row, keyed by the same id.
         const next: Room = {
-          ...(roomRef.current ?? base),
+          ...stillHere,
           mediaType: "video",
-          versions: [...(roomRef.current ?? base).versions, version],
+          versions: [...stillHere.versions, version],
           updatedAt: Date.now(),
         };
         setRoom(next);
@@ -462,9 +487,16 @@ export function App() {
         trackSave(next);
         showToast(isNewRoom ? "影片好了，開始留意見吧" : `已新增${label}`, { tone: "success" });
       } catch (err) {
-        if (isUploadCancelled(err)) {
+        if (isUploadCancelled(err) || err instanceof CancelledUpload || abandoned) {
           setVideoUpload({ state: "idle" });
           showToast("已取消上傳");
+          // A room created for an upload nobody wants must not keep the local
+          // id tied to an empty cloud room — the next attempt would make a
+          // second one and orphan this.
+          if (isNewRoom) {
+            cloudRef.current.forgetCloudRoom(base.id);
+            if ((roomRef.current?.versions.length ?? 0) === 0) setRoom(null);
+          }
         } else {
           const message =
             err instanceof Error && err.message !== "cloud-room-failed"
@@ -473,10 +505,11 @@ export function App() {
           setVideoUpload({ state: "error", message, progress: 0, cancel: () => setVideoUpload({ state: "idle" }) });
           showToast(message, { tone: "error" });
         }
-        // A room created for an upload that never landed would strand the user
-        // on an empty video workspace with no way back except 回首頁.
-        if (isNewRoom && (roomRef.current?.versions.length ?? 0) === 0) setRoom(null);
+        // The room stays: its cloud room and invite already exist, so keeping
+        // it lets 再試一次 reuse them instead of creating a second empty room.
+        // Leaving from the failure screen is what releases them.
       } finally {
+        videoCancelRef.current = null;
         busy.current.delete("upload");
       }
     },
@@ -935,14 +968,22 @@ export function App() {
       return;
     }
     const openCount = current.comments.filter((c) => !c.resolved).length;
-    const lines = current.comments.map((c) => {
+    const ordered =
+      roomMediaType(current) === "video"
+        ? [...current.comments].sort((a, b) => anchorStart(a) - anchorStart(b) || a.createdAt - b.createdAt)
+        : current.comments;
+    const lines = ordered.map((c) => {
       const status = c.resolved ? "已完成" : "待修改";
       const type = c.problemType ?? "修改";
       const priority = c.priority ?? "一般";
       const versionLabel = current.versions.find((v) => v.id === c.versionId)?.label ?? "";
       const suggestion = c.suggestion ? `\n   建議：${c.suggestion}` : "";
       const number = pinNumber(current, c.id);
-      return `#${String(number).padStart(2, "0")} [${status}] [${priority}] [${type}] ${versionLabel}\n   問題：${c.body}${suggestion}`;
+      // A video note without its timecode cannot be found again; the whole list
+      // is only useful if each line points back at a moment.
+      const at = anchorLabel(c);
+      const where = [versionLabel, at].filter(Boolean).join(" ");
+      return `#${String(number).padStart(2, "0")} [${status}] [${priority}] [${type}] ${where}\n   問題：${c.body}${suggestion}`;
     });
     const summary = `${current.title}\n共 ${current.comments.length} 個修改點｜待修改 ${openCount}｜已完成 ${current.comments.length - openCount}\n\n${lines.join("\n\n")}`;
     try {
@@ -1024,6 +1065,7 @@ export function App() {
         openShare,
         ...(video ? { video } : {}),
         goHome: () => {
+          videoCancelRef.current?.();
           clearUndo();
           setRoom(null);
           setSelectedPinId(null);
@@ -1178,6 +1220,7 @@ export function App() {
           status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
           peers: cloudSession ? cloud.online : peerCount,
         }}
+        cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
       />
 
       {shareOpen && room && (
