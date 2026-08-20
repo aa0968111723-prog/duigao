@@ -137,13 +137,21 @@ export function VideoWorkspace({ api, presence }: Props) {
   /** Tapping a card or a marker: go to that moment and select it. */
   const focusComment = useCallback(
     (pin: CommentPin) => {
-      if (pin.versionId !== view.versionId) {
-        api.setView({ ...view, versionId: pin.versionId, compareMode: "single" });
-      }
+      const target = anchorStart(pin);
       api.selectPin(pin.id);
-      seekTo(anchorStart(pin));
+      if (pin.versionId !== view.versionId) {
+        // Cross-version: the seek belongs to the cut that is about to load, so
+        // it travels with the source rather than hitting the outgoing element.
+        setStartAt(target);
+        liveTimeRef.current = target;
+        setLiveTime(target);
+        publishFrame(target);
+        api.setView({ ...view, versionId: pin.versionId, compareMode: "single" });
+        return;
+      }
+      seekTo(target);
     },
-    [api, view, seekTo],
+    [api, view, seekTo, publishFrame],
   );
 
   const selectMarker = useCallback(
@@ -219,7 +227,11 @@ export function VideoWorkspace({ api, presence }: Props) {
   const switchVersion = useCallback(
     (versionId: string) => {
       if (versionId === view.versionId) return;
-      const at = playerRef.current?.currentTime() ?? liveTimeRef.current;
+      // A pending seek outranks the element's clock: right after a switch the
+      // new <video> reads 0 while the moment we are carrying is the one the
+      // reviewer actually asked for.
+      const at =
+        playerRef.current?.pendingTarget() ?? playerRef.current?.currentTime() ?? liveTimeRef.current;
       const next = room.versions.find((v) => v.id === versionId);
       const cap = next?.duration && next.duration > 0 ? next.duration : undefined;
       // A shorter cut clamps rather than refusing; an unknown length resumes at
@@ -294,7 +306,6 @@ export function VideoWorkspace({ api, presence }: Props) {
   const timeline = (
     <VideoTimeline
       duration={duration || version.duration || 0}
-      currentTime={liveTime}
       subscribe={subscribeFrame}
       markers={markers}
       selectedId={api.selectedPinId}

@@ -20,7 +20,7 @@ import {
 } from "./lib/types";
 import { regionCenter } from "./lib/region";
 import { roomCode, uid } from "./lib/id";
-import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
+import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { readRoomLink } from "./cloud/invite";
@@ -31,6 +31,7 @@ import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { RoomWorkspace } from "./components/RoomWorkspace";
 import { Home } from "./components/Home";
+import { UploadZone } from "./components/UploadZone";
 import { ShareSheet, type ShareState } from "./components/ShareSheet";
 import {
   nextPinNumber,
@@ -42,7 +43,7 @@ import {
   type VideoUploadState,
   type WorkspaceApi,
 } from "./components/api";
-import { acceptVideoFile } from "./features/video-review/media";
+import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
 import "./usability.css";
@@ -467,6 +468,13 @@ export function App() {
 
         const version = await handle.done;
         setVideoUpload({ state: "idle" });
+        if (abandoned) {
+          // Cancelled while the row was being written: the cut is in the cloud
+          // and will be there next time, but the person is already somewhere
+          // else and must not be dragged into a room they walked away from.
+          showToast("已取消上傳");
+          return;
+        }
 
         // The user may have walked away while this was in flight. The cut is
         // safely in the cloud either way; what must NOT happen is yanking them
@@ -572,6 +580,27 @@ export function App() {
     },
     [guest, form, claim, pushUndo, updateRoom, showToast, undoLast],
   );
+
+  /**
+   * Give up on a video room that never got its first cut.
+   *
+   * Three things have to go, or the next attempt starts from a fresh local id
+   * and quietly creates a SECOND empty cloud room: the mapping, the cached
+   * snapshot the cloud bind already wrote, and the room in state.
+   */
+  const abandonEmptyVideoRoom = useCallback(() => {
+    const current = roomRef.current;
+    videoCancelRef.current?.();
+    setVideoUpload({ state: "idle" });
+    if (current) {
+      const cloudId = cloudRef.current.forgetCloudRoom(current.id);
+      deleteRoom(current.id).catch(() => undefined);
+      if (cloudId && cloudId !== current.id) deleteRoom(cloudId).catch(() => undefined);
+    }
+    clearUndo();
+    setRoom(null);
+    location.hash = "";
+  }, [clearUndo]);
 
   /** The playing version's signed URL expired; mint another for the same path. */
   const refreshVideoUrl = useCallback(async (): Promise<string | null> => {
@@ -823,6 +852,19 @@ export function App() {
       setPeerCount(0);
     };
   }, [isGuestSession, room?.id, startHosting]);
+
+  /**
+   * Closing the tab mid-upload.
+   *
+   * The request would be killed by the browser anyway; aborting it ourselves is
+   * what lets the cleanup path run, so a half-uploaded object does not sit in a
+   * private bucket that nothing will ever reference.
+   */
+  useEffect(() => {
+    const stop = () => videoCancelRef.current?.();
+    window.addEventListener("pagehide", stop);
+    return () => window.removeEventListener("pagehide", stop);
+  }, []);
 
   // Phones freeze background tabs and drop sockets; re-dial the peer link the
   // moment we are visible or online again. Harmless when no peer is in use.
@@ -1111,6 +1153,7 @@ export function App() {
 
   if (!hasVersions && uploadingFirstVideo) {
     const pct = Math.round((videoUpload.state === "error" ? 0 : videoUpload.progress) * 100);
+    const failed = videoUpload.state === "error";
     return (
       <div className="onboard">
         <div className="onboard-card">
@@ -1129,8 +1172,26 @@ export function App() {
               <span className="v-upload-fill" style={{ width: `${pct}%` }} />
             </span>
           )}
-          <p className="onboard-note">影片會直接存進雲端，夥伴用連結就能打開，你不用一直開著頁面。</p>
-          {videoUpload.state !== "error" && (
+          <p className="onboard-note">
+            {failed
+              ? "影片沒有上傳成功。可以再選一次檔案，房間和分享連結會沿用這一間。"
+              : "影片會直接存進雲端，夥伴用連結就能打開，你不用一直開著頁面。"}
+          </p>
+          {failed ? (
+            <>
+              <UploadZone
+                onFiles={addVideoFile}
+                accept={VIDEO_ACCEPT}
+                multiple={false}
+                className="btn btn-primary btn-block"
+              >
+                重新選一支影片
+              </UploadZone>
+              <button className="btn btn-block" onClick={abandonEmptyVideoRoom}>
+                回首頁
+              </button>
+            </>
+          ) : (
             <button className="btn btn-block" onClick={videoUpload.cancel}>
               取消
             </button>

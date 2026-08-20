@@ -89,6 +89,7 @@ export function uploadVideoVersion(
       cancelUpload = null;
 
       onPhase("processing", 1);
+      if (cancelled) throw new CloudError("upload-cancelled", "storage");
       if (poster) {
         // A cover that fails to upload costs a thumbnail, never the cut.
         posterPath = await uploadAsset(
@@ -99,6 +100,9 @@ export function uploadVideoVersion(
         ).catch(() => null);
       }
 
+      // Last chance to honour a cancel: after this the row exists, and deleting
+      // a landed version to satisfy a cancel would be worse than keeping it.
+      if (cancelled) throw new CloudError("upload-cancelled", "storage");
       await addVideoVersion(supabase, input.roomId, {
         id: input.versionId,
         label: input.label,

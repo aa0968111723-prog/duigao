@@ -21,6 +21,14 @@ export type PlayerHandle = {
   pause: () => void;
   /** The live time, without waiting for a render. Used when a comment is filed. */
   currentTime: () => number;
+  /**
+   * A seek that is waiting for the new source's metadata, or null.
+   *
+   * Switching versions twice quickly would otherwise read 0 from a <video>
+   * that has only just been swapped, and the moment the reviewer was holding
+   * would be lost.
+   */
+  pendingTarget: () => number | null;
   duration: () => number;
   isPaused: () => boolean;
 };
@@ -151,6 +159,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
       },
       pause: () => videoRef.current?.pause(),
       currentTime: () => videoRef.current?.currentTime ?? clockRef.current,
+      pendingTarget: () => pendingSeek.current?.seconds ?? null,
       duration: () => {
         const v = videoRef.current;
         return v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : duration;

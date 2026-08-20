@@ -34,6 +34,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
+import { readFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { start as startMock, requestLog, rows } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54405;
@@ -154,6 +156,44 @@ async function recordWebm(page, seconds) {
   }, seconds);
 }
 
+/**
+ * Run the app's own media rules — the ones no browser journey reaches.
+ *
+ * `rejectByDuration` in particular cannot be proven by the recorded fixture:
+ * MediaRecorder writes no duration into a WebM header, so that path is exactly
+ * the one where the limit is deliberately skipped. Calling the module directly
+ * is the only honest way to show the ceiling exists.
+ */
+async function checkMediaRules(page) {
+  const ts = await import("typescript");
+  const source = await readFile(join(import.meta.dirname, "..", "..", "src", "features", "video-review", "media.ts"), "utf8");
+  const js = ts.default.transpileModule(source, {
+    compilerOptions: { module: ts.default.ModuleKind.ESNext, target: ts.default.ScriptTarget.ES2022 },
+  }).outputText;
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(js, "utf8").toString("base64")}`;
+
+  return await page.evaluate(async (url) => {
+    const m = await import(url);
+    const file = (name, type, size) => {
+      const f = new File([new Uint8Array(8)], name, { type });
+      Object.defineProperty(f, "size", { value: size });
+      return f;
+    };
+    return {
+      tooBig: m.acceptVideoFile(file("big.mp4", "video/mp4", 101 * 1024 * 1024)),
+      wrongType: m.acceptVideoFile(file("clip.avi", "video/x-msvideo", 1000)),
+      notVideo: m.acceptVideoFile(file("poster.png", "image/png", 1000)),
+      good: m.acceptVideoFile(file("cut.mp4", "video/mp4", 5 * 1024 * 1024)),
+      tooLong: m.rejectByDuration(2 * 60 * 60 + 1),
+      okLength: m.rejectByDuration(90),
+      unknownLength: m.rejectByDuration(0),
+      times: [m.formatTime(13.42), m.formatTime(90), m.formatTime(3671)],
+      posterAt: [m.posterTimeFor(120), m.posterTimeFor(0.6), m.posterTimeFor(0)],
+      limitHint: m.VIDEO_LIMIT_HINT,
+    };
+  }, dataUrl);
+}
+
 // ------------------------------------------------------------------- steps --
 
 async function enterName(page, appUrl, name) {
@@ -253,6 +293,8 @@ try {
 
   // --------------------------------------------------- A: create + play ----
   const ctxA = await browser.newContext(phone(390, 844, ANDROID_UA));
+  // The copy-list leg reads what the app wrote; without this Chromium refuses.
+  await ctxA.grantPermissions(["clipboard-read", "clipboard-write"], { origin: APP.replace(/\/$/, "") });
   const A = await ctxA.newPage();
   await enterName(A, APP, "主辦方A");
   requestLog.length = 0;
@@ -419,10 +461,64 @@ try {
     afterSwitch <= newDuration + 0.2,
     `after=${afterSwitch.toFixed(2)} duration=${newDuration.toFixed(2)}`,
   );
+
   await openDiscussion(A);
   const otherCutComments = await A.locator("article.m-item").count();
   check("F. 版本各自的討論不會混在一起", otherCutComments === 0, `改一的討論數 ${otherCutComments}`);
+
+  // The spec's actual sentence (§20): A 在 00:35，切 B 也在 00:35。Only a cut
+  // long enough to hold the moment can show that, so park inside the短 cut and
+  // switch back to the long one.
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 3.2;
+  });
+  await A.waitForTimeout(300);
+  const beforeBack = await currentTime(A);
+  await A.locator(".m-vchip").nth(0).click();
+  await playerReady(A);
+  await A.waitForTimeout(900);
+  const afterBack = await currentTime(A);
+  check(
+    "F. 切到夠長的版本會停在同一個時間（§20 本文）",
+    Math.abs(afterBack - beforeBack) < 0.5,
+    `before=${beforeBack.toFixed(2)} after=${afterBack.toFixed(2)}`,
+  );
+
+  // 3.3 needs an end that outlives the current cut: the range was filed on the
+  // long version, so viewing it against the short one is where a separately
+  // clamped width would draw past the track.
+  await A.locator(".m-vchip").nth(1).click();
+  await playerReady(A);
+  await A.waitForTimeout(600);
+  const overflowSafe = await A.evaluate(() =>
+    Array.from(document.querySelectorAll(".v-marker-range")).every((el) => {
+      const left = parseFloat(el.style.left) || 0;
+      const width = parseFloat(el.style.width) || 0;
+      return left + width <= 100.5;
+    }),
+  );
+  check("F. 範圍在較短的版本上也不會畫出軌道", overflowSafe);
+  await A.locator(".m-vchip").nth(0).click();
+  await playerReady(A);
+  await A.waitForTimeout(500);
   void shortDuration;
+
+  // ------------------------------------------- copy list keeps the times ---
+  await A.evaluate(() => navigator.clipboard.writeText("").catch(() => undefined));
+  await A.click(".m-toolbar .m-tool:has-text('更多')");
+  await A.waitForSelector(".m-more", { timeout: 10000 });
+  await A.click(".m-more .m-row:has-text('複製修改清單')");
+  await A.waitForTimeout(600);
+  const summary = await A.evaluate(() => navigator.clipboard.readText().catch(() => ""));
+  check(
+    "K. 複製的修改清單帶時間碼（不然對不回畫面）",
+    /\d+:\d{2}/.test(summary),
+    summary.split("\n").slice(0, 3).join(" / ").slice(0, 120),
+  );
+  check("K. 片段的清單寫成起訖", /\d+:\d{2}–\d+:\d{2}/.test(summary) || !summary.includes("轉場"), "");
+  await A.keyboard.press("Escape");
+  await A.waitForTimeout(300);
 
   // ------------------------------------------------------ G: share card ----
   await A.locator(".m-vchip").nth(0).click();
@@ -460,6 +556,25 @@ try {
 
   await A.keyboard.press("Escape");
 
+  const mappingKeys = await A.evaluate(() =>
+    Object.keys(localStorage).filter((k) => k.startsWith("duigao.cloudmap.")),
+  );
+  const roomIdInUrl = (shareUrl.match(/#room=([0-9a-f-]{36})/) || [])[1];
+  check(
+    "L. 房間的雲端身分同時記在本機碼與雲端 UUID 底下",
+    mappingKeys.some((k) => k.endsWith(roomIdInUrl)) && mappingKeys.length >= 2,
+    mappingKeys.join(", "),
+  );
+  check(
+    "L. 用雲端 id 重開房間仍然是雲端房（不會掉回本機模式）",
+    await A.evaluate((id) => {
+      const raw = localStorage.getItem(`duigao.cloudmap.${id}`);
+      if (!raw) return false;
+      const m = JSON.parse(raw);
+      return m.roomId === id && typeof m.token === "string" && m.token.length > 16;
+    }, roomIdInUrl),
+  );
+
   // --------------------------------------- H: partner opens, host closed ---
   await ctxA.close();
   const ctxB = await browser.newContext(phone(430, 932, LINE_UA));
@@ -491,6 +606,29 @@ try {
   check("H. 夥伴點討論卡也會跳到對的時間", (await currentTime(B)) > 0.3);
   await ctxB.close();
 
+  // -------------------------------------------- M: desktop can share -------
+  // BLOCKER 6 was a desktop player with no way to hand the link over. Every
+  // other leg runs on a phone, so this is the only place that would catch it
+  // coming back.
+  const ctxD = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+  const D = await ctxD.newPage();
+  await D.goto(shareUrl, { waitUntil: "domcontentloaded" });
+  await D.fill("input.text-input", "桌機夥伴");
+  await D.click("button.btn-primary");
+  await playerReady(D);
+  check("M. 桌機影片工作區有播放器與時間軸", (await D.isVisible("video.v-video")) && (await D.isVisible(".v-track")));
+  check("M. 桌機有回首頁與標題", (await D.isVisible("header.topbar .brand")) && (await D.isVisible("header.topbar input.title-input")));
+  check("M. 桌機討論在右側", await D.isVisible(".v-desktop-side"));
+  await D.click("header.topbar .btn-primary:has-text('分享')");
+  await D.waitForSelector("input.m-share-url", { timeout: 30000 });
+  const desktopUrl = await D.inputValue("input.m-share-url");
+  check(
+    "M. 桌機拿得到永久分享連結",
+    /#room=[0-9a-f-]{36}&invite=[A-Za-z0-9_-]{20,}/.test(desktopUrl),
+    desktopUrl.slice(0, 80),
+  );
+  await ctxD.close();
+
   // ------------------------------------------------ I: image regression ----
   const ctxC = await browser.newContext(phone(390, 844, ANDROID_UA));
   const C = await ctxC.newPage();
@@ -515,7 +653,37 @@ try {
   await C.keyboard.press("Escape");
   await ctxC.close();
 
+  // ------------------------------------------------ J: the media rules -----
+  const ctxRules = await browser.newContext();
+  const rulesPage = await ctxRules.newPage();
+  await rulesPage.goto(APP, { waitUntil: "domcontentloaded" });
+  const rules = await checkMediaRules(rulesPage);
+  await ctxRules.close();
+
+  check("J. 超過 100MB 會被擋下並說出上限", rules.tooBig.ok === false && rules.tooBig.reason.includes("100 MB"), rules.tooBig.reason);
+  check("J. 不支援的影片格式會建議轉 MP4", rules.wrongType.ok === false && rules.wrongType.reason.includes("MP4"), rules.wrongType.reason);
+  check("J. 不是影片的檔案會被擋下", rules.notVideo.ok === false);
+  check("J. 正常的 MP4 會過", rules.good.ok === true);
+  check(
+    "J. 超過 120 分鐘會被擋下（fixture 讀不到長度，只有直接呼叫才驗得到）",
+    typeof rules.tooLong === "string" && rules.tooLong.includes("120"),
+    String(rules.tooLong),
+  );
+  check("J. 正常長度不會被擋", rules.okLength === null);
+  check("J. 讀不到長度時放行（不因 codec 怪癖懲罰使用者）", rules.unknownLength === null);
+  check("J. 時間格式", rules.times.join(" ") === "0:13 1:30 1:01:11", rules.times.join(" "));
+  check(
+    "J. 封面取樣時間：長片取 3 秒、短片取中間",
+    rules.posterAt[0] === 3 && Math.abs(rules.posterAt[1] - 0.3) < 0.001 && rules.posterAt[2] === 0,
+    rules.posterAt.join(" / "),
+  );
+  check("J. 首頁寫得出上限提示", rules.limitHint.includes("100 MB") && rules.limitHint.includes("120"), rules.limitHint);
+
   console.log(`\n${results.filter((r) => r.pass).length}/${results.length} checks passed`);
+  console.log(
+    "\n注意：這個 harness 的 mock 沒有 websocket 以外的真實後端行為，" +
+      "Safari 的 Range seek、iPhone HEVC、LINE in-app 首次播放手勢與三種直向尺寸仍需真機驗收。",
+  );
   if (results.some((r) => !r.pass)) process.exitCode = 1;
 } finally {
   await browser.close();

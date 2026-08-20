@@ -162,8 +162,19 @@ try {
   // re-run. 0005 is written to be idempotent; prove it.
   psqlFile(join(MIGRATIONS, "0005_share_previews.sql"));
   ok("0005 可以重複套用（idempotent）", true);
+  const shapeQuery = `select
+      (select count(*) from information_schema.columns where table_name in ('rooms','versions','comments')) || '/' ||
+      (select count(*) from pg_constraint where conname like 'comments_anchor%' or conname like 'versions_media%'
+         or conname like 'rooms_media%' or conname like 'versions_duration%') || '/' ||
+      (select count(*) from pg_indexes where indexname = 'idx_comments_version_time') || '/' ||
+      (select count(*) from pg_trigger where tgname = 'comments_derive_anchor');`;
+  const shapeBefore = psql(shapeQuery).out;
   psqlFile(join(MIGRATIONS, "0006_video_rooms.sql"));
-  ok("0006 可以重複套用（idempotent）", true);
+  const shapeAfter = psql(shapeQuery).out;
+  // Not just "it did not throw": re-applying must leave the same columns,
+  // constraints, index and trigger — a migration that doubles anything on a
+  // second run is a migration nobody can safely re-run.
+  ok("0006 可以重複套用，且結構完全一樣", shapeBefore === shapeAfter, `${shapeBefore} → ${shapeAfter}`);
 
   // ------------------------------------------------------------- fixtures
   const owner = psql("insert into auth.users default values returning id;").out;
@@ -454,6 +465,16 @@ try {
       ).failed,
     );
 
+    const equalRange = psql("select gen_random_uuid();").out;
+    ok(
+      "end 等於 start 的片段也會被擋下（那是一個瞬間，不是一段）",
+      as(
+        owner,
+        `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, end_time_seconds, body)
+         values ('${equalRange}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-range', 22, 22, '同一點');`,
+      ).failed,
+    );
+
     ok(
       "非成員讀不到影片留言的時間",
       as(stranger, `select count(*) from public.comments where version_id = '${videoVersionId}'::uuid;`).out === "0",
@@ -462,6 +483,25 @@ try {
 
   section("影片沒有動到既有的分享安全面");
   {
+    // The composite (version_id, room_id) foreign key predates video; a share
+    // card for a video room points at a video version, so that pairing has to
+    // hold for one of those too.
+    const videoPreviewId = psql("select gen_random_uuid();").out;
+    // One live preview per room (idx_share_previews_room_enabled, PR #21), so
+    // the earlier image preview has to step down first — otherwise this probe
+    // would be testing that unique index instead of the composite foreign key
+    // it exists to test.
+    psql(`update public.share_previews set enabled = false where room_id = '${roomId}'::uuid;`);
+    ok(
+      "share_previews 可以指向一支影片版本",
+      !as(
+        owner,
+        `insert into public.share_previews (id, room_id, version_id, title, description)
+         values ('${videoPreviewId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '影片對稿', '幫我看一下這支影片');`,
+      ).failed,
+    );
+    psql(`delete from public.share_previews where id = '${videoPreviewId}'::uuid;`);
+
     ok(
       "get_share_preview 的輸出欄位沒有變（沒有 media_type、沒有 room_id）",
       psql(
@@ -478,9 +518,14 @@ try {
       "room-assets 沒有被鎖成只收特定 mime（會擋掉既有圖片）",
       psql("select allowed_mime_types is null from storage.buckets where id = 'room-assets';").out === "t",
     );
+    // The number itself is the contract: the client validates against the same
+    // ceiling, and a bucket quietly set to something else would make one of the
+    // two lie to the user.
     ok(
-      "room-assets 有明確的檔案大小上限",
-      Number(psql("select coalesce(file_size_limit, 0) from storage.buckets where id = 'room-assets';").out) > 0,
+      "room-assets 的上限就是 0006 寫的 200MB",
+      psql("select coalesce(file_size_limit, 0) from storage.buckets where id = 'room-assets';").out ===
+        String(200 * 1024 * 1024),
+      psql("select coalesce(file_size_limit, 0) from storage.buckets where id = 'room-assets';").out,
     );
   }
 

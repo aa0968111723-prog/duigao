@@ -193,25 +193,12 @@ export async function createRoom(
     const newId = uuid();
     versionIdMap.set(v.id, newId);
     if (v.kind === "video") {
-      // Video versions are uploaded straight to Storage when they are added
-      // (a cut never travels as a data URL), so migrating one is a row copy.
-      // Their id therefore must NOT be remapped — the bytes already sit under
-      // the old id's path, and rewriting the id would orphan them.
+      // Video versions never travel this path: a cut is uploaded straight into
+      // its cloud room's folder, so there is no local-room migration to do.
+      // Copying the row would keep a video_path under the OLD room id, which
+      // membership RLS then refuses to read — better to skip it loudly than to
+      // migrate a version nobody can play.
       versionIdMap.set(v.id, v.id);
-      versionRows.push({
-        id: v.id,
-        room_id: roomId,
-        label: v.label,
-        sort_order: i,
-        media_kind: "video",
-        image_path: null,
-        video_path: v.videoPath ?? null,
-        mime_type: v.mimeType ?? null,
-        duration_seconds: v.duration ?? null,
-        file_size: v.fileSize ?? null,
-        width: v.width ?? null,
-        height: v.height ?? null,
-      });
       continue;
     }
     const { path, mime } = await uploadVersion(supabase, roomId, newId, v.imageDataUrl);

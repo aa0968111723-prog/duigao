@@ -252,6 +252,10 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
         boundRef.current = targetRoomId;
         setInviteUrl(token ? buildInviteUrl(targetRoomId, token) : null);
         await reload();
+        // The snapshot that just landed re-keys the room to its cloud id, which
+        // re-runs this effect. Subscribing now would leave a channel the next
+        // cleanup no longer knows about.
+        if (cancelled) return;
         setProposalCloudSync(targetRoomId, (doc) => {
           run(async () => {
             const expected = revisions.current.get(doc.id) ?? 0;
@@ -456,7 +460,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
    * room; the next attempt starts from a fresh local id, creates a SECOND cloud
    * room, and the first one is unreachable forever.
    */
-  const forgetCloudRoom = useCallback((localRoomId: string) => {
+  const forgetCloudRoom = useCallback((localRoomId: string): string | null => {
     const mapped = getCloudMapping(localRoomId);
     clearCloudMapping(localRoomId);
     if (mapped) clearCloudMapping(mapped.roomId);
@@ -465,6 +469,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     boundRef.current = null;
     setInviteUrl(null);
     setStatus(isCloudConfigured ? "connecting" : "local-only");
+    return mapped?.roomId ?? null;
   }, []);
 
   /**
