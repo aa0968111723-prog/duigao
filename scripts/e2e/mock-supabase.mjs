@@ -398,7 +398,7 @@ export const server = http.createServer(async (req, res) => {
 // No `ws` dependency: this mock is test-only, and the parser is small enough
 // that owning it beats owning a dependency.
 
-const WS_GUID = "258EAFA5-E914-47DA-95CA-5AB0DC85B11C";
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"; // RFC6455's fixed accept-key salt
 const OPCODE = { continuation: 0x0, text: 0x1, binary: 0x2, close: 0x8, ping: 0x9, pong: 0xa };
 
 /** Live sockets: `{ socket, topics: Map<topic, { joinRef, room, configs, presenceKey, presence }> }`. */
@@ -457,7 +457,7 @@ function sendFrame(socket, opcode, payload) {
 }
 
 /** Phoenix v2 frames a message as the positional array `[join_ref, ref, topic, event, payload]`. */
-function push(client, message) {
+function pushMessage(client, message) {
   if (process.env.MOCK_LOG) console.log("ws ->", message[3], message[2]);
   sendFrame(client.socket, OPCODE.text, Buffer.from(JSON.stringify(message)));
 }
@@ -482,7 +482,7 @@ function roomOfTopic(topic) {
  */
 function roomOfRow(table, row) {
   if (!row) return null;
-  return row.room_id ?? (table === "rooms" ? row.id : null) ?? null;
+  return row.room_id ?? (table === "rooms" ? row.id : null);
 }
 
 /** `room_id=eq.<uuid>` / `id=eq.<uuid>` — the only filter forms subscribeRoom uses. */
@@ -511,7 +511,7 @@ function presenceStateOf(topic) {
  */
 function syncPresence(topic) {
   for (const client of realtimeClients) {
-    if (client.topics.has(topic)) push(client, [null, null, topic, "presence_state", presenceStateOf(topic)]);
+    if (client.topics.has(topic)) pushMessage(client, [null, null, topic, "presence_state", presenceStateOf(topic)]);
   }
 }
 
@@ -527,12 +527,12 @@ function joinTopic(client, joinRef, ref, topic, payload) {
     presenceKey: payload?.config?.presence?.key ?? null,
     presence: null,
   });
-  push(client, [joinRef ?? null, ref ?? null, topic, "phx_reply", { status: "ok", response: { postgres_changes: configs } }]);
+  pushMessage(client, [joinRef ?? null, ref ?? null, topic, "phx_reply", { status: "ok", response: { postgres_changes: configs } }]);
   // supabase-js versions before the bindings check reported SUBSCRIBED only on
   // this message; newer ones ignore it. Sending it costs nothing and keeps the
   // mock working across a client bump.
-  push(client, [null, null, topic, "system", { status: "ok", extension: "postgres_changes", message: "Subscribed to PostgreSQL" }]);
-  push(client, [null, null, topic, "presence_state", presenceStateOf(topic)]);
+  pushMessage(client, [null, null, topic, "system", { status: "ok", extension: "postgres_changes", message: "Subscribed to PostgreSQL" }]);
+  pushMessage(client, [null, null, topic, "presence_state", presenceStateOf(topic)]);
 }
 
 function handleRealtimeMessage(client, raw) {
@@ -545,24 +545,24 @@ function handleRealtimeMessage(client, raw) {
   // Unanswered heartbeats make the client close the socket itself, which would
   // look exactly like a mock that dropped the connection.
   if (topic === "phoenix" && event === "heartbeat") {
-    return push(client, [joinRef ?? null, ref ?? null, topic, "phx_reply", { status: "ok", response: {} }]);
+    return pushMessage(client, [joinRef ?? null, ref ?? null, topic, "phx_reply", { status: "ok", response: {} }]);
   }
   if (event === "phx_join") return joinTopic(client, joinRef, ref, topic, payload);
   if (event === "phx_leave") {
     client.topics.delete(topic);
-    push(client, [joinRef ?? null, ref ?? null, topic, "phx_reply", { status: "ok", response: {} }]);
+    pushMessage(client, [joinRef ?? null, ref ?? null, topic, "phx_reply", { status: "ok", response: {} }]);
     return syncPresence(topic);
   }
   if (event === "presence") {
     const sub = client.topics.get(topic);
     if (sub && payload?.event === "track") sub.presence = { phx_ref: randomUUID(), ...(payload.payload ?? {}) };
     if (sub && payload?.event === "untrack") sub.presence = null;
-    if (ref) push(client, [joinRef ?? null, ref, topic, "phx_reply", { status: "ok", response: {} }]);
+    if (ref) pushMessage(client, [joinRef ?? null, ref, topic, "phx_reply", { status: "ok", response: {} }]);
     return syncPresence(topic);
   }
   // Anything else that carries a ref (e.g. `access_token` after a refresh) gets
   // an ack, so the client's push resolves instead of sitting out its timeout.
-  if (ref) push(client, [joinRef ?? null, ref, topic, "phx_reply", { status: "ok", response: {} }]);
+  if (ref) pushMessage(client, [joinRef ?? null, ref, topic, "phx_reply", { status: "ok", response: {} }]);
 }
 
 server.on("upgrade", (req, socket, head) => {
@@ -649,7 +649,7 @@ export function emitChange({ schema = "public", table, type, record, oldRecord }
           && (c.event === "*" || c.event === type)
           && matchesFilter(c.filter, subject))
         .map((c) => c.id);
-      if (ids.length) push(client, [null, null, topic, "postgres_changes", { ids, data }]);
+      if (ids.length) pushMessage(client, [null, null, topic, "postgres_changes", { ids, data }]);
     }
   }
 }
