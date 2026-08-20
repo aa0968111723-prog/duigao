@@ -209,6 +209,7 @@ export function VideoWorkspace({ api, presence }: Props) {
   const cancelDraft = useCallback(() => {
     setDraft(null);
     setRangePick(null);
+    setComposeInset(0);
     api.cancelPin();
   }, [api]);
 
@@ -217,6 +218,7 @@ export function VideoWorkspace({ api, presence }: Props) {
     api.video?.commitVideoComment(draft);
     setDraft(null);
     setRangePick(null);
+    setComposeInset(0);
   }, [draft, api]);
 
   /**
@@ -389,6 +391,7 @@ export function VideoWorkspace({ api, presence }: Props) {
           }}
           onCancel={cancelDraft}
           onSubmit={submitDraft}
+          onHeight={setComposeInset}
         />
       )}
 
@@ -620,24 +623,6 @@ export function VideoWorkspace({ api, presence }: Props) {
       </div>
 
       {sheets}
-      <ComposeInsetProbe draft={draft} onInset={setComposeInset} />
-      <span hidden aria-hidden>
-        {guest.name}
-      </span>
     </div>
   );
 }
-
-/**
- * The composer sheet reports its own height so the bottom stack can get out of
- * the keyboard's way; when there is no composer the inset has to go back to
- * zero, or the toolbar stays pushed up after sending.
- */
-function ComposeInsetProbe({ draft, onInset }: { draft: VideoAnchor | null; onInset: (px: number) => void }) {
-  useEffect(() => {
-    if (!draft) onInset(0);
-  }, [draft, onInset]);
-  return null;
-}
-
-export type { Version };
