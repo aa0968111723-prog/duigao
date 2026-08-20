@@ -30,7 +30,7 @@ import { readFile as read } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
 import { deflateSync } from "node:zlib";
-import { start as startMock } from "./mock-supabase.mjs";
+import { start as startMock, requestLog } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54399;
 const APP_PORT = 4173;
@@ -245,6 +245,24 @@ try {
   check("A. 預覽 HTML 不含 invite token", !card.html.includes(inviteToken));
   check("A. 預覽 HTML 不含 room id", !card.html.includes(cloudRoomIdOf(shareUrl)));
 
+  // The card must be rendered from the ORIGINAL poster in Storage. A DOM
+  // screenshot would drag in pins, regions, proposal overlays and the toolbar —
+  // so assert the route taken, not just the result.
+  const previewIdOf = shareUrl.split("/share-preview/")[1].split("#")[0];
+  check(
+    "A. 縮圖來源是 room-assets 裡的原稿（不是螢幕截圖）",
+    requestLog.some((r) => r.startsWith("POST /storage/v1/object/sign/room-assets/rooms/")) &&
+      requestLog.some((r) => r.startsWith("GET /storage/v1/object/sign/room-assets/rooms/")),
+  );
+  check(
+    "A. 縮圖上傳到獨立的 share-previews bucket",
+    requestLog.some((r) => r === `POST /storage/v1/object/share-previews/${previewIdOf}/cover.webp`),
+  );
+  check(
+    "A. 沒有把任何東西寫進 room-assets 的 preview 路徑",
+    !requestLog.some((r) => r.startsWith("POST /storage/v1/object/room-assets/") && r.includes("cover")),
+  );
+
   // 關掉「顯示文宣縮圖」→ 只剩通用封面
   await A.click(".m-share-toggle input");
   await A.waitForFunction(
@@ -257,6 +275,11 @@ try {
   const offImage = /<meta property="og:image" content="([^"]*)"/.exec(offCard)?.[1] ?? "";
   check("A. 關閉縮圖後 og:image 換成通用封面", offImage.endsWith("/og-cover.png"), offImage);
   check("A. 關閉縮圖後不再暴露文宣縮圖", !offCard.includes("/share-previews/"));
+  // Public bucket: flipping a flag is not revocation, the bytes have to go.
+  check(
+    "A. 關閉縮圖會真的刪掉公開的縮圖檔",
+    requestLog.some((r) => r === "DELETE /storage/v1/object/share-previews"),
+  );
 
   // 開回來，讓後續的夥伴情境仍有卡片
   await A.click(".m-share-toggle input");

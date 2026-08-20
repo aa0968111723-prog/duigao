@@ -22,6 +22,13 @@ const tables = {
 };
 const objects = new Map(); // `${bucket}/${path}` -> {buf, mime}
 
+/**
+ * Every request the app made, as `METHOD /path`. Lets a run assert not just the
+ * outcome but the route taken — e.g. that a share thumbnail was rendered from
+ * the original poster in Storage rather than from a screenshot of the page.
+ */
+export const requestLog = [];
+
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const now = () => new Date().toISOString();
 
@@ -121,6 +128,7 @@ let mockOrigin = `http://127.0.0.1:${PORT}`;
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
+  requestLog.push(`${req.method} ${p}`);
   if (process.env.MOCK_LOG) console.log(req.method, req.url.slice(0, 140));
   if (req.method === "OPTIONS") { cors(res); res.writeHead(204); return res.end(); }
 
