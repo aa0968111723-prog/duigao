@@ -19,7 +19,7 @@
  * cluster is run as the `postgres` system account instead.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, readdirSync, chownSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readdirSync, chownSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,11 +90,29 @@ const spawnOpts = asUser ? { uid: asUser.uid, gid: asUser.gid } : {};
 // Windows has no unix sockets, so the cluster listens on loopback there. The
 // port is still private to this run and the cluster is deleted at the end.
 const PGHOST = IS_WINDOWS ? "127.0.0.1" : sock;
-const LISTEN = IS_WINDOWS ? `-p ${PORT} -c listen_addresses='127.0.0.1'` : `-p ${PORT} -k ${sock} -c listen_addresses=''`;
-const env = { ...process.env, PGHOST, PGPORT: String(PORT), PGDATABASE: "duigao", PGUSER: PG_USER, HOME: sock };
+// No quotes on Windows: the value reaches postgres verbatim (there is no shell
+// to strip them), and a quoted address is not an address.
+const LISTEN = IS_WINDOWS
+  ? `-p ${PORT} -c listen_addresses=127.0.0.1`
+  : `-p ${PORT} -k ${sock} -c listen_addresses=''`;
+const env = {
+  ...process.env,
+  PGHOST,
+  PGPORT: String(PORT),
+  PGDATABASE: "duigao",
+  PGUSER: PG_USER,
+  HOME: sock,
+  PGCLIENTENCODING: "UTF8",
+};
 
 function psql(sql, { expectError = false } = {}) {
-  const res = spawnSync(bin("psql"), ["-v", "ON_ERROR_STOP=1", "-X", "-q", "-A", "-t", "-c", sql], {
+  // The statement travels as a UTF-8 FILE rather than a -c argument: on Windows
+  // psql reads command-line arguments in the console codepage, which turns the
+  // Chinese in these fixtures into invalid byte sequences before the server
+  // ever sees them. A file has an encoding; an argv string does not.
+  const scratch = join(dataDir, "stmt.sql");
+  writeFileSync(scratch, sql, "utf8");
+  const res = spawnSync(bin("psql"), ["-v", "ON_ERROR_STOP=1", "-X", "-q", "-A", "-t", "-f", scratch], {
     env,
     encoding: "utf8",
     ...spawnOpts,
@@ -122,10 +140,13 @@ try {
     env,
     ...spawnOpts,
   });
+  // `stdio: "ignore"` matters on Windows: pg_ctl hands its stdio handles to the
+  // server it spawns, so a piped start never returns — the parent waits on a
+  // pipe the (still running) database keeps open.
   execFileSync(
     bin("pg_ctl"),
     ["-D", dataDir, "-o", LISTEN, "-w", "-l", join(dataDir, "log"), "start"],
-    { stdio: "pipe", env, ...spawnOpts },
+    { stdio: "ignore", env, ...spawnOpts },
   );
   started = true;
   execFileSync(bin("createdb"), ["duigao"], { env, stdio: "pipe", ...spawnOpts });
@@ -483,7 +504,7 @@ try {
 } finally {
   if (started) {
     try {
-      execFileSync(bin("pg_ctl"), ["-D", dataDir, "-m", "immediate", "stop"], { stdio: "pipe", env, ...spawnOpts });
+      execFileSync(bin("pg_ctl"), ["-D", dataDir, "-m", "immediate", "stop"], { stdio: "ignore", env, ...spawnOpts });
     } catch {
       /* already gone */
     }
