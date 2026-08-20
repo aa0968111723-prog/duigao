@@ -1,0 +1,507 @@
+/* ============================================================================
+   影片對稿 — the video workspace's own styles.
+
+   Additive only, in the spirit of usability.css: nothing here overrides a
+   poster-review rule. The shell reuses the phone chrome (.m-app, .m-top,
+   .m-versions, .m-bottom, .m-sheet, .m-toolbar) so a reviewer who has used the
+   poster app is not learning a second application — only the stage between the
+   version chips and the sheet is new.
+
+   The governing rule: **the player is the screen.** Every size below is chosen
+   so the video keeps the room and the controls stay a thin band.
+   ========================================================================= */
+
+.v-app .v-stage-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 8px 10px 4px;
+}
+
+/* ---------------------------------------------------------------- player -- */
+
+.v-player {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.v-frame {
+  position: relative;
+  background: #000;
+  border-radius: var(--r-md, 14px);
+  overflow: hidden;
+  /* Letterboxed rather than cropped: a 9:16 vertical cut and a 16:9 trailer
+     both have to be watchable without the app deciding what to hide. */
+  aspect-ratio: 16 / 9;
+  max-height: 62vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.v-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #000;
+}
+
+.v-bigplay {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  background: rgba(16, 14, 12, 0.5);
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  padding-left: 6px; /* optical centring of the triangle */
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+}
+
+.v-spinner {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  animation: v-spin 0.9s linear infinite;
+}
+
+@keyframes v-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+.v-failure {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  text-align: center;
+  background: rgba(12, 11, 10, 0.9);
+  color: var(--ink, #f4efe6);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.v-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.v-ctl {
+  min-width: 44px;
+  min-height: 44px; /* thumb target, even though the glyph is small */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink, #f4efe6);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.v-ctl:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.v-ctl-play {
+  font-size: 16px;
+}
+
+.v-ctl-rate {
+  font-variant-numeric: tabular-nums;
+}
+
+.v-clock {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim, #b6ada0);
+  white-space: nowrap;
+}
+
+.v-clock em {
+  font-style: normal;
+  opacity: 0.5;
+  margin: 0 2px;
+}
+
+/* -------------------------------------------------------------- timeline -- */
+
+.v-timeline {
+  padding: 10px 2px 4px;
+}
+
+.v-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  touch-action: none; /* the track owns horizontal drags; the page must not scroll */
+}
+
+.v-track-played {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34);
+  pointer-events: none;
+}
+
+.v-playhead {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 20px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--ink, #f4efe6);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.v-range-live {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(196, 92, 74, 0.5);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+/* Markers sit above the track and stay tappable: the dot is 10px, the button
+   is 32px, because a fingertip is not a mouse pointer. */
+.v-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.v-marker::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--marker, #c45c4a);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+
+.v-marker-range {
+  transform: translateY(-50%);
+  left: 0;
+  justify-content: flex-start;
+  border-radius: 999px;
+  min-width: 18px;
+}
+
+.v-marker-range::before {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--marker, #c45c4a);
+  opacity: 0.85;
+}
+
+/* Done items stay visible — the count still matters — but stop competing for
+   attention with what still needs doing. */
+.v-marker.is-done::before {
+  opacity: 0.3;
+  background: var(--ink-dim, #b6ada0);
+  box-shadow: none;
+}
+
+.v-marker.is-selected::before {
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.4),
+    0 0 0 5px rgba(255, 255, 255, 0.55);
+}
+
+.v-marker-no {
+  position: absolute;
+  bottom: -2px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink-dim, #b6ada0);
+  pointer-events: none;
+}
+
+.v-marker-range .v-marker-no,
+.v-marker.is-done .v-marker-no {
+  display: none;
+}
+
+/* ------------------------------------------------------- range / upload --- */
+
+.v-rangebar {
+  gap: 8px;
+}
+
+.v-upload {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+  color: var(--ink, #f4efe6);
+}
+
+.v-upload-text {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.v-upload-bar {
+  flex: 1;
+  height: 6px;
+  min-width: 60px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+  display: block;
+}
+
+.v-upload-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent, #c45c4a);
+  transition: width 0.25s ease-out;
+}
+
+/* --------------------------------------------------------- sort / cards --- */
+
+.v-sortrow {
+  display: flex;
+  gap: 6px;
+  padding: 4px 14px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.v-sortrow::-webkit-scrollbar {
+  display: none;
+}
+
+/* The time is what a video comment IS about, so it leads the card. */
+.m-item-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.m-item-anchor {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent, #c45c4a);
+  letter-spacing: 0.02em;
+}
+
+.m-item.is-done .m-item-anchor {
+  color: var(--ink-dim, #b6ada0);
+}
+
+.v-compose-hint {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink-dim, #b6ada0);
+}
+
+.v-more-meta,
+.v-more-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-dim, #b6ada0);
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------- home entries -- */
+
+.home-picks {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.home-pick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 18px;
+  border-radius: var(--r-lg, 18px);
+  border: 1px solid var(--line, #2b2724);
+  background: var(--panel, #17150f);
+  cursor: pointer;
+  text-align: left;
+  min-height: 76px;
+}
+
+.home-pick:active {
+  transform: scale(0.995);
+}
+
+.home-pick.is-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.home-pick-icon {
+  font-size: 24px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  flex: none;
+}
+
+.home-pick-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.home-pick-copy b {
+  font-size: 16px;
+  color: var(--ink, #f4efe6);
+}
+
+.home-pick-copy small {
+  font-size: 12.5px;
+  color: var(--ink-dim, #b6ada0);
+  line-height: 1.5;
+}
+
+.home-recent-kind {
+  margin-right: 6px;
+  opacity: 0.7;
+}
+
+/* ----------------------------------------------------------- desktop ------ */
+
+.v-desktop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  padding: 18px;
+  height: 100dvh;
+  box-sizing: border-box;
+  align-items: start;
+}
+
+.v-desktop-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.v-desktop-main .v-frame {
+  max-height: 64vh;
+}
+
+.v-desktop-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.v-desktop-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
+  border: 1px solid var(--line, #2b2724);
+  border-radius: var(--r-lg, 18px);
+  background: var(--panel, #17150f);
+}
+
+.v-side-head {
+  padding: 14px 16px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-dim, #b6ada0);
+}
+
+.v-side-head em {
+  font-style: normal;
+  opacity: 0.5;
+  margin: 0 6px;
+}
+
+@media (max-width: 1100px) and (pointer: fine) {
+  .v-desktop {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+}
+
+/* Landscape phone: the video earns the height, the controls stay one row. */
+@media (orientation: landscape) and (max-height: 520px) and (pointer: coarse) {
+  .v-app .v-stage-area {
+    padding: 4px 8px 0;
+    gap: 4px;
+  }
+
+  .v-frame {
+    max-height: 56vh;
+  }
+
+  .v-timeline {
+    padding: 6px 2px 2px;
+  }
+}

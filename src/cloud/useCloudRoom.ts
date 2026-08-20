@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Guest, Room, Version } from "../lib/types";
+import { roomMediaType } from "../lib/types";
 import { saveRoom } from "../lib/store";
 import type { ShowToast } from "../toast";
 import {
@@ -33,6 +34,8 @@ import {
   type CloudProposal,
 } from "./roomRepository";
 import { ensureRoomPreview, rotateRoomPreview, type SharePreview } from "./sharePreview";
+import { uploadVideoVersion, type VideoUploadHandle, type VideoUploadInput } from "./videoRoom";
+import { signedVideoUrl } from "./videoAssets";
 import { subscribeRoom, type Unsubscribe } from "./roomSync";
 import type { SyncStatus } from "./types";
 
@@ -385,6 +388,71 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   }, [supabase, guest, room, isGuestSession, inviteUrl, reload, run, showToast]);
 
   /**
+   * Put a room in the cloud NOW, from an explicitly passed Room.
+   *
+   * Poster rooms reach the cloud lazily, when someone taps 分享. A video room
+   * cannot: Storage authorises an upload by looking at `rooms/<room-id>/…` and
+   * checking membership, so the room and the membership row have to exist
+   * before the first byte moves. The Room is passed in rather than read from
+   * this hook's props because the caller has just created it — React has not
+   * re-rendered yet, and the stale value would create the wrong room.
+   */
+  const ensureCloudRoom = useCallback(
+    async (target: Room): Promise<{ roomId: string; url: string } | null> => {
+      if (!supabase || !guest) return null;
+      if (boundRef.current) {
+        const existing = getCloudMapping(target.id)?.token;
+        return existing ? { roomId: boundRef.current, url: buildInviteUrl(boundRef.current, existing) } : null;
+      }
+      const mapped = getCloudMapping(target.id);
+      if (mapped) {
+        boundRef.current = mapped.roomId;
+        const url = buildInviteUrl(mapped.roomId, mapped.token);
+        setInviteUrl(url);
+        return { roomId: mapped.roomId, url };
+      }
+      setStatus("syncing");
+      await ensureSession(supabase);
+      const token = generateInviteToken();
+      const { roomId } = await createRoom(supabase, { room: target, proposals: [] }, guest, token);
+      saveCloudMapping(target.id, { roomId, token });
+      boundRef.current = roomId;
+      const url = buildInviteUrl(roomId, token);
+      setInviteUrl(url);
+      setStatus("synced");
+      // Re-run the bind effect so realtime + presence attach to the new room.
+      setBindNonce((n) => n + 1);
+      return { roomId, url };
+    },
+    [supabase, guest],
+  );
+
+  /**
+   * Upload one cut and write its row. Progress is reported in real bytes; the
+   * caller owns the UI state machine and the cancel button.
+   */
+  const uploadVideo = useCallback(
+    (
+      input: Omit<VideoUploadInput, "roomId"> & { roomId?: string },
+      onPhase: (phase: "preparing" | "uploading" | "processing", progress: number) => void,
+    ): VideoUploadHandle | null => {
+      const rid = input.roomId ?? boundRef.current;
+      if (!supabase || !rid) return null;
+      return uploadVideoVersion(supabase, { ...input, roomId: rid }, onPhase);
+    },
+    [supabase],
+  );
+
+  /** A signed video URL expires mid-session; the player asks for a fresh one. */
+  const refreshVideoUrl = useCallback(
+    async (path: string): Promise<string | null> => {
+      if (!supabase || !path) return null;
+      return await signedVideoUrl(supabase, path).catch(() => null);
+    },
+    [supabase],
+  );
+
+  /**
    * Resolve the room title + the version to put on the card straight from the
    * cloud, not from React state: right after a migration the local room object
    * still carries pre-migration version ids, and a share tap can land before
@@ -407,16 +475,22 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     [supabase],
   );
 
+  // A video room's card says what a video room asks for. The picture is the
+  // poster frame, which is already this version's stored image — so the whole
+  // Open Graph pipeline, and the anonymous read surface behind it, is unchanged.
+  const previewExtras = () =>
+    room && roomMediaType(room) === "video" ? { mediaType: "video" as const } : {};
+
   const preview: SharePreviewApi = {
     ensure: async (opts) => {
       const target = await resolvePreviewTarget(opts?.versionId);
       if (!target || !supabase) return null;
-      return ensureRoomPreview(supabase, { ...target, showThumbnail: opts?.showThumbnail });
+      return ensureRoomPreview(supabase, { ...target, ...previewExtras(), showThumbnail: opts?.showThumbnail });
     },
     rotate: async (opts) => {
       const target = await resolvePreviewTarget(opts?.versionId);
       if (!target || !supabase) return null;
-      return rotateRoomPreview(supabase, { ...target, showThumbnail: opts?.showThumbnail });
+      return rotateRoomPreview(supabase, { ...target, ...previewExtras(), showThumbnail: opts?.showThumbnail });
     },
   };
 
@@ -446,6 +520,9 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     boundRoomId: boundRef.current,
     active: Boolean(supabase),
     ensureShared,
+    ensureCloudRoom,
+    uploadVideo,
+    refreshVideoUrl,
     retry,
     writes,
     preview,

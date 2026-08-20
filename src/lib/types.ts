@@ -12,10 +12,48 @@ export type AnnotationRegion = {
   height: number;
 };
 
+/**
+ * What a room is for. Images are reviewed in space (a point or a circled area);
+ * videos are reviewed in time (a moment or a stretch). The two workspaces share
+ * everything below the UI — rooms, invites, discussion, sync — and nothing above
+ * it, which is why this lives on the room rather than being guessed per action.
+ */
+export type MediaType = "image" | "video";
+
+/**
+ * Where a piece of video feedback points. Times are SECONDS as numbers, never
+ * "00:13" strings: the timeline, seeking and any future frame-accurate work all
+ * need real arithmetic, and formatting is a render-time concern.
+ */
+export type VideoAnchor =
+  | { kind: "point"; time: number }
+  | { kind: "range"; startTime: number; endTime: number };
+
+/**
+ * One draft of the work under review.
+ *
+ * `imageDataUrl` is the still image for this version: the poster artwork for an
+ * image room, the captured poster frame for a video room. Keeping that one field
+ * honest for both is what lets thumbnails, share cards and recents stay
+ * media-agnostic. Video-only facts live in the optional fields below; an image
+ * version simply has none of them.
+ */
 export type Version = {
   id: string;
   label: string;
   imageDataUrl: string;
+  /** Absent on rooms created before video existed — treat as "image". */
+  kind?: MediaType;
+  /** Playable URL for the video itself (signed, and refreshed on expiry). */
+  videoUrl?: string;
+  /** Storage path of the video, so a stale signed URL can be re-signed. */
+  videoPath?: string;
+  /** Seconds. Absent when the browser could not read the metadata. */
+  duration?: number;
+  mimeType?: string;
+  fileSize?: number;
+  width?: number;
+  height?: number;
 };
 
 export type ReviewType = "文字" | "排版" | "圖片" | "顏色" | "資訊錯誤" | "其他";
@@ -31,6 +69,12 @@ export type CommentPin = {
   y: number;
   /** Present when the feedback points at an area instead of a single spot. x/y stay at the region's center. */
   region?: AnnotationRegion;
+  /**
+   * Present on video feedback: the moment or stretch it is about. x/y are
+   * meaningless for these and stay at their defaults until a future release
+   * adds on-screen positions to video comments.
+   */
+  anchor?: VideoAnchor;
   body: string;
   suggestion?: string;
   problemType?: ReviewType;
@@ -79,6 +123,8 @@ export type ProposalPref = { versionId: string; userId: string; choice: string }
 export type Room = {
   id: string;
   title: string;
+  /** Absent on every room created before video review shipped — normalized to "image". */
+  mediaType?: MediaType;
   versions: Version[];
   comments: CommentPin[];
   strokes: Stroke[];
@@ -124,6 +170,14 @@ export type PeerMsg =
 export const COLORS = ["#c45c4a", "#3d6b8c", "#5a7a4a", "#8a5a3a", "#6b5a8c", "#2f6f6a"] as const;
 
 export const VERSION_LABELS = ["初稿", "改一", "改二", "改三", "改四"] as const;
+
+/** Cut names read differently from poster drafts, so video rooms get their own. */
+export const VIDEO_VERSION_LABELS = ["初剪", "改一", "改二", "改三", "最終版"] as const;
+
+/** Older rooms carry no mediaType; they are all image rooms. */
+export function roomMediaType(room: Pick<Room, "mediaType">): MediaType {
+  return room.mediaType === "video" ? "video" : "image";
+}
 
 export const REVIEW_TYPES: ReviewType[] = ["文字", "排版", "圖片", "顏色", "資訊錯誤", "其他"];
 

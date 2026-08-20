@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import type { ColorMode, CompareMode } from "../lib/types";
-import type { CollabStatus } from "../lib/peer";
-import { useViewport } from "../hooks/useViewport";
-import { loadFlag, saveFlag } from "../lib/store";
-import { ProposalDock, type ProposalIntent } from "../features/visual-proposal/ProposalDock";
-import { pruneProposalVersions, useProposalStore, useRoomProposals } from "../features/visual-proposal/store";
-import { DragSheet, ModalSheet, type SheetSnap } from "./BottomSheet";
-import { CommentCard } from "./CommentCard";
-import { PinFields } from "./PinFields";
-import { UploadZone } from "./UploadZone";
+import type { ColorMode, CompareMode } from "../../lib/types";
+import type { CollabStatus } from "../../lib/peer";
+import { useViewport } from "../../hooks/useViewport";
+import { loadFlag, saveFlag } from "../../lib/store";
+import { ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
+import { pruneProposalVersions, useProposalStore, useRoomProposals } from "../visual-proposal/store";
+import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
+import { CommentCard } from "../discussion/CommentCard";
+import { PinFields } from "../discussion/PinFields";
+import { UploadZone } from "../../components/UploadZone";
 import { Viewer } from "./Stage";
-import { IconChat, IconEye, IconMore, IconPen, IconPin } from "./icons";
-import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "./api";
+import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
+import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "../../components/api";
 
 const COLOR_MODES: { id: ColorMode; label: string }[] = [
   { id: "color", label: "彩色" },

@@ -7,10 +7,10 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { Point, Version } from "../lib/types";
-import { regionFromPoints } from "../lib/region";
-import { VisualProposalOverlay } from "../features/visual-proposal/VisualProposalOverlay";
-import { nextPinNumber, pinNumber, type WorkspaceApi } from "./api";
+import type { Point, Version } from "../../lib/types";
+import { regionFromPoints } from "../../lib/region";
+import { VisualProposalOverlay } from "../visual-proposal/VisualProposalOverlay";
+import { nextPinNumber, pinNumber, type WorkspaceApi } from "../../components/api";
 
 type Rect = { left: number; top: number; width: number; height: number };
 
