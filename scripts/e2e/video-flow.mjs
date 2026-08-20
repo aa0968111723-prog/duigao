@@ -25,6 +25,10 @@
  *      still work, and nothing about that flow changed
  *   N  a failed first upload leaves a way out, and retrying reuses the room it
  *      already created instead of quietly leaving an empty one behind
+ *   P  a guest who joined by link can add a cut of their own — Storage
+ *      authorises on membership, not on owning the invite
+ *   Q  cancelling the first upload leaves nothing behind, and backend English
+ *      never reaches the screen
  *
  * The video fixture is recorded in-page from a canvas, so no binary file is
  * committed — the same principle as share-flow.mjs's generated PNG.
@@ -668,6 +672,32 @@ try {
   await B.locator("article.m-item").first().click();
   await B.waitForTimeout(600);
   check("H. 夥伴點討論卡也會跳到對的時間", (await currentTime(B)) > 0.3);
+
+  // ------------------------------------------- P: a guest adds a cut -------
+  const chipsBeforeGuest = await B.locator(".m-vchip").count();
+  const versionsBeforeGuest = rows.versions.length;
+  await B.setInputFiles('.m-vchip-add input[type="file"]', {
+    name: "guest-cut.webm",
+    mimeType: "video/webm",
+    buffer: SHORT,
+  });
+  const guestAdded = await B.waitForFunction(
+    (n) => document.querySelectorAll(".m-vchip").length > n,
+    chipsBeforeGuest,
+    { timeout: 90000 },
+  )
+    .then(() => true)
+    .catch(() => false);
+  check("P. 夥伴（不是主辦方）也能新增一版", guestAdded, `chips ${chipsBeforeGuest} → ${await B.locator(".m-vchip").count()}`);
+
+  const guestVersion = rows.versions[rows.versions.length - 1];
+  check(
+    "P. 夥伴上傳的影片放在同一個房間底下（不是另外開一間）",
+    rows.versions.length === versionsBeforeGuest + 1 &&
+      typeof guestVersion?.video_path === "string" &&
+      guestVersion.video_path.includes(guestVersion.room_id),
+    guestVersion?.video_path ?? "沒有新版本",
+  );
   await ctxB.close();
 
   // -------------------------------------------- M: desktop can share -------
@@ -785,6 +815,43 @@ try {
     `失敗後 ${roomsAfterFailure} 間、重試後 ${roomsAfterRetry} 間（一開始 ${roomsBefore} 間）`,
   );
   await ctxN.close();
+
+  // --------------------------- Q: cancel, and what an error may say --------
+  const ctxQ = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const Q = await ctxQ.newPage();
+  await enterName(Q, APP, "會反悔的人");
+  const roomsBeforeCancel = countRooms();
+  await uploadVideo(Q, LONG);
+  await Q.waitForSelector(".onboard-card .btn", { timeout: 60000 });
+  await Q.click(".onboard-card .btn:has-text('取消')");
+  await Q.waitForSelector(".home-picks", { timeout: 30000 });
+  check("Q. 取消第一支上傳會回到首頁", await Q.isVisible(".home-picks"));
+
+  const recentTitles = await Q.locator(".home-recent-item").allInnerTexts();
+  check(
+    "Q. 取消後不會在最近討論留下打不開的空房",
+    !recentTitles.some((t) => t.includes("未命名影片")),
+    recentTitles.join(" / ") || "（沒有最近討論）",
+  );
+  void roomsBeforeCancel;
+
+  // Backend English — RLS wording, PostgREST codes — is not user copy.
+  faults.videoUpload = true;
+  await uploadVideo(Q, SHORT);
+  await Q.waitForFunction(
+    () => document.querySelector(".onboard-hint")?.textContent?.includes("失敗") ?? false,
+    null,
+    { timeout: 60000 },
+  ).catch(() => null);
+  const shown = await Q.innerText(".onboard-card");
+  faults.videoUpload = false;
+  check(
+    "Q. 後端的英文錯誤不會變成使用者文案",
+    !/row-level|violates|PGRST|permission denied|injected/i.test(shown),
+    shown.replace(/\n/g, " ").slice(0, 90),
+  );
+  check("Q. 取而代之的是可以照做的中文", shown.includes("影片上傳失敗") || shown.includes("再試"), "");
+  await ctxQ.close();
 
   console.log(`\n${results.filter((r) => r.pass).length}/${results.length} checks passed`);
   console.log(

@@ -96,9 +96,11 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
   /**
    * iOS hands volume to the hardware buttons and ignores `video.volume`
    * entirely. A slider there would move and change nothing — worse than no
-   * slider — so it is only rendered once the element proves it obeys.
+   * slider — so it starts hidden and appears only once the element has proved
+   * it obeys. Showing it first and retracting it would flash a dead control
+   * and jump the width of the control row.
    */
-  const [volumeWorks, setVolumeWorks] = useState(true);
+  const [volumeWorks, setVolumeWorks] = useState(false);
   const [rate, setRate] = useState(1);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [buffering, setBuffering] = useState(false);

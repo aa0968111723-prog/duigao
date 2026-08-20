@@ -442,6 +442,15 @@ export function App() {
         return;
       }
 
+      // A guest whose join is still in flight has no bound room yet. Uploading
+      // would fall through to "create a room", which for a room that already
+      // holds a cut is refused with a sentence about migration — true, and
+      // completely beside the point for the person waiting three seconds.
+      if (isGuestSession && !cloudRef.current.boundRoomId && (roomRef.current?.versions.length ?? 0) > 0) {
+        showToast("還在連線，等一下再試一次。");
+        return;
+      }
+
       busy.current.add("upload");
       const existing = roomRef.current;
       const isNewRoom = !existing;
@@ -458,6 +467,9 @@ export function App() {
       // exists: the cloud room is created first, and that takes a moment on a
       // slow connection.
       let abandoned = false;
+      // Both ids the room may answer to while this upload is in flight; the
+      // cloud id joins once the room exists (binding re-keys the room to it).
+      const belongsToThisUpload = new Set([base.id]);
       let handleCancel: (() => void) | null = null;
       const cancel = () => {
         abandoned = true;
@@ -474,7 +486,7 @@ export function App() {
         // Binding to the cloud swaps the room's identity from the local code to
         // the cloud UUID (the snapshot that lands next IS the room). Both ids
         // therefore mean "still the room this upload belongs to".
-        const belongsToThisUpload = new Set([base.id, cloudRoom.roomId]);
+        belongsToThisUpload.add(cloudRoom.roomId);
 
         const handle = cloudRef.current.uploadVideo(
           {
@@ -538,6 +550,11 @@ export function App() {
             if (cloudId) deleteRoom(cloudId).catch(() => undefined);
             if ((roomRef.current?.versions.length ?? 0) === 0) setRoom(null);
           }
+        } else if (!belongsToThisUpload.has(roomRef.current?.id ?? "")) {
+          // The upload failed after the person had already moved on. Telling
+          // whichever room they are in now that something failed there would be
+          // a lie; the success path already knows this, and so must this one.
+          showToast(userFacingMessage(err), { tone: "error" });
         } else {
           const message = userFacingMessage(err);
           setVideoUpload({ state: "error", message, progress: 0, cancel: () => setVideoUpload({ state: "idle" }) });

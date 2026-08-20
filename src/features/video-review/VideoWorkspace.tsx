@@ -263,10 +263,12 @@ export function VideoWorkspace({ api, presence }: Props) {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
-      // Space is how a keyboard presses the button it is focused on. Claiming it
-      // globally would make every control in this workspace unusable — the
-      // shortcut is for when nothing in particular has focus.
-      if (el?.closest('button, a, select, summary, [role="button"], [role="slider"], [tabindex]')) {
+      // Space is how a keyboard presses the button it is focused on, so it is
+      // left alone for anything that would consume it. A slider is focusable
+      // but does NOT use Space — and the timeline is the control people leave
+      // focus on, so treating it as "busy" would kill the shortcut for the rest
+      // of the session after a single scrub.
+      if (el?.closest('button, a, select, summary, [role="button"]')) {
         if (e.key !== "Escape") return;
       }
       if (e.key === " " || e.code === "Space") {
