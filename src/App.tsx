@@ -445,6 +445,10 @@ export function App() {
         const cloudRoom = await cloudRef.current.ensureCloudRoom(base);
         if (!cloudRoom) throw new Error("cloud-room-failed");
         if (abandoned) throw new CancelledUpload();
+        // Binding to the cloud swaps the room's identity from the local code to
+        // the cloud UUID (the snapshot that lands next IS the room). Both ids
+        // therefore mean "still the room this upload belongs to".
+        const belongsToThisUpload = new Set([base.id, cloudRoom.roomId]);
 
         const handle = cloudRef.current.uploadVideo(
           {
@@ -468,7 +472,7 @@ export function App() {
         // safely in the cloud either way; what must NOT happen is yanking them
         // back into a room they left, or writing over the room they opened next.
         const stillHere = roomRef.current;
-        if (!stillHere || stillHere.id !== base.id) {
+        if (!stillHere || !belongsToThisUpload.has(stillHere.id)) {
           showToast(`${label}已經上傳好了，之後打開這個影片就看得到。`, { tone: "success" });
           return;
         }

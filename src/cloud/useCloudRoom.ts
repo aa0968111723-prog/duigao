@@ -117,6 +117,23 @@ function proposalToPayload(doc: VisualProposal): Record<string, unknown> {
 }
 
 /**
+ * Remember a room's cloud identity under BOTH ids.
+ *
+ * The moment a room reaches the cloud, the snapshot that comes back carries the
+ * cloud UUID as the room's id — the local six-character code is gone from
+ * state. A mapping filed only under the local code therefore stops being
+ * findable exactly when it starts mattering: on the next bind (or the next time
+ * the room is opened from 最近討論) the lookup misses and the room quietly
+ * drops to local-only, taking realtime and every cloud write with it.
+ *
+ * Filing it under the cloud id as well makes the room self-describing.
+ */
+function rememberCloudRoom(localRoomId: string, roomId: string, token: string): void {
+  saveCloudMapping(localRoomId, { roomId, token });
+  saveCloudMapping(roomId, { roomId, token });
+}
+
+/**
  * Binds the active room to the cloud when configured. Inert (returns
  * local-only) otherwise, so the local IndexedDB + PeerJS path is untouched.
  */
@@ -364,7 +381,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
         revision: 1,
       }));
       const { roomId } = await createRoom(supabase, { room, proposals: localProposals }, guest, token);
-      saveCloudMapping(room.id, { roomId, token });
+      rememberCloudRoom(room.id, roomId, token);
       boundRef.current = roomId;
       const url = buildInviteUrl(roomId, token);
       setInviteUrl(url);
@@ -420,7 +437,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
       await ensureSession(supabase);
       const token = generateInviteToken();
       const { roomId } = await createRoom(supabase, { room: target, proposals: [] }, guest, token);
-      saveCloudMapping(target.id, { roomId, token });
+      rememberCloudRoom(target.id, roomId, token);
       boundRef.current = roomId;
       const url = buildInviteUrl(roomId, token);
       setInviteUrl(url);
@@ -440,7 +457,9 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
    * room, and the first one is unreachable forever.
    */
   const forgetCloudRoom = useCallback((localRoomId: string) => {
+    const mapped = getCloudMapping(localRoomId);
     clearCloudMapping(localRoomId);
+    if (mapped) clearCloudMapping(mapped.roomId);
     unsubRef.current?.();
     unsubRef.current = null;
     boundRef.current = null;
