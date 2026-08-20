@@ -32,6 +32,7 @@ import {
   upsertProposal,
   type CloudProposal,
 } from "./roomRepository";
+import { ensureRoomPreview, rotateRoomPreview, type SharePreview } from "./sharePreview";
 import { subscribeRoom, type Unsubscribe } from "./roomSync";
 import type { SyncStatus } from "./types";
 
@@ -55,6 +56,18 @@ export type CloudWrites = {
 export type ShareResult =
   | { ok: true; url: string }
   | { ok: false; reason: "not-configured" | "no-room" | "failed" };
+
+/**
+ * Open Graph preview control (PR #21). Every call is best-effort: the caller
+ * already holds a working permanent share URL, and a preview must never be
+ * allowed to take that away.
+ */
+export type SharePreviewApi = {
+  /** Create or refresh this room's preview. null = nothing to preview yet. */
+  ensure: (opts?: { versionId?: string; showThumbnail?: boolean }) => Promise<SharePreview | null>;
+  /** Revoke the current preview id and mint a new one. */
+  rotate: (opts?: { versionId?: string; showThumbnail?: boolean }) => Promise<SharePreview | null>;
+};
 
 type Params = {
   guest: Guest | null;
@@ -371,6 +384,42 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     }
   }, [supabase, guest, room, isGuestSession, inviteUrl, reload, run, showToast]);
 
+  /**
+   * Resolve the room title + the version to put on the card straight from the
+   * cloud, not from React state: right after a migration the local room object
+   * still carries pre-migration version ids, and a share tap can land before
+   * the snapshot has re-rendered.
+   */
+  const resolvePreviewTarget = useCallback(
+    async (versionHint?: string): Promise<{ roomId: string; versionId: string; title: string } | null> => {
+      const rid = boundRef.current;
+      if (!supabase || !rid) return null;
+      const [roomRes, versionsRes] = await Promise.all([
+        supabase.from("rooms").select("title").eq("id", rid).single(),
+        supabase.from("versions").select("id").eq("room_id", rid).order("sort_order", { ascending: true }),
+      ]);
+      const rows = (versionsRes.data as { id: string }[] | null) ?? [];
+      if (rows.length === 0) return null; // nothing worth putting on a card yet
+      const chosen = rows.find((v) => v.id === versionHint) ?? rows[0];
+      const title = ((roomRes.data as { title?: string } | null)?.title ?? "").trim();
+      return { roomId: rid, versionId: chosen.id, title: title || "文宣討論區" };
+    },
+    [supabase],
+  );
+
+  const preview: SharePreviewApi = {
+    ensure: async (opts) => {
+      const target = await resolvePreviewTarget(opts?.versionId);
+      if (!target || !supabase) return null;
+      return ensureRoomPreview(supabase, { ...target, showThumbnail: opts?.showThumbnail });
+    },
+    rotate: async (opts) => {
+      const target = await resolvePreviewTarget(opts?.versionId);
+      if (!target || !supabase) return null;
+      return rotateRoomPreview(supabase, { ...target, showThumbnail: opts?.showThumbnail });
+    },
+  };
+
   const writes: CloudWrites = {
     setTitle: (title) => run(() => setRoomTitle(supabase!, boundRef.current!, title)),
     insertComment: (pin) => run(() => insertComment(supabase!, boundRef.current!, pin)),
@@ -399,5 +448,6 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     ensureShared,
     retry,
     writes,
+    preview,
   };
 }

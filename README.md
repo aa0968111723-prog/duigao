@@ -19,6 +19,7 @@
 - 待修改 / 已完成、一鍵複製完整修改清單
 - 視覺提案 2.0：覆蓋在原稿上的提案層（文字／素材／色塊），提案卡有類型、狀態、支持與留言；原稿 / 提案 / 對照三種檢視；可從修改點直接開提案
 - 分享 Bottom Sheet：複製連結、傳到 LINE、系統分享
+- 連結預覽（Open Graph）：貼到 LINE 會出現乾淨文宣縮圖＋標題，可一鍵關掉縮圖或重新產生預覽連結；invite 永遠不會離開瀏覽器
 - 操作回饋 toast 與「復原」、儲存狀態、首次使用引導
 - 雲端房間（Supabase）：分享後主辦方關掉頁面，夥伴仍能隨時打開同一房
 - 彩色 / 黑白 / 對切 / 並排 / 滑動比較（手機收在「更多」）
@@ -40,6 +41,7 @@ src/
     Home.tsx / ShareSheet.tsx / UploadZone.tsx
   toast.tsx                操作回饋 toast
   cloud/                   唯一的雲端層：auth、invite、repository、realtime、offline queue
+                           ＋ sharePreview / shareThumbnail（LINE 連結預覽）
   features/visual-proposal/ 視覺提案：提案層、提案卡（支持／留言／狀態）、比較、與修改點連動
   styles.css               共用樣式與桌機版面
   mobile.css               手機元件樣式（≤720px）
@@ -53,9 +55,12 @@ src/
 ```bash
 npm install
 npm run dev
-npm run build            # cloud env 檢查 + tsc --noEmit + vite build，輸出到 dist/
-npm run check:cloud-env  # 只檢查部署 env，未就緒時 exit 1（給 CI / 部署流程用）
-npm run test:share-e2e   # 分享連結驗收（見 scripts/e2e/README.md）
+npm run build              # cloud env 檢查 + tsc --noEmit + vite build，輸出到 dist/
+npm run check:cloud-env    # 只檢查部署 env，未就緒時 exit 1（給 CI / 部署流程用）
+npm run test:migrations    # 用真的 PostgreSQL 套 supabase/migrations 並驗 RLS
+npm run test:share-preview # 連結預覽：爬蟲 OG、invite 隔離、縮圖幾何
+npm run test:share-e2e     # 完整分享旅程驗收（見 scripts/e2e/README.md）
+npm run make:og-cover      # 重製 public/og-cover.png 通用分享封面
 ```
 
 ## 技術
@@ -72,7 +77,7 @@ npm run test:share-e2e   # 分享連結驗收（見 scripts/e2e/README.md）
 
 | 層 | 角色 |
 |---|---|
-| **Supabase** | persistent collaboration —— 房間、成員、版本、修改建議（含圈選範圍）、留言、我也覺得、回覆、視覺提案的**唯一永久資料來源**；海報與提案素材放 private Storage |
+| **Supabase** | persistent collaboration —— 房間、成員、版本、修改建議（含圈選範圍）、留言、我也覺得、回覆、視覺提案的**唯一永久資料來源**；海報與提案素材放 private Storage。另有一個 Edge Function 專門回傳分享連結的 Open Graph 卡片 |
 | **IndexedDB** | local / offline cache —— 開過的房間離線也能看，回線後自動補同步 |
 | **Supabase Realtime** | collaboration updates —— 其他人的新增、完成、回覆即時出現 |
 | **PeerJS** | optional live acceleration / fallback —— 未設定雲端時的本機分享通道；連不上時只影響即時性，**永遠不影響房間能不能使用** |
@@ -127,8 +132,33 @@ VITE_SUPABASE_PUBLISHABLE_KEY=...    # publishable（anon）key，絕不放 serv
 3. `0003_comment_regions.sql` — 修改建議的圈選範圍
 4. `0004_reconcile_cloud_architecture.sql` — 移除早期簡化版 `get_room`/`save_room` 鏡像（全新專案為 no-op）
 
+5. `0005_share_previews.sql` — 分享連結預覽（`share_previews`、`get_share_preview`、public `share-previews` bucket）
+
 視覺提案 2.0 的新欄位（類型、狀態、說明、支持、留言、綁定的修改點）都放在既有的
 `visual_proposals.payload` jsonb 裡，**不需要新的 migration**。
+
+### 分享連結預覽（Edge Function）
+
+貼到 LINE 的連結長這樣：
+
+```
+https://<project>.supabase.co/functions/v1/share-preview/<previewId>#room=<uuid>&invite=<secret>
+                             └──── 伺服器只看得到這一段 ────┘└─── 只留在瀏覽器 ───┘
+```
+
+瀏覽器不會把 fragment 送給任何伺服器，所以預覽服務**結構上就拿不到** invite；
+它只用一個匿名 RPC 讀 title / description / 縮圖路徑（連 room_id 都讀不到），
+組出 Open Graph HTML，再用兩行 JavaScript 把原 fragment 原封不動交回 App。
+縮圖是從原稿衍生的低解析度圖，放在獨立的 public `share-previews` bucket；
+`room-assets` 維持 private。預覽失敗只會少一張卡片，永久分享連結照常可用。
+
+```bash
+supabase secrets set APP_ORIGIN=https://duigao-k7q2.zeabur.app
+supabase functions deploy share-preview --no-verify-jwt   # 爬蟲沒有 Authorization header
+```
+
+`SUPABASE_URL` / `SUPABASE_ANON_KEY` 由 Supabase 自動注入；這個 function
+不需要也不應該拿到 service-role key。前端沒有新的環境變數。
 
 > 若專案曾部署過早期鏡像（有 `get_room`/`save_room`），請先跑 `0004` 再跑 `0001`–`0003`，
 > 並在 Dashboard 開啟 **Authentication → Allow anonymous sign-ins**。

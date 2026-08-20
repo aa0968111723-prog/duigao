@@ -30,7 +30,7 @@ import { readFile as read } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
 import { deflateSync } from "node:zlib";
-import { start as startMock } from "./mock-supabase.mjs";
+import { start as startMock, requestLog } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54399;
 const APP_PORT = 4173;
@@ -144,6 +144,8 @@ async function openShareSheet(page) {
   await page.waitForSelector(".m-share-note", { timeout: 20000 });
 }
 
+const cloudRoomIdOf = (shareUrl) => shareUrl.split("#room=")[1].split("&")[0];
+
 const noHorizontalOverflow = (page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 
@@ -169,7 +171,9 @@ execFileSync("npx", ["vite", "build", "--outDir", nocloudDist, "--emptyOutDir"],
   env: { ...process.env, VITE_SUPABASE_URL: "", VITE_SUPABASE_PUBLISHABLE_KEY: "" },
 });
 
-const mock = await startMock(MOCK_PORT);
+// The mock also mounts the real share-preview Edge Function, so the guest leg
+// below is a genuine LINE journey: card URL → redirect → room.
+const mock = await startMock(MOCK_PORT, { appOrigin: APP.replace(/\/$/, "") });
 const app = await serveStatic(cloudDist, APP_PORT);
 const nocloud = await serveStatic(nocloudDist, NOCLOUD_PORT);
 
@@ -186,6 +190,13 @@ try {
 
   await openShareSheet(A);
   await A.waitForSelector("input.m-share-url", { timeout: 30000 });
+  // The preview lands a moment after the link itself; wait for it to settle.
+  await A.waitForSelector(".m-share-preview", { timeout: 30000 }).catch(() => null);
+  await A.waitForFunction(
+    () => !document.querySelector(".m-share-preview-thumb.is-generic")?.textContent?.includes("準備中"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
   const shareUrl = await A.inputValue("input.m-share-url");
   const shareNote = (await A.textContent(".m-share-note")) ?? "";
   check(
@@ -194,6 +205,89 @@ try {
     shareUrl.replace(/invite=.*/, "invite=<redacted>"),
   );
   check("A. 分享文案宣告永久連結", shareNote.includes("分享連結已建立"));
+
+  // ------------------------------------------------- PR #21: 連結預覽 (OG)
+  check(
+    "A. 分享 URL 走 share-preview landing（previewId ≠ roomId）",
+    /\/functions\/v1\/share-preview\/[0-9a-f-]{36}#room=/.test(shareUrl) &&
+      shareUrl.split("/share-preview/")[1].split("#")[0] !== shareUrl.split("#room=")[1].split("&")[0],
+    shareUrl.replace(/invite=.*/, "invite=<redacted>"),
+  );
+  const previewThumb = await A.getAttribute(".m-share-preview-thumb", "src").catch(() => null);
+  check(
+    "A. 連結預覽顯示乾淨文宣縮圖",
+    Boolean(previewThumb && previewThumb.includes("/storage/v1/object/public/share-previews/")),
+    previewThumb ?? "no thumbnail",
+  );
+  check(
+    "A. 縮圖真的載入得起來",
+    await A.evaluate(() => {
+      const img = document.querySelector(".m-share-preview-thumb");
+      return Boolean(img && img.complete && img.naturalWidth > 0);
+    }),
+  );
+
+  // The card a crawler sees: fetched with no JavaScript at all.
+  const previewUrl = shareUrl.split("#")[0];
+  // no-store: the endpoint sets a short public cache, and this run fetches the
+  // same URL again after toggling the thumbnail off. (Crawler user agents are
+  // covered by scripts/e2e/share-preview.mjs — fetch() cannot set one.)
+  const card = await A.evaluate(async (u) => {
+    const res = await fetch(u, { cache: "no-store" });
+    return { status: res.status, type: res.headers.get("content-type"), html: await res.text() };
+  }, previewUrl);
+  const ogImage = /<meta property="og:image" content="([^"]*)"/.exec(card.html)?.[1] ?? "";
+  const ogTitle = /<meta property="og:title" content="([^"]*)"/.exec(card.html)?.[1] ?? "";
+  const inviteToken = shareUrl.split("&invite=")[1];
+  check("A. 爬蟲 GET 預覽頁得到 200 text/html", card.status === 200 && /text\/html/.test(card.type ?? ""));
+  check("A. 預覽頁有 og:title / og:description / og:image", Boolean(ogTitle && ogImage && /og:description/.test(card.html)));
+  check("A. og:image 指向 share-previews 公開 bucket", ogImage.includes("/storage/v1/object/public/share-previews/"), ogImage);
+  check("A. 預覽 HTML 不含 invite token", !card.html.includes(inviteToken));
+  check("A. 預覽 HTML 不含 room id", !card.html.includes(cloudRoomIdOf(shareUrl)));
+
+  // The card must be rendered from the ORIGINAL poster in Storage. A DOM
+  // screenshot would drag in pins, regions, proposal overlays and the toolbar —
+  // so assert the route taken, not just the result.
+  const previewIdOf = shareUrl.split("/share-preview/")[1].split("#")[0];
+  check(
+    "A. 縮圖來源是 room-assets 裡的原稿（不是螢幕截圖）",
+    requestLog.some((r) => r.startsWith("POST /storage/v1/object/sign/room-assets/rooms/")) &&
+      requestLog.some((r) => r.startsWith("GET /storage/v1/object/sign/room-assets/rooms/")),
+  );
+  check(
+    "A. 縮圖上傳到獨立的 share-previews bucket",
+    requestLog.some((r) => r === `POST /storage/v1/object/share-previews/${previewIdOf}/cover.webp`),
+  );
+  check(
+    "A. 沒有把任何東西寫進 room-assets 的 preview 路徑",
+    !requestLog.some((r) => r.startsWith("POST /storage/v1/object/room-assets/") && r.includes("cover")),
+  );
+
+  // 關掉「顯示文宣縮圖」→ 只剩通用封面
+  await A.click(".m-share-toggle input");
+  await A.waitForFunction(
+    () => document.querySelector(".m-share-preview-thumb.is-generic") &&
+      !document.querySelector(".m-share-preview-thumb.is-generic").textContent.includes("準備中"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  const offCard = await A.evaluate(async (u) => (await fetch(u, { cache: "no-store" })).text(), previewUrl);
+  const offImage = /<meta property="og:image" content="([^"]*)"/.exec(offCard)?.[1] ?? "";
+  check("A. 關閉縮圖後 og:image 換成通用封面", offImage.endsWith("/og-cover.png"), offImage);
+  check("A. 關閉縮圖後不再暴露文宣縮圖", !offCard.includes("/share-previews/"));
+  // Public bucket: flipping a flag is not revocation, the bytes have to go.
+  check(
+    "A. 關閉縮圖會真的刪掉公開的縮圖檔",
+    requestLog.some((r) => r === "DELETE /storage/v1/object/share-previews"),
+  );
+
+  // 開回來，讓後續的夥伴情境仍有卡片
+  await A.click(".m-share-toggle input");
+  await A.waitForFunction(
+    () => Boolean(document.querySelector("img.m-share-preview-thumb")),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
 
   const localRoomId = await A.evaluate(() =>
     Object.keys(localStorage)
@@ -209,7 +303,7 @@ try {
   await A.reload({ waitUntil: "domcontentloaded" });
   await A.waitForFunction(() => location.hash.includes("&invite="), null, { timeout: 15000 }).catch(() => {});
   const upgraded = await A.evaluate(() => location.hash);
-  const cloudRoomId = shareUrl.split("#room=")[1].split("&")[0];
+  const cloudRoomId = cloudRoomIdOf(shareUrl);
   check(
     "D. 舊版 #room=<6碼> 在 owner 裝置自動升級成 room+invite",
     upgraded.startsWith(`#room=${cloudRoomId}`) && upgraded.includes("&invite="),
