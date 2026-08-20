@@ -29,6 +29,16 @@ const objects = new Map(); // `${bucket}/${path}` -> {buf, mime}
  */
 export const requestLog = [];
 
+/**
+ * Fault injection. A run can make the next thumbnail upload fail to check that
+ * the app self-heals — a preview that gets stuck advertising an old poster is
+ * invisible in the happy path.
+ */
+export const faults = { previewUpload: false, previewDelete: false };
+
+/** Row access for assertions (e.g. which version a preview currently points at). */
+export const rows = tables;
+
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const now = () => new Date().toISOString();
 
@@ -128,7 +138,7 @@ let mockOrigin = `http://127.0.0.1:${PORT}`;
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
-  requestLog.push(`${req.method} ${p}`);
+  requestLog.push(`${req.method} ${p}${url.search ? url.search.slice(0, 90) : ""}`);
   if (process.env.MOCK_LOG) console.log(req.method, req.url.slice(0, 140));
   if (req.method === "OPTIONS") { cors(res); res.writeHead(204); return res.end(); }
 
@@ -286,6 +296,9 @@ export const server = http.createServer(async (req, res) => {
     const path = decodeURIComponent(tail.join("/"));
     if (req.method === "POST" || req.method === "PUT") {
       const raw = await readBody(req);
+      if (bucket === "share-previews" && faults.previewUpload) {
+        return json(res, 500, { message: "injected upload failure" });
+      }
       const ct = String(req.headers["content-type"] || "image/png");
       // storage-js uploads through FormData in browsers; keep only the file part.
       const { buf, mime } = ct.startsWith("multipart/form-data") ? unwrapMultipart(raw, ct) : { buf: raw, mime: ct };
@@ -295,6 +308,9 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === "DELETE") {
       // storage-js `remove(paths)` DELETEs the bucket with {prefixes:[...]}.
       const body = JSON.parse((await readBody(req)).toString() || "{}");
+      if (bucket === "share-previews" && faults.previewDelete) {
+        return json(res, 500, { message: "injected delete failure" });
+      }
       const gone = [];
       for (const prefix of body.prefixes ?? []) {
         if (objects.delete(`${bucket}/${prefix}`)) gone.push({ name: prefix });

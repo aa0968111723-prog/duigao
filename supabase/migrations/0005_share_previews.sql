@@ -32,7 +32,10 @@
 --     DELETING the object as well as flipping `enabled` — the client does
 --     both. A public bucket is not covered by storage RLS on read, so the
 --     random 122-bit preview id is what protects an *active* thumbnail, and
---     deletion is what protects a *revoked* one.
+--     deletion is what protects a *revoked* one. That deletion is only
+--     possible because members also get a SELECT policy: PostgreSQL applies
+--     SELECT policies when a DELETE inspects columns, so a bucket with only
+--     INSERT/UPDATE/DELETE policies would delete nothing at all, silently.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -166,11 +169,25 @@ on conflict (id) do update
       file_size_limit = excluded.file_size_limit,
       allowed_mime_types = excluded.allowed_mime_types;
 
--- Reads are served by the public bucket route, which bypasses RLS by design.
--- No SELECT policy is created here on purpose: without one, the authenticated
--- list/read endpoints stay closed, so the bucket cannot be enumerated and a
--- thumbnail is reachable only by someone who already has the random preview id.
--- Writes and deletes stay membership-gated.
+-- Crawlers read through the public bucket route, which bypasses RLS by design.
+-- The SELECT policy below is not for them: it is what lets a MEMBER replace or
+-- delete their own thumbnail, because PostgreSQL evaluates SELECT policies for
+-- any UPDATE/DELETE that inspects columns. Without it, revocation would be a
+-- no-op — the flag would flip while the image stayed publicly fetchable.
+--
+-- It stays membership-scoped, so `anon` still cannot list or read through the
+-- authenticated endpoints, and the bucket cannot be enumerated.
+drop policy if exists share_previews_select on storage.objects;
+create policy share_previews_select on storage.objects
+  for select to authenticated
+  using (
+    bucket_id = 'share-previews'
+    and exists (
+      select 1 from public.share_previews sp
+      where sp.id = ((storage.foldername(name))[1])::uuid
+        and public.is_room_member(sp.room_id)
+    )
+  );
 drop policy if exists share_previews_insert on storage.objects;
 create policy share_previews_insert on storage.objects
   for insert to authenticated

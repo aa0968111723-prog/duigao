@@ -304,6 +304,21 @@ async function main() {
     const crawler = await get(livePreview, CRAWLERS.facebook);
     const crawlerHtml = await crawler.text();
     ok("爬蟲不會被 redirect 帶走", !crawlerHtml.includes("location.replace"));
+    // A real person wrongly matched as a bot must still get a working button:
+    // the server-rendered href cannot carry the fragment on its own.
+    ok("即使被判成爬蟲，按鈕仍會補上 fragment", crawlerHtml.includes('open.setAttribute("href", target)'));
+    ok("被判成爬蟲時整份 HTML 一樣沒有 invite", !/invite/i.test(crawlerHtml));
+
+    // In-app browsers must not be mistaken for unfurlers.
+    for (const [label, ua] of [
+      ["WhatsApp（unfurler 與 in-app 瀏覽器同 UA，一律當真人）", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36 WhatsApp/2.24.6.78 A"],
+      ["Yandex 手機瀏覽器", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 YaBrowser/24.1 YandexSearch/24.1 Mobile Safari/537.36"],
+      ["Pinterest App", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Pinterest for iOS/12.5"],
+    ]) {
+      const res = await get(livePreview, ua);
+      const html2 = await res.text();
+      ok(`${label} 會被當成真人（會自動導回 App）`, html2.includes("location.replace"));
+    }
   }
 
   await browserLeg(livePreview, handler);
