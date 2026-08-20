@@ -731,7 +731,12 @@ export function App() {
       .rotate({ versionId: viewRef.current.versionId })
       .then((preview) => {
         applyPreview(seq, appUrl, preview);
-        if (seq === shareSeq.current) showToast("已重新產生預覽連結，請改用新的分享連結。", { tone: "success" });
+        // A null result means nothing was rotated (no readable version yet), so
+        // saying "use the new link" would be a lie — applyPreview already put
+        // the sheet back on the plain permanent URL.
+        if (preview && seq === shareSeq.current) {
+          showToast("已重新產生預覽連結，請改用新的分享連結。", { tone: "success" });
+        }
       })
       .catch(() => failPreview(seq, appUrl));
   }, [applyPreview, failPreview, showToast]);

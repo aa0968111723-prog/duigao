@@ -52,12 +52,21 @@ if (!APP_ORIGIN) {
 }
 
 /**
- * Crawlers do not run JavaScript, so the redirect below is a no-op for them.
- * This list only exists so the rare unfurler that *does* render a page reads
- * this card instead of chasing the redirect into the SPA.
+ * Crawlers do not run JavaScript, so the auto-redirect is already a no-op for
+ * them. This list only exists so the rare unfurler that *does* render a page
+ * reads this card instead of chasing the redirect into the SPA.
+ *
+ * Only unambiguous bot tokens belong here. WhatsApp's unfurler and its in-app
+ * browser both send `WhatsApp/2.x`, so it is left out entirely: a bot ignores
+ * the redirect anyway (the meta tags are already in <head>, ahead of any
+ * script), while a person gets the seamless jump. Same reasoning for the
+ * Pinterest and Yandex apps — only their `…bot` forms are listed.
+ *
+ * Even so, a person wrongly matched here must still be able to get through,
+ * which is why the link-fixing half of the script below runs for everyone.
  */
 const CRAWLER_UA =
-  /facebookexternalhit|facebookcatalog|meta-externalagent|twitterbot|linebot|line-podcast|slackbot|discordbot|telegrambot|whatsapp|skypeuripreview|pinterest|redditbot|embedly|quora link preview|bitlybot|nuzzel|vkshare|w3c_validator|google-inspectiontool|bingbot|googlebot|applebot|yandex|developers\.google\.com\/\+\/web\/snippet/i;
+  /facebookexternalhit|facebookcatalog|meta-externalagent|twitterbot|linebot|line-podcast|slackbot|discordbot|telegrambot|skypeuripreview|pinterestbot|redditbot|embedly|quora link preview|bitlybot|nuzzel|vkshare|w3c_validator|google-inspectiontool|bingbot|googlebot|applebot|yandexbot|yandeximages|developers\.google\.com\/\+\/web\/snippet/i;
 
 type Preview = {
   title: string;
@@ -141,21 +150,26 @@ function renderHtml(opts: {
   // JSON-encoded so the origin can never break out of the string literal.
   const originLiteral = JSON.stringify(APP_ORIGIN);
 
-  // The emitted script is deliberately comment-free: the served HTML must not
-  // contain the substring "invite" anywhere, in any form, so that "no secret
-  // ever reaches this page" is checkable by grep as well as by argument. The
-  // reasoning lives here instead — `location.hash` is handed over byte for
-  // byte, with no parsing, re-encoding or rebuilding.
-  const redirectScript = opts.redirect
-    ? `<script>(function(){
+  // Two halves, deliberately separated:
+  //
+  //   * fixing the button's href runs for EVERY user agent. The server-rendered
+  //     anchor cannot carry the fragment (the server never sees one), so if a
+  //     real person is misclassified as a crawler, this is the only thing that
+  //     keeps their room+secret reachable at all.
+  //   * the automatic jump is what the crawler list suppresses.
+  //
+  // The script is comment-free on purpose: the served HTML must not contain the
+  // substring "invite" anywhere, in any form, so that "no secret ever reaches
+  // this page" is checkable by grep as well as by argument. The reasoning lives
+  // here instead — `location.hash` is handed over byte for byte, with no
+  // parsing, re-encoding or rebuilding.
+  const script = `<script>(function(){
   var origin = ${originLiteral};
   if (!origin) return;
   var target = origin + "/" + (location.hash || "");
   var open = document.getElementById("open");
   if (open) open.setAttribute("href", target);
-  location.replace(target);
-})();</script>`
-    : "";
+${opts.redirect ? "  location.replace(target);\n" : ""}})();</script>`;
 
   return `<!doctype html>
 <html lang="zh-Hant">
@@ -202,7 +216,7 @@ function renderHtml(opts: {
 <p>${description}</p>
 <a id="open" href="${appOrigin}">開啟文宣討論區</a>
 </div>
-${redirectScript}
+${script}
 </body>
 </html>
 `;

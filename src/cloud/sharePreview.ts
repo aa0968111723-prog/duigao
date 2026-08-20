@@ -117,11 +117,27 @@ export async function loadRoomPreview(supabase: SupabaseClient, roomId: string):
   return data ? fromRow(data as PreviewRow) : null;
 }
 
-async function removeThumbnail(supabase: SupabaseClient, path: string | null | undefined): Promise<void> {
-  if (!path) return;
-  // Revoking a preview means the bytes go too: the bucket is public, so
-  // `enabled = false` alone would leave a still-fetchable image behind.
-  await supabase.storage.from(PREVIEW_BUCKET).remove([path]);
+/**
+ * Revoking a preview means the bytes go too: the bucket is public, so
+ * `enabled = false` alone would leave a still-fetchable image behind.
+ *
+ * storage-js resolves with `{ data, error }` and never throws, so the result
+ * has to be inspected — otherwise a failed delete looks exactly like a
+ * successful one, and the caller goes on to forget the path.
+ *
+ * @returns true when the object is gone (or there was nothing to delete).
+ */
+async function removeThumbnail(supabase: SupabaseClient, path: string | null | undefined): Promise<boolean> {
+  if (!path) return true;
+  const { error } = await supabase.storage.from(PREVIEW_BUCKET).remove([path]);
+  return !error;
+}
+
+/** Deleting is the privacy control, so a failure has to surface, not pass. */
+async function revokeThumbnail(supabase: SupabaseClient, path: string | null | undefined): Promise<void> {
+  if (!(await removeThumbnail(supabase, path))) {
+    throw new CloudError("縮圖刪除失敗，預覽尚未撤銷", "preview");
+  }
 }
 
 async function writeThumbnail(
@@ -137,6 +153,8 @@ async function writeThumbnail(
     .from(PREVIEW_BUCKET)
     .upload(path, blob, { contentType: mime, upsert: true, cacheControl: "3600" });
   if (error) throw new CloudError(error.message, "preview");
+  // Best-effort: the new object already landed, so failing here would throw
+  // away a good upload to complain about a leftover the row no longer names.
   if (previousPath && previousPath !== path) await removeThumbnail(supabase, previousPath);
   return path;
 }
@@ -168,19 +186,23 @@ export async function ensureRoomPreview(
   const previewId = existing?.id ?? crypto.randomUUID();
 
   const base = {
-    version_id: input.versionId,
     title,
     description: DEFAULT_PREVIEW_DESCRIPTION,
     show_thumbnail: showThumbnail,
   };
 
   if (existing) {
+    // `version_id` is deliberately NOT written here. It moves only once the new
+    // image is actually in the bucket (see the final update below): committing
+    // it first would make a failed render look like a fresh card forever —
+    // `stale` would read false on every retry while the old poster kept being
+    // served. A fresh row has no thumbnail yet, so the insert can carry it.
     const { error } = await supabase.from("share_previews").update(base).eq("id", previewId);
     if (error) throw new CloudError(error.message, "preview");
   } else {
     const { error } = await supabase
       .from("share_previews")
-      .insert({ id: previewId, room_id: input.roomId, enabled: true, ...base });
+      .insert({ id: previewId, room_id: input.roomId, version_id: input.versionId, enabled: true, ...base });
     if (error) throw new CloudError(error.message, "preview");
   }
 
@@ -192,13 +214,13 @@ export async function ensureRoomPreview(
     const imageUrl = await versionImageUrl(supabase, input.roomId, input.versionId);
     thumbnailPath = await writeThumbnail(supabase, previewId, imageUrl, thumbnailPath);
   } else if (!showThumbnail && thumbnailPath) {
-    await removeThumbnail(supabase, thumbnailPath);
+    await revokeThumbnail(supabase, thumbnailPath);
     thumbnailPath = null;
   }
 
   const { data, error } = await supabase
     .from("share_previews")
-    .update({ thumbnail_path: thumbnailPath })
+    .update({ thumbnail_path: thumbnailPath, version_id: input.versionId })
     .eq("id", previewId)
     .select("id, room_id, version_id, title, description, thumbnail_path, show_thumbnail, updated_at")
     .single();
@@ -217,7 +239,9 @@ export async function rotateRoomPreview(
 ): Promise<SharePreview> {
   const existing = await loadRoomPreview(supabase, input.roomId);
   if (existing) {
-    await removeThumbnail(supabase, existing.thumbnailPath);
+    // Delete first and refuse to continue if it fails: flipping `enabled`
+    // while the object survives would revoke nothing at all.
+    await revokeThumbnail(supabase, existing.thumbnailPath);
     const { error } = await supabase
       .from("share_previews")
       .update({ enabled: false, thumbnail_path: null })

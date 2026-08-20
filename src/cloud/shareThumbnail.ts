@@ -95,16 +95,21 @@ export async function renderShareThumbnail(imageUrl: string): Promise<RenderedTh
   ctx.fillStyle = "#141210";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-  // Backdrop: cover-scaled and pushed back. `ctx.filter` is not universal, so
-  // read it back — without blur we still darken, which reads as a plain mat.
+  // Backdrop: cover-scaled and pushed back. `ctx.filter` is not universal
+  // (Safari < 16.4), and on those browsers the assignment just creates an own
+  // property that reads back unchanged — so the support test has to look at the
+  // prototype, not at the value. Without blur we darken instead, which reads as
+  // a plain mat; without either, the card would be a bright cropped duplicate.
   const coverScale = Math.max(CANVAS_W / iw, CANVAS_H / ih);
   const cw = iw * coverScale;
   const ch = ih * coverScale;
   ctx.save();
   let blurred = false;
   try {
-    ctx.filter = "blur(30px) brightness(0.42) saturate(0.85)";
-    blurred = ctx.filter !== "none";
+    if ("filter" in Object.getPrototypeOf(ctx)) {
+      ctx.filter = "blur(30px) brightness(0.42) saturate(0.85)";
+      blurred = ctx.filter !== "none";
+    }
   } catch {
     blurred = false;
   }

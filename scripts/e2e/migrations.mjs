@@ -230,14 +230,26 @@ try {
     ok("room-assets 仍然是私有", psql("select public from storage.buckets where id = 'room-assets';").out === "f");
     ok("share-previews 是公開的衍生縮圖 bucket", psql("select public from storage.buckets where id = 'share-previews';").out === "t");
     ok(
-      "share-previews 沒有 SELECT policy（不可列舉）",
-      psql("select count(*) from pg_policies where tablename = 'objects' and policyname like 'share_previews_%' and cmd = 'SELECT';").out === "0",
+      "share-previews 的 SELECT policy 是 member-scoped（讓成員刪得掉自己的圖）",
+      psql("select qual from pg_policies where tablename = 'objects' and policyname = 'share_previews_select';").out.includes("is_room_member"),
     );
     const thumb = `insert into storage.objects (bucket_id, name) values ('share-previews', '${previewId}/cover.webp');`;
     ok("成員可以上傳自己 preview 的縮圖", !as(owner, thumb).failed);
     ok(
       "非成員不能覆蓋別人 preview 的縮圖",
       as(stranger, `insert into storage.objects (bucket_id, name) values ('share-previews', '${previewId}/evil.webp');`).failed,
+    );
+    // Revocation is only real if the bytes can actually be removed. PostgreSQL
+    // applies SELECT policies when a DELETE inspects columns, so a bucket with
+    // only INSERT/UPDATE/DELETE policies silently deletes nothing.
+    as(owner, `delete from storage.objects where bucket_id = 'share-previews' and name = '${previewId}/cover.webp';`);
+    ok(
+      "成員可以刪掉自己 preview 的縮圖（撤銷要真的刪得掉）",
+      psql(`select count(*) from storage.objects where name = '${previewId}/cover.webp';`).out === "0",
+    );
+    ok(
+      "匿名仍然無法列舉 share-previews bucket",
+      asAnon(`select count(*) from storage.objects where bucket_id = 'share-previews';`).out !== "1",
     );
   }
 

@@ -30,7 +30,7 @@ import { readFile as read } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
 import { deflateSync } from "node:zlib";
-import { start as startMock, requestLog } from "./mock-supabase.mjs";
+import { start as startMock, requestLog, faults, rows } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54399;
 const APP_PORT = 4173;
@@ -51,7 +51,7 @@ try {
 }
 
 // ---------------------------------------------------------------- fixtures
-/** A small greyscale PNG, so the run needs no binary fixture in the repo. */
+/** Small greyscale PNGs, so the run needs no binary fixture in the repo. */
 function makePoster(w = 600, h = 800) {
   const crc = (buf) => {
     let c = ~0;
@@ -88,6 +88,8 @@ function makePoster(w = 600, h = 800) {
   ]);
 }
 const POSTER = makePoster();
+/** A different shape, so a re-render is visibly a different card. */
+const POSTER2 = makePoster(900, 500);
 
 // ------------------------------------------------------------------ servers
 const TYPES = {
@@ -288,6 +290,110 @@ try {
     null,
     { timeout: 30000 },
   ).catch(() => {});
+
+  // ------- 撤銷失敗不能假裝成功（公開 bucket 上，沒刪掉就等於沒撤銷）-------
+  faults.previewDelete = true;
+  await A.click(".m-share-toggle input");
+  await A.waitForFunction(
+    () => (document.querySelector(".m-share-preview")?.textContent ?? "").includes("沒有產生連結預覽"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check(
+    "A. 縮圖刪不掉時不會假裝已經關閉",
+    ((await A.textContent(".m-share-preview")) ?? "").includes("沒有產生連結預覽"),
+    (await A.textContent(".m-share-preview"))?.trim(),
+  );
+  check(
+    "A. 刪不掉時仍保留 thumbnail_path，之後才有機會補刪",
+    Boolean(rows.share_previews[0]?.thumbnail_path),
+    JSON.stringify(rows.share_previews[0]?.thumbnail_path),
+  );
+  // Clearing the fault: the next 分享 retries the delete on its own, because the
+  // row still remembers the path. The preview stays OFF (the flag did land), so
+  // turn it back on for the scenarios below.
+  faults.previewDelete = false;
+  await A.click(".m-close");
+  await openShareSheet(A);
+  await A.waitForFunction(
+    () => Boolean(document.querySelector(".m-share-toggle input")) &&
+      !(document.querySelector(".m-share-preview-thumb.is-generic")?.textContent ?? "").includes("準備中"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check(
+    "A. 補刪成功後縮圖檔真的不見了",
+    !rows.share_previews[0]?.thumbnail_path,
+    JSON.stringify(rows.share_previews[0]?.thumbnail_path),
+  );
+  await A.click(".m-share-toggle input");
+  await A.waitForSelector("img.m-share-preview-thumb", { timeout: 30000 }).catch(() => null);
+
+  // ---------------- 預覽失敗後要能自己好起來（不是永遠卡在舊版）----------------
+  // A second version plus a failing upload is the shape that used to wedge the
+  // card on the previous poster forever: the row advanced to the new version
+  // while the old image stayed, so every later retry decided nothing was stale.
+  await A.click(".m-close");
+  await A.setInputFiles('input[type="file"]', { name: "poster2.png", mimeType: "image/png", buffer: POSTER2 });
+  // A new version is written locally first and re-keyed when the cloud snapshot
+  // comes back, which resets the selection. Wait for that to settle BEFORE
+  // choosing the version, or the choice is silently undone a moment later.
+  await A.waitForFunction(() => document.querySelectorAll(".m-vchip:not(.m-vchip-add)").length >= 2, null, {
+    timeout: 20000,
+  }).catch(() => {});
+  const versionCount = await A.evaluate(() => document.querySelectorAll(".m-vchip:not(.m-vchip-add)").length);
+  check("A. 可以再加一個版本（給預覽換版用）", versionCount >= 2, `versions=${versionCount}`);
+  await A.waitForTimeout(2500);
+
+  // The card follows the version being looked at, so switch to the new one.
+  // `nth=` indexes the matched list; :nth-of-type would index siblings instead.
+  await A.locator("button.m-vchip:not(.m-vchip-add)").nth(1).click();
+  await A.waitForFunction(
+    () => document.querySelector(".m-vchip.is-on")?.textContent?.trim() === "改一",
+    null,
+    { timeout: 10000 },
+  ).catch(() => {});
+  await A.waitForTimeout(800);
+  check(
+    "A. 切換到新版本後選擇不會被雲端同步彈回去",
+    (await A.evaluate(() => document.querySelector(".m-vchip.is-on")?.textContent?.trim())) === "改一",
+  );
+
+  faults.previewUpload = true;
+  requestLog.length = 0;
+  await openShareSheet(A);
+  await A.waitForSelector(".m-share-preview", { timeout: 30000 }).catch(() => null);
+  await A.waitForFunction(
+    () => (document.querySelector(".m-share-preview")?.textContent ?? "").includes("沒有產生連結預覽"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  const failedText = (await A.textContent(".m-share-preview")) ?? "";
+  const failedUrl = await A.inputValue("input.m-share-url");
+  check("A. 縮圖上傳失敗時說明預覽沒產生", failedText.includes("沒有產生連結預覽"), failedText.trim());
+  check(
+    "A. 縮圖上傳失敗仍給得出永久 room+invite 連結",
+    /#room=[0-9a-f-]{36}&invite=[A-Za-z0-9_-]{20,}$/.test(failedUrl),
+    failedUrl.replace(/invite=.*/, "invite=<redacted>"),
+  );
+
+  faults.previewUpload = false;
+  await A.click(".m-close");
+  requestLog.length = 0;
+  await openShareSheet(A);
+  await A.waitForSelector("img.m-share-preview-thumb", { timeout: 30000 }).catch(() => null);
+  check(
+    "A. 上傳恢復後預覽會自己重新產生（不會卡在舊版）",
+    requestLog.some((r) => r.startsWith("POST /storage/v1/object/share-previews/")),
+    requestLog.filter((r) => r.includes("share-previews")).join(" | ") || "no re-upload",
+  );
+  check(
+    "A. 恢復後 ShareSheet 又是完整的預覽卡片",
+    ((await A.textContent(".m-share-preview")) ?? "").includes("顯示文宣縮圖"),
+  );
+  await A.click(".m-close");
+  await openShareSheet(A);
+  await A.waitForSelector("input.m-share-url", { timeout: 30000 });
 
   const localRoomId = await A.evaluate(() =>
     Object.keys(localStorage)
