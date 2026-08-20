@@ -1,0 +1,15 @@
+# Supabase CLI project config.
+#
+# Only the bits this repo actually relies on are pinned here; everything else
+# stays on CLI defaults so the file does not drift into a second source of
+# truth for the hosted project.
+
+project_id = "duigao"
+
+[functions.share-preview]
+# Social crawlers (LINE, Facebook, Messenger, X) fetch the card with no
+# Authorization header, so JWT verification must be off for this one function.
+# It is safe because the function is read-only, reads through a single
+# anon-granted RPC that exposes no room data, and never receives the invite
+# token (it lives in the URL fragment, which no browser sends to a server).
+verify_jwt = false

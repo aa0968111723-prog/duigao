@@ -37,7 +37,18 @@ export {
   type CloudProposal,
   type CloudSnapshot,
 } from "./roomRepository";
+export {
+  buildPreviewShareUrl,
+  ensureRoomPreview,
+  loadRoomPreview,
+  previewThumbnailUrl,
+  renderShareThumbnail,
+  rotateRoomPreview,
+  DEFAULT_PREVIEW_DESCRIPTION,
+  PREVIEW_BUCKET,
+  type SharePreview,
+} from "./sharePreview";
 export { subscribeRoom, type SyncHandlers, type Unsubscribe } from "./roomSync";
 export { syncStatusLabel, type SyncStatus } from "./types";
-export { useCloudRoom, type ShareResult } from "./useCloudRoom";
+export { useCloudRoom, type ShareResult, type SharePreviewApi } from "./useCloudRoom";
 export { signedUrl as cloudSignedUrl } from "./assets";

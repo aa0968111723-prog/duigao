@@ -293,3 +293,76 @@ Android / LINE in-app browser：
 5. 主辦方關頁也不影響
 6. LINE 預覽服務永遠拿不到 invite secret
 7. 關掉縮圖時不會公開文宣內容
+
+---
+
+# 實作結果
+
+## URL 架構
+
+```
+分享出去的連結
+https://<project>.supabase.co/functions/v1/share-preview/<previewId>#room=<uuid>&invite=<secret>
+                             └──── 伺服器只看得到這一段 ────┘└─── 只留在瀏覽器 ───┘
+```
+
+`buildInviteUrl()` 產生的 fragment 一個位元組都沒有被改寫；`buildPreviewShareUrl()`
+只是把它接到 preview landing 後面。爬蟲的 HTTP request 永遠只有
+`/share-preview/<previewId>`。
+
+## 檔案
+
+| 檔案 | 角色 |
+|---|---|
+| `supabase/migrations/0005_share_previews.sql` | `share_previews` 表、RLS、`get_share_preview` RPC、`share-previews` bucket 與寫入 policy |
+| `supabase/functions/share-preview/index.ts` | Edge Function：讀 preview → 組 OG HTML → 把 fragment 交還 App |
+| `supabase/config.toml` | 這個 function `verify_jwt = false`（爬蟲沒有 Authorization header） |
+| `src/cloud/shareThumbnail.ts` | 純 canvas：把原稿 contain 進 1200×630，不裁切、不變形 |
+| `src/cloud/sharePreview.ts` | preview 的建立／更新／關閉／重新產生，以及 URL 組裝 |
+| `src/cloud/useCloudRoom.ts` | `preview.ensure()` / `preview.rotate()`，room 與 version 直接從雲端解析 |
+| `src/components/ShareSheet.tsx` | 「連結預覽」區塊：縮圖、標題、顯示文宣縮圖 toggle、更多 → 重新產生 |
+| `public/og-cover.png` | 關閉縮圖／撤銷／查不到時的通用品牌卡片（`scripts/make-og-cover.mjs` 可重製） |
+
+## invite 隔離
+
+四道各自獨立的防線：
+
+1. secret 在 fragment，瀏覽器不會送給任何伺服器。
+2. Edge Function 沒有任何讀 fragment 的路徑——它拿不到，不是「不看」。
+3. `get_share_preview` 只回 `title / description / image_path / updated_at`，
+   連 `room_id` 都不回，所以 previewId 推不回房間。
+4. 送出的 HTML 整份不含 `invite` 這個字串（連註解都沒有），可以直接用 grep 驗證。
+
+## Fallback
+
+`ensureShared()` 一成功就先把永久連結交給使用者（`preview: building`），
+預覽晚一步才補上。任何一步失敗都只會落到 `preview: unavailable`：
+分享連結仍然是可複製、可傳 LINE 的 `#room=…&invite=…`，
+只是顯示「這次沒有產生連結預覽，但分享連結仍可使用。」
+
+## 驗收指令
+
+```bash
+npm run build            # cloud env 檢查 + tsc + vite build
+npm run test:migrations  # 用真的 PostgreSQL 套 0001–0005 並驗 RLS（29 項）
+npm run test:share-preview   # 爬蟲 / 安全 / 縮圖幾何（110 項）
+npm run test:share-e2e       # 完整分享旅程，含 LINE 卡片 →  進房（29 項）
+```
+
+## 部署
+
+```bash
+# 1. migration（正式專案 uanurolzzgshxrqbooix，不要另開專案）
+supabase db push            # 或在 SQL Editor 貼上 0005_share_previews.sql
+
+# 2. Edge Function secret
+supabase secrets set APP_ORIGIN=https://duigao-k7q2.zeabur.app
+
+# 3. Edge Function（爬蟲沒有 Authorization header）
+supabase functions deploy share-preview --no-verify-jwt
+```
+
+`SUPABASE_URL` 與 `SUPABASE_ANON_KEY` 由 Supabase 自動注入，
+不需要、也不應該給這個 function service-role key。
+
+前端沒有新的環境變數：preview URL 由既有的 `VITE_SUPABASE_URL` 推導。

@@ -3,6 +3,20 @@ import { ModalSheet } from "./BottomSheet";
 import type { ShowToast } from "../toast";
 
 /**
+ * How the LINE / Messenger card for this link is doing (PR #21). It is an
+ * enhancement layered on top of an already-working share URL, so every state
+ * here — including the failures — still leaves the sheet fully usable.
+ */
+export type SharePreviewState =
+  | { status: "building" }
+  /** A clean poster thumbnail is live on the card. */
+  | { status: "on"; thumbnailUrl: string }
+  /** The user turned the poster off: the card falls back to the brand cover. */
+  | { status: "off" }
+  /** No card this time. The permanent share link is unaffected. */
+  | { status: "unavailable" };
+
+/**
  * What the share sheet is allowed to show. Only `ready` carries a URL that
  * survives the host closing the page — every failure path is URL-less by
  * design, so a legacy `#room=<6碼>` link can never be handed out as if it were
@@ -10,7 +24,11 @@ import type { ShowToast } from "../toast";
  */
 export type ShareState =
   | { kind: "creating" }
-  | { kind: "ready"; url: string }
+  /**
+   * `url` is what the user copies: the preview landing page once one exists,
+   * otherwise `appUrl`. Both carry the same `#room=…&invite=…` fragment.
+   */
+  | { kind: "ready"; url: string; appUrl: string; preview: SharePreviewState }
   /** Cloud room creation failed: retry, never a fallback link. */
   | { kind: "failed" }
   /** Production build without Supabase env — the deployment cannot share. */
@@ -26,14 +44,87 @@ type Props = {
   onRetry: () => void;
   onClose: () => void;
   onToast: ShowToast;
+  /** Turn the poster thumbnail on the social card on or off. */
+  onPreviewThumbnail: (next: boolean) => void;
+  /** Revoke the current preview link and mint a new one. */
+  onRotatePreview: () => void;
 };
 
 function Note({ children }: { children: ReactNode }) {
   return <p className="m-share-note">{children}</p>;
 }
 
+/**
+ * 連結預覽 — one thumbnail, one toggle, one line of plain-language privacy.
+ * Deliberately no size / quality / OpenGraph / cache knobs: the person sharing
+ * a poster wants to know what LINE will show, not how it was encoded.
+ */
+function PreviewBlock({
+  title,
+  preview,
+  onPreviewThumbnail,
+  onRotatePreview,
+}: {
+  title: string;
+  preview: SharePreviewState;
+  onPreviewThumbnail: (next: boolean) => void;
+  onRotatePreview: () => void;
+}) {
+  const [more, setMore] = useState(false);
+  const busy = preview.status === "building";
+  const on = preview.status === "on";
+
+  if (preview.status === "unavailable") {
+    return (
+      <section className="m-share-preview" aria-label="連結預覽">
+        <span className="m-share-preview-label">連結預覽</span>
+        <Note>這次沒有產生連結預覽，但分享連結仍可使用。</Note>
+      </section>
+    );
+  }
+
+  return (
+    <section className="m-share-preview" aria-label="連結預覽">
+      <span className="m-share-preview-label">連結預覽</span>
+      <div className="m-share-preview-card">
+        {on ? (
+          <img className="m-share-preview-thumb" src={preview.thumbnailUrl} alt={`${title} 的連結預覽縮圖`} />
+        ) : (
+          <div className="m-share-preview-thumb is-generic" aria-hidden>
+            {busy ? "準備中…" : "文宣討論區"}
+          </div>
+        )}
+        <strong className="m-share-preview-title">{title}</strong>
+      </div>
+      <label className="m-share-toggle">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={busy}
+          onChange={(e) => onPreviewThumbnail(e.target.checked)}
+        />
+        <span>顯示文宣縮圖</span>
+      </label>
+      <Note>
+        {on
+          ? "開啟後，分享平台會看到一張低解析度文宣預覽。"
+          : "關閉時，分享平台只會看到「文宣討論區」的通用封面。"}
+      </Note>
+      {more ? (
+        <button type="button" className="m-row" onClick={onRotatePreview} disabled={busy}>
+          重新產生預覽連結（舊連結不再顯示文宣）
+        </button>
+      ) : (
+        <button type="button" className="m-link m-share-more" onClick={() => setMore(true)}>
+          更多
+        </button>
+      )}
+    </section>
+  );
+}
+
 /** Share is a bottom sheet on every size: copy, LINE, or the OS share sheet. */
-export function ShareSheet({ title, state, onRetry, onClose, onToast }: Props) {
+export function ShareSheet({ title, state, onRetry, onClose, onToast, onPreviewThumbnail, onRotatePreview }: Props) {
   const [copied, setCopied] = useState(false);
   const canNativeShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
 
@@ -127,6 +218,16 @@ export function ShareSheet({ title, state, onRetry, onClose, onToast }: Props) {
           <button type="button" className="m-row" onClick={nativeShare}>
             其他方式分享
           </button>
+        )}
+        {/* Above the raw URL: seeing what LINE will show matters more than the
+            link text, but the two primary actions still come first. */}
+        {state.kind === "ready" && (
+          <PreviewBlock
+            title={title}
+            preview={state.preview}
+            onPreviewThumbnail={onPreviewThumbnail}
+            onRotatePreview={onRotatePreview}
+          />
         )}
         <input className="m-input m-share-url" readOnly value={url} onFocus={(e) => e.currentTarget.select()} />
       </div>

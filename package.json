@@ -9,7 +9,10 @@
     "build:local": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "check:cloud-env": "node scripts/check-cloud-env.mjs --strict",
-    "test:share-e2e": "node scripts/e2e/share-flow.mjs"
+    "make:og-cover": "node scripts/make-og-cover.mjs",
+    "test:share-e2e": "node scripts/e2e/share-flow.mjs",
+    "test:share-preview": "node scripts/e2e/share-preview.mjs",
+    "test:migrations": "node scripts/e2e/migrations.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

@@ -1,11 +1,14 @@
 /**
- * Minimal stand-in for the Supabase endpoints this app uses, so the PR #16
- * share flow can be exercised end-to-end in a sandbox with no outbound network.
+ * Minimal stand-in for the Supabase endpoints this app uses, so the share flow
+ * can be exercised end-to-end in a sandbox with no outbound network.
  * Implements: anonymous auth, the invite RPCs (with membership + invite-token
- * checks), PostgREST-ish table reads/writes, and Storage upload/sign/serve.
+ * checks), PostgREST-ish table reads/writes, Storage upload/sign/serve (private
+ * and public buckets), and — when started with an `appOrigin` — the real
+ * `share-preview` Edge Function mounted where Supabase would serve it.
  */
 import http from "node:http";
 import { randomUUID, createHash } from "node:crypto";
+import { loadSharePreviewHandler, serveHandler } from "./edge-function.mjs";
 
 const PORT = Number(process.env.MOCK_PORT || 54399);
 
@@ -15,8 +18,9 @@ const members = new Map(); // roomId -> Set(userId)
 const tables = {
   versions: [], comments: [], strokes: [], messages: [], visual_proposals: [],
   comment_supports: [], comment_replies: [], proposal_preferences: [],
+  share_previews: [],
 };
-const objects = new Map(); // path -> {buf, mime}
+const objects = new Map(); // `${bucket}/${path}` -> {buf, mime}
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const now = () => new Date().toISOString();
@@ -65,6 +69,23 @@ function readBody(req) {
   });
 }
 
+/**
+ * PostgREST answers `Accept: application/vnd.pgrst.object+json` with the bare
+ * object, or 406/PGRST116 when the row count is not exactly one — which is how
+ * supabase-js tells `.single()` from `.maybeSingle()`. Getting this wrong makes
+ * an empty result look like a truthy `[]` to the client, so the mock models it.
+ */
+function respondRows(req, res, rows) {
+  const wantsObject = String(req.headers.accept || "").includes("vnd.pgrst.object");
+  if (!wantsObject) return json(res, 200, rows);
+  if (rows.length === 1) return json(res, 200, rows[0]);
+  return json(res, 406, {
+    code: "PGRST116",
+    message: rows.length === 0 ? "JSON object requested, multiple (or no) rows returned" : "multiple rows",
+    details: `Results contain ${rows.length} rows`,
+  });
+}
+
 /** `?select=*&room_id=eq.<id>&order=...` — only the `eq.` filters this app uses. */
 function filterRows(rows, params) {
   let out = rows;
@@ -93,11 +114,20 @@ function unwrapMultipart(raw, contentType) {
   return { buf: raw, mime: "application/octet-stream" };
 }
 
+/** Set by start({ appOrigin }) — mounts the real Edge Function at /functions/v1. */
+let previewHandler = null;
+let mockOrigin = `http://127.0.0.1:${PORT}`;
+
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
   if (process.env.MOCK_LOG) console.log(req.method, req.url.slice(0, 140));
   if (req.method === "OPTIONS") { cors(res); res.writeHead(204); return res.end(); }
+
+  // ---- Edge Functions ----
+  if (previewHandler && p.startsWith("/functions/v1/share-preview")) {
+    return serveHandler(previewHandler, req, res, mockOrigin);
+  }
 
   // ---- auth ----
   if (p === "/auth/v1/signup" || p === "/auth/v1/token") {
@@ -115,6 +145,21 @@ export const server = http.createServer(async (req, res) => {
   if (p.startsWith("/rest/v1/rpc/")) {
     const fn = p.slice("/rest/v1/rpc/".length);
     const body = JSON.parse((await readBody(req)).toString() || "{}");
+
+    // The one anon-reachable read: the public share-card projection. It never
+    // returns room_id, so a preview id can not be walked back to a room.
+    if (fn === "get_share_preview") {
+      const row = tables.share_previews.find((r) => r.id === body.p_preview_id && r.enabled);
+      return json(res, 200, row
+        ? [{
+            title: row.title,
+            description: row.description,
+            image_path: row.show_thumbnail ? row.thumbnail_path : null,
+            updated_at: row.updated_at || now(),
+          }]
+        : []);
+    }
+
     const uid = userOf(req);
     if (!uid) return json(res, 401, { message: "auth required" });
 
@@ -174,7 +219,7 @@ export const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET") {
       const rows = filterRows(tables[table], url.searchParams).filter((r) => isMember(r.room_id, uid));
-      return json(res, 200, rows);
+      return respondRows(req, res, rows);
     }
     if (req.method === "POST") {
       const body = JSON.parse((await readBody(req)).toString() || "[]");
@@ -182,38 +227,73 @@ export const server = http.createServer(async (req, res) => {
       for (const row of rows) {
         if (!isMember(row.room_id, uid)) return json(res, 403, { message: "not a member" });
         if (tables[table].some((r) => r.id === row.id)) return json(res, 409, { message: "duplicate key value" });
-        tables[table].push({ created_at: now(), ...row });
+        tables[table].push({ created_at: now(), updated_at: now(), ...row });
       }
       cors(res); res.writeHead(201); return res.end("[]");
     }
-    if (req.method === "PATCH" || req.method === "DELETE") {
+    if (req.method === "PATCH") {
+      const patch = JSON.parse((await readBody(req)).toString() || "{}");
+      const rows = filterRows(tables[table], url.searchParams).filter((r) => isMember(r.room_id, uid));
+      // `updated_at` moves on every write, exactly like the SQL trigger — the
+      // client derives its cache-busting `?v=` from it.
+      for (const row of rows) Object.assign(row, patch, { updated_at: now() });
+      if (String(req.headers.prefer || "").includes("return=representation")) return respondRows(req, res, rows);
+      cors(res); res.writeHead(204); return res.end();
+    }
+    if (req.method === "DELETE") {
       await readBody(req);
       cors(res); res.writeHead(204); return res.end();
     }
   }
 
   // ---- storage ----
-  if (p.startsWith("/storage/v1/object/sign/")) {
-    const path = decodeURIComponent(p.slice("/storage/v1/object/sign/room-assets/".length));
-    if (req.method === "POST") {
-      await readBody(req);
-      return json(res, 200, { signedURL: `/object/sign/room-assets/${path}?token=mock` });
-    }
-    const obj = objects.get(path);
-    if (!obj) { cors(res); res.writeHead(404); return res.end(); }
-    cors(res); res.writeHead(200, { "content-type": obj.mime }); return res.end(obj.buf);
-  }
+  // Bucket-generic on purpose: `room-assets` stays private while PR #21's
+  // `share-previews` is served from the public route, and the mock has to be
+  // able to tell those two apart.
   if (p.startsWith("/storage/v1/object/")) {
-    const path = decodeURIComponent(p.slice("/storage/v1/object/room-assets/".length));
+    const rest = p.slice("/storage/v1/object/".length);
+    const [head, ...tail] = rest.split("/");
+
+    if (head === "sign") {
+      const [bucket, ...rel] = tail;
+      const path = decodeURIComponent(rel.join("/"));
+      if (req.method === "POST") {
+        await readBody(req);
+        return json(res, 200, { signedURL: `/object/sign/${bucket}/${path}?token=mock` });
+      }
+      const obj = objects.get(`${bucket}/${path}`);
+      if (!obj) { cors(res); res.writeHead(404); return res.end(); }
+      cors(res); res.writeHead(200, { "content-type": obj.mime }); return res.end(obj.buf);
+    }
+
+    if (head === "public") {
+      // Anonymous read — no auth header at all, like a social crawler.
+      const [bucket, ...rel] = tail;
+      const obj = objects.get(`${bucket}/${decodeURIComponent(rel.join("/"))}`);
+      if (!obj) { cors(res); res.writeHead(404); return res.end(); }
+      cors(res); res.writeHead(200, { "content-type": obj.mime }); return res.end(obj.buf);
+    }
+
+    const bucket = head;
+    const path = decodeURIComponent(tail.join("/"));
     if (req.method === "POST" || req.method === "PUT") {
       const raw = await readBody(req);
       const ct = String(req.headers["content-type"] || "image/png");
       // storage-js uploads through FormData in browsers; keep only the file part.
       const { buf, mime } = ct.startsWith("multipart/form-data") ? unwrapMultipart(raw, ct) : { buf: raw, mime: ct };
-      objects.set(path, { buf, mime });
-      return json(res, 200, { Key: `room-assets/${path}` });
+      objects.set(`${bucket}/${path}`, { buf, mime });
+      return json(res, 200, { Key: `${bucket}/${path}` });
     }
-    const obj = objects.get(path);
+    if (req.method === "DELETE") {
+      // storage-js `remove(paths)` DELETEs the bucket with {prefixes:[...]}.
+      const body = JSON.parse((await readBody(req)).toString() || "{}");
+      const gone = [];
+      for (const prefix of body.prefixes ?? []) {
+        if (objects.delete(`${bucket}/${prefix}`)) gone.push({ name: prefix });
+      }
+      return json(res, 200, gone);
+    }
+    const obj = objects.get(`${bucket}/${path}`);
     if (!obj) { cors(res); res.writeHead(404); return res.end(); }
     cors(res); res.writeHead(200, { "content-type": obj.mime }); return res.end(obj.buf);
   }
@@ -223,7 +303,15 @@ export const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ message: `no mock route for ${req.method} ${p}` }));
 });
 
-export function start(port = PORT) {
+export async function start(port = PORT, options = {}) {
+  mockOrigin = `http://127.0.0.1:${port}`;
+  if (options.appOrigin) {
+    previewHandler = await loadSharePreviewHandler({
+      supabaseUrl: mockOrigin,
+      anonKey: "sb_publishable_e2e_mock_key_000000",
+      appOrigin: options.appOrigin.replace(/\/+$/, ""),
+    });
+  }
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
 }
 

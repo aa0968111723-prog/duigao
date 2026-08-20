@@ -634,6 +634,59 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .m-share-note { margin: 0 0 4px; font-size: 13px; line-height: 1.7; color: var(--ink-dim); }
 .m-share-url { font-size: 13px; color: var(--ink-dim); }
 
+/* ---------- 連結預覽 (PR #21): what LINE will actually show ---------- */
+.m-share-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.m-share-preview-label { font-size: 12px; color: var(--ink-faint); }
+.m-share-preview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: #100e0c;
+}
+/* 1200×630 is the card ratio every platform crops to; show it honestly. */
+.m-share-preview-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1200 / 630;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  background: #0c0b09;
+}
+.m-share-preview-thumb.is-generic {
+  display: grid;
+  place-items: center;
+  color: var(--ink-faint);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+.m-share-preview-title {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m-share-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.m-share-toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
+.m-share-toggle input:disabled { opacity: 0.5; }
+.m-share-more { align-self: flex-start; }
+
 .m-input {
   flex: 1;
   min-width: 0;

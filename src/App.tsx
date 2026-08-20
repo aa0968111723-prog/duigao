@@ -22,6 +22,7 @@ import { isCloudConfigured } from "./cloud/config";
 import { readRoomLink } from "./cloud/invite";
 import { syncStatusLabel, type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
+import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
 import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { DesktopWorkspace } from "./components/DesktopWorkspace";
@@ -616,6 +617,40 @@ export function App() {
   }, []);
 
   const [shareState, setShareState] = useState<ShareState>({ kind: "creating" });
+  const shareStateRef = useRef<ShareState>(shareState);
+  shareStateRef.current = shareState;
+  /**
+   * Guards against a late preview result landing on a share sheet the user has
+   * since closed and reopened (or on a different room).
+   */
+  const shareSeq = useRef(0);
+
+  /**
+   * Fold a preview result into the sheet. The permanent `#room=…&invite=…` URL
+   * stays the fallback in every branch: an Open Graph card is an enhancement,
+   * never a prerequisite for sharing (PR #21).
+   */
+  const applyPreview = useCallback((seq: number, appUrl: string, preview: SharePreview | null) => {
+    if (seq !== shareSeq.current) return;
+    if (!preview) {
+      setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "unavailable" } });
+      return;
+    }
+    setShareState({
+      kind: "ready",
+      url: buildPreviewShareUrl(preview.id, appUrl),
+      appUrl,
+      preview:
+        preview.showThumbnail && preview.thumbnailPath
+          ? { status: "on", thumbnailUrl: previewThumbnailUrl(preview.thumbnailPath, preview.updatedAt) }
+          : { status: "off" },
+    });
+  }, []);
+
+  const failPreview = useCallback((seq: number, appUrl: string) => {
+    if (seq !== shareSeq.current) return;
+    setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "unavailable" } });
+  }, []);
 
   /**
    * A share link is only worth handing out if it still opens after the host
@@ -634,11 +669,27 @@ export function App() {
       return;
     }
     if (isCloudConfigured) {
+      const seq = ++shareSeq.current;
       setShareState({ kind: "creating" });
       cloudRef.current
         .ensureShared()
-        .then((res) => setShareState(res.ok ? { kind: "ready", url: res.url } : { kind: "failed" }))
-        .catch(() => setShareState({ kind: "failed" }));
+        .then((res) => {
+          if (seq !== shareSeq.current) return;
+          if (!res.ok) {
+            setShareState({ kind: "failed" });
+            return;
+          }
+          // Hand over the working link immediately; the card catches up.
+          const appUrl = res.url;
+          setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "building" } });
+          cloudRef.current.preview
+            .ensure({ versionId: viewRef.current.versionId })
+            .then((preview) => applyPreview(seq, appUrl, preview))
+            .catch(() => failPreview(seq, appUrl));
+        })
+        .catch(() => {
+          if (seq === shareSeq.current) setShareState({ kind: "failed" });
+        });
       return;
     }
     if (import.meta.env.DEV) {
@@ -651,7 +702,39 @@ export function App() {
     }
     // Deployed without VITE_SUPABASE_* — there is no permanent link to give.
     setShareState({ kind: "unavailable" });
-  }, [isLegacyLink, startHosting]);
+  }, [isLegacyLink, startHosting, applyPreview, failPreview]);
+
+  /** 顯示文宣縮圖 toggle in the share sheet's 連結預覽 block. */
+  const setPreviewThumbnail = useCallback(
+    (next: boolean) => {
+      const current = shareStateRef.current;
+      if (current.kind !== "ready") return;
+      const { appUrl } = current;
+      const seq = ++shareSeq.current;
+      setShareState({ ...current, preview: { status: "building" } });
+      cloudRef.current.preview
+        .ensure({ versionId: viewRef.current.versionId, showThumbnail: next })
+        .then((preview) => applyPreview(seq, appUrl, preview))
+        .catch(() => failPreview(seq, appUrl));
+    },
+    [applyPreview, failPreview],
+  );
+
+  /** Revoke the current preview id so links already in a chat stop showing the poster. */
+  const rotatePreview = useCallback(() => {
+    const current = shareStateRef.current;
+    if (current.kind !== "ready") return;
+    const { appUrl } = current;
+    const seq = ++shareSeq.current;
+    setShareState({ ...current, preview: { status: "building" } });
+    cloudRef.current.preview
+      .rotate({ versionId: viewRef.current.versionId })
+      .then((preview) => {
+        applyPreview(seq, appUrl, preview);
+        if (seq === shareSeq.current) showToast("已重新產生預覽連結，請改用新的分享連結。", { tone: "success" });
+      })
+      .catch(() => failPreview(seq, appUrl));
+  }, [applyPreview, failPreview, showToast]);
 
   const copySummary = useCallback(async () => {
     const current = roomRef.current;
@@ -945,6 +1028,8 @@ export function App() {
           onRetry={openShare}
           onClose={() => setShareOpen(false)}
           onToast={showToast}
+          onPreviewThumbnail={setPreviewThumbnail}
+          onRotatePreview={rotatePreview}
         />
       )}
 
