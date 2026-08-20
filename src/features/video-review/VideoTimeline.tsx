@@ -126,7 +126,7 @@ export function VideoTimeline({
   };
 
   return (
-    <div className="v-timeline">
+    <div className="v-timeline" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endScrub} onPointerCancel={endScrub}>
       <div
         ref={trackRef}
         className="v-track"

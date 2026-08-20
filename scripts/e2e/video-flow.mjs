@@ -23,6 +23,8 @@
  *      moment it is created, not only after a share
  *   I  poster rooms are untouched: the image entry still takes images, pins
  *      still work, and nothing about that flow changed
+ *   N  a failed first upload leaves a way out, and retrying reuses the room it
+ *      already created instead of quietly leaving an empty one behind
  *
  * The video fixture is recorded in-page from a canvas, so no binary file is
  * committed — the same principle as share-flow.mjs's generated PNG.
@@ -39,7 +41,7 @@ import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
 import { readFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
-import { start as startMock, requestLog, rows } from "./mock-supabase.mjs";
+import { start as startMock, requestLog, rows, faults, cloudRooms } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54405;
 const APP_PORT = 4177;
@@ -243,6 +245,14 @@ async function fileComment(page, which) {
   await page.waitForSelector(".m-action-btn", { timeout: 10000 });
   await page.locator(".m-action-btn").nth(which === "point" ? 0 : 1).click();
 }
+
+/**
+ * How many cloud rooms exist — including empty ones.
+ *
+ * Counting through child tables would miss exactly the room this leg is about:
+ * one created for an upload that never landed has no versions and no comments.
+ */
+const countRooms = () => cloudRooms.size;
 
 /** Raise the discussion sheet so its cards are actually reachable. */
 async function openDiscussion(page) {
@@ -732,6 +742,49 @@ try {
     rules.posterAt.join(" / "),
   );
   check("J. 首頁寫得出上限提示", rules.limitHint.includes("100 MB") && rules.limitHint.includes("120"), rules.limitHint);
+
+  // --------------------------------- N: a first upload that fails ----------
+  // The room reaches the cloud BEFORE the bytes do, so a failure here is the
+  // one that can strand a person on a screen with nothing on it — and, if they
+  // reload, leave an empty cloud room behind and make a second one.
+  const roomsBefore = countRooms();
+  const ctxN = await browser.newContext(phone(390, 844, ANDROID_UA));
+  const N = await ctxN.newPage();
+  await enterName(N, APP, "上傳失敗的人");
+  faults.videoUpload = true;
+  await uploadVideo(N, SHORT);
+  await N.waitForSelector(".onboard-card", { timeout: 60000 });
+  await N.waitForFunction(
+    () => document.querySelector(".onboard-hint")?.textContent?.includes("失敗") ?? false,
+    null,
+    { timeout: 60000 },
+  ).catch(() => null);
+
+  const failureText = await N.innerText(".onboard-card");
+  check("N. 上傳失敗會說出來，而不是停在進度條", failureText.includes("失敗"), failureText.split("\n")[1] ?? "");
+  const buttons = await N.locator(".onboard-card button, .onboard-card .btn").allInnerTexts();
+  check(
+    "N. 失敗畫面有出口（重新選檔／回首頁），不是死路",
+    buttons.some((b) => b.includes("重新選")) && buttons.some((b) => b.includes("回首頁")),
+    buttons.join(" / "),
+  );
+
+  const roomsAfterFailure = countRooms();
+  faults.videoUpload = false;
+  await N.setInputFiles('.onboard-card input[type="file"]', {
+    name: "retry.webm",
+    mimeType: "video/webm",
+    buffer: SHORT,
+  });
+  await playerReady(N);
+  const roomsAfterRetry = countRooms();
+  check("N. 失敗後重試會播得起來", await N.isVisible("video.v-video"));
+  check(
+    "N. 重試沿用同一間雲端房，不會多開一間",
+    roomsAfterRetry === roomsAfterFailure,
+    `失敗後 ${roomsAfterFailure} 間、重試後 ${roomsAfterRetry} 間（一開始 ${roomsBefore} 間）`,
+  );
+  await ctxN.close();
 
   console.log(`\n${results.filter((r) => r.pass).length}/${results.length} checks passed`);
   console.log(

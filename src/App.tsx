@@ -59,6 +59,27 @@ function pickColor(): string {
 /** Distinguishes "the user cancelled" from a genuine upload failure. */
 class CancelledUpload extends Error {}
 
+/**
+ * What to actually show someone when an upload fails.
+ *
+ * Backend text — PostgREST, Storage, Postgres constraint names, RLS wording —
+ * is English, leaks schema details and never says what to do next, so it is not
+ * copy. The messages this app authors are Traditional Chinese, and that is the
+ * test: anything without a Han character came from a machine, not from us.
+ */
+function userFacingMessage(err: unknown): string {
+  const fallback = "影片上傳失敗，請檢查網路後再試一次。";
+  const raw = err instanceof Error ? err.message : "";
+  if (!raw || raw === "cloud-room-failed") return fallback;
+  if (!/[一-鿿]/.test(raw)) {
+    // Keep the real reason where a developer can find it; show a sentence the
+    // person can act on.
+    console.warn("[video] upload failed:", raw);
+    return fallback;
+  }
+  return raw;
+}
+
 function emptyRoom(id: string, title: string, mediaType: MediaType = "image"): Room {
   return {
     id,
@@ -337,6 +358,10 @@ export function App() {
   const openRoom = useCallback(
     (r: Room) => {
       clearUndo();
+      // An upload state belongs to the room it was started in; carrying it over
+      // would show another room a red banner about something that never
+      // happened there.
+      setVideoUpload({ state: "idle" });
       setRoom(r);
       setView(initialView(r));
     },
@@ -506,14 +531,15 @@ export function App() {
           // id tied to an empty cloud room — the next attempt would make a
           // second one and orphan this.
           if (isNewRoom) {
-            cloudRef.current.forgetCloudRoom(base.id);
+            // The bind already cached an empty snapshot; leaving it behind puts
+            // a room in 最近討論 that opens to nothing.
+            const cloudId = cloudRef.current.forgetCloudRoom(base.id);
+            deleteRoom(base.id).catch(() => undefined);
+            if (cloudId) deleteRoom(cloudId).catch(() => undefined);
             if ((roomRef.current?.versions.length ?? 0) === 0) setRoom(null);
           }
         } else {
-          const message =
-            err instanceof Error && err.message !== "cloud-room-failed"
-              ? err.message
-              : "影片上傳失敗，請檢查網路後再試一次。";
+          const message = userFacingMessage(err);
           setVideoUpload({ state: "error", message, progress: 0, cancel: () => setVideoUpload({ state: "idle" }) });
           showToast(message, { tone: "error" });
         }
@@ -1043,6 +1069,9 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Video rooms have their own Escape ladder (draft → range pick →
+      // selection). Running both would cancel two things per press.
+      if (roomRef.current && roomMediaType(roomRef.current) === "video") return;
       if (draftPin) cancelPin();
       else if (tool === "region") setTool("pan");
       else if (selectedPinId) setSelectedPinId(null);
@@ -1112,6 +1141,7 @@ export function App() {
         ...(video ? { video } : {}),
         goHome: () => {
           videoCancelRef.current?.();
+          setVideoUpload({ state: "idle" });
           clearUndo();
           setRoom(null);
           setSelectedPinId(null);
@@ -1219,7 +1249,9 @@ export function App() {
       return (
         <div className="onboard">
           <div className="onboard-card">
-            <h1 className="onboard-title">文宣討論區</h1>
+            {/* The link does not say what is behind it, so the title stays the
+                neutral one rather than promising a poster. */}
+            <h1 className="onboard-title">對稿討論區</h1>
             <p className="onboard-hint">
               {!stalled
                 ? "正在載入…"

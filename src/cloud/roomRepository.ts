@@ -194,12 +194,14 @@ export async function createRoom(
     versionIdMap.set(v.id, newId);
     if (v.kind === "video") {
       // Video versions never travel this path: a cut is uploaded straight into
-      // its cloud room's folder, so there is no local-room migration to do.
-      // Copying the row would keep a video_path under the OLD room id, which
-      // membership RLS then refuses to read — better to skip it loudly than to
-      // migrate a version nobody can play.
-      versionIdMap.set(v.id, v.id);
-      continue;
+      // its cloud room's folder, so there is no local-room migration to do, and
+      // copying the row would leave video_path under the OLD room id — which
+      // membership RLS then refuses to read.
+      //
+      // Refusing outright rather than skipping: a skipped version leaves its
+      // comments and strokes pointing at a row that was never inserted, and
+      // losing feedback silently is worse than a migration that says no.
+      throw new CloudError("影片房間不需要搬移，請直接分享", "versions");
     }
     const { path, mime } = await uploadVersion(supabase, roomId, newId, v.imageDataUrl);
     versionRows.push({ id: newId, room_id: roomId, label: v.label, sort_order: i, image_path: path, mime_type: mime });

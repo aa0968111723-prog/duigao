@@ -158,8 +158,11 @@
 
 /* -------------------------------------------------------------- timeline -- */
 
+/* The band is a 44px touch target with a 10px line drawn inside it: a
+   fingertip is 8mm wide, and a 10px bar is a mouse-era control. */
 .v-timeline {
-  padding: 10px 2px 4px;
+  padding: 17px 2px 11px;
+  touch-action: none;
 }
 
 .v-track {
@@ -484,4 +487,139 @@
   .v-volume {
     display: none;
   }
+}
+
+/* ---------------------------------------------------- desktop shell bits ---
+
+   The video workspace reuses the phone shell's markup (version chips, the
+   one-line status bar, the action sheet, the empty state) so that a reviewer
+   who has used the poster app recognises it. Those classes are styled inside
+   mobile.css's media query — deliberately, since the poster app only shows
+   them on phones — so the desktop layout has to dress them itself rather than
+   widen a rule the image workspace depends on. */
+
+@media (min-width: 721px) and (pointer: fine) {
+  .v-desktop .m-versions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 0;
+  }
+
+  .v-desktop .m-vchip {
+    border: 1px solid var(--line, #2b2724);
+    background: var(--panel, #17150f);
+    color: var(--ink-dim, #b6ada0);
+    border-radius: 999px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    min-height: 36px;
+  }
+
+  /* Which cut you are watching is the one thing this row exists to say. */
+  .v-desktop .m-vchip.is-on {
+    background: var(--accent, #c45c4a);
+    border-color: var(--accent, #c45c4a);
+    color: #fff;
+  }
+
+  .v-desktop .m-vchip-add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+  }
+
+  .v-desktop-side .m-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 14px 16px;
+    overflow-y: auto;
+  }
+
+  .v-desktop .m-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    font-size: 13px;
+    color: var(--ink, #f4efe6);
+  }
+
+  .v-desktop .m-status-text {
+    flex: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .v-desktop .m-status-cancel {
+    border: 0;
+    background: transparent;
+    color: var(--ink-dim, #b6ada0);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 6px 8px;
+  }
+
+  .v-desktop-side .m-discuss-empty {
+    padding: 28px 18px;
+    text-align: center;
+    color: var(--ink-dim, #b6ada0);
+  }
+
+  .v-desktop-side .m-discuss-empty-title {
+    font-weight: 700;
+    color: var(--ink, #f4efe6);
+    margin: 0 0 6px;
+  }
+
+  .v-desktop-side .m-discuss-empty-sub {
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 0;
+  }
+
+  .v-desktop .v-sortrow {
+    padding: 12px 14px 8px;
+  }
+
+  .v-desktop .m-chip {
+    border: 1px solid var(--line, #2b2724);
+    background: transparent;
+    color: var(--ink-dim, #b6ada0);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .v-desktop .m-chip.is-on {
+    background: var(--ink, #f4efe6);
+    color: var(--bg, #0f0e0c);
+    border-color: var(--ink, #f4efe6);
+  }
+}
+
+/* ------------------------------------------------ keyboard + bottom stack ---
+
+   The frozen frame is the thing being talked about, so the composer must not
+   cover it. `--m-compose` is the composer sheet's measured height (it reports
+   it through ModalSheet's onHeight), and the stage gives way by exactly that
+   much — the same arithmetic the poster workspace uses. */
+.v-app .v-stage-area {
+  padding-bottom: max(
+    calc(var(--m-toolbar, 64px) + var(--m-peek, 0px) + var(--m-status, 0px)),
+    calc(var(--m-compose, 0px) + 8px)
+  );
+}
+
+/* While the composer is open the video shrinks rather than hides: seeing the
+   moment you are describing is the point of freezing it. */
+.v-app:has(.m-modal) .v-frame {
+  max-height: 30vh;
 }

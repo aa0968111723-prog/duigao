@@ -38,8 +38,14 @@ export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
  */
 export const MAX_VIDEO_SECONDS = 2 * 60 * 60;
 
-/** Human form of the current ceilings, for the picker and the README. */
-export const VIDEO_LIMIT_HINT = `一支上限 ${formatBytes(MAX_VIDEO_BYTES)}、${Math.round(MAX_VIDEO_SECONDS / 60)} 分鐘`;
+/**
+ * Human form of the ceilings, for the picker and the README.
+ *
+ * Hedged on purpose: this is the app's own limit, and the Supabase project
+ * behind it may impose a lower one (50MB on the free plan). Promising a flat
+ * 100MB would make the app the liar when a 90MB file is refused by Storage.
+ */
+export const VIDEO_LIMIT_HINT = `一支最多 ${formatBytes(MAX_VIDEO_BYTES)}、${Math.round(MAX_VIDEO_SECONDS / 60)} 分鐘，實際上限依雲端空間設定`;
 
 /**
  * The check that needs the video's own metadata. Returns a reason to refuse,

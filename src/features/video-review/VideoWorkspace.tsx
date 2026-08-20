@@ -142,6 +142,7 @@ export function VideoWorkspace({ api, presence }: Props) {
       if (pin.versionId !== view.versionId) {
         // Cross-version: the seek belongs to the cut that is about to load, so
         // it travels with the source rather than hitting the outgoing element.
+        setRangePick(null);
         setStartAt(target);
         liveTimeRef.current = target;
         setLiveTime(target);
@@ -241,6 +242,10 @@ export function VideoWorkspace({ api, presence }: Props) {
       const target = cap ? Math.min(at, Math.max(0, cap - 0.1)) : at;
       playerRef.current?.pause();
       api.selectPin(null);
+      // A half-picked range belongs to the cut it was started on: its start was
+      // read off THAT timeline, so carrying it into another cut would file a
+      // range whose beginning nobody ever saw here.
+      setRangePick(null);
       // The resume point travels WITH the new source. Seeking here would land
       // on the outgoing element, and the new cut would start at 0:00 (§20).
       setStartAt(target);
@@ -258,6 +263,12 @@ export function VideoWorkspace({ api, presence }: Props) {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // Space is how a keyboard presses the button it is focused on. Claiming it
+      // globally would make every control in this workspace unusable — the
+      // shortcut is for when nothing in particular has focus.
+      if (el?.closest('button, a, select, summary, [role="button"], [role="slider"], [tabindex]')) {
+        if (e.key !== "Escape") return;
+      }
       if (e.key === " " || e.code === "Space") {
         e.preventDefault();
         const p = playerRef.current;
@@ -425,14 +436,15 @@ export function VideoWorkspace({ api, presence }: Props) {
               : "正在準備影片…"}
       </span>
       {upload.state === "uploading" && (
-        <>
-          <span className="v-upload-bar" aria-hidden>
-            <span className="v-upload-fill" style={{ width: `${Math.round(upload.progress * 100)}%` }} />
-          </span>
-          <button type="button" className="m-status-cancel" onClick={upload.cancel}>
-            取消
-          </button>
-        </>
+        <span className="v-upload-bar" aria-hidden>
+          <span className="v-upload-fill" style={{ width: `${Math.round(upload.progress * 100)}%` }} />
+        </span>
+      )}
+      {/* A banner with no way to dismiss it is a banner that stays forever. */}
+      {(upload.state === "uploading" || upload.state === "preparing" || upload.state === "error") && (
+        <button type="button" className="m-status-cancel" onClick={upload.cancel}>
+          {upload.state === "error" ? "知道了" : "取消"}
+        </button>
       )}
     </div>
   );

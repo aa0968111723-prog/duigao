@@ -107,17 +107,22 @@ async function versionImageUrl(
   supabase: SupabaseClient,
   roomId: string,
   versionId: string,
-): Promise<{ url: string; durationSeconds: number | null }> {
+): Promise<{ url: string; durationSeconds: number | null } | null> {
   const { data, error } = await supabase
     .from("versions")
     .select("image_path, duration_seconds")
     .eq("room_id", roomId)
     .eq("id", versionId)
     .single();
-  if (error || !data?.image_path) throw new CloudError(error?.message ?? "version not found", "preview");
+  if (error) throw new CloudError(error.message, "preview");
+  const duration = (data as { duration_seconds?: number | null } | null)?.duration_seconds;
+  // A video version whose poster capture failed has no still image. That costs
+  // a picture on the card, and nothing else: returning null here lets the
+  // caller publish a text card instead of failing the whole preview, which
+  // would leave the room with no card at all.
+  if (!data?.image_path) return null;
   const signed = await supabase.storage.from(ASSET_BUCKET).createSignedUrl(data.image_path as string, 300);
   if (signed.error || !signed.data) throw new CloudError(signed.error?.message ?? "sign failed", "preview");
-  const duration = (data as { duration_seconds?: number | null }).duration_seconds;
   return { url: signed.data.signedUrl, durationSeconds: typeof duration === "number" ? duration : null };
 }
 
@@ -241,13 +246,20 @@ export async function ensureRoomPreview(
   const stale = !thumbnailPath || existing?.versionId !== input.versionId || Boolean(input.force);
   if (showThumbnail && stale) {
     const source = await versionImageUrl(supabase, input.roomId, input.versionId);
-    thumbnailPath = await writeThumbnail(
-      supabase,
-      previewId,
-      source.url,
-      thumbnailPath,
-      isVideo ? { play: true, durationLabel: cardDuration(source.durationSeconds) } : undefined,
-    );
+    if (source) {
+      thumbnailPath = await writeThumbnail(
+        supabase,
+        previewId,
+        source.url,
+        thumbnailPath,
+        isVideo ? { play: true, durationLabel: cardDuration(source.durationSeconds) } : undefined,
+      );
+    } else if (thumbnailPath) {
+      // Nothing to render from any more: drop the stale image rather than keep
+      // advertising a picture that no longer belongs to this version.
+      await revokeThumbnail(supabase, thumbnailPath);
+      thumbnailPath = null;
+    }
   } else if (!showThumbnail && thumbnailPath) {
     await revokeThumbnail(supabase, thumbnailPath);
     thumbnailPath = null;

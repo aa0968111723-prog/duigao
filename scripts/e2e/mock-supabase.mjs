@@ -36,10 +36,24 @@ export const requestLog = [];
  * the app self-heals — a preview that gets stuck advertising an old poster is
  * invisible in the happy path.
  */
-export const faults = { previewUpload: false, previewDelete: false };
+export const faults = {
+  previewUpload: false,
+  previewDelete: false,
+  /** Next video upload into room-assets fails, for testing the retry path. */
+  videoUpload: false,
+  /** Next createSignedUrl fails, for the "row landed, signing did not" case. */
+  sign: false,
+};
 
 /** Row access for assertions (e.g. which version a preview currently points at). */
 export const rows = tables;
+
+/**
+ * The rooms themselves, for assertions that care about rooms with nothing in
+ * them — an abandoned upload's leftovers are invisible to `rows`, because a
+ * room with no versions and no comments appears in no child table.
+ */
+export const cloudRooms = rooms;
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const now = () => new Date().toISOString();
@@ -338,6 +352,7 @@ export const server = http.createServer(async (req, res) => {
       const path = decodeURIComponent(rel.join("/"));
       if (req.method === "POST") {
         await readBody(req);
+        if (faults.sign) return json(res, 500, { message: "injected signing failure" });
         return json(res, 200, { signedURL: `/object/sign/${bucket}/${path}?token=mock` });
       }
       const obj = objects.get(`${bucket}/${path}`);
@@ -359,6 +374,11 @@ export const server = http.createServer(async (req, res) => {
       const raw = await readBody(req);
       if (bucket === "share-previews" && faults.previewUpload) {
         return json(res, 500, { message: "injected upload failure" });
+      }
+      // A video upload failing mid-flight is the case that decides whether a
+      // retry reuses the room it already created or quietly makes a second one.
+      if (bucket === "room-assets" && faults.videoUpload && path.includes("/videos/")) {
+        return json(res, 500, { message: "injected video upload failure" });
       }
       const ct = String(req.headers["content-type"] || "image/png");
       // storage-js uploads through FormData in browsers; keep only the file part.

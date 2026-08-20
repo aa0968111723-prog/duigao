@@ -93,6 +93,12 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
   const [clock, setClock] = useState(0);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
+  /**
+   * iOS hands volume to the hardware buttons and ignores `video.volume`
+   * entirely. A slider there would move and change nothing — worse than no
+   * slider — so it is only rendered once the element proves it obeys.
+   */
+  const [volumeWorks, setVolumeWorks] = useState(true);
   const [rate, setRate] = useState(1);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [buffering, setBuffering] = useState(false);
@@ -314,6 +320,11 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
               onDurationChange?.(known);
             }
             v.playbackRate = rate;
+            // One probe per source, on the element that will actually play.
+            const before = v.volume;
+            v.volume = before === 1 ? 0.5 : 1;
+            setVolumeWorks(v.volume !== before);
+            v.volume = before;
             // A cut switched to at 00:35 lands on a cut that may be shorter:
             // clamp instead of assigning past the end, which browsers handle
             // inconsistently (some stall silently).
@@ -403,6 +414,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
         >
           <span aria-hidden>{muted ? "🔇" : "🔊"}</span>
         </button>
+        {volumeWorks && (
         <input
           className="v-volume"
           type="range"
@@ -423,6 +435,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
             setMuted(v.muted);
           }}
         />
+        )}
         <button type="button" className="v-ctl v-ctl-rate" onClick={cycleRate} aria-label={`播放速度 ${rate} 倍`}>
           {rate}×
         </button>

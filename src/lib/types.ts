@@ -171,8 +171,14 @@ export const COLORS = ["#c45c4a", "#3d6b8c", "#5a7a4a", "#8a5a3a", "#6b5a8c", "#
 
 export const VERSION_LABELS = ["初稿", "改一", "改二", "改三", "改四"] as const;
 
-/** Cut names read differently from poster drafts, so video rooms get their own. */
-export const VIDEO_VERSION_LABELS = ["初剪", "改一", "改二", "改三", "最終版"] as const;
+/**
+ * Cut names read differently from poster drafts, so video rooms get their own.
+ *
+ * No 最終版 here on purpose: the sixth cut would then be 改5 sitting after a
+ * version that claims to be final. "Final" is something a person decides and
+ * renames to, not the app's guess about the fifth upload.
+ */
+export const VIDEO_VERSION_LABELS = ["初剪", "改一", "改二", "改三", "改四"] as const;
 
 /** Older rooms carry no mediaType; they are all image rooms. */
 export function roomMediaType(room: Pick<Room, "mediaType">): MediaType {

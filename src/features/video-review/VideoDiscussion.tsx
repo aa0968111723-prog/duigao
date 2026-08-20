@@ -86,7 +86,7 @@ export function VideoDiscussion({ api, versionId, selectedId, onSelect, compact 
             <p className="m-discuss-empty-sub">
               播到覺得怪怪的地方，
               <br />
-              按「修改」留一句就可以。
+              {compact ? "按「修改」留一句就可以。" : "按「這一刻留意見」留一句就可以。"}
             </p>
           </div>
         )}
