@@ -60,8 +60,26 @@ npm run check:cloud-env    # 只檢查部署 env，未就緒時 exit 1（給 CI 
 npm run test:migrations    # 用真的 PostgreSQL 套 supabase/migrations 並驗 RLS
 npm run test:share-preview # 連結預覽：爬蟲 OG、invite 隔離、縮圖幾何
 npm run test:share-e2e     # 完整分享旅程驗收（見 scripts/e2e/README.md）
+npm run test:video         # 影片對稿驗收：上傳、時間點/片段留言、切版本、分享卡
 npm run make:og-cover      # 重製 public/og-cover.png 通用分享封面
 ```
+
+## 影片對稿
+
+圖片是空間座標（點一個位置、圈一塊範圍），影片是時間座標（某一刻、某一段）。
+兩者共用同一套房間、邀請、權限、Storage、Realtime 與討論；分開的只有工作區介面，
+由 `RoomWorkspace` 依 `room.mediaType` 決定要開哪一個。
+
+**支援格式**：MP4（H.264）與 WebM 最穩。`.mov`（iPhone）可以上傳，但裡面若是 HEVC，
+桌機 Chrome／Android 常常播不出來——播放器會直接說明，不會給一個黑畫面。
+匯出時請選「網頁用 / fast start」的 MP4，否則瀏覽器要下載完才能拉時間軸。
+
+**大小與長度**：一支上限 100MB、120 分鐘。這是客戶端的上限；Storage bucket 另外設在
+200MB，而 Supabase 專案本身還有全域上限（免費方案是 50MB），**三者取最小**。
+上傳是單次請求、沒有續傳，所以這個數字刻意保守——大檔續傳（TUS）是後續的事。
+
+**離線**：房間、討論、留言可以離線看；影片本體需要連線才能播放。
+
 
 ## 技術
 

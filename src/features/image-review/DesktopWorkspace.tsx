@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { ColorMode, CompareMode, Tool } from "../lib/types";
-import { ProposalControls } from "../features/visual-proposal/ProposalControls";
-import { pruneProposalVersions } from "../features/visual-proposal/store";
-import { CommentCard } from "./CommentCard";
-import { PinFields } from "./PinFields";
-import { UploadZone } from "./UploadZone";
+import type { ColorMode, CompareMode, Tool } from "../../lib/types";
+import { ProposalControls } from "../visual-proposal/ProposalControls";
+import { pruneProposalVersions } from "../visual-proposal/store";
+import { CommentCard } from "../discussion/CommentCard";
+import { PinFields } from "../discussion/PinFields";
+import { UploadZone } from "../../components/UploadZone";
 import { Viewer } from "./Stage";
-import { nextPinNumber, type WorkspaceApi } from "./api";
+import { nextPinNumber, type WorkspaceApi } from "../../components/api";
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "pan", label: "看" },

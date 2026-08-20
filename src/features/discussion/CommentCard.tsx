@@ -1,8 +1,8 @@
 import { useState } from "react";
-import type { CommentPin } from "../lib/types";
-import type { VisualProposal } from "../features/visual-proposal/store";
-import { proposalStatusLabel, proposalTypeLabel } from "../features/visual-proposal/helpers";
-import { hasSupported, pinNumber, repliesFor, supportCount, versionLabel, type WorkspaceApi } from "./api";
+import type { CommentPin } from "../../lib/types";
+import type { VisualProposal } from "../visual-proposal/store";
+import { proposalStatusLabel, proposalTypeLabel } from "../visual-proposal/helpers";
+import { hasSupported, pinNumber, repliesFor, supportCount, versionLabel, type WorkspaceApi } from "../../components/api";
 
 type Props = {
   api: WorkspaceApi;
@@ -16,6 +16,12 @@ type Props = {
   /** Turn this 修改點 into a visual proposal. Absent on surfaces without the editor. */
   onCreateProposal?: () => void;
   onOpenProposal?: (proposalId: string) => void;
+  /**
+   * Where this feedback points, when a plain version label is not enough.
+   * Video review passes "00:13" or "00:22–00:27"; image review passes nothing
+   * and the card looks exactly as it always has.
+   */
+  anchorLabel?: string;
 };
 
 /**
@@ -32,6 +38,7 @@ export function CommentCard({
   relatedProposals,
   onCreateProposal,
   onOpenProposal,
+  anchorLabel,
 }: Props) {
   const { room, guest } = api;
   const n = pinNumber(room, pin.id);
@@ -65,7 +72,10 @@ export function CommentCard({
     >
       <div className="m-item-top">
         <span className={`m-item-no ${pin.resolved ? "is-done" : ""}`}>{pin.resolved ? "✓" : n}</span>
-        <p className="m-item-body">{pin.body}</p>
+        <div className="m-item-lines">
+          {anchorLabel && <span className="m-item-anchor">{anchorLabel}</span>}
+          <p className="m-item-body">{pin.body}</p>
+        </div>
       </div>
       <div className="m-item-meta">
         <span className="m-item-who" style={{ color: pin.authorColor }}>

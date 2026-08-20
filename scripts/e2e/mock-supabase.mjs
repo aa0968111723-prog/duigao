@@ -42,6 +42,43 @@ export const rows = tables;
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const now = () => new Date().toISOString();
 
+/**
+ * Serve a stored object, honouring Range.
+ *
+ * Media is the reason this exists: a `<video>` seeks by asking for byte ranges,
+ * and a server that always answers 200 with the whole file makes seeking look
+ * like it works in tests while it may not in production. Answering 206 here
+ * means the app's playback and scrub paths are exercised the way Storage
+ * actually serves them.
+ */
+function serveObject(req, res, obj) {
+  cors(res);
+  const total = obj.buf.length;
+  const range = req.headers.range;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(String(range || ""));
+  if (!match) {
+    res.writeHead(200, {
+      "content-type": obj.mime,
+      "content-length": total,
+      "accept-ranges": "bytes",
+    });
+    return res.end(req.method === "HEAD" ? undefined : obj.buf);
+  }
+  const start = match[1] ? Number(match[1]) : 0;
+  const end = match[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
+  if (Number.isNaN(start) || start >= total || end < start) {
+    res.writeHead(416, { "content-range": `bytes */${total}` });
+    return res.end();
+  }
+  res.writeHead(206, {
+    "content-type": obj.mime,
+    "content-length": end - start + 1,
+    "content-range": `bytes ${start}-${end}/${total}`,
+    "accept-ranges": "bytes",
+  });
+  return res.end(req.method === "HEAD" ? undefined : obj.buf.subarray(start, end + 1));
+}
+
 function cors(res) {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-headers", "*");
@@ -281,7 +318,7 @@ export const server = http.createServer(async (req, res) => {
       }
       const obj = objects.get(`${bucket}/${path}`);
       if (!obj) { cors(res); res.writeHead(404); return res.end(); }
-      cors(res); res.writeHead(200, { "content-type": obj.mime }); return res.end(obj.buf);
+      return serveObject(req, res, obj);
     }
 
     if (head === "public") {
@@ -289,7 +326,7 @@ export const server = http.createServer(async (req, res) => {
       const [bucket, ...rel] = tail;
       const obj = objects.get(`${bucket}/${decodeURIComponent(rel.join("/"))}`);
       if (!obj) { cors(res); res.writeHead(404); return res.end(); }
-      cors(res); res.writeHead(200, { "content-type": obj.mime }); return res.end(obj.buf);
+      return serveObject(req, res, obj);
     }
 
     const bucket = head;
@@ -319,7 +356,7 @@ export const server = http.createServer(async (req, res) => {
     }
     const obj = objects.get(`${bucket}/${path}`);
     if (!obj) { cors(res); res.writeHead(404); return res.end(); }
-    cors(res); res.writeHead(200, { "content-type": obj.mime }); return res.end(obj.buf);
+    return serveObject(req, res, obj);
   }
 
   cors(res);

@@ -158,6 +158,8 @@ const nocloudDist = join(out, "nocloud");
 console.log("building bundles…");
 execFileSync("npx", ["vite", "build", "--outDir", cloudDist, "--emptyOutDir"], {
   stdio: "pipe",
+  // npx is a shell script on Windows; without this the spawn is an ENOENT.
+  shell: process.platform === "win32",
   env: {
     ...process.env,
     // A build pointed at the local mock. `http://127.0.0.1` is accepted by the
@@ -168,6 +170,7 @@ execFileSync("npx", ["vite", "build", "--outDir", cloudDist, "--emptyOutDir"], {
 });
 execFileSync("npx", ["vite", "build", "--outDir", nocloudDist, "--emptyOutDir"], {
   stdio: "pipe",
+  shell: process.platform === "win32",
   // A production build with the cloud env deliberately absent (case C). Blank
   // strings override any .env file, which a plain `delete` would not.
   env: { ...process.env, VITE_SUPABASE_URL: "", VITE_SUPABASE_PUBLISHABLE_KEY: "" },

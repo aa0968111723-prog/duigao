@@ -710,3 +710,95 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .m-btn:disabled { opacity: 0.4; }
 .m-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
 .m-btn-block { width: 100%; }
+
+/* --- shared by both workspaces ------------------------------------------- */
+
+/* A comment card's lines. Video review puts a timecode above the body; poster
+   review has no anchor label and the wrapper simply holds the one line. */
+.m-item-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.m-item-anchor {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.m-item.is-done .m-item-anchor {
+  color: var(--ink-dim);
+}
+
+/* ---------------------------------------------------------- home entries -- */
+
+.home-picks {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.home-pick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 18px;
+  border-radius: var(--r-lg, 18px);
+  border: 1px solid var(--line, #2b2724);
+  background: var(--panel, #17150f);
+  cursor: pointer;
+  text-align: left;
+  min-height: 76px;
+}
+
+.home-pick:active {
+  transform: scale(0.995);
+}
+
+.home-pick.is-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.home-pick-icon {
+  font-size: 24px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  flex: none;
+}
+
+.home-pick-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.home-pick-copy b {
+  font-size: 16px;
+  color: var(--ink, #f4efe6);
+}
+
+.home-pick-copy small {
+  font-size: 12.5px;
+  color: var(--ink-dim, #b6ada0);
+  line-height: 1.5;
+}
+
+.home-recent-kind {
+  margin-right: 6px;
+  opacity: 0.7;
+}
+

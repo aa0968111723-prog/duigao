@@ -24,6 +24,13 @@ const QUALITY_STEPS = [0.82, 0.72, 0.62, 0.5, 0.4];
 
 export type RenderedThumbnail = { blob: Blob; mime: string };
 
+/**
+ * Optional decoration for a video room's card: a play glyph over the frame, and
+ * the running time in the corner. Nothing here touches the fit — the frame is
+ * still contained, and no app UI, timeline or comment ever reaches the card.
+ */
+export type ThumbnailDecoration = { play?: boolean; durationLabel?: string };
+
 type Source = ImageBitmap | HTMLImageElement;
 
 async function loadBitmap(url: string): Promise<Source> {
@@ -82,7 +89,10 @@ export function containRect(iw: number, ih: number): { x: number; y: number; w: 
  * Transparent PNGs composite onto that opaque backdrop, so alpha never turns
  * into the checkerboard-grey mush a naive JPEG flatten produces.
  */
-export async function renderShareThumbnail(imageUrl: string): Promise<RenderedThumbnail> {
+export async function renderShareThumbnail(
+  imageUrl: string,
+  decoration?: ThumbnailDecoration,
+): Promise<RenderedThumbnail> {
   const source = await loadBitmap(imageUrl);
   const { w: iw, h: ih } = sizeOf(source);
 
@@ -128,6 +138,9 @@ export async function renderShareThumbnail(imageUrl: string): Promise<RenderedTh
   ctx.lineWidth = 1;
   ctx.strokeRect(fit.x + 0.5, fit.y + 0.5, fit.w - 1, fit.h - 1);
 
+  if (decoration?.play) drawPlayBadge(ctx, fit);
+  if (decoration?.durationLabel) drawDurationBadge(ctx, fit, decoration.durationLabel);
+
   if ("close" in source && typeof source.close === "function") source.close();
 
   // WebP first, JPEG when the browser cannot encode it. Step the quality down
@@ -143,4 +156,68 @@ export async function renderShareThumbnail(imageUrl: string): Promise<RenderedTh
     }
   }
   throw new Error("thumbnail encoding failed");
+}
+
+/** A soft disc with a triangle: the one universally understood "this plays". */
+function drawPlayBadge(
+  ctx: CanvasRenderingContext2D,
+  fit: { x: number; y: number; w: number; h: number },
+): void {
+  const cx = fit.x + fit.w / 2;
+  const cy = fit.y + fit.h / 2;
+  const r = Math.max(34, Math.min(fit.w, fit.h) * 0.14);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(16, 14, 12, 0.55)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.72)";
+  ctx.lineWidth = Math.max(2, r * 0.06);
+  ctx.stroke();
+
+  // Optically centred: a triangle balanced on its bounding box reads left-heavy.
+  const t = r * 0.46;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.beginPath();
+  ctx.moveTo(cx - t * 0.55 + t * 0.18, cy - t);
+  ctx.lineTo(cx + t + t * 0.18, cy);
+  ctx.lineTo(cx - t * 0.55 + t * 0.18, cy + t);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Running time, bottom-right of the frame itself so it cannot look like chrome. */
+function drawDurationBadge(
+  ctx: CanvasRenderingContext2D,
+  fit: { x: number; y: number; w: number; h: number },
+  label: string,
+): void {
+  ctx.save();
+  const fontSize = 26;
+  ctx.font = `600 ${fontSize}px system-ui, -apple-system, "Noto Sans TC", sans-serif`;
+  const padX = 14;
+  const padY = 8;
+  const textWidth = ctx.measureText(label).width;
+  const w = textWidth + padX * 2;
+  const h = fontSize + padY * 2;
+  const x = fit.x + fit.w - w - 16;
+  const y = fit.y + fit.h - h - 16;
+
+  ctx.fillStyle = "rgba(16, 14, 12, 0.66)";
+  const r = 10;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x + padX, y + h / 2 + 1);
+  ctx.restore();
 }

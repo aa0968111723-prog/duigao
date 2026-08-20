@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
   VERSION_LABELS,
+  VIDEO_VERSION_LABELS,
+  roomMediaType,
   type AnnotationRegion,
   type ChatMessage,
   type CommentPin,
@@ -10,8 +12,10 @@ import {
   type Point,
   type Room,
   type Stroke,
+  type MediaType,
   type Tool,
   type Version,
+  type VideoAnchor,
   type ViewState,
 } from "./lib/types";
 import { regionCenter } from "./lib/region";
@@ -20,13 +24,12 @@ import { listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { readRoomLink } from "./cloud/invite";
-import { syncStatusLabel, type SyncStatus } from "./cloud/types";
+import { type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
 import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
 import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { DesktopWorkspace } from "./components/DesktopWorkspace";
-import { MobileWorkspace } from "./components/MobileWorkspace";
+import { RoomWorkspace } from "./components/RoomWorkspace";
 import { Home } from "./components/Home";
 import { ShareSheet, type ShareState } from "./components/ShareSheet";
 import {
@@ -35,8 +38,13 @@ import {
   type PinDraft,
   type PinForm,
   type SaveState,
+  type VideoApi,
+  type VideoUploadState,
   type WorkspaceApi,
 } from "./components/api";
+import { acceptVideoFile } from "./features/video-review/media";
+import { anchorLabel, anchorStart } from "./features/video-review/anchors";
+import { isUploadCancelled } from "./cloud/videoRoom";
 import "./usability.css";
 
 const EMPTY_FORM: PinForm = { body: "", suggestion: "", type: "文字", priority: "一般" };
@@ -47,8 +55,20 @@ function pickColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)];
 }
 
-function emptyRoom(id: string, title: string): Room {
-  return { id, title, versions: [], comments: [], strokes: [], messages: [], updatedAt: Date.now() };
+/** Distinguishes "the user cancelled" from a genuine upload failure. */
+class CancelledUpload extends Error {}
+
+function emptyRoom(id: string, title: string, mediaType: MediaType = "image"): Room {
+  return {
+    id,
+    title,
+    mediaType,
+    versions: [],
+    comments: [],
+    strokes: [],
+    messages: [],
+    updatedAt: Date.now(),
+  };
 }
 
 function initialView(room: Room | null): ViewState {
@@ -92,6 +112,9 @@ export function App() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
   const [undoCount, setUndoCount] = useState(0);
+  const [videoUpload, setVideoUpload] = useState<VideoUploadState>({ state: "idle" });
+  /** Cancels an upload in flight. Held in a ref so leaving the room can call it. */
+  const videoCancelRef = useRef<(() => void) | null>(null);
 
   const { toasts, showToast, dismiss } = useToasts();
   const isMobile = useIsMobile();
@@ -319,7 +342,7 @@ export function App() {
     [clearUndo],
   );
 
-  const addFiles = useCallback(
+  const addImageFiles = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
       if (busy.current.has("upload")) return;
@@ -366,6 +389,206 @@ export function App() {
     },
     [persist, pushUndo, showToast, undoLast],
   );
+
+  /**
+   * Add one cut to a video room, creating the room in the cloud first if this is
+   * the first one.
+   *
+   * A poster room can live entirely on this device until someone taps 分享. A
+   * video room cannot: Storage authorises an upload against `rooms/<room-id>/…`
+   * and room membership, so the room has to exist in the cloud before the first
+   * byte moves — which is also what makes the share link work after the host
+   * closes the page, the whole point of the feature.
+   */
+  const addVideoFile = useCallback(
+    async (files: FileList | null) => {
+      const file = files?.[0];
+      if (!file) return;
+      if (busy.current.has("upload")) return;
+
+      const check = acceptVideoFile(file);
+      if (!check.ok) {
+        showToast(check.reason, { tone: "error" });
+        return;
+      }
+      if (!isCloudConfigured) {
+        showToast("影片對稿需要雲端設定，這台裝置目前是本機模式。", { tone: "error" });
+        return;
+      }
+
+      busy.current.add("upload");
+      const existing = roomRef.current;
+      const isNewRoom = !existing;
+      const base = existing ?? emptyRoom(roomCode(), "未命名影片", "video");
+      if (isNewRoom) {
+        setRoom(base);
+        setView(initialView(base));
+      }
+
+      const versionId = crypto.randomUUID();
+      const index = base.versions.length;
+      const label = VIDEO_VERSION_LABELS[index] ?? `改${index}`;
+      // Cancelling has to work from the first frame, not only once the XHR
+      // exists: the cloud room is created first, and that takes a moment on a
+      // slow connection.
+      let abandoned = false;
+      let handleCancel: (() => void) | null = null;
+      const cancel = () => {
+        abandoned = true;
+        handleCancel?.();
+        setVideoUpload({ state: "idle" });
+      };
+      videoCancelRef.current = cancel;
+      setVideoUpload({ state: "preparing", progress: 0, cancel });
+
+      try {
+        const cloudRoom = await cloudRef.current.ensureCloudRoom(base);
+        if (!cloudRoom) throw new Error("cloud-room-failed");
+        if (abandoned) throw new CancelledUpload();
+        // Binding to the cloud swaps the room's identity from the local code to
+        // the cloud UUID (the snapshot that lands next IS the room). Both ids
+        // therefore mean "still the room this upload belongs to".
+        const belongsToThisUpload = new Set([base.id, cloudRoom.roomId]);
+
+        const handle = cloudRef.current.uploadVideo(
+          {
+            roomId: cloudRoom.roomId,
+            versionId,
+            label,
+            sortOrder: index,
+            file: check.file,
+            mime: check.mime,
+            roomTitle: base.title,
+          },
+          (phase, progress) => setVideoUpload({ state: phase, progress, cancel }),
+        );
+        if (!handle) throw new Error("cloud-room-failed");
+        handleCancel = handle.cancel;
+
+        const version = await handle.done;
+        setVideoUpload({ state: "idle" });
+
+        // The user may have walked away while this was in flight. The cut is
+        // safely in the cloud either way; what must NOT happen is yanking them
+        // back into a room they left, or writing over the room they opened next.
+        const stillHere = roomRef.current;
+        if (!stillHere || !belongsToThisUpload.has(stillHere.id)) {
+          showToast(`${label}已經上傳好了，之後打開這個影片就看得到。`, { tone: "success" });
+          return;
+        }
+
+        // Adopt it locally right away so the player can start while the cloud
+        // snapshot catches up; the snapshot then replaces this with the same
+        // row, keyed by the same id.
+        const next: Room = {
+          ...stillHere,
+          mediaType: "video",
+          versions: [...stillHere.versions, version],
+          updatedAt: Date.now(),
+        };
+        setRoom(next);
+        setView((v) => (isNewRoom || !v.versionId ? initialView(next) : v));
+        trackSave(next);
+        showToast(isNewRoom ? "影片好了，開始留意見吧" : `已新增${label}`, { tone: "success" });
+      } catch (err) {
+        if (isUploadCancelled(err) || err instanceof CancelledUpload || abandoned) {
+          setVideoUpload({ state: "idle" });
+          showToast("已取消上傳");
+          // A room created for an upload nobody wants must not keep the local
+          // id tied to an empty cloud room — the next attempt would make a
+          // second one and orphan this.
+          if (isNewRoom) {
+            cloudRef.current.forgetCloudRoom(base.id);
+            if ((roomRef.current?.versions.length ?? 0) === 0) setRoom(null);
+          }
+        } else {
+          const message =
+            err instanceof Error && err.message !== "cloud-room-failed"
+              ? err.message
+              : "影片上傳失敗，請檢查網路後再試一次。";
+          setVideoUpload({ state: "error", message, progress: 0, cancel: () => setVideoUpload({ state: "idle" }) });
+          showToast(message, { tone: "error" });
+        }
+        // The room stays: its cloud room and invite already exist, so keeping
+        // it lets 再試一次 reuse them instead of creating a second empty room.
+        // Leaving from the failure screen is what releases them.
+      } finally {
+        videoCancelRef.current = null;
+        busy.current.delete("upload");
+      }
+    },
+    [showToast, trackSave],
+  );
+
+  /** Picks route by what the room IS, so neither workspace has to check. */
+  const addFiles = useCallback(
+    (files: FileList | null) => {
+      const current = roomRef.current;
+      if (current && roomMediaType(current) === "video") {
+        void addVideoFile(files);
+        return;
+      }
+      void addImageFiles(files);
+    },
+    [addImageFiles, addVideoFile],
+  );
+
+  /**
+   * File one piece of video feedback: same comment, same discussion, same cloud
+   * write as a poster pin — only the coordinates are a time.
+   */
+  const commitVideoComment = useCallback(
+    (anchor: VideoAnchor) => {
+      const current = roomRef.current;
+      if (!current || !guest || !form.body.trim()) return;
+      const versionId = viewRef.current.versionId || current.versions[0]?.id;
+      if (!versionId) return;
+      const at = anchor.kind === "range" ? anchor.startTime : anchor.time;
+      if (!claim(`video:${versionId}:${at.toFixed(2)}:${form.body.trim()}`)) return;
+
+      const pin: CommentPin = {
+        id: uid("c_"),
+        versionId,
+        authorId: guest.id,
+        authorName: guest.name,
+        authorColor: guest.color,
+        // x/y are meaningless for time anchors; the columns keep their defaults
+        // so a future on-screen position has somewhere to go.
+        x: 0.5,
+        y: 0.5,
+        anchor,
+        body: form.body.trim(),
+        suggestion: form.suggestion.trim(),
+        problemType: form.type,
+        priority: form.priority,
+        resolved: false,
+        createdAt: Date.now(),
+      };
+      pushUndo(current);
+      updateRoom((r) => ({ ...r, comments: [...r.comments, pin] }));
+      cloudRef.current.writes.insertComment(pin);
+      setFormState(EMPTY_FORM);
+      showToast("已收到你的意見 ✓", { tone: "success", action: { label: "復原", onClick: undoLast } });
+    },
+    [guest, form, claim, pushUndo, updateRoom, showToast, undoLast],
+  );
+
+  /** The playing version's signed URL expired; mint another for the same path. */
+  const refreshVideoUrl = useCallback(async (): Promise<string | null> => {
+    const current = roomRef.current;
+    const version = current?.versions.find((v) => v.id === viewRef.current.versionId);
+    if (!version?.videoPath) return null;
+    const fresh = await cloudRef.current.refreshVideoUrl(version.videoPath);
+    if (!fresh) return null;
+    // Keep the room object honest too, so a later re-render does not hand the
+    // player the stale URL again.
+    setRoom((r) =>
+      r
+        ? { ...r, versions: r.versions.map((v) => (v.id === version.id ? { ...v, videoUrl: fresh } : v)) }
+        : r,
+    );
+    return fresh;
+  }, []);
 
   /**
    * Feedback tasks are one-shot on mobile: sent or cancelled, the app returns
@@ -749,14 +972,22 @@ export function App() {
       return;
     }
     const openCount = current.comments.filter((c) => !c.resolved).length;
-    const lines = current.comments.map((c) => {
+    const ordered =
+      roomMediaType(current) === "video"
+        ? [...current.comments].sort((a, b) => anchorStart(a) - anchorStart(b) || a.createdAt - b.createdAt)
+        : current.comments;
+    const lines = ordered.map((c) => {
       const status = c.resolved ? "已完成" : "待修改";
       const type = c.problemType ?? "修改";
       const priority = c.priority ?? "一般";
       const versionLabel = current.versions.find((v) => v.id === c.versionId)?.label ?? "";
       const suggestion = c.suggestion ? `\n   建議：${c.suggestion}` : "";
       const number = pinNumber(current, c.id);
-      return `#${String(number).padStart(2, "0")} [${status}] [${priority}] [${type}] ${versionLabel}\n   問題：${c.body}${suggestion}`;
+      // A video note without its timecode cannot be found again; the whole list
+      // is only useful if each line points back at a moment.
+      const at = anchorLabel(c);
+      const where = [versionLabel, at].filter(Boolean).join(" ");
+      return `#${String(number).padStart(2, "0")} [${status}] [${priority}] [${type}] ${where}\n   問題：${c.body}${suggestion}`;
     });
     const summary = `${current.title}\n共 ${current.comments.length} 個修改點｜待修改 ${openCount}｜已完成 ${current.comments.length - openCount}\n\n${lines.join("\n\n")}`;
     try {
@@ -789,6 +1020,11 @@ export function App() {
     setSelectedPinId(id);
     setPreviewStrokeId(null);
   }, []);
+
+  const video: VideoApi | null =
+    room && roomMediaType(room) === "video"
+      ? { upload: videoUpload, commitVideoComment, refreshVideoUrl }
+      : null;
 
   const api: WorkspaceApi | null = room
     ? {
@@ -831,7 +1067,9 @@ export function App() {
         markCoachSeen,
         showToast,
         openShare,
+        ...(video ? { video } : {}),
         goHome: () => {
+          videoCancelRef.current?.();
           clearUndo();
           setRoom(null);
           setSelectedPinId(null);
@@ -869,6 +1107,39 @@ export function App() {
   }
 
   const hasVersions = (room?.versions.length ?? 0) > 0;
+  const uploadingFirstVideo = Boolean(room) && roomMediaType(room!) === "video" && videoUpload.state !== "idle";
+
+  if (!hasVersions && uploadingFirstVideo) {
+    const pct = Math.round((videoUpload.state === "error" ? 0 : videoUpload.progress) * 100);
+    return (
+      <div className="onboard">
+        <div className="onboard-card">
+          <h1 className="onboard-title">影片對稿</h1>
+          <p className="onboard-hint">
+            {videoUpload.state === "uploading"
+              ? `正在上傳影片 ${pct}%`
+              : videoUpload.state === "processing"
+                ? "正在處理影片…"
+                : videoUpload.state === "error"
+                  ? videoUpload.message
+                  : "正在準備影片…"}
+          </p>
+          {videoUpload.state === "uploading" && (
+            <span className="v-upload-bar" aria-hidden>
+              <span className="v-upload-fill" style={{ width: `${pct}%` }} />
+            </span>
+          )}
+          <p className="onboard-note">影片會直接存進雲端，夥伴用連結就能打開，你不用一直開著頁面。</p>
+          {videoUpload.state !== "error" && (
+            <button className="btn btn-block" onClick={videoUpload.cancel}>
+              取消
+            </button>
+          )}
+        </div>
+        <ToastStack toasts={toasts} onDismiss={dismiss} />
+      </div>
+    );
+  }
 
   if (!hasVersions) {
     if (isGuestSession) {
@@ -890,7 +1161,7 @@ export function App() {
             <h1 className="onboard-title">文宣討論區</h1>
             <p className="onboard-hint">
               {!stalled
-                ? "正在載入文宣…"
+                ? "正在載入…"
                 : legacyStalled
                   ? "這是舊版分享連結"
                   : badLink
@@ -932,7 +1203,14 @@ export function App() {
     }
     return (
       <div className="app">
-        <Home recent={recent} isGuestSession={isGuestSession} onFiles={addFiles} onOpen={openRoom} />
+        <Home
+          recent={recent}
+          isGuestSession={isGuestSession}
+          onFiles={addImageFiles}
+          onVideoFiles={addVideoFile}
+          videoAvailable={isCloudConfigured}
+          onOpen={openRoom}
+        />
         <ToastStack toasts={toasts} onDismiss={dismiss} />
       </div>
     );
@@ -940,91 +1218,14 @@ export function App() {
 
   return (
     <>
-      {isMobile ? (
-        <MobileWorkspace
-          api={api!}
-          presence={{
-            status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
-            peers: cloudSession ? cloud.online : peerCount,
-          }}
-        />
-      ) : (
-        <div className="app">
-          <header className="topbar">
-            <button className="brand" onClick={api!.goHome}>
-              <span className="brand-dot" />
-              文宣討論區
-            </button>
-            <input
-              className="title-input"
-              value={room!.title}
-              onChange={(e) => api!.setTitle(e.target.value)}
-              aria-label="文宣名稱"
-            />
-            <div className="topbar-right">
-              {saveState !== "idle" && (
-                <span className={`save-status save-${saveState}`} title="資料自動保存在這台裝置">
-                  {saveState === "saving" ? "儲存中…" : saveState === "saved" ? "已儲存" : "儲存失敗"}
-                </span>
-              )}
-              {cloudSession
-                ? cloud.status !== "local-only" && (
-                    <span
-                      className={`badge badge-${syncToPresence(cloud.status) ?? "closed"}`}
-                      title="資料保存在雲端，主辦方不用保持頁面開著"
-                      onClick={cloud.status === "error" || cloud.status === "offline-pending" ? () => window.location.reload() : undefined}
-                    >
-                      {cloud.online > 1 && cloud.status === "synced"
-                        ? `已同步 · ${cloud.online} 人`
-                        : syncStatusLabel(cloud.status)}
-                    </span>
-                  )
-                : collabStatus && (
-                    <span
-                      className={`badge badge-${collabStatus}`}
-                      title={
-                        collabStatus === "online"
-                          ? "已與其他人同步"
-                          : collabStatus === "connecting" || collabStatus === "waiting"
-                            ? "正在建立同步連線，會自動重試"
-                            : "目前離線，內容已保存在這台裝置"
-                      }
-                    >
-                      {collabStatus === "online"
-                        ? peerCount > 0
-                          ? `已同步 · ${peerCount} 人`
-                          : "已同步"
-                        : collabStatus === "connecting"
-                          ? "正在同步"
-                          : collabStatus === "waiting"
-                            ? "等待連線"
-                            : "目前離線"}
-                    </span>
-                  )}
-              <span className="me" style={{ background: guest.color }} title={guest.name}>
-                {guest.name.slice(0, 1)}
-              </span>
-              <button className="btn btn-primary" onClick={api!.openShare}>
-                分享
-              </button>
-            </div>
-          </header>
-
-          {!coachSeen && room!.comments.length === 0 && (
-            <div className="coach" role="note">
-              <span className="coach-icon">💡</span>
-              <span className="coach-text">
-                第一次用嗎？選「修改點」 → 點文宣上需要調整的位置 → 留下意見。
-              </span>
-              <button className="coach-dismiss" onClick={markCoachSeen}>
-                知道了
-              </button>
-            </div>
-          )}
-
-          <DesktopWorkspace api={api!} />
-        </div>
-      )}
+      <RoomWorkspace
+        api={api!}
+        presence={{
+          status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
+          peers: cloudSession ? cloud.online : peerCount,
+        }}
+        cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
+      />
 
       {shareOpen && room && (
         <ShareSheet

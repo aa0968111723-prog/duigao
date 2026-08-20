@@ -12,6 +12,7 @@
     "make:og-cover": "node scripts/make-og-cover.mjs",
     "test:share-e2e": "node scripts/e2e/share-flow.mjs",
     "test:share-preview": "node scripts/e2e/share-preview.mjs",
+    "test:video": "node scripts/e2e/video-flow.mjs",
     "test:migrations": "node scripts/e2e/migrations.mjs"
   },
   "dependencies": {

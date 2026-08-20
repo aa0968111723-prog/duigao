@@ -8,10 +8,38 @@ import type {
   ReviewType,
   Room,
   Tool,
+  VideoAnchor,
   ViewState,
 } from "../lib/types";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
+
+/**
+ * What a cut is doing on its way into the room. `progress` is a real byte
+ * fraction, never a timer: a bar that moves on its own while the network is
+ * stalled is worse than no bar.
+ */
+export type VideoUploadState =
+  | { state: "idle" }
+  | { state: "preparing"; progress: number; cancel: () => void }
+  | { state: "uploading"; progress: number; cancel: () => void }
+  | { state: "processing"; progress: number; cancel: () => void }
+  | { state: "error"; message: string; progress: number; cancel: () => void };
+
+/**
+ * The video-only half of the workspace contract.
+ *
+ * Present only on video rooms, so the poster workspace neither sees it nor has
+ * to ignore it — the two surfaces stay separate without a single `if (video)`
+ * inside the image code.
+ */
+export type VideoApi = {
+  upload: VideoUploadState;
+  /** File the current draft against a moment or a stretch. */
+  commitVideoComment: (anchor: VideoAnchor) => void;
+  /** Re-sign the playing version's URL after an expiry. */
+  refreshVideoUrl: () => Promise<string | null>;
+};
 
 /** A pending piece of feedback. When it came from a 圈範圍 gesture, `region` is set and x/y are its center. */
 export type PinDraft = { versionId: string; x: number; y: number; region?: AnnotationRegion };
@@ -67,6 +95,8 @@ export type WorkspaceApi = {
   showToast: ShowToast;
   openShare: () => void;
   goHome: () => void;
+  /** Only on video rooms. Absent means "this is a poster room". */
+  video?: VideoApi;
 };
 
 /** Number review items within their own poster version, not across all versions. */

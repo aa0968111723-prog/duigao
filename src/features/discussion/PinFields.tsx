@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { REVIEW_PRIORITIES, REVIEW_TYPES, type ReviewType } from "../lib/types";
-import type { WorkspaceApi } from "./api";
+import { REVIEW_PRIORITIES, REVIEW_TYPES, type ReviewType } from "../../lib/types";
+import type { WorkspaceApi } from "../../components/api";
 
 /** Quick, soft reasons shown first; each maps to a review type behind the scenes. */
 const QUICK_REASONS: { label: string; type: ReviewType }[] = [

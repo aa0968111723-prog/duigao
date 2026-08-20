@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ASSET_BUCKET } from "./assets";
 import { CloudError } from "./errors";
 import { SUPABASE_URL } from "./config";
-import { renderShareThumbnail } from "./shareThumbnail";
+import { renderShareThumbnail, type ThumbnailDecoration } from "./shareThumbnail";
 
 /**
  * Open Graph share previews (PR #21).
@@ -33,6 +33,10 @@ export { renderShareThumbnail } from "./shareThumbnail";
 
 export const DEFAULT_PREVIEW_DESCRIPTION =
   "幫我看一下這張文宣，點需要調整的位置留一句話就可以，不用改原稿。";
+
+/** A video is reviewed in time, so its card asks for the thing time affords. */
+export const VIDEO_PREVIEW_DESCRIPTION =
+  "幫我看一下這支影片，在需要調整的時間點留一句話就可以。";
 
 export type SharePreview = {
   id: string;
@@ -91,18 +95,39 @@ export function previewThumbnailUrl(path: string, updatedAt: string): string {
 
 /* ------------------------------------------------------------ repository -- */
 
-/** Fresh signed URL for a version's ORIGINAL image, straight from the row. */
-async function versionImageUrl(supabase: SupabaseClient, roomId: string, versionId: string): Promise<string> {
+/**
+ * Fresh signed URL for a version's still image, straight from the row.
+ *
+ * For a video version that image is the captured poster frame — which is why
+ * video rooms get real Open Graph cards without this module, the edge function
+ * or the anonymous read surface changing at all. Also returns the running time
+ * when there is one, so the card can wear it.
+ */
+async function versionImageUrl(
+  supabase: SupabaseClient,
+  roomId: string,
+  versionId: string,
+): Promise<{ url: string; durationSeconds: number | null }> {
   const { data, error } = await supabase
     .from("versions")
-    .select("image_path")
+    .select("image_path, duration_seconds")
     .eq("room_id", roomId)
     .eq("id", versionId)
     .single();
   if (error || !data?.image_path) throw new CloudError(error?.message ?? "version not found", "preview");
   const signed = await supabase.storage.from(ASSET_BUCKET).createSignedUrl(data.image_path as string, 300);
   if (signed.error || !signed.data) throw new CloudError(signed.error?.message ?? "sign failed", "preview");
-  return signed.data.signedUrl;
+  const duration = (data as { duration_seconds?: number | null }).duration_seconds;
+  return { url: signed.data.signedUrl, durationSeconds: typeof duration === "number" ? duration : null };
+}
+
+/** mm:ss for the card corner. Local to avoid a UI import in the cloud layer. */
+function cardDuration(seconds: number | null): string | undefined {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return undefined;
+  const whole = Math.round(seconds);
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 /** The room's live preview, if it already has one. Members only (RLS). */
@@ -145,8 +170,9 @@ async function writeThumbnail(
   previewId: string,
   imageUrl: string,
   previousPath: string | null,
+  decoration?: ThumbnailDecoration,
 ): Promise<string> {
-  const { blob, mime } = await renderShareThumbnail(imageUrl);
+  const { blob, mime } = await renderShareThumbnail(imageUrl, decoration);
   const ext = mime === "image/webp" ? "webp" : "jpg";
   const path = `${previewId}/cover.${ext}`;
   const { error } = await supabase.storage
@@ -163,6 +189,8 @@ export type EnsurePreviewInput = {
   roomId: string;
   versionId: string;
   title: string;
+  /** "video" swaps the card's sentence and puts a play glyph on the frame. */
+  mediaType?: "image" | "video";
   /** Explicit override; otherwise an existing row's choice wins, else on. */
   showThumbnail?: boolean;
   /** Re-render the thumbnail even when nothing about the source changed. */
@@ -185,9 +213,10 @@ export async function ensureRoomPreview(
   const title = input.title.trim() || "文宣討論區";
   const previewId = existing?.id ?? crypto.randomUUID();
 
+  const isVideo = input.mediaType === "video";
   const base = {
     title,
-    description: DEFAULT_PREVIEW_DESCRIPTION,
+    description: isVideo ? VIDEO_PREVIEW_DESCRIPTION : DEFAULT_PREVIEW_DESCRIPTION,
     show_thumbnail: showThumbnail,
   };
 
@@ -211,8 +240,14 @@ export async function ensureRoomPreview(
   // a new version, a first share, or an explicit refresh re-renders.
   const stale = !thumbnailPath || existing?.versionId !== input.versionId || Boolean(input.force);
   if (showThumbnail && stale) {
-    const imageUrl = await versionImageUrl(supabase, input.roomId, input.versionId);
-    thumbnailPath = await writeThumbnail(supabase, previewId, imageUrl, thumbnailPath);
+    const source = await versionImageUrl(supabase, input.roomId, input.versionId);
+    thumbnailPath = await writeThumbnail(
+      supabase,
+      previewId,
+      source.url,
+      thumbnailPath,
+      isVideo ? { play: true, durationLabel: cardDuration(source.durationSeconds) } : undefined,
+    );
   } else if (!showThumbnail && thumbnailPath) {
     await revokeThumbnail(supabase, thumbnailPath);
     thumbnailPath = null;

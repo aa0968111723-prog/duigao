@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatMessage, CommentPin, CommentReply, Guest, Point, Room, Stroke, Version } from "../lib/types";
+import { roomMediaType } from "../lib/types";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
 import {
@@ -9,8 +10,10 @@ import {
   uploadAsset,
   versionPath,
 } from "./assets";
+import { signedVideoUrl } from "./videoAssets";
 import {
   commentFromRow,
+  mediaTypeOf,
   messageFromRow,
   prefFromRow,
   replyFromRow,
@@ -39,6 +42,60 @@ export type CloudProposal = {
 export type CloudSnapshot = { room: Room; proposals: CloudProposal[] };
 
 const uuid = () => crypto.randomUUID();
+
+/**
+ * The anchor half of a comment row.
+ *
+ * Image feedback keeps writing exactly what it always wrote (its anchor type is
+ * derived from whether it circled an area), so nothing about the existing
+ * comment path changes shape.
+ */
+function anchorColumns(pin: CommentPin): Record<string, unknown> {
+  if (pin.anchor?.kind === "range") {
+    return {
+      anchor_type: "video-range",
+      time_seconds: pin.anchor.startTime,
+      end_time_seconds: pin.anchor.endTime,
+    };
+  }
+  if (pin.anchor?.kind === "point") {
+    return { anchor_type: "video-point", time_seconds: pin.anchor.time, end_time_seconds: null };
+  }
+  return {
+    anchor_type: pin.region ? "image-region" : "image-point",
+    time_seconds: null,
+    end_time_seconds: null,
+  };
+}
+
+/**
+ * A stored version becomes a playable/viewable one.
+ *
+ * Signing is best-effort per asset: a video whose poster is missing still
+ * plays, and a poster whose signing failed still leaves a usable version. The
+ * alternative — one failed signature taking down the whole room load — is the
+ * behaviour this shape exists to avoid.
+ */
+async function versionFromRow(supabase: SupabaseClient, row: VersionRow): Promise<Version> {
+  const poster = row.image_path ? await signedUrl(supabase, row.image_path).catch(() => "") : "";
+  if (row.media_kind !== "video") {
+    return { id: row.id, label: row.label, imageDataUrl: poster, kind: "image" };
+  }
+  const videoUrl = row.video_path ? await signedVideoUrl(supabase, row.video_path).catch(() => "") : "";
+  return {
+    id: row.id,
+    label: row.label,
+    imageDataUrl: poster,
+    kind: "video",
+    videoUrl,
+    videoPath: row.video_path ?? undefined,
+    duration: row.duration_seconds ?? undefined,
+    mimeType: row.mime_type ?? undefined,
+    fileSize: row.file_size ?? undefined,
+    width: row.width ?? undefined,
+    height: row.height ?? undefined,
+  };
+}
 
 // ---- assets embedded in a proposal payload ---------------------------------
 // data: URLs are uploaded to Storage and replaced with `asset:<path>` markers so
@@ -120,12 +177,43 @@ export async function createRoom(
   });
   if (rpcErr) throw new CloudError(rpcErr.message, "create");
 
+  // The RPC predates media types and only ever creates image rooms, so a video
+  // room states what it is right after. Failing here would leave a room that
+  // renders with the wrong workspace, so it is checked rather than ignored.
+  const mediaType = roomMediaType(local.room);
+  if (mediaType === "video") {
+    const { error } = await supabase.from("rooms").update({ media_type: "video" }).eq("id", roomId);
+    if (error) throw new CloudError(error.message, "create");
+  }
+
   const versionIdMap = new Map<string, string>();
   const versionRows = [];
   for (let i = 0; i < local.room.versions.length; i++) {
     const v = local.room.versions[i];
     const newId = uuid();
     versionIdMap.set(v.id, newId);
+    if (v.kind === "video") {
+      // Video versions are uploaded straight to Storage when they are added
+      // (a cut never travels as a data URL), so migrating one is a row copy.
+      // Their id therefore must NOT be remapped — the bytes already sit under
+      // the old id's path, and rewriting the id would orphan them.
+      versionIdMap.set(v.id, v.id);
+      versionRows.push({
+        id: v.id,
+        room_id: roomId,
+        label: v.label,
+        sort_order: i,
+        media_kind: "video",
+        image_path: null,
+        video_path: v.videoPath ?? null,
+        mime_type: v.mimeType ?? null,
+        duration_seconds: v.duration ?? null,
+        file_size: v.fileSize ?? null,
+        width: v.width ?? null,
+        height: v.height ?? null,
+      });
+      continue;
+    }
     const { path, mime } = await uploadVersion(supabase, roomId, newId, v.imageDataUrl);
     versionRows.push({ id: newId, room_id: roomId, label: v.label, sort_order: i, image_path: path, mime_type: mime });
   }
@@ -145,6 +233,7 @@ export async function createRoom(
     x: c.x,
     y: c.y,
     region: c.region ?? null,
+    ...anchorColumns(c),
     body: c.body,
     suggestion: c.suggestion ?? "",
     problem_type: c.problemType ?? null,
@@ -218,16 +307,13 @@ export async function loadRoom(supabase: SupabaseClient, roomId: string): Promis
   const roomRow = roomRes.data as RoomRow;
 
   const versions: Version[] = await Promise.all(
-    ((versionsRes.data as VersionRow[] | null) ?? []).map(async (row) => ({
-      id: row.id,
-      label: row.label,
-      imageDataUrl: await signedUrl(supabase, row.image_path),
-    })),
+    ((versionsRes.data as VersionRow[] | null) ?? []).map((row) => versionFromRow(supabase, row)),
   );
 
   const room: Room = {
     id: roomRow.id,
     title: roomRow.title,
+    mediaType: mediaTypeOf(roomRow.media_type),
     versions,
     comments: ((commentsRes.data as CommentRow[] | null) ?? []).map(commentFromRow),
     strokes: ((strokesRes.data as StrokeRow[] | null) ?? []).map(strokeFromRow),
@@ -268,6 +354,7 @@ export async function insertComment(supabase: SupabaseClient, roomId: string, pi
     x: pin.x,
     y: pin.y,
     region: pin.region ?? null,
+    ...anchorColumns(pin),
     body: pin.body,
     suggestion: pin.suggestion ?? "",
     problem_type: pin.problemType ?? null,
@@ -325,6 +412,52 @@ export async function addVersion(
     .insert({ id, room_id: roomId, label, sort_order: sortOrder, image_path: path, mime_type: mime });
   if (error) throw new CloudError(error.message, "version");
   return { id, label, imageDataUrl: await signedUrl(supabase, path) };
+}
+
+/**
+ * Insert the row for a video version whose bytes are already in Storage.
+ *
+ * Called after the upload finishes, so the row and the object can never
+ * disagree about whether the video exists. The poster is optional on purpose:
+ * a frame capture that failed costs a cover, not the version.
+ */
+export async function addVideoVersion(
+  supabase: SupabaseClient,
+  roomId: string,
+  input: {
+    id: string;
+    label: string;
+    sortOrder: number;
+    videoPath: string;
+    posterPath: string | null;
+    mimeType: string;
+    duration: number | null;
+    fileSize: number | null;
+    width: number | null;
+    height: number | null;
+  },
+): Promise<void> {
+  const { error } = await supabase.from("versions").insert({
+    id: input.id,
+    room_id: roomId,
+    label: input.label,
+    sort_order: input.sortOrder,
+    media_kind: "video",
+    image_path: input.posterPath,
+    video_path: input.videoPath,
+    mime_type: input.mimeType,
+    duration_seconds: input.duration && input.duration > 0 ? input.duration : null,
+    file_size: input.fileSize,
+    width: input.width,
+    height: input.height,
+  });
+  if (error) throw new CloudError(error.message, "version");
+}
+
+/** Mark a room as a video room. Used when a video room is created in the cloud. */
+export async function setRoomMediaType(supabase: SupabaseClient, roomId: string, mediaType: "image" | "video") {
+  const { error } = await supabase.from("rooms").update({ media_type: mediaType }).eq("id", roomId);
+  if (error) throw new CloudError(error.message, "room");
 }
 
 export async function upsertProposal(
