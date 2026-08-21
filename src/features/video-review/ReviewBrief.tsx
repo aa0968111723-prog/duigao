@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ModalSheet } from "../../components/BottomSheet";
 import {
   MAX_BRIEF_QUESTIONS,
   VIDEO_CATEGORIES,
@@ -18,6 +19,11 @@ import type { BriefInput } from "../../cloud/videoReview";
  * Per VERSION, never per room. 初剪 and 二剪 want different things, and a brief
  * that silently carries over is worse than no brief — it sends people hunting
  * for a problem that was fixed two cuts ago.
+ *
+ * Only the one-line summary lives inline. Reading the whole thing, and writing
+ * it, happen in a sheet: the strip between the timeline and the discussion sheet
+ * is a few dozen pixels on a phone, and a form that tall inside it ends up with
+ * its own save button underneath the drag sheet — unreachable.
  */
 
 type Props = {
@@ -104,6 +110,7 @@ export function ReviewBrief({ brief, canEdit, online, onSave }: Props) {
 
   if (editing) {
     return (
+      <ModalSheet title="作者說明" onClose={cancelEdit} dismissible={false}>
       <section className="v-brief is-editing" aria-label="編輯作者說明">
         <label className="v-brief-field">
           <span>這一版說明</span>
@@ -160,6 +167,7 @@ export function ReviewBrief({ brief, canEdit, online, onSave }: Props) {
         </div>
         {!online && <p className="v-brief-note">這個房間還沒連上雲端，作者說明暫時存不了。</p>}
       </section>
+      </ModalSheet>
     );
   }
 
@@ -189,6 +197,7 @@ export function ReviewBrief({ brief, canEdit, online, onSave }: Props) {
       )}
 
       {open && (
+        <ModalSheet title="作者說明" onClose={() => setOpen(false)}>
         <div className="v-brief-body-open">
           {brief?.body.trim() && <p className="v-brief-text">{brief.body}</p>}
 
@@ -221,6 +230,7 @@ export function ReviewBrief({ brief, canEdit, online, onSave }: Props) {
             </div>
           )}
         </div>
+        </ModalSheet>
       )}
     </section>
   );
