@@ -952,11 +952,28 @@ try {
     (await A.textContent(".v-brief-summary")) ?? "",
   );
 
-  // ---- S2: ＋在這裡留言（自動抓時間、自動暫停）---------------------------
-  // 6s of a 12s fixture stands in for the spec's 00:37 of a minute-long cut.
+  // The end-of-cut question fires once per version per visit. Spend it here, on
+  // purpose, rather than letting it appear over whichever interaction happens to
+  // be in flight when playback crosses 92%.
   await A.evaluate(() => {
     const v = document.querySelector("video.v-video");
-    if (v) { v.currentTime = 6; v.play?.(); }
+    if (v) { v.currentTime = Math.max(0, (v.duration || 12) - 0.4); v.play?.(); }
+  });
+  await A.waitForTimeout(1800);
+  check("S7a. 播到尾端會主動問「看完了，這版你覺得？」", (await A.locator(".v-verdict").count()) === 1);
+  await dismissVerdict(A);
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.pause?.();
+  });
+
+  // ---- S2: ＋在這裡留言（自動抓時間、自動暫停）---------------------------
+  // 6s of a 12s fixture stands in for the spec's 00:37 of a minute-long cut.
+  // Left paused: the button reads the playhead either way, and a running clock
+  // would make every assertion below a moving target.
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 6;
   });
   await A.waitForTimeout(400);
   check("S2. 播放器旁有明確的「＋在這裡留言」", await A.isVisible(".v-capture-main"));
@@ -966,7 +983,7 @@ try {
   const composerTitle = (await A.textContent(".m-modal-title")) ?? "";
   check("S2. 自動帶入目前時間，不必手打時間碼", /0:0[4-9] 這一刻/.test(composerTitle), composerTitle);
   check(
-    "S2. 按下之後影片會暫停",
+    "S2. 打開 composer 時影片是停住的",
     await A.evaluate(() => document.querySelector("video.v-video")?.paused === true),
   );
   await A.click(".v-compose-cats .v-tag:has-text('節奏')");
@@ -994,7 +1011,10 @@ try {
   await A.waitForTimeout(600);
   check("S3. 一鍵反應寫進 video_reactions", rows.video_reactions.length === 1, JSON.stringify(rows.video_reactions.map((r) => r.reaction_type)));
   check("S3. 反應記在按下去的時間", Math.abs((rows.video_reactions[0]?.time_seconds ?? 0) - 3) < 2.5, `${rows.video_reactions[0]?.time_seconds}`);
-  check("S3. 反應不會強制暫停影片", beforeReact === await A.evaluate(() => document.querySelector("video.v-video")?.paused));
+  check(
+    "S3. 反應不會改變播放狀態（不強制暫停）",
+    beforeReact === (await A.evaluate(() => document.querySelector("video.v-video")?.paused)),
+  );
   const toastText = (await A.textContent(".toast, .m-toast").catch(() => null)) ?? "";
   check("S3. 有輕量 toast 說明記在哪一秒", /已記在\s*\d+:\d{2}/.test(toastText), toastText.slice(0, 40));
 
