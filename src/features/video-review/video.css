@@ -213,6 +213,12 @@
 .v-marker {
   position: absolute;
   top: 50%;
+  /* The 32px button is centred on its time, so a marker at 0:00 sticks 16px
+     past the track's left edge — and `.m-app { overflow: hidden }` cuts that
+     half off, leaving the very common "note at the opening frame" untappable
+     (measured x: -6 at every phone width). Clamping the centre keeps the whole
+     target on screen; the dot inside still reads as "the start". */
+  left: clamp(16px, var(--marker-left, 0%), calc(100% - 16px));
   transform: translate(-50%, -50%);
   width: 32px;
   height: 32px;
@@ -236,7 +242,10 @@
 
 .v-marker-range {
   transform: translateY(-50%);
-  left: 0;
+  /* A range starts where it starts and carries its own width, so it needs the
+     raw position, not the point marker's centre-clamp. (This used to read
+     `left: 0` and never applied at all — the inline style always won.) */
+  left: var(--marker-left, 0%);
   justify-content: flex-start;
   border-radius: 999px;
   min-width: 18px;
@@ -455,8 +464,12 @@
     font-size: 12px;
   }
 
+  /* Narrower, but never below the 44px this project sets as its own touch
+     target (--tap). Squeezing the row is a layout problem to solve with
+     spacing, not by handing someone a button their finger misses. */
   .v-ctl {
-    min-width: 36px;
+    min-width: var(--tap, 44px);
+    padding-inline: 6px;
     font-size: 13px;
   }
 }
@@ -622,7 +635,15 @@
 }
 
 /* While the composer is open the video shrinks rather than hides: seeing the
-   moment you are describing is the point of freezing it. */
+   moment you are describing is the point of freezing it.
+
+   `max-height` alone is not enough. On a landscape phone the frame's own
+   height already comes from a `min(46vh, …)` calculation, and once the
+   composer takes the remaining space the flex layout resolves that to 0 —
+   measured at 844x390: .v-frame was 828x0, i.e. the video vanished exactly
+   when the person was trying to describe what they saw in it. A floor keeps
+   it a video. */
 .v-app:has(.m-modal) .v-frame {
   max-height: 30vh;
+  min-height: 96px;
 }
