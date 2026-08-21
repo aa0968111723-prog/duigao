@@ -953,16 +953,18 @@ try {
   );
 
   // ---- S2: ＋在這裡留言（自動抓時間、自動暫停）---------------------------
+  // 6s of a 12s fixture stands in for the spec's 00:37 of a minute-long cut.
   await A.evaluate(() => {
     const v = document.querySelector("video.v-video");
-    if (v) { v.currentTime = 37; v.play?.(); }
+    if (v) { v.currentTime = 6; v.play?.(); }
   });
   await A.waitForTimeout(400);
   check("S2. 播放器旁有明確的「＋在這裡留言」", await A.isVisible(".v-capture-main"));
+  await dismissVerdict(A);
   await A.click(".v-capture-main");
   await A.waitForSelector(".m-modal-title", { timeout: 10000 });
   const composerTitle = (await A.textContent(".m-modal-title")) ?? "";
-  check("S2. 自動帶入目前時間，不必手打時間碼", /0:3\d 這一刻/.test(composerTitle), composerTitle);
+  check("S2. 自動帶入目前時間，不必手打時間碼", /0:0[4-9] 這一刻/.test(composerTitle), composerTitle);
   check(
     "S2. 按下之後影片會暫停",
     await A.evaluate(() => document.querySelector("video.v-video")?.paused === true),
@@ -974,23 +976,24 @@ try {
   await A.click("button:has-text('送出')");
   await A.waitForTimeout(800);
   const pointComment = rows.comments.filter((c) => c.anchor_type === "video-point").slice(-1)[0];
-  check("S2. 存成 video-point，時間在 37 秒附近", Boolean(pointComment) && Math.abs(pointComment.time_seconds - 37) < 3, `${pointComment?.time_seconds}`);
+  check("S2. 存成 video-point，時間就是按下去的那一刻", Boolean(pointComment) && Math.abs(pointComment.time_seconds - 6) < 2.5, `${pointComment?.time_seconds}`);
   check("S2. 分類是可選的，選了就存起來", pointComment?.problem_type === "節奏", String(pointComment?.problem_type));
   check("S2. 新回饋的預設狀態是待處理", pointComment?.review_status === "open", String(pointComment?.review_status));
 
   // ---- S3: 快速反應 ------------------------------------------------------
   await A.evaluate(() => {
     const v = document.querySelector("video.v-video");
-    if (v) v.currentTime = 21;
+    if (v) v.currentTime = 3;
   });
   await A.waitForTimeout(300);
+  await dismissVerdict(A);
   await A.click(".v-capture-toggle");
   await A.waitForSelector(".v-reactions", { timeout: 10000 });
   const beforeReact = await A.evaluate(() => document.querySelector("video.v-video")?.paused);
   await A.click(".v-reaction:has-text('太快')");
   await A.waitForTimeout(600);
   check("S3. 一鍵反應寫進 video_reactions", rows.video_reactions.length === 1, JSON.stringify(rows.video_reactions.map((r) => r.reaction_type)));
-  check("S3. 反應記在按下去的時間", Math.abs((rows.video_reactions[0]?.time_seconds ?? 0) - 21) < 3, `${rows.video_reactions[0]?.time_seconds}`);
+  check("S3. 反應記在按下去的時間", Math.abs((rows.video_reactions[0]?.time_seconds ?? 0) - 3) < 2.5, `${rows.video_reactions[0]?.time_seconds}`);
   check("S3. 反應不會強制暫停影片", beforeReact === await A.evaluate(() => document.querySelector("video.v-video")?.paused));
   const toastText = (await A.textContent(".toast, .m-toast").catch(() => null)) ?? "";
   check("S3. 有輕量 toast 說明記在哪一秒", /已記在\s*\d+:\d{2}/.test(toastText), toastText.slice(0, 40));
@@ -1007,22 +1010,23 @@ try {
   // ---- S4: 時間區間回饋（從時間點升級）-----------------------------------
   await A.evaluate(() => {
     const v = document.querySelector("video.v-video");
-    if (v) v.currentTime = 37;
+    if (v) v.currentTime = 6;
   });
   await A.waitForTimeout(300);
+  await dismissVerdict(A);
   await A.click(".v-capture-main");
   await A.waitForSelector(".v-compose-range", { timeout: 10000 });
   await A.click(".v-compose-range");
   await A.waitForSelector(".v-rangebar", { timeout: 10000 });
   await A.evaluate(() => {
     const v = document.querySelector("video.v-video");
-    if (v) v.currentTime = 43;
+    if (v) v.currentTime = 9;
   });
   await A.waitForTimeout(400);
   await A.click("button:has-text('設為結束')");
   await A.waitForSelector(".m-modal-title", { timeout: 10000 });
   const rangeTitle = (await A.textContent(".m-modal-title")) ?? "";
-  check("S4. 「改成一段」做出 00:37–00:43 這種區間", /0:3\d–0:4\d 這一段/.test(rangeTitle), rangeTitle);
+  check("S4. 「改成一段」做出一個真的區間", /0:0\d–0:0\d 這一段/.test(rangeTitle), rangeTitle);
   await A.fill("textarea", "這整段可以再快一點").catch(() => undefined);
   await A.click("button:has-text('送出')");
   await A.waitForTimeout(800);
@@ -1059,6 +1063,7 @@ try {
   // ---- S7: 看完表態 ------------------------------------------------------
   await A.keyboard.press("Escape");
   await A.waitForTimeout(300);
+  await dismissVerdict(A);
   await A.click(".m-tool:has-text('更多')");
   await A.waitForSelector(".m-modal-body", { timeout: 10000 });
   await A.click("button:has-text('看完了，給個看法')");
@@ -1068,6 +1073,7 @@ try {
   check("S7. verdict 寫進 version_verdicts", rows.version_verdicts.length === 1, JSON.stringify(rows.version_verdicts.map((v) => v.verdict)));
   check("S7. 存的是三種語義之一", rows.version_verdicts[0]?.verdict === "minor", String(rows.version_verdicts[0]?.verdict));
   // 改變心意：仍然只有一列。
+  await dismissVerdict(A);
   await A.click(".m-tool:has-text('更多')");
   await A.waitForSelector(".m-modal-body", { timeout: 10000 });
   await A.click("button:has-text('改變我的看法')");
@@ -1078,6 +1084,7 @@ try {
     `${rows.version_verdicts.length} 列 / ${rows.version_verdicts[0]?.verdict}`);
 
   // ---- S8: 審片摘要 ------------------------------------------------------
+  await dismissVerdict(A);
   await A.click(".m-tool:has-text('更多')");
   await A.waitForSelector(".m-modal-body", { timeout: 10000 });
   await A.click("button:has-text('審片摘要')");
