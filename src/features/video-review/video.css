@@ -860,7 +860,15 @@
 .v-summary-empty { margin: 0; font-size: 14px; color: var(--ink-faint); line-height: 1.7; }
 
 /* ---------- composer 內的分類 ---------- */
-.v-compose-cats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.v-compose-cats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.v-compose-cats-label { font-size: 12px; color: var(--ink-faint); margin-right: 2px; }
+.v-compose-cats .v-tag { min-height: 32px; padding: 4px 12px; font-size: 12px; }
 .v-compose-range { display: inline-block; margin-bottom: 10px; }
 
 /* Desktop: the reaction grid has room to be one row. */

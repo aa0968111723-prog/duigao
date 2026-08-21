@@ -89,12 +89,19 @@ export function VideoCommentComposer({
         </button>
       )}
 
+      <PinFields api={api} autoFocus />
+
       {/*
-        Categories are optional on purpose. Making someone classify before they
-        may speak is how you turn "the music is too loud" into silence — so
-        nothing here is required, and 送出 never checks it.
+        Categories come AFTER the sentence, and are optional.
+
+        Above it they were the first thing in the sheet — six chips between the
+        person and the text field, which on a phone pushed the field itself off
+        the bottom. Making someone classify before they may speak is how you turn
+        "the music is too loud" into silence. Nothing here is required and 送出
+        never checks it.
       */}
       <div className="v-compose-cats" role="group" aria-label="這則回饋屬於（可略過）">
+        <span className="v-compose-cats-label">屬於（可略過）</span>
         {VIDEO_CATEGORIES.map((cat) => (
           <button
             key={cat}
@@ -107,8 +114,6 @@ export function VideoCommentComposer({
           </button>
         ))}
       </div>
-
-      <PinFields api={api} autoFocus />
     </ModalSheet>
   );
 }
