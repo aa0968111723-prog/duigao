@@ -59,7 +59,6 @@ export function uploadVideoVersion(
     const objectUrl = URL.createObjectURL(input.file);
     const ext = extForVideoMime(input.mime);
     const path = videoPath(input.roomId, input.versionId, ext);
-    let videoLanded = false;
     let rowLanded = false;
     let posterPath: string | null = null;
 
@@ -85,7 +84,6 @@ export function uploadVideoVersion(
       );
       cancelUpload = handle.cancel;
       await handle.done;
-      videoLanded = true;
       cancelUpload = null;
 
       onPhase("processing", 1);
@@ -140,7 +138,16 @@ export function uploadVideoVersion(
       // to the app and would sit in the bucket forever. Once the row exists the
       // opposite is true — deleting the object would leave a version pointing
       // at nothing — so cleanup stops the moment the row lands.
-      if (videoLanded && !rowLanded) {
+      //
+      // The condition deliberately is NOT `videoLanded`. Aborting an XHR only
+      // stops the client waiting for the response; Storage may already hold the
+      // complete object, and on a fast link (or a small file) it usually does.
+      // Keying cleanup on "we saw the 200" leaves exactly that window leaking —
+      // it is why cancelling mid-upload could still strand an object, which is
+      // reproducible on a CI runner even when a local machine never hits it.
+      // The path is deterministic and the row does not exist, so deleting is
+      // safe whether or not the bytes ever arrived.
+      if (!rowLanded) {
         await removeQuietly(supabase, [path, ...(posterPath ? [posterPath] : [])]);
       }
       throw err;
