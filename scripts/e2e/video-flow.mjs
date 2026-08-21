@@ -68,6 +68,24 @@ try {
  * intended product behaviour, and these legs scrub near the end constantly — so
  * anything that drives the workspace has to be willing to wave it away first.
  */
+/**
+ * Drop the discussion back to its peek height.
+ *
+ * The stage — player, timeline, capture bar — sits behind the sheet whenever it
+ * is dragged up, which is true of the video itself and always has been. A person
+ * who wants to leave feedback taps 看 (or drags the sheet down) first; so does
+ * this. 修改 in the toolbar stays available at any snap for the ones who do not.
+ */
+async function collapseSheet(page) {
+  const expanded = await page.evaluate(() =>
+    Boolean(document.querySelector(".m-sheet-half, .m-sheet-full")),
+  );
+  if (expanded) {
+    await page.click(".m-toolbar .m-tool:has-text('看')").catch(() => undefined);
+    await page.waitForTimeout(350);
+  }
+}
+
 async function dismissVerdict(page) {
   if (await page.locator(".v-verdict").count()) {
     await page.keyboard.press("Escape").catch(() => undefined);
@@ -976,8 +994,10 @@ try {
     if (v) v.currentTime = 6;
   });
   await A.waitForTimeout(400);
+  await collapseSheet(A);
   check("S2. 播放器旁有明確的「＋在這裡留言」", await A.isVisible(".v-capture-main"));
   await dismissVerdict(A);
+  await collapseSheet(A);
   await A.click(".v-capture-main");
   await A.waitForSelector(".m-modal-title", { timeout: 10000 });
   const composerTitle = (await A.textContent(".m-modal-title")) ?? "";
@@ -1004,6 +1024,7 @@ try {
   });
   await A.waitForTimeout(300);
   await dismissVerdict(A);
+  await collapseSheet(A);
   await A.click(".v-capture-toggle");
   await A.waitForSelector(".v-reactions", { timeout: 10000 });
   const beforeReact = await A.evaluate(() => document.querySelector("video.v-video")?.paused);
@@ -1034,6 +1055,7 @@ try {
   });
   await A.waitForTimeout(300);
   await dismissVerdict(A);
+  await collapseSheet(A);
   await A.click(".v-capture-main");
   await A.waitForSelector(".v-compose-range", { timeout: 10000 });
   await A.click(".v-compose-range");
@@ -1137,6 +1159,7 @@ try {
   await S.waitForTimeout(1500);
   const partnerBrief = (await S.textContent(".v-brief").catch(() => null)) ?? "";
   check("S10. 夥伴一進來就看得到作者說明", partnerBrief.includes("作者說明"), partnerBrief.slice(0, 40));
+  await collapseSheet(S);
   check("S10. 夥伴看得到「＋在這裡留言」", await S.isVisible(".v-capture-main"));
   check("S10. 夥伴看不到作者的四態狀態列", (await S.locator(".v-status").count()) === 0);
   check("S10. 夥伴看不到「審片摘要」入口", !(await S.isVisible("button:has-text('審片摘要')").catch(() => false)));
