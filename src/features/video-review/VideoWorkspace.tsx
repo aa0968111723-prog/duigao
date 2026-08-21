@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CommentPin, VideoAnchor, Version } from "../../lib/types";
+import {
+  REACTION_LABEL,
+  type CommentPin,
+  type ReactionType,
+  type Verdict,
+  type VideoAnchor,
+  type VideoCategory,
+  type Version,
+} from "../../lib/types";
 import type { CollabStatus } from "../../lib/peer";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useViewport } from "../../hooks/useViewport";
@@ -7,7 +15,12 @@ import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSh
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
 import { pinNumber, type WorkspaceApi } from "../../components/api";
 import { VideoPlayer, type PlayerHandle } from "./VideoPlayer";
-import { VideoTimeline, type TimelineMarker } from "./VideoTimeline";
+import { VideoTimeline, type ReactionCluster, type TimelineMarker } from "./VideoTimeline";
+import { ReviewBrief } from "./ReviewBrief";
+import { QuickReactions } from "./QuickReactions";
+import { VerdictSheet } from "./VerdictSheet";
+import { ReviewSummary } from "./ReviewSummary";
+import { summarize } from "./summary";
 import { VideoDiscussion, videoCommentsOf, sortVideoComments } from "./VideoDiscussion";
 import { VideoCommentComposer } from "./VideoCommentComposer";
 import { VideoVersionSelector } from "./VideoVersionSelector";
@@ -54,6 +67,27 @@ export function VideoWorkspace({ api, presence }: Props) {
    * outgoing <video> is still mounted, so a seek would land on the wrong file.
    */
   const [startAt, setStartAt] = useState<number | undefined>(undefined);
+  /* -------------------------------------------- 影片對稿 2.0 state (#32) -- */
+  /** Optional bucket for the draft. Null means "did not say", which is fine. */
+  const [draftCategory, setDraftCategory] = useState<VideoCategory | null>(null);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [verdictOpen, setVerdictOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  /**
+   * The end-of-video prompt is offered ONCE per cut per visit. Asking again
+   * every time somebody scrubs back past the 90% mark would turn a light
+   * question into nagging.
+   */
+  const verdictAskedRef = useRef<string | null>(null);
+  /**
+   * Whether the person is in the middle of something.
+   *
+   * The end-of-video question must never interrupt: reaching 92% while someone
+   * is typing feedback, picking a range, or reading another sheet is not an
+   * invitation to throw a scrim over their work. Held in a ref so the frame
+   * listener can read it without re-subscribing on every keystroke.
+   */
+  const busyRef = useRef(false);
   /**
    * The live clock, without re-rendering to hold it.
    *
@@ -89,6 +123,8 @@ export function VideoWorkspace({ api, presence }: Props) {
 
   // While picking the end of a range, the live end has to follow the video —
   // that IS the interaction. Everything else reads the ref.
+  busyRef.current = Boolean(draft) || rangePick !== null || actionOpen || more || summaryOpen;
+
   const showsClock = actionOpen || rangePick !== null;
   const showsClockRef = useRef(showsClock);
   showsClockRef.current = showsClock;
@@ -107,6 +143,76 @@ export function VideoWorkspace({ api, presence }: Props) {
   const videoComments = useMemo(
     () => (version ? videoCommentsOf(room, version.id) : []),
     [room, version],
+  );
+
+  /* ------------------------------------------------- 影片對稿 2.0 (#32) -- */
+
+  const review = api.video?.review;
+  const canManageReview = api.video?.canManageReview ?? false;
+  const reviewOnline = api.video?.reviewOnline ?? false;
+  const myUserId = api.video?.myUserId ?? "";
+
+  const brief = useMemo(
+    () => review?.briefs.find((b) => b.versionId === version?.id) ?? null,
+    [review, version],
+  );
+
+  const versionReactions = useMemo(
+    () => review?.reactions.filter((r) => r.versionId === version?.id) ?? [],
+    [review, version],
+  );
+
+  const myVerdict = useMemo(
+    () => review?.verdicts.find((v) => v.versionId === version?.id && v.userId === myUserId) ?? null,
+    [review, version, myUserId],
+  );
+
+  /**
+   * Merge reactions that land within a couple of seconds of each other into one
+   * mark. Same window the database dedupes a single person's double-tap with,
+   * so what the timeline shows and what the row-level guard enforces agree.
+   */
+  const reactionClusters: ReactionCluster[] = useMemo(() => {
+    const WINDOW = 2;
+    const byType = new Map<ReactionType, { time: number; count: number }[]>();
+    for (const r of [...versionReactions].sort((a, b) => a.time - b.time)) {
+      const list = byType.get(r.type) ?? [];
+      const last = list[list.length - 1];
+      if (last && r.time - last.time <= WINDOW) {
+        // Keep the cluster anchored where it started rather than drifting later
+        // with every new tap.
+        last.count += 1;
+      } else {
+        list.push({ time: r.time, count: 1 });
+      }
+      byType.set(r.type, list);
+    }
+    const out: ReactionCluster[] = [];
+    for (const [type, groups] of byType) {
+      const { emoji, text } = REACTION_LABEL[type];
+      for (const g of groups) {
+        out.push({
+          id: `${type}-${g.time.toFixed(2)}`,
+          time: g.time,
+          emoji,
+          count: g.count,
+          label: `${formatTime(g.time)} ${text}${g.count > 1 ? ` ×${g.count}` : ""}`,
+        });
+      }
+    }
+    return out.sort((a, b) => a.time - b.time);
+  }, [versionReactions]);
+
+  const summary = useMemo(
+    () =>
+      summarize({
+        comments: videoComments,
+        reactions: versionReactions,
+        verdicts: review?.verdicts.filter((v) => v.versionId === version?.id) ?? [],
+        progress: review?.progress.filter((p) => p.versionId === version?.id) ?? [],
+        duration: duration || version?.duration || 0,
+      }),
+    [videoComments, versionReactions, review, version, duration],
   );
 
   const markers: TimelineMarker[] = useMemo(
@@ -175,6 +281,49 @@ export function VideoWorkspace({ api, presence }: Props) {
     return () => window.clearTimeout(id);
   }, [api.selectedPinId]);
 
+  /**
+   * A tap on 一鍵反應.
+   *
+   * The moment comes from the player, not from the person: they are watching,
+   * not timing. The video is NOT paused — that is the difference between this
+   * and leaving a comment, and it is the whole reason people will use it.
+   */
+  const react = useCallback(
+    (type: ReactionType) => {
+      if (!version || !api.video) return;
+      const at = playerRef.current?.currentTime() ?? liveTimeRef.current;
+      api.video.react(version.id, at, type);
+      api.showToast(`已記在 ${formatTime(at)}`);
+    },
+    [version, api],
+  );
+
+  const submitVerdict = useCallback(
+    (verdict: Verdict, note?: string) => {
+      if (!version || !api.video) return;
+      api.video.setVerdict(version.id, verdict, note);
+      api.showToast("已記下你的看法，謝謝！", { tone: "success" });
+    },
+    [version, api],
+  );
+
+  /**
+   * Tell the room how far this person got.
+   *
+   * Two numbers, and only ever forwards — the database refuses to move the
+   * maximum backwards, so re-watching a passage cannot rewrite it. Sent on a
+   * lazy schedule (see the effect below) because nobody needs it live.
+   */
+  const reportProgress = useCallback(
+    (completed: boolean) => {
+      if (!version || !api.video || !reviewOnline) return;
+      const at = playerRef.current?.currentTime() ?? liveTimeRef.current;
+      if (at <= 0 && !completed) return;
+      api.video.reportProgress(version.id, at, completed);
+    },
+    [version, api, reviewOnline],
+  );
+
   /** 這一刻留意見: freeze the frame being talked about, then ask about it. */
   const startPoint = useCallback(() => {
     setActionOpen(false);
@@ -210,16 +359,33 @@ export function VideoWorkspace({ api, presence }: Props) {
   const cancelDraft = useCallback(() => {
     setDraft(null);
     setRangePick(null);
+    setDraftCategory(null);
     setComposeInset(0);
     api.cancelPin();
   }, [api]);
 
   const submitDraft = useCallback(() => {
     if (!draft) return;
-    api.video?.commitVideoComment(draft);
+    api.video?.commitVideoComment(draft, draftCategory ?? undefined);
     setDraft(null);
     setRangePick(null);
+    setDraftCategory(null);
     setComposeInset(0);
+  }, [draft, api, draftCategory]);
+
+  /**
+   * 改成一段 — promote the moment being written about into a stretch.
+   *
+   * The typed sentence survives (it lives in `api.form`, not here): someone who
+   * has already explained the problem should not have to retype it because they
+   * realised it is about six seconds rather than one frame.
+   */
+  const promoteToRange = useCallback(() => {
+    if (!draft || draft.kind !== "point") return;
+    setDraft(null);
+    setRangePick({ start: draft.time, end: null });
+    playerRef.current?.seek(draft.time, { play: true });
+    api.showToast("播到結束的地方，再按「設為結束」。");
   }, [draft, api]);
 
   /**
@@ -257,6 +423,59 @@ export function VideoWorkspace({ api, presence }: Props) {
     },
     [view, api, room.versions, publishFrame],
   );
+
+  /**
+   * Progress + the end-of-video question.
+   *
+   * Both ride the existing per-frame bus rather than adding listeners to the
+   * <video>. Progress is written at most once every 15 seconds and once more on
+   * unmount — a review session should cost a handful of rows, not one per
+   * second — and the verdict prompt fires once, at 92%, per cut per visit.
+   */
+  useEffect(() => {
+    if (!version || !reviewOnline) return;
+    let lastSent = 0;
+    let latest = 0;
+
+    const unsubscribe = subscribeFrame((t) => {
+      latest = t;
+      const total = playerRef.current?.duration() ?? duration;
+      const now = Date.now();
+      if (now - lastSent > 15000) {
+        lastSent = now;
+        reportProgress(false);
+      }
+      if (
+        total > 0 &&
+        t >= total * 0.92 &&
+        verdictAskedRef.current !== version.id &&
+        // Someone who has already said what they think does not need asking
+        // again; they can still change it from 更多.
+        !myVerdict &&
+        // …and never on top of whatever they are already doing.
+        !busyRef.current
+      ) {
+        verdictAskedRef.current = version.id;
+        reportProgress(true);
+        setVerdictOpen(true);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      // Leaving the room or switching cuts: record where they actually got to,
+      // otherwise a partner who watched 50 seconds and closed the tab reads as
+      // never having opened it.
+      if (latest > 0) reportProgress(false);
+    };
+  }, [version, reviewOnline, duration, myVerdict, subscribeFrame, reportProgress]);
+
+  // A different cut is a different question, so the once-per-cut guard resets.
+  useEffect(() => {
+    if (verdictAskedRef.current && verdictAskedRef.current !== version?.id) {
+      verdictAskedRef.current = null;
+    }
+  }, [version?.id]);
 
   // Space / arrows, but never while the viewer is typing feedback.
   useEffect(() => {
@@ -323,6 +542,7 @@ export function VideoWorkspace({ api, presence }: Props) {
       duration={duration || version.duration || 0}
       subscribe={subscribeFrame}
       markers={markers}
+      reactions={reactionClusters}
       selectedId={api.selectedPinId}
       onSeek={(t) => seekTo(t)}
       onSelectMarker={selectMarker}
@@ -345,6 +565,63 @@ export function VideoWorkspace({ api, presence }: Props) {
     [api, version.id, focusComment, isMobile],
   );
 
+  const briefCard = version && (
+    <ReviewBrief
+      brief={brief}
+      canEdit={canManageReview}
+      online={reviewOnline}
+      onSave={(input) => api.video?.saveBrief(version.id, input)}
+    />
+  );
+
+  /**
+   * The one action a partner is meant to find without being told.
+   *
+   * It reads the clock itself and pauses — nobody types a timecode, and nobody
+   * has to hunt for the pause button first. The 快速反應 row underneath is
+   * collapsed by default so the first screen stays "video + one button".
+   */
+  const captureBar = (
+    <div className="v-capture">
+      <button type="button" className="v-capture-main" onClick={startPoint}>
+        ＋ 在這裡留言
+      </button>
+      <button
+        type="button"
+        className="m-link v-capture-toggle"
+        aria-expanded={reactionsOpen}
+        onClick={() => setReactionsOpen((o) => !o)}
+      >
+        快速反應 {reactionsOpen ? "▾" : "›"}
+      </button>
+      {reactionsOpen && <QuickReactions onReact={react} disabled={!reviewOnline} />}
+    </div>
+  );
+
+  const verdictSheet = verdictOpen && (
+    <VerdictSheet
+      current={myVerdict?.verdict ?? null}
+      currentNote={myVerdict?.note}
+      onSubmit={submitVerdict}
+      onClose={() => setVerdictOpen(false)}
+    />
+  );
+
+  const summarySheet = summaryOpen && version && (
+    <ModalSheet title="審片摘要" onClose={() => setSummaryOpen(false)}>
+      <div className="m-more">
+        <ReviewSummary
+          label={version.label}
+          summary={summary}
+          onSeek={(t) => {
+            setSummaryOpen(false);
+            seekTo(t);
+          }}
+        />
+      </div>
+    </ModalSheet>
+  );
+
   const moreSheet = more && (
     <ModalSheet title="更多" onClose={() => setMore(false)}>
       <div className="m-more">
@@ -356,6 +633,30 @@ export function VideoWorkspace({ api, presence }: Props) {
             {version.width && version.height ? ` · ${version.width}×${version.height}` : ""}
           </p>
         </div>
+        {canManageReview && reviewOnline && (
+          <button
+            type="button"
+            className="m-row"
+            onClick={() => {
+              setMore(false);
+              setSummaryOpen(true);
+            }}
+          >
+            審片摘要
+          </button>
+        )}
+        {reviewOnline && (
+          <button
+            type="button"
+            className="m-row"
+            onClick={() => {
+              setMore(false);
+              setVerdictOpen(true);
+            }}
+          >
+            {myVerdict ? "改變我的看法" : "看完了，給個看法"}
+          </button>
+        )}
         <button type="button" className="m-row" onClick={api.undo} disabled={!api.canUndo}>
           復原上一個操作
         </button>
@@ -398,6 +699,9 @@ export function VideoWorkspace({ api, presence }: Props) {
         <VideoCommentComposer
           api={api}
           anchor={draft}
+          category={draftCategory}
+          onCategory={setDraftCategory}
+          onMakeRange={promoteToRange}
           onRepick={() => {
             setDraft(null);
             setActionOpen(true);
@@ -409,6 +713,8 @@ export function VideoWorkspace({ api, presence }: Props) {
       )}
 
       {moreSheet}
+      {verdictSheet}
+      {summarySheet}
     </>
   );
 
@@ -506,16 +812,20 @@ export function VideoWorkspace({ api, presence }: Props) {
             canAdd={!uploading}
           />
           {uploadBar}
+          {briefCard}
           {player}
           {timeline}
           {rangeBar}
+          {captureBar}
           <div className="v-desktop-actions">
-            <button type="button" className="btn btn-primary" onClick={startPoint}>
-              這一刻留意見
-            </button>
             <button type="button" className="btn" onClick={startRange} disabled={Boolean(rangePick)}>
               選一段留意見
             </button>
+            {canManageReview && reviewOnline && (
+              <button type="button" className="btn" onClick={() => setSummaryOpen(true)}>
+                審片摘要
+              </button>
+            )}
             <button type="button" className="btn btn-ghost" onClick={() => setMore(true)}>
               更多
             </button>
@@ -574,8 +884,10 @@ export function VideoWorkspace({ api, presence }: Props) {
 
       <div className="v-stage-area">
         {uploadBar}
+        {briefCard}
         {player}
         {timeline}
+        {captureBar}
       </div>
 
       <div className="m-bottom">

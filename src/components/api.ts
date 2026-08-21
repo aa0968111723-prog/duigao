@@ -4,13 +4,19 @@ import type {
   CommentReply,
   Guest,
   Point,
+  ReactionType,
   ReviewPriority,
+  ReviewStatus,
   ReviewType,
   Room,
   Tool,
+  Verdict,
   VideoAnchor,
+  VideoCategory,
   ViewState,
 } from "../lib/types";
+import type { BriefInput } from "../cloud/videoReview";
+import type { ReviewData } from "../cloud/useCloudRoom";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -36,9 +42,25 @@ export type VideoUploadState =
 export type VideoApi = {
   upload: VideoUploadState;
   /** File the current draft against a moment or a stretch. */
-  commitVideoComment: (anchor: VideoAnchor) => void;
+  commitVideoComment: (anchor: VideoAnchor, category?: VideoCategory) => void;
   /** Re-sign the playing version's URL after an expiry. */
   refreshVideoUrl: (path: string) => Promise<string | null>;
+
+  /* ------------------------------------------------ 影片對稿 2.0 (#32) -- */
+
+  /** Briefs, reactions, verdicts and progress for this room. Empty offline. */
+  review: ReviewData;
+  /** Whether this visitor may write the brief and triage other people's feedback. */
+  canManageReview: boolean;
+  /** This visitor's cloud id, for "my verdict" / "my reaction" lookups. */
+  myUserId: string;
+  /** Only meaningful in a cloud room; a local-only room cannot review. */
+  reviewOnline: boolean;
+  saveBrief: (versionId: string, input: BriefInput) => void;
+  react: (versionId: string, time: number, type: ReactionType) => void;
+  setVerdict: (versionId: string, verdict: Verdict, note?: string) => void;
+  reportProgress: (versionId: string, maxWatched: number, completed: boolean) => void;
+  setStatus: (commentId: string, status: ReviewStatus) => void;
 };
 
 /** A pending piece of feedback. When it came from a 圈範圍 gesture, `region` is set and x/y are its center. */

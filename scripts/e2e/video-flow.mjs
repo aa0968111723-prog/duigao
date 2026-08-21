@@ -45,7 +45,7 @@ import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
 import { readFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
-import { start as startMock, requestLog, rows, faults, cloudRooms, storageObjects, expireSignedUrls } from "./mock-supabase.mjs";
+import { start as startMock, requestLog, rows, faults, roles, cloudRooms, storageObjects, expireSignedUrls } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54405;
 const APP_PORT = 4177;
@@ -61,6 +61,36 @@ try {
 } catch {
   console.error("playwright is not installed. Run: npm i -D playwright && npx playwright install chromium");
   process.exit(2);
+}
+
+/**
+ * PR #32 asks a light "看完了，這版你覺得？" once the playhead passes 92%. That is
+ * intended product behaviour, and these legs scrub near the end constantly — so
+ * anything that drives the workspace has to be willing to wave it away first.
+ */
+/**
+ * Drop the discussion back to its peek height.
+ *
+ * The stage — player, timeline, capture bar — sits behind the sheet whenever it
+ * is dragged up, which is true of the video itself and always has been. A person
+ * who wants to leave feedback taps 看 (or drags the sheet down) first; so does
+ * this. 修改 in the toolbar stays available at any snap for the ones who do not.
+ */
+async function collapseSheet(page) {
+  const expanded = await page.evaluate(() =>
+    Boolean(document.querySelector(".m-sheet-half, .m-sheet-full")),
+  );
+  if (expanded) {
+    await page.click(".m-toolbar .m-tool:has-text('看')").catch(() => undefined);
+    await page.waitForTimeout(350);
+  }
+}
+
+async function dismissVerdict(page) {
+  if (await page.locator(".v-verdict").count()) {
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await page.waitForTimeout(200);
+  }
 }
 
 // ------------------------------------------------------------------ report --
@@ -487,9 +517,11 @@ try {
 
   // Change the source once so this leg gets a fresh one-shot re-sign budget,
   // then click a discussion card after its URL has expired.
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(1).click();
   await playerReady(A);
   await A.waitForTimeout(500);
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(0).click();
   await playerReady(A);
   await A.waitForTimeout(500);
@@ -542,6 +574,7 @@ try {
   const beforeSwitch = await currentTime(A);
   const shortDuration = 6;
 
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(1).click();
   await playerReady(A);
   await A.waitForTimeout(900);
@@ -571,6 +604,7 @@ try {
   });
   await A.waitForTimeout(300);
   const beforeBack = await currentTime(A);
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(0).click();
   await playerReady(A);
   await A.waitForTimeout(900);
@@ -584,6 +618,7 @@ try {
   // 3.3 needs an end that outlives the current cut: the range was filed on the
   // long version, so viewing it against the short one is where a separately
   // clamped width would draw past the track.
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(1).click();
   await playerReady(A);
   await A.waitForTimeout(600);
@@ -595,6 +630,7 @@ try {
     }),
   );
   check("F. 範圍在較短的版本上也不會畫出軌道", overflowSafe);
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(0).click();
   await playerReady(A);
   await A.waitForTimeout(500);
@@ -602,6 +638,7 @@ try {
 
   // ------------------------------------------- copy list keeps the times ---
   await A.evaluate(() => navigator.clipboard.writeText("").catch(() => undefined));
+  await dismissVerdict(A);
   await A.click(".m-toolbar .m-tool:has-text('更多')");
   await A.waitForSelector(".m-more", { timeout: 10000 });
   await A.click(".m-more .m-row:has-text('複製修改清單')");
@@ -617,6 +654,7 @@ try {
   await A.waitForTimeout(300);
 
   // ------------------------------------------------------ G: share card ----
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(0).click();
   await A.waitForTimeout(400);
 
@@ -633,6 +671,7 @@ try {
   // all; in production it is a second or two, which is exactly long enough for
   // a person to tap.
   faults.previewUploadDelayMs = 2500;
+  await dismissVerdict(A);
   await A.click("button.m-share");
   await A.waitForSelector(".m-share-note", { timeout: 30000 });
   {
@@ -772,9 +811,11 @@ try {
   // custom first: switching cut must NOT silently replace the host's cover.
   await A.keyboard.press("Escape");
   await A.waitForTimeout(300);
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(1).click();
   await A.waitForTimeout(800);
   requestLog.length = 0;
+  await dismissVerdict(A);
   await A.click("button.m-share");
   await A.waitForSelector("input.m-share-url", { timeout: 30000 });
   await A.waitForFunction(
@@ -847,8 +888,10 @@ try {
   // Put the room back on 初剪 so the legs below see the cut they expect.
   await A.keyboard.press("Escape");
   await A.waitForTimeout(300);
+  await dismissVerdict(A);
   await A.locator(".m-vchip").nth(0).click();
   await A.waitForTimeout(600);
+  await dismissVerdict(A);
   await A.click("button.m-share");
   await A.waitForSelector("input.m-share-url", { timeout: 30000 });
   await A.waitForFunction(
@@ -877,6 +920,266 @@ try {
       return m.roomId === id && typeof m.token === "string" && m.token.length > 16;
     }, roomIdInUrl),
   );
+
+  // ==================== S: 影片對稿 2.0 —— 審片流程 (PR #32) ====================
+  //
+  // The author's half first: write the brief, then check that the reviewer half
+  // (a different browser context, joining from the share link) sees it and can
+  // answer with all three kinds of feedback.
+  await A.click("button.m-share").catch(() => undefined);
+  await A.keyboard.press("Escape");
+  await A.waitForTimeout(200);
+  await dismissVerdict(A);
+  await A.locator(".m-vchip").nth(0).click();
+  await A.waitForTimeout(500);
+
+  // ---- S1: 作者說明 ------------------------------------------------------
+  check("S1. 作者一開始就看得到「作者說明」卡", await A.isVisible(".v-brief"));
+  await A.click(".v-brief button:has-text('寫一段')");
+  await A.waitForSelector(".v-brief.is-editing", { timeout: 10000 });
+  await A.fill(".v-brief-body", "這是招生短片第一剪。這次主要想確認節奏，以及 0:42 後面會不會太快。");
+  await A.click(".v-brief-tags .v-tag:has-text('節奏')");
+  await A.click(".v-brief-tags .v-tag:has-text('字幕')");
+  await A.locator(".v-brief-q").nth(0).fill("前 10 秒有吸引你嗎？");
+  await A.locator(".v-brief-q").nth(1).fill("0:35 的轉場會不會太突兀？");
+  await A.click("button:has-text('儲存說明')");
+  await A.waitForFunction(
+    () => !document.querySelector(".v-brief.is-editing"),
+    null,
+    { timeout: 20000 },
+  ).catch(() => {});
+  const briefRow = rows.version_review_briefs[0];
+  check("S1. 作者說明寫進 version_review_briefs", Boolean(briefRow?.body?.includes("第一剪")), JSON.stringify(briefRow?.body ?? null));
+  check("S1. 關注標籤存下來了", JSON.stringify(briefRow?.focus_tags) === JSON.stringify(["節奏", "字幕"]), JSON.stringify(briefRow?.focus_tags));
+  check("S1. 問題最多三個且存下來了", Array.isArray(briefRow?.questions) && briefRow.questions.length === 2, JSON.stringify(briefRow?.questions));
+  check(
+    "S1. 作者說明綁在這一版，不是整個房間",
+    briefRow?.version_id === rows.versions.find((v) => v.sort_order === 0)?.id,
+    `${briefRow?.version_id}`,
+  );
+  // The card re-reads the brief from the server after saving, so the summary
+  // appears on the round trip rather than on the click.
+  await A.waitForFunction(
+    () => (document.querySelector(".v-brief-summary")?.textContent ?? "").includes("招生短片"),
+    null,
+    { timeout: 20000 },
+  ).catch(() => {});
+  check(
+    "S1. 收合後只顯示一行摘要",
+    ((await A.textContent(".v-brief-summary")) ?? "").includes("招生短片"),
+    (await A.textContent(".v-brief-summary")) ?? "",
+  );
+
+  // The end-of-cut question fires once per version per visit. Spend it here, on
+  // purpose, rather than letting it appear over whichever interaction happens to
+  // be in flight when playback crosses 92%.
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) { v.currentTime = Math.max(0, (v.duration || 12) - 0.4); v.play?.(); }
+  });
+  await A.waitForTimeout(1800);
+  check("S7a. 播到尾端會主動問「看完了，這版你覺得？」", (await A.locator(".v-verdict").count()) === 1);
+  await dismissVerdict(A);
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.pause?.();
+  });
+
+  // ---- S2: ＋在這裡留言（自動抓時間、自動暫停）---------------------------
+  // 6s of a 12s fixture stands in for the spec's 00:37 of a minute-long cut.
+  // Left paused: the button reads the playhead either way, and a running clock
+  // would make every assertion below a moving target.
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 6;
+  });
+  await A.waitForTimeout(400);
+  await collapseSheet(A);
+  check("S2. 播放器旁有明確的「＋在這裡留言」", await A.isVisible(".v-capture-main"));
+  await dismissVerdict(A);
+  await collapseSheet(A);
+  await A.click(".v-capture-main");
+  await A.waitForSelector(".m-modal-title", { timeout: 10000 });
+  const composerTitle = (await A.textContent(".m-modal-title")) ?? "";
+  check("S2. 自動帶入目前時間，不必手打時間碼", /0:0[4-9] 這一刻/.test(composerTitle), composerTitle);
+  check(
+    "S2. 打開 composer 時影片是停住的",
+    await A.evaluate(() => document.querySelector("video.v-video")?.paused === true),
+  );
+  await A.click(".v-compose-cats .v-tag:has-text('節奏')");
+  await A.fill(".m-modal-body textarea, .m-modal-body input.m-input", "這一段的節奏可以再快一點").catch(async () => {
+    await A.fill("textarea", "這一段的節奏可以再快一點");
+  });
+  await A.click("button:has-text('送出')");
+  await A.waitForTimeout(800);
+  const pointComment = rows.comments.filter((c) => c.anchor_type === "video-point").slice(-1)[0];
+  check("S2. 存成 video-point，時間就是按下去的那一刻", Boolean(pointComment) && Math.abs(pointComment.time_seconds - 6) < 2.5, `${pointComment?.time_seconds}`);
+  check("S2. 分類是可選的，選了就存起來", pointComment?.problem_type === "節奏", String(pointComment?.problem_type));
+  check("S2. 新回饋的預設狀態是待處理", pointComment?.review_status === "open", String(pointComment?.review_status));
+
+  // ---- S3: 快速反應 ------------------------------------------------------
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 3;
+  });
+  await A.waitForTimeout(300);
+  await dismissVerdict(A);
+  await collapseSheet(A);
+  await A.click(".v-capture-toggle");
+  await A.waitForSelector(".v-reactions", { timeout: 10000 });
+  const beforeReact = await A.evaluate(() => document.querySelector("video.v-video")?.paused);
+  await A.click(".v-reaction:has-text('太快')");
+  await A.waitForTimeout(600);
+  check("S3. 一鍵反應寫進 video_reactions", rows.video_reactions.length === 1, JSON.stringify(rows.video_reactions.map((r) => r.reaction_type)));
+  check("S3. 反應記在按下去的時間", Math.abs((rows.video_reactions[0]?.time_seconds ?? 0) - 3) < 2.5, `${rows.video_reactions[0]?.time_seconds}`);
+  check(
+    "S3. 反應不會改變播放狀態（不強制暫停）",
+    beforeReact === (await A.evaluate(() => document.querySelector("video.v-video")?.paused)),
+  );
+  // Several toasts can be on screen at once; the previous action's is still
+  // fading when this one arrives, so look at all of them rather than the first.
+  await A.waitForFunction(
+    () => [...document.querySelectorAll(".toast, .m-toast")].some((t) => /已記在/.test(t.textContent ?? "")),
+    null,
+    { timeout: 10000 },
+  ).catch(() => {});
+  const toastText = (await A.locator(".toast, .m-toast").allInnerTexts().catch(() => [])).join(" | ");
+  check("S3. 有輕量 toast 說明記在哪一秒", /已記在\s*\d+:\d{2}/.test(toastText), toastText.slice(0, 60));
+
+  // 連點防護：同一秒附近再按一次同一個反應，不應該長出第二筆。
+  await A.click(".v-reaction:has-text('太快')");
+  await A.waitForTimeout(600);
+  check("S3. 連點同一個反應不會產生第二筆", rows.video_reactions.length === 1, `${rows.video_reactions.length} 筆`);
+  await A.click(".v-reaction:has-text('喜歡')");
+  await A.waitForTimeout(600);
+  check("S3. 同一時間不同反應可以並存", rows.video_reactions.length === 2);
+  check("S3. timeline 上出現聚合 marker", (await A.locator(".v-rmark").count()) >= 1, `${await A.locator(".v-rmark").count()} 個`);
+
+  // ---- S4: 時間區間回饋（從時間點升級）-----------------------------------
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 6;
+  });
+  await A.waitForTimeout(300);
+  await dismissVerdict(A);
+  await collapseSheet(A);
+  await A.click(".v-capture-main");
+  await A.waitForSelector(".v-compose-range", { timeout: 10000 });
+  await A.click(".v-compose-range");
+  await A.waitForSelector(".v-rangebar", { timeout: 10000 });
+  await A.evaluate(() => {
+    const v = document.querySelector("video.v-video");
+    if (v) v.currentTime = 9;
+  });
+  await A.waitForTimeout(400);
+  await A.click("button:has-text('設為結束')");
+  await A.waitForSelector(".m-modal-title", { timeout: 10000 });
+  const rangeTitle = (await A.textContent(".m-modal-title")) ?? "";
+  check("S4. 「改成一段」做出一個真的區間", /0:0\d–0:0\d 這一段/.test(rangeTitle), rangeTitle);
+  await A.fill("textarea", "這整段可以再快一點").catch(() => undefined);
+  await A.click("button:has-text('送出')");
+  await A.waitForTimeout(800);
+  const rangeComment = rows.comments.filter((c) => c.anchor_type === "video-range").slice(-1)[0];
+  check(
+    "S4. 存成 video-range，end > start 且不超過片長",
+    Boolean(rangeComment) && rangeComment.end_time_seconds > rangeComment.time_seconds,
+    `${rangeComment?.time_seconds} → ${rangeComment?.end_time_seconds}`,
+  );
+
+  // ---- S5: 作者處理狀態 --------------------------------------------------
+  await A.evaluate(() => document.querySelector(".m-tool:nth-child(3)")?.click());
+  await A.waitForTimeout(500);
+  const statusCount = await A.locator(".v-status").count();
+  check("S5. 作者看得到四態狀態列", statusCount >= 1, `${statusCount} 個`);
+  await A.locator(".v-status").first().locator("button:has-text('已修改')").click();
+  await A.waitForTimeout(800);
+  const doneComment = rows.comments.find((c) => c.review_status === "done");
+  check("S5. 可以標成「已修改」", Boolean(doneComment), JSON.stringify(rows.comments.map((c) => c.review_status)));
+  check("S5. 舊 client 只讀 resolved 也看得到正確狀態", doneComment?.resolved === true);
+  await A.locator(".v-status").first().locator("button:has-text('不採用')").click();
+  await A.waitForTimeout(800);
+  check(
+    "S5. 「不採用」是獨立狀態，不會被壓成「已修改」",
+    rows.comments.some((c) => c.review_status === "wontfix"),
+    JSON.stringify(rows.comments.map((c) => c.review_status)),
+  );
+
+  // ---- S6: 分類篩選 ------------------------------------------------------
+  check("S6. 只有用過的分類才會出現在篩選列", await A.isVisible(".v-catrow"));
+  const catChips = await A.locator(".v-catrow .m-chip").allInnerTexts();
+  check("S6. 篩選列有「全部」與用過的分類", catChips.includes("全部") && catChips.includes("節奏"), catChips.join("/"));
+
+  // ---- S7: 看完表態 ------------------------------------------------------
+  await A.keyboard.press("Escape");
+  await A.waitForTimeout(300);
+  await dismissVerdict(A);
+  await A.click(".m-tool:has-text('更多')");
+  await A.waitForSelector(".m-modal-body", { timeout: 10000 });
+  await A.click("button:has-text('看完了，給個看法')");
+  await A.waitForSelector(".v-verdict", { timeout: 10000 });
+  await A.click(".v-verdict-btn:has-text('小修即可')");
+  await A.waitForTimeout(800);
+  check("S7. verdict 寫進 version_verdicts", rows.version_verdicts.length === 1, JSON.stringify(rows.version_verdicts.map((v) => v.verdict)));
+  check("S7. 存的是三種語義之一", rows.version_verdicts[0]?.verdict === "minor", String(rows.version_verdicts[0]?.verdict));
+  // 改變心意：仍然只有一列。
+  await dismissVerdict(A);
+  await A.click(".m-tool:has-text('更多')");
+  await A.waitForSelector(".m-modal-body", { timeout: 10000 });
+  // The entry only knows it is a CHANGE once the verdict has come back from the
+  // server, which is also the check that "my verdict" is keyed by the right id.
+  await A.waitForSelector("button:has-text('改變我的看法')", { timeout: 20000 }).catch(() => {});
+  check("S7. 表態過之後入口變成「改變我的看法」", await A.isVisible("button:has-text('改變我的看法')"));
+  await A.click("button:has-text('改變我的看法')");
+  await A.waitForSelector(".v-verdict", { timeout: 10000 });
+  await A.click(".v-verdict-btn:has-text('可以過')");
+  await A.waitForTimeout(800);
+  check("S7. 再表態是更新，不是第二列", rows.version_verdicts.length === 1 && rows.version_verdicts[0].verdict === "pass",
+    `${rows.version_verdicts.length} 列 / ${rows.version_verdicts[0]?.verdict}`);
+
+  // ---- S8: 審片摘要 ------------------------------------------------------
+  await dismissVerdict(A);
+  await A.click(".m-tool:has-text('更多')");
+  await A.waitForSelector(".m-modal-body", { timeout: 10000 });
+  await A.click("button:has-text('審片摘要')");
+  await A.waitForSelector(".v-summary", { timeout: 10000 });
+  const summaryText = (await A.textContent(".v-summary")) ?? "";
+  check("S8. 摘要顯示時間回饋數", /則時間回饋/.test(summaryText), summaryText.slice(0, 80));
+  check("S8. 摘要顯示快速反應數", /個快速反應/.test(summaryText));
+  check("S8. 摘要顯示 verdict 分布", /可以過/.test(summaryText));
+  check("S8. 摘要沒有任何 AI 措辭", !/AI|人工智慧|情緒|預測/.test(summaryText));
+  await A.keyboard.press("Escape");
+  await A.waitForTimeout(300);
+
+  // ---- S9: 觀看進度只有兩個事實 ------------------------------------------
+  check(
+    "S9. 觀看進度只記 max_watched / completed",
+    rows.version_review_progress.every((p) =>
+      !("play_count" in p) && !("events" in p) && !("user_agent" in p) && !("device" in p)),
+    JSON.stringify(Object.keys(rows.version_review_progress[0] ?? {})),
+  );
+
+  // ---- S10: reviewer 端 ---------------------------------------------------
+  // A partner from LINE: reviewer role, sees the brief, can react and verdict,
+  // must NOT get the author's triage controls.
+  // A room created today hands a link-joiner `reviewer` (0007). Say so, so this
+  // leg exercises the half of the product most partners actually get.
+  roles.nextJoinRole = "reviewer";
+  const ctxS = await browser.newContext(phone(390, 844, LINE_UA));
+  const S = await ctxS.newPage();
+  await S.goto(shareUrl, { waitUntil: "domcontentloaded" });
+  await S.fill("input.text-input", "夥伴S").catch(() => undefined);
+  await S.click("button.btn-primary").catch(() => undefined);
+  await S.waitForSelector("video.v-video", { timeout: 60000 }).catch(() => null);
+  await S.waitForTimeout(1500);
+  const partnerBrief = (await S.textContent(".v-brief").catch(() => null)) ?? "";
+  check("S10. 夥伴一進來就看得到作者說明", partnerBrief.includes("作者說明"), partnerBrief.slice(0, 40));
+  await collapseSheet(S);
+  check("S10. 夥伴看得到「＋在這裡留言」", await S.isVisible(".v-capture-main"));
+  check("S10. 夥伴看不到作者的四態狀態列", (await S.locator(".v-status").count()) === 0);
+  check("S10. 夥伴看不到「審片摘要」入口", !(await S.isVisible("button:has-text('審片摘要')").catch(() => false)));
+  check("S10. 夥伴仍然可以表態", await S.isVisible(".v-capture-toggle"));
+  await ctxS.close();
+  roles.nextJoinRole = "editor";
 
   // ------------------------------ R: the host is still watching ------------
   // A video room reaches the cloud when it is CREATED (its Storage path needs a
