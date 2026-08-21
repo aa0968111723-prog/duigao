@@ -45,7 +45,7 @@ import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
 import { readFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
-import { start as startMock, requestLog, rows, faults, cloudRooms, storageObjects, expireSignedUrls } from "./mock-supabase.mjs";
+import { start as startMock, requestLog, rows, faults, roles, cloudRooms, storageObjects, expireSignedUrls } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54405;
 const APP_PORT = 4177;
@@ -1161,6 +1161,9 @@ try {
   // ---- S10: reviewer 端 ---------------------------------------------------
   // A partner from LINE: reviewer role, sees the brief, can react and verdict,
   // must NOT get the author's triage controls.
+  // A room created today hands a link-joiner `reviewer` (0007). Say so, so this
+  // leg exercises the half of the product most partners actually get.
+  roles.nextJoinRole = "reviewer";
   const ctxS = await browser.newContext(phone(390, 844, LINE_UA));
   const S = await ctxS.newPage();
   await S.goto(shareUrl, { waitUntil: "domcontentloaded" });
@@ -1174,7 +1177,9 @@ try {
   check("S10. 夥伴看得到「＋在這裡留言」", await S.isVisible(".v-capture-main"));
   check("S10. 夥伴看不到作者的四態狀態列", (await S.locator(".v-status").count()) === 0);
   check("S10. 夥伴看不到「審片摘要」入口", !(await S.isVisible("button:has-text('審片摘要')").catch(() => false)));
+  check("S10. 夥伴仍然可以表態", await S.isVisible(".v-capture-toggle"));
   await ctxS.close();
+  roles.nextJoinRole = "editor";
 
   // ------------------------------ R: the host is still watching ------------
   // A video room reaches the cloud when it is CREATED (its Storage path needs a

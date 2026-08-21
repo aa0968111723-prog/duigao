@@ -17,6 +17,28 @@ const PORT = Number(process.env.MOCK_PORT || 54399);
 const users = new Map(); // token -> userId
 const rooms = new Map(); // roomId -> { id, owner_user_id, title, invite_hash, created_at, updated_at }
 const members = new Map(); // roomId -> Set(userId)
+/**
+ * `${roomId}:${userId}` -> 'owner' | 'editor' | 'reviewer'.
+ *
+ * Modelled because the capability split is a real part of the product, not a
+ * database detail: 0007 hands the creator `owner` and everyone arriving through
+ * a share link `reviewer`. Without this every participant in a browser run read
+ * back as `editor`, so the reviewer experience — the one most partners actually
+ * get — was never exercised above the SQL layer.
+ */
+const memberRoles = new Map();
+const roleKey = (roomId, uid) => `${roomId}:${uid}`;
+
+/**
+ * What the next join-by-link hands out.
+ *
+ * Defaults to `editor`, which is what every leg written before this knob
+ * assumed — a room created before 0007 backfills to `editor`, and legs like P
+ * (a partner adding their own cut) depend on it. A leg that wants to exercise
+ * the reviewer half sets this to 'reviewer' first, which is what 0007 gives a
+ * partner joining a room created today.
+ */
+export const roles = { nextJoinRole: "editor" };
 const tables = {
   versions: [], comments: [], strokes: [], messages: [], visual_proposals: [],
   comment_supports: [], comment_replies: [], proposal_preferences: [],
@@ -326,6 +348,7 @@ export const server = http.createServer(async (req, res) => {
         invite_hash: sha(body.p_invite_token), created_at: now(), updated_at: now(),
       });
       members.set(body.p_room_id, new Set([uid]));
+      memberRoles.set(roleKey(body.p_room_id, uid), "owner");
       return json(res, 200, body.p_room_id);
     }
     if (fn === "join_room_by_invite") {
@@ -333,7 +356,13 @@ export const server = http.createServer(async (req, res) => {
       // Same generic error as the real RPC: never disclose that a room exists.
       if (!room || room.invite_hash !== sha(body.p_invite_token || "")) return json(res, 400, { message: "invalid invite" });
       members.get(body.p_room_id).add(uid);
+      if (!memberRoles.has(roleKey(body.p_room_id, uid))) {
+        memberRoles.set(roleKey(body.p_room_id, uid), roles.nextJoinRole);
+      }
       return json(res, 200, body.p_room_id);
+    }
+    if (fn === "room_role") {
+      return json(res, 200, memberRoles.get(roleKey(body.p_room_id, uid)) ?? null);
     }
     if (fn === "upsert_visual_proposal") {
       const row = {
