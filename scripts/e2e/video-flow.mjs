@@ -619,7 +619,46 @@ try {
   // ------------------------------------------------------ G: share card ----
   await A.locator(".m-vchip").nth(0).click();
   await A.waitForTimeout(400);
+
+  // ---- G0: the race (PR #30) --------------------------------------------
+  //
+  // This is the bug the whole PR exists for. The room already has everything a
+  // good card needs — a share_previews row, a poster frame, a duration — and it
+  // STILL shared as a bare 文宣討論區, because the sheet handed over the plain
+  // app URL the instant the room existed and only swapped in the preview URL
+  // once the upload finished. A host who tapped 傳到 LINE inside that window
+  // sent `https://app/#room=…&invite=…`, which no crawler can unfurl.
+  //
+  // The upload is held open here so the window is wide enough to observe at
+  // all; in production it is a second or two, which is exactly long enough for
+  // a person to tap.
+  faults.previewUploadDelayMs = 2500;
   await A.click("button.m-share");
+  await A.waitForSelector(".m-share-note", { timeout: 30000 });
+  {
+    const sheet = (await A.textContent(".m-more")) ?? "";
+    const html = (await A.innerHTML(".m-more")) ?? "";
+    check("G0. 準備中會說「正在準備影片分享預覽…」", sheet.includes("正在準備影片分享預覽"), sheet.slice(0, 90));
+    check("G0. 準備中不會出現可點的「傳到 LINE」連結", !(await A.$("a.m-row-line")));
+    check(
+      "G0. 準備中的 LINE 按鈕是 disabled，而且說自己在準備",
+      (await A.getAttribute("button.m-row-line", "disabled")) !== null &&
+        ((await A.textContent("button.m-row-line")) ?? "").includes("正在準備 LINE 預覽"),
+      (await A.textContent("button.m-row-line")) ?? "",
+    );
+    check("G0. 準備中「複製連結」是 disabled", await A.isDisabled("button.m-row-primary"));
+    check("G0. 準備中不把網址攤在輸入框裡", !(await A.$("input.m-share-url")));
+    // The decisive one: the raw app URL must not be reachable ANYWHERE in the
+    // sheet while the card is still being built — not as an href, not as a
+    // value, not as text.
+    check(
+      "G0. 準備中整個 ShareSheet 都沒有原始 App URL",
+      !html.includes(`${APP.replace(/\/$/, "")}/#room=`) && !html.includes("#room="),
+      html.slice(0, 160),
+    );
+  }
+  faults.previewUploadDelayMs = 0;
+
   await A.waitForSelector("input.m-share-url", { timeout: 30000 });
   await A.waitForFunction(
     () => !document.querySelector(".m-share-preview-thumb.is-generic")?.textContent?.includes("準備中"),
@@ -627,6 +666,23 @@ try {
     { timeout: 30000 },
   ).catch(() => null);
   const shareUrl = await A.inputValue("input.m-share-url");
+  check(
+    "G0. 準備完成後分享的是 share-preview 連結，fragment 一字不差",
+    shareUrl.includes("/functions/v1/share-preview/") &&
+      /#room=[0-9a-f-]{36}&invite=[A-Za-z0-9_-]{20,}$/.test(shareUrl),
+    shareUrl.replace(/invite=.*/, "invite=<redacted>"),
+  );
+  {
+    const href = (await A.getAttribute("a.m-row-line", "href")) ?? "";
+    const msg = decodeURIComponent(href.split("?")[1] ?? "");
+    check(
+      "G0. 傳到 LINE 帶出去的就是 share-preview 連結，不是 App URL",
+      msg.includes("/functions/v1/share-preview/") && !msg.includes(`${APP.replace(/\/$/, "")}/#room=`),
+      msg.split("\n").pop()?.replace(/invite=.*/, "invite=<redacted>") ?? "",
+    );
+    check("G0. LINE 文案講「這支影片」", msg.includes("這支影片"), msg.slice(0, 50));
+    check("G0. LINE 文案不講「這張文宣」", !msg.includes("這張文宣"));
+  }
   check(
     "G. 分享連結是永久連結（room + invite 在 fragment）",
     /#room=[0-9a-f-]{36}&invite=[A-Za-z0-9_-]{20,}/.test(shareUrl),
@@ -636,11 +692,12 @@ try {
   const previewId = (shareUrl.match(/share-preview\/([0-9a-f-]{36})/) || [])[1];
   check("G. 卡片走 previewId，不是 roomId", Boolean(previewId) && !shareUrl.includes(`/${previewId}#room=${previewId}`));
 
-  const cardHtml = previewId
-    ? await (await fetch(`http://127.0.0.1:${MOCK_PORT}/functions/v1/share-preview/${previewId}`, {
-        headers: { "user-agent": "facebookexternalhit/1.1" },
-      })).text()
-    : "";
+  /** The card exactly as a LINE / Facebook crawler receives it. */
+  const fetchCard = async (id) =>
+    await (await fetch(`http://127.0.0.1:${MOCK_PORT}/functions/v1/share-preview/${id}`, {
+      headers: { "user-agent": "facebookexternalhit/1.1" },
+    })).text();
+  const cardHtml = previewId ? await fetchCard(previewId) : "";
   check("G. OG 卡片是影片的邀請語", cardHtml.includes("時間點留一句話"), cardHtml.match(/og:description[^>]*/)?.[0] ?? "");
   check("G. OG HTML 不含 invite / room id", !/invite/i.test(cardHtml) && !cardHtml.includes("room="));
   check(
@@ -649,6 +706,156 @@ try {
   );
   const previewRow = rows.share_previews[0];
   check("G. 縮圖是從 poster frame render 的", Boolean(previewRow?.thumbnail_path));
+  check("G. 卡片記得自己是影片（media_type=video）", previewRow?.media_type === "video", String(previewRow?.media_type));
+  check("G. 預設封面來源是 auto", previewRow?.cover_source === "auto", String(previewRow?.cover_source));
+  check("G. OG 品牌字是「影片對稿」", /og:site_name[^>]*影片對稿/.test(cardHtml));
+  check("G. OG 卡片完全沒有「文宣」字樣", !cardHtml.includes("文宣"), cardHtml.match(/[^\n]*文宣[^\n]*/)?.[0] ?? "");
+
+  // ---- G1: 影片模式的 ShareSheet 文案 (PR #30) ---------------------------
+  {
+    const sheet = (await A.textContent(".m-more")) ?? "";
+    check("G1. 影片房的 toggle 是「顯示影片封面」", sheet.includes("顯示影片封面"), sheet.slice(0, 140));
+    check("G1. 影片房不會出現「顯示文宣縮圖」", !sheet.includes("顯示文宣縮圖"));
+    check("G1. 影片房不會出現「這張文宣」", !sheet.includes("這張文宣"));
+    check("G1. 影片房不會出現「低解析度文宣預覽」", !sheet.includes("低解析度文宣預覽"));
+    check("G1. 影片房的隱私說明講影片封面", sheet.includes("影片封面預覽"), sheet.slice(0, 200));
+    check(
+      "G1. 連結預覽的標題是房間名（未自訂時）",
+      ((await A.textContent(".m-share-preview-title")) ?? "").includes("未命名影片"),
+      (await A.textContent(".m-share-preview-title")) ?? "",
+    );
+  }
+
+  // ---- G2: 自訂分享標題 ≠ 改房間 ---------------------------------------
+  const shareRoomId = previewRow.room_id;
+  const roomTitleBefore = cloudRooms.get(shareRoomId)?.title ?? null;
+  await A.click("button:has-text('自訂分享內容')");
+  await A.waitForSelector(".m-share-custom", { timeout: 10000 });
+  await A.fill(".m-share-custom input.m-input", "淡江招生短片｜第一剪");
+  await A.click("button:has-text('儲存分享內容')");
+  await A.waitForFunction(
+    () => (document.querySelector(".m-share-preview-title")?.textContent ?? "").includes("第一剪"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check("G2. 自訂標題寫進 share_previews", rows.share_previews[0]?.title === "淡江招生短片｜第一剪", JSON.stringify(rows.share_previews[0]?.title));
+  check(
+    "G2. 房間名稱完全沒被動到",
+    cloudRooms.get(shareRoomId)?.title === roomTitleBefore && roomTitleBefore === "未命名影片",
+    `${roomTitleBefore} → ${cloudRooms.get(shareRoomId)?.title}`,
+  );
+  {
+    const card = await fetchCard(rows.share_previews[0].id);
+    check("G2. LINE 卡片標題換成自訂標題", /og:title[^>]*淡江招生短片/.test(card), card.match(/og:title[^>]*/)?.[0] ?? "");
+    check("G2. 卡片說明仍是影片文案", card.includes("時間點留一句話"));
+  }
+
+  // ---- G3: 自訂封面（乾淨呈現，不再疊播放鍵）----------------------------
+  requestLog.length = 0;
+  await A.setInputFiles("input.m-share-file", { name: "cover.png", mimeType: "image/png", buffer: TINY_PNG });
+  await A.waitForFunction(
+    () => document.querySelector('.m-share-covers input[value="custom"]')?.checked === true,
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  const customThumb = rows.share_previews[0]?.thumbnail_path;
+  check("G3. 自訂封面把 cover_source 設成 custom", rows.share_previews[0]?.cover_source === "custom", String(rows.share_previews[0]?.cover_source));
+  check(
+    "G3. 自訂封面只上傳衍生檔到 share-previews",
+    requestLog.some((r) => r.startsWith("POST /storage/v1/object/share-previews/")) &&
+      !requestLog.some((r) => r.startsWith("POST /storage/v1/object/room-assets/")),
+    requestLog.filter((r) => r.includes("/storage/v1/object/")).join(" | "),
+  );
+  check("G3. 房間的原始影片與 poster 沒有被改寫", rows.versions.every((v) => !String(v.image_path ?? "").includes("share-previews")));
+
+  // ---- G4: 換版本時 auto 會刷新、custom 不會被蓋掉 ----------------------
+  // custom first: switching cut must NOT silently replace the host's cover.
+  await A.keyboard.press("Escape");
+  await A.waitForTimeout(300);
+  await A.locator(".m-vchip").nth(1).click();
+  await A.waitForTimeout(800);
+  requestLog.length = 0;
+  await A.click("button.m-share");
+  await A.waitForSelector("input.m-share-url", { timeout: 30000 });
+  await A.waitForFunction(
+    () => !document.querySelector(".m-share-preview-thumb.is-generic")?.textContent?.includes("準備中"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => null);
+  check("G4. 換版本後 custom 封面仍然是 custom", rows.share_previews[0]?.cover_source === "custom", String(rows.share_previews[0]?.cover_source));
+  check(
+    "G4. 換版本後 custom 封面的檔案沒有被重畫",
+    rows.share_previews[0]?.thumbnail_path === customThumb &&
+      !requestLog.some((r) => r.startsWith("POST /storage/v1/object/share-previews/")),
+    `${customThumb} → ${rows.share_previews[0]?.thumbnail_path}`,
+  );
+  check("G4. 換版本後自訂標題也還在", rows.share_previews[0]?.title === "淡江招生短片｜第一剪");
+
+  // now auto: switching back to auto must follow the CURRENT cut's poster.
+  await A.click("button:has-text('自訂分享內容')");
+  await A.waitForSelector(".m-share-custom", { timeout: 10000 });
+  requestLog.length = 0;
+  await A.click('.m-share-covers input[value="auto"]');
+  await A.waitForFunction(
+    () => Boolean(document.querySelector("img.m-share-preview-thumb")),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  const secondVersionId = rows.versions.find((v) => v.sort_order === 1)?.id ?? rows.versions[1]?.id;
+  check("G4. 回到 auto 會重新畫封面", requestLog.some((r) => r.startsWith("POST /storage/v1/object/share-previews/")), requestLog.filter((r) => r.includes("share-previews")).join(" | "));
+  check(
+    "G4. auto 封面跟著目前這一版走",
+    rows.share_previews[0]?.version_id === secondVersionId,
+    `${rows.share_previews[0]?.version_id} vs ${secondVersionId}`,
+  );
+
+  // ---- G5: 不顯示封面 / 恢復預設 ---------------------------------------
+  await A.click('.m-share-covers input[value="none"]');
+  await A.waitForFunction(
+    () => Boolean(document.querySelector(".m-share-preview-thumb.is-generic")) &&
+      !document.querySelector(".m-share-preview-thumb.is-generic").textContent.includes("準備中"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check("G5. 不顯示封面把檔案刪掉", !rows.share_previews[0]?.thumbnail_path, JSON.stringify(rows.share_previews[0]?.thumbnail_path));
+  {
+    const card = await fetchCard(rows.share_previews[0].id);
+    check(
+      "G5. 沒有封面時退回影片通用封面，而不是文宣通用封面",
+      /og:image[^>]*og-video-cover\.png/.test(card) && !card.includes("og-cover.png"),
+      /<meta property="og:image" content="([^"]*)"/.exec(card)?.[1] ?? "",
+    );
+    check("G5. 沒有封面的卡片仍然不含 invite / room id", !/invite/i.test(card) && !card.includes(shareRoomId));
+    check("G5. 影片房的通用卡片講「影片對稿」", card.includes("影片對稿") && !card.includes("文宣討論區"));
+  }
+
+  await A.click("button:has-text('恢復預設')");
+  await A.waitForFunction(
+    () => Boolean(document.querySelector("img.m-share-preview-thumb")),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check("G5. 恢復預設後標題回到房間名", rows.share_previews[0]?.title === "未命名影片", JSON.stringify(rows.share_previews[0]?.title));
+  check("G5. 恢復預設後封面回到 auto", rows.share_previews[0]?.cover_source === "auto");
+  check(
+    "G5. 恢復預設後說明是影片預設文案",
+    (rows.share_previews[0]?.description ?? "").includes("這支影片"),
+    JSON.stringify(rows.share_previews[0]?.description),
+  );
+  check("G5. 恢復預設沒有把房間名改掉", cloudRooms.get(shareRoomId)?.title === "未命名影片");
+
+  // Put the room back on 初剪 so the legs below see the cut they expect.
+  await A.keyboard.press("Escape");
+  await A.waitForTimeout(300);
+  await A.locator(".m-vchip").nth(0).click();
+  await A.waitForTimeout(600);
+  await A.click("button.m-share");
+  await A.waitForSelector("input.m-share-url", { timeout: 30000 });
+  await A.waitForFunction(
+    () => !document.querySelector(".m-share-preview-thumb.is-generic")?.textContent?.includes("準備中"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => null);
 
   await A.keyboard.press("Escape");
 

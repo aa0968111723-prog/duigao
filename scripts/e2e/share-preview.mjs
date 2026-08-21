@@ -31,6 +31,7 @@ import ts from "typescript";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FN_SOURCE = join(ROOT, "supabase", "functions", "share-preview", "index.ts");
 const MIGRATION = join(ROOT, "supabase", "migrations", "0005_share_previews.sql");
+const MIGRATION_0011 = join(ROOT, "supabase", "migrations", "0011_share_preview_customization.sql");
 const THUMB_SOURCE = join(ROOT, "src", "cloud", "shareThumbnail.ts");
 
 /** The secret that must never, ever appear in a preview response. */
@@ -60,16 +61,29 @@ function section(name) {
 
 // ---------------------------------------------------------------- fixtures
 /**
- * Stand-in for Supabase PostgREST implementing only `get_share_preview`, with
- * the same visibility rules as the SQL: disabled previews and previews with
- * 顯示文宣縮圖 off return no image; unknown ids return no rows at all.
+ * Stand-in for Supabase PostgREST implementing only the share-card projections,
+ * with the same visibility rules as the SQL:
+ *
+ *   get_share_preview     (0005) — disabled previews return no rows at all
+ *   get_share_preview_v3  (0011) — answers for disabled previews too, but with
+ *                                  every content field nulled; only media_type
+ *                                  survives, so the card can pick the right
+ *                                  brand instead of calling a cut 「文宣討論區」
+ *
+ * Previews with the cover turned off return no image in either.
+ *
+ * `v3Available` lets the run prove the deploy-order story: the function must
+ * still render real cards on a project that has not applied 0011 yet.
  */
 const previews = new Map();
 const rpcLog = [];
+let v3Available = true;
 
 const mock = http.createServer(async (req, res) => {
   rpcLog.push(`${req.method} ${req.url}`);
-  if (req.url !== "/rest/v1/rpc/get_share_preview" || req.method !== "POST") {
+  const v3 = req.url === "/rest/v1/rpc/get_share_preview_v3";
+  const v1 = req.url === "/rest/v1/rpc/get_share_preview";
+  if ((!v1 && !v3) || req.method !== "POST" || (v3 && !v3Available)) {
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ message: "no such route" }));
     return;
@@ -78,11 +92,30 @@ const mock = http.createServer(async (req, res) => {
   for await (const c of req) chunks.push(c);
   const body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
   const row = previews.get(body.p_preview_id);
-  const visible = row && row.enabled;
   res.writeHead(200, { "content-type": "application/json" });
+  if (!row) {
+    res.end("[]");
+    return;
+  }
+  if (v3) {
+    res.end(
+      JSON.stringify([
+        {
+          title: row.enabled ? row.title : null,
+          description: row.enabled ? row.description : null,
+          image_path: row.enabled && row.show_thumbnail ? row.thumbnail_path : null,
+          media_type: row.media_type === "video" ? "video" : "image",
+          updated_at: row.updated_at,
+          version_archived: false,
+          revoked: !row.enabled,
+        },
+      ]),
+    );
+    return;
+  }
   res.end(
     JSON.stringify(
-      visible
+      row.enabled
         ? [
             {
               title: row.title,
@@ -157,6 +190,9 @@ async function main() {
   const revokedPreview = randomUUID();
   const injectedPreview = randomUUID();
   const unknownPreview = randomUUID();
+  const videoPreview = randomUUID();
+  const videoOffPreview = randomUUID();
+  const videoRevokedPreview = randomUUID();
 
   previews.set(livePreview, {
     title: "期初演講討論",
@@ -174,6 +210,21 @@ async function main() {
     title: `"><script>alert('xss')</script>`,
     description: `<img src=x onerror="alert('xss')">`,
   });
+
+  // A production video room: poster frame in the bucket, a title the host typed
+  // themselves, and the time-based invitation.
+  previews.set(videoPreview, {
+    title: "小華招生短片｜第一剪",
+    description: "幫我看一下這支影片，在需要調整的時間點留一句話就可以。",
+    thumbnail_path: `${videoPreview}/cover.webp`,
+    show_thumbnail: true,
+    enabled: true,
+    media_type: "video",
+    updated_at: "2026-08-21T00:00:00.000Z",
+    room_id: ROOM_ID,
+  });
+  previews.set(videoOffPreview, { ...previews.get(videoPreview), show_thumbnail: false });
+  previews.set(videoRevokedPreview, { ...previews.get(videoPreview), enabled: false });
 
   const get = (id, ua = CRAWLERS.generic, method = "GET") =>
     handler(
@@ -321,6 +372,113 @@ async function main() {
     }
   }
 
+  // ------------------------------------------------------- 影片／文宣分流
+  section("影片房：卡片講的是影片，不是文宣 (PR #30)");
+  {
+    for (const [name, ua] of Object.entries(CRAWLERS)) {
+      const res = await get(videoPreview, ua);
+      const html = await res.text();
+      ok(`${name}: og:title 是自訂的影片標題`, meta(html, "og:title") === "小華招生短片｜第一剪", meta(html, "og:title"));
+      ok(
+        `${name}: og:description 是影片文案`,
+        (meta(html, "og:description") ?? "").includes("在需要調整的時間點留一句話"),
+        meta(html, "og:description"),
+      );
+      ok(
+        `${name}: og:image 是影片 poster 衍生縮圖`,
+        (meta(html, "og:image") ?? "").includes(`/storage/v1/object/public/share-previews/${videoPreview}/cover.webp`),
+        meta(html, "og:image"),
+      );
+      ok(`${name}: og:site_name 是「影片對稿」`, meta(html, "og:site_name") === "影片對稿", meta(html, "og:site_name"));
+    }
+
+    const html = await (await get(videoPreview, CRAWLERS.line)).text();
+    ok("影片卡片完全沒有「這張文宣」", !html.includes("這張文宣"));
+    ok("影片卡片完全沒有「文宣討論區」", !html.includes("文宣討論區"));
+    ok("影片卡片沒有把原始影片公開", !/\.(mp4|webm|mov|m4v)/i.test(html));
+    ok("影片卡片按鈕寫「開啟影片對稿」", html.includes("開啟影片對稿"));
+  }
+
+  section("影片房：關閉封面／撤銷後退到「影片對稿」通用卡片");
+  {
+    const off = await (await get(videoOffPreview, CRAWLERS.facebook)).text();
+    ok("關閉封面後 og:image 是影片通用封面", meta(off, "og:image") === `${APP_ORIGIN}/og-video-cover.png`, meta(off, "og:image"));
+    ok("關閉封面後不再暴露任何縮圖路徑", !off.includes("share-previews/"));
+    ok("關閉封面後標題仍然是影片標題", meta(off, "og:title") === "小華招生短片｜第一剪");
+
+    const revoked = await (await get(videoRevokedPreview, CRAWLERS.facebook)).text();
+    ok("撤銷後 og:title 是「影片對稿」而不是「文宣討論區」", meta(revoked, "og:title") === "影片對稿", meta(revoked, "og:title"));
+    ok("撤銷後 og:image 是影片通用封面", meta(revoked, "og:image") === `${APP_ORIGIN}/og-video-cover.png`);
+    ok("撤銷後看不到原本的影片標題", !revoked.includes("小華招生短片"));
+    ok("撤銷後仍然不含 invite", !/invite/i.test(revoked));
+  }
+
+  section("圖片房不受影響：仍然是「文宣討論區」");
+  {
+    const html = await (await get(livePreview, CRAWLERS.facebook)).text();
+    ok("圖片卡片沒有「這支影片」", !html.includes("這支影片"));
+    ok("圖片卡片 og:site_name 仍是文宣討論區", meta(html, "og:site_name") === "文宣討論區");
+    const off = await (await get(offPreview, CRAWLERS.facebook)).text();
+    ok("圖片關閉縮圖後用的是文宣通用封面", meta(off, "og:image") === `${APP_ORIGIN}/og-cover.png`);
+  }
+
+  section("部署順序：沒有 0011 的專案照樣出得了卡片");
+  {
+    v3Available = false;
+    try {
+      rpcLog.length = 0;
+      const html = await (await get(livePreview, CRAWLERS.facebook)).text();
+      ok("v3 不存在時回退到舊的 get_share_preview", meta(html, "og:title") === "期初演講討論", meta(html, "og:title"));
+      ok(
+        "回退真的打了兩支 RPC（先 v3 再 v1）",
+        rpcLog.filter((r) => r.includes("get_share_preview_v3")).length === 1 &&
+          rpcLog.filter((r) => r.endsWith("/get_share_preview")).length === 1,
+        rpcLog.join(" | "),
+      );
+      const videoHtml = await (await get(videoPreview, CRAWLERS.facebook)).text();
+      ok(
+        "沒有 media_type 可讀時退回圖片預設（而不是壞掉）",
+        meta(videoHtml, "og:site_name") === "文宣討論區" && meta(videoHtml, "og:title") === "小華招生短片｜第一剪",
+        meta(videoHtml, "og:site_name"),
+      );
+    } finally {
+      v3Available = true;
+    }
+  }
+
+  section("Edge Function 的文案與 App 的 presentation 是同一份");
+  {
+    // Duplicated strings are fine; silently DIVERGING strings are not. If the
+    // app ever says 「影片對稿」 while the card says something else, the person
+    // who clicks the link lands somewhere that does not look like what they
+    // were promised.
+    const app = await readFile(join(ROOT, "src", "lib", "sharePresentation.ts"), "utf8");
+    const fn = await readFile(FN_SOURCE, "utf8");
+    const constOf = (src, name) => new RegExp(`${name} = "([^"]*)"`).exec(src)?.[1] ?? null;
+    for (const [name, inFn] of [
+      ["IMAGE_BRAND", "文宣討論區"],
+      ["VIDEO_BRAND", "影片對稿"],
+      ["IMAGE_SHARE_DESCRIPTION", "幫我看一下這張文宣，點需要調整的位置留一句話就可以，不用改原稿。"],
+      ["VIDEO_SHARE_DESCRIPTION", "幫我看一下這支影片，在需要調整的時間點留一句話就可以。"],
+      ["IMAGE_GENERIC_COVER", "og-cover.png"],
+      ["VIDEO_GENERIC_COVER", "og-video-cover.png"],
+    ]) {
+      ok(`${name} 兩邊一致`, constOf(app, name) === inFn && fn.includes(inFn), `${constOf(app, name)} vs ${inFn}`);
+    }
+  }
+
+  section("通用封面：影片有自己的一張，而且不含任何房間畫面");
+  {
+    const cover = join(ROOT, "public", "og-video-cover.png");
+    const bytes = await readFile(cover);
+    ok("public/og-video-cover.png 有 commit", bytes.length > 1000);
+    ok("是 PNG", bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])));
+    // IHDR width/height live at a fixed offset in every PNG.
+    ok("是 1200×630", bytes.readUInt32BE(16) === 1200 && bytes.readUInt32BE(20) === 630, `${bytes.readUInt32BE(16)}×${bytes.readUInt32BE(20)}`);
+    const gen = await readFile(join(ROOT, "scripts", "make-og-cover.mjs"), "utf8");
+    ok("產生它的 script 也 commit 了（資產可重現）", gen.includes("og-video-cover.png"));
+  }
+
   await browserLeg(livePreview, handler);
   await thumbnailLeg(tmp);
 
@@ -338,6 +496,34 @@ async function main() {
     ok("share_previews 寫入要 is_room_member", /share_previews_all[\s\S]*?is_room_member\(room_id\)/.test(sql));
     ok("沒有把 room-assets 改成 public", !/room-assets[^\n]*public\s*=\s*true/.test(sql) && !/'room-assets',\s*true/.test(sql));
     ok("share-previews bucket 與 room-assets 分離", /insert into storage\.buckets[\s\S]*?'share-previews'/.test(sql));
+  }
+
+  section("Migration 0011：media-aware projection 一樣不外洩房間欄位");
+  {
+    const sql = await readFile(MIGRATION_0011, "utf8");
+    const returns = /returns table \(([\s\S]*?)\)\s*language sql/i.exec(sql)?.[1] ?? "";
+    ok("get_share_preview_v3 有定義", returns.length > 0);
+    ok("回傳 media_type", /\bmedia_type\b/.test(returns));
+    for (const forbidden of ["room_id", "version_id", "created_by", "invite"]) {
+      ok(`v3 回傳欄位不含 ${forbidden}`, !new RegExp(`\\b${forbidden}\\b`).test(returns));
+    }
+    ok(
+      "只 grant execute 給 anon / authenticated",
+      /grant execute on function public\.get_share_preview_v3\(uuid\) to anon, authenticated;/.test(sql),
+    );
+    ok(
+      "先明確 revoke 再 grant（跟 0010 同一套 ACL 收斂）",
+      /revoke execute on function public\.get_share_preview_v3\(uuid\) from public, anon, authenticated;/.test(sql),
+    );
+    ok("沒有改掉舊的 get_share_preview / _v2 型別", !/create or replace function public\.get_share_preview\(/.test(sql) && !/create or replace function public\.get_share_preview_v2\(/.test(sql));
+    ok("cover_source 只允許 auto/custom/none", /cover_source in \('auto', 'custom', 'none'\)/.test(sql));
+    ok("media_type 只允許 image/video", /media_type in \('image', 'video'\)/.test(sql));
+    ok(
+      "沒有把 room-assets 改成 public",
+      !/room-assets[^\n]*public\s*=\s*true/.test(sql) && !/'room-assets',\s*true/.test(sql),
+    );
+    ok("沒有新增任何 storage bucket", !/insert into storage\.buckets/.test(sql));
+    ok("欄位新增是 if not exists（可重複套用）", /add column if not exists media_type/.test(sql));
   }
 
   section("PWA：service worker 不攔截跨網域的預覽端點");

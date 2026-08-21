@@ -50,6 +50,12 @@ export const faults = {
   assetDelete: 0,
   /** Fail the next versions insert after Storage has accepted the bytes. */
   versionInsert: false,
+  /**
+   * Hold every share-previews upload open for this many ms. Not a fault: it
+   * widens the window in which a card is still `building`, which is the exact
+   * window PR #30's race lived in and is otherwise too short to observe.
+   */
+  previewUploadDelayMs: 0,
 };
 
 /** Row access for assertions (e.g. which version a preview currently points at). */
@@ -245,6 +251,23 @@ export const server = http.createServer(async (req, res) => {
           }]
         : []);
     }
+    // v3 (PR #30) adds media_type, and answers for revoked previews too — with
+    // every content field nulled, so the card falls back to the RIGHT brand
+    // instead of calling a video 「文宣討論區」. Still no room_id, ever.
+    if (fn === "get_share_preview_v3") {
+      const row = tables.share_previews.find((r) => r.id === body.p_preview_id);
+      return json(res, 200, row
+        ? [{
+            title: row.enabled ? row.title : null,
+            description: row.enabled ? row.description : null,
+            image_path: row.enabled && row.show_thumbnail ? row.thumbnail_path : null,
+            media_type: row.media_type === "video" ? "video" : "image",
+            updated_at: row.updated_at || now(),
+            version_archived: false,
+            revoked: !row.enabled,
+          }]
+        : []);
+    }
 
     const uid = userOf(req);
     if (!uid) return json(res, 401, { message: "auth required" });
@@ -401,6 +424,9 @@ export const server = http.createServer(async (req, res) => {
       const raw = await readBody(req);
       if (bucket === "share-previews" && faults.previewUpload) {
         return json(res, 500, { message: "injected upload failure" });
+      }
+      if (bucket === "share-previews" && faults.previewUploadDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, faults.previewUploadDelayMs));
       }
       // A video upload failing mid-flight is the case that decides whether a
       // retry reuses the room it already created or quietly makes a second one.

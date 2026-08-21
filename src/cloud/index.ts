@@ -44,11 +44,14 @@ export {
   previewThumbnailUrl,
   renderShareThumbnail,
   rotateRoomPreview,
-  DEFAULT_PREVIEW_DESCRIPTION,
+  IMAGE_SHARE_DESCRIPTION,
+  VIDEO_SHARE_DESCRIPTION,
   PREVIEW_BUCKET,
+  type CoverSource,
   type SharePreview,
+  type SharePreviewPatch,
 } from "./sharePreview";
 export { subscribeRoom, type SyncHandlers, type Unsubscribe } from "./roomSync";
 export { syncStatusLabel, type SyncStatus } from "./types";
-export { useCloudRoom, type ShareResult, type SharePreviewApi } from "./useCloudRoom";
+export { useCloudRoom, type PreviewOpts, type ShareResult, type SharePreviewApi } from "./useCloudRoom";
 export { signedUrl as cloudSignedUrl } from "./assets";

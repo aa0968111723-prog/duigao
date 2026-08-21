@@ -8,9 +8,14 @@
  * lose its title at the top and its date / QR code at the bottom, which is the
  * exact failure this module exists to avoid.
  *
- * The source is always the ORIGINAL version image. Never a screenshot of the
- * canvas: that would drag pins, regions, proposal overlays and the toolbar into
- * what is supposed to look like a clean poster.
+ * The source is always the ORIGINAL version image — for a video room, the
+ * poster frame captured at upload. Never a screenshot of the canvas or of the
+ * player: that would drag pins, regions, proposal overlays, the transport bar,
+ * the timeline and the toolbar into what is supposed to look like a clean frame.
+ *
+ * A host-supplied cover (PR #30) goes through the exact same renderer, so an
+ * 8MB phone photo becomes the same small, contained 1200×630 derivative as
+ * everything else — the original file is never uploaded anywhere.
  */
 
 /** Open Graph's canonical card size. */
@@ -33,7 +38,22 @@ export type ThumbnailDecoration = { play?: boolean; durationLabel?: string };
 
 type Source = ImageBitmap | HTMLImageElement;
 
-async function loadBitmap(url: string): Promise<Source> {
+/**
+ * What a card may be rendered from.
+ *
+ * A URL is the room's own artwork (a poster, or a video's captured poster
+ * frame). A Blob is a cover the host picked from their camera roll — it is
+ * rendered here, client-side, and only the 1200×630 derivative is ever
+ * uploaded. The original file never reaches the public bucket.
+ */
+export type ThumbnailSource = string | Blob;
+
+/** What a custom cover may be. Anything else is refused before it is read. */
+export const COVER_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+async function loadBitmap(source: ThumbnailSource): Promise<Source> {
+  if (typeof source !== "string") return await loadBlob(source);
+  const url = source;
   // fetch → blob → bitmap keeps the canvas untainted no matter how the storage
   // URL is served, and gives a clear failure instead of a silent security error.
   try {
@@ -46,6 +66,18 @@ async function loadBitmap(url: string): Promise<Source> {
     // Older Safari has no createImageBitmap for some types; try the img path.
     return await loadImageElement(url, false);
   }
+}
+
+/** A picked file never travels through the network, so it skips the fetch. */
+async function loadBlob(blob: Blob): Promise<Source> {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(blob);
+    } catch {
+      /* fall through to the <img> path below */
+    }
+  }
+  return await loadImageElement(URL.createObjectURL(blob), true);
 }
 
 function loadImageElement(src: string, revoke: boolean): Promise<HTMLImageElement> {
@@ -90,7 +122,7 @@ export function containRect(iw: number, ih: number): { x: number; y: number; w: 
  * into the checkerboard-grey mush a naive JPEG flatten produces.
  */
 export async function renderShareThumbnail(
-  imageUrl: string,
+  imageUrl: ThumbnailSource,
   decoration?: ThumbnailDecoration,
 ): Promise<RenderedThumbnail> {
   const source = await loadBitmap(imageUrl);

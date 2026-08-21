@@ -32,7 +32,8 @@ import { useIsMobile } from "./hooks/useIsMobile";
 import { RoomWorkspace } from "./components/RoomWorkspace";
 import { Home } from "./components/Home";
 import { UploadZone } from "./components/UploadZone";
-import { ShareSheet, type ShareState } from "./components/ShareSheet";
+import { ShareSheet, type ShareCard, type ShareCustomization, type ShareState } from "./components/ShareSheet";
+import { sharePresentation } from "./lib/sharePresentation";
 import {
   nextPinNumber,
   pinNumber,
@@ -79,6 +80,15 @@ function userFacingMessage(err: unknown): string {
   }
   return raw;
 }
+
+/**
+ * Building a card involves a signed read, a canvas render and an upload. Most of
+ * the time that is a second or two — but sharing must not hang on it forever, so
+ * a slow build converts into the honest "no thumbnail this time" path instead of
+ * an endless 準備中. A late result still wins if it arrives: the sequence guard
+ * is what decides, not this timer.
+ */
+const PREVIEW_BUILD_TIMEOUT_MS = 6000;
 
 function emptyRoom(id: string, title: string, mediaType: MediaType = "image"): Room {
   return {
@@ -958,13 +968,21 @@ export function App() {
   const applyPreview = useCallback((seq: number, appUrl: string, preview: SharePreview | null) => {
     if (seq !== shareSeq.current) return;
     if (!preview) {
-      setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "unavailable" } });
+      setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "unavailable" }, card: null });
       return;
     }
+    const card: ShareCard = {
+      title: preview.title,
+      description: preview.description,
+      coverSource: preview.coverSource,
+      titleCustomized: preview.titleCustomized,
+      descriptionCustomized: preview.descriptionCustomized,
+    };
     setShareState({
       kind: "ready",
       url: buildPreviewShareUrl(preview.id, appUrl),
       appUrl,
+      card,
       preview:
         preview.showThumbnail && preview.thumbnailPath
           ? { status: "on", thumbnailUrl: previewThumbnailUrl(preview.thumbnailPath, preview.updatedAt) }
@@ -974,8 +992,23 @@ export function App() {
 
   const failPreview = useCallback((seq: number, appUrl: string) => {
     if (seq !== shareSeq.current) return;
-    setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "unavailable" } });
+    // Keep whatever the sheet already knows about the card: a failed refresh
+    // should not make an existing custom title look like it was never saved.
+    const current = shareStateRef.current;
+    const card = current.kind === "ready" ? current.card : null;
+    setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "unavailable" }, card });
   }, []);
+
+  const withPreviewTimeout = useCallback(
+    (work: Promise<SharePreview | null>): Promise<SharePreview | null> => {
+      let timer = 0;
+      const deadline = new Promise<never>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error("preview build timed out")), PREVIEW_BUILD_TIMEOUT_MS);
+      });
+      return Promise.race([work, deadline]).finally(() => window.clearTimeout(timer));
+    },
+    [],
+  );
 
   /**
    * A share link is only worth handing out if it still opens after the host
@@ -1004,11 +1037,14 @@ export function App() {
             setShareState({ kind: "failed" });
             return;
           }
-          // Hand over the working link immediately; the card catches up.
+          // The room is shareable, but nothing is handed out yet: `building`
+          // holds every share action back until the card either exists or has
+          // definitively failed. Sending `appUrl` in this window is exactly the
+          // bug — LINE would get a fragment-only URL and show the generic cover
+          // even though the poster frame was already sitting in Storage.
           const appUrl = res.url;
-          setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "building" } });
-          cloudRef.current.preview
-            .ensure({ versionId: viewRef.current.versionId })
+          setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "building" }, card: null });
+          withPreviewTimeout(cloudRef.current.preview.ensure({ versionId: viewRef.current.versionId }))
             .then((preview) => applyPreview(seq, appUrl, preview))
             .catch(() => failPreview(seq, appUrl));
         })
@@ -1027,9 +1063,9 @@ export function App() {
     }
     // Deployed without VITE_SUPABASE_* — there is no permanent link to give.
     setShareState({ kind: "unavailable" });
-  }, [isLegacyLink, startHosting, applyPreview, failPreview]);
+  }, [isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
 
-  /** 顯示文宣縮圖 toggle in the share sheet's 連結預覽 block. */
+  /** 顯示文宣縮圖 / 顯示影片封面 toggle in the share sheet's 連結預覽 block. */
   const setPreviewThumbnail = useCallback(
     (next: boolean) => {
       const current = shareStateRef.current;
@@ -1037,12 +1073,40 @@ export function App() {
       const { appUrl } = current;
       const seq = ++shareSeq.current;
       setShareState({ ...current, preview: { status: "building" } });
-      cloudRef.current.preview
-        .ensure({ versionId: viewRef.current.versionId, showThumbnail: next })
+      withPreviewTimeout(
+        cloudRef.current.preview.ensure({ versionId: viewRef.current.versionId, showThumbnail: next }),
+      )
         .then((preview) => applyPreview(seq, appUrl, preview))
         .catch(() => failPreview(seq, appUrl));
     },
-    [applyPreview, failPreview],
+    [applyPreview, failPreview, withPreviewTimeout],
+  );
+
+  /**
+   * 自訂分享內容 — title, description and cover for the CARD.
+   *
+   * Note what is NOT here: no `writes.setTitle`, no version write, no upload to
+   * `room-assets`. A share is an outward-facing invitation; the room keeps its
+   * own name and its own files. That separation is the feature.
+   */
+  const customizeShare = useCallback(
+    (patch: ShareCustomization) => {
+      const current = shareStateRef.current;
+      if (current.kind !== "ready") return;
+      const { appUrl } = current;
+      const seq = ++shareSeq.current;
+      setShareState({ ...current, preview: { status: "building" } });
+      withPreviewTimeout(cloudRef.current.preview.ensure({ versionId: viewRef.current.versionId, patch }))
+        .then((preview) => {
+          applyPreview(seq, appUrl, preview);
+          if (preview && seq === shareSeq.current) showToast("分享內容已更新", { tone: "success" });
+        })
+        .catch(() => {
+          failPreview(seq, appUrl);
+          showToast("這次沒能更新分享內容，請再試一次。", { tone: "error" });
+        });
+    },
+    [applyPreview, failPreview, showToast, withPreviewTimeout],
   );
 
   /** Revoke the current preview id so links already in a chat stop showing the poster. */
@@ -1052,8 +1116,7 @@ export function App() {
     const { appUrl } = current;
     const seq = ++shareSeq.current;
     setShareState({ ...current, preview: { status: "building" } });
-    cloudRef.current.preview
-      .rotate({ versionId: viewRef.current.versionId })
+    withPreviewTimeout(cloudRef.current.preview.rotate({ versionId: viewRef.current.versionId }))
       .then((preview) => {
         applyPreview(seq, appUrl, preview);
         // A null result means nothing was rotated (no readable version yet), so
@@ -1064,7 +1127,7 @@ export function App() {
         }
       })
       .catch(() => failPreview(seq, appUrl));
-  }, [applyPreview, failPreview, showToast]);
+  }, [applyPreview, failPreview, showToast, withPreviewTimeout]);
 
   const copySummary = useCallback(async () => {
     const current = roomRef.current;
@@ -1356,13 +1419,14 @@ export function App() {
 
       {shareOpen && room && (
         <ShareSheet
-          title={room.title}
+          presentation={sharePresentation(roomMediaType(room), room.title)}
           state={shareState}
           onRetry={openShare}
           onClose={() => setShareOpen(false)}
           onToast={showToast}
           onPreviewThumbnail={setPreviewThumbnail}
           onRotatePreview={rotatePreview}
+          onCustomize={customizeShare}
         />
       )}
 

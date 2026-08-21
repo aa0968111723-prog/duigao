@@ -687,6 +687,25 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .m-share-toggle input:disabled { opacity: 0.5; }
 .m-share-more { align-self: flex-start; }
 
+/* ---------- 自訂分享內容 (PR #30): collapsed until asked for ---------- */
+.m-share-custom,
+.m-share-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.m-share-custom-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.m-share-field { display: flex; flex-direction: column; gap: 6px; }
+.m-share-field > span { font-size: 12px; color: var(--ink-faint); }
+.m-share-textarea { resize: vertical; min-height: 76px; line-height: 1.6; font-family: inherit; }
+.m-share-covers { display: flex; flex-direction: column; gap: 2px; }
+/* The picker is driven by the 上傳自訂封面 radio, so the raw input never shows. */
+.m-share-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.m-share-save:disabled { opacity: 0.55; }
+.m-row:disabled { opacity: 0.55; cursor: default; }
+
 .m-input {
   flex: 1;
   min-width: 0;
