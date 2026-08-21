@@ -939,6 +939,13 @@ try {
     briefRow?.version_id === rows.versions.find((v) => v.sort_order === 0)?.id,
     `${briefRow?.version_id}`,
   );
+  // The card re-reads the brief from the server after saving, so the summary
+  // appears on the round trip rather than on the click.
+  await A.waitForFunction(
+    () => (document.querySelector(".v-brief-summary")?.textContent ?? "").includes("招生短片"),
+    null,
+    { timeout: 20000 },
+  ).catch(() => {});
   check(
     "S1. 收合後只顯示一行摘要",
     ((await A.textContent(".v-brief-summary")) ?? "").includes("招生短片"),
