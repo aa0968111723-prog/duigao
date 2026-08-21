@@ -38,7 +38,7 @@ export type VideoApi = {
   /** File the current draft against a moment or a stretch. */
   commitVideoComment: (anchor: VideoAnchor) => void;
   /** Re-sign the playing version's URL after an expiry. */
-  refreshVideoUrl: () => Promise<string | null>;
+  refreshVideoUrl: (path: string) => Promise<string | null>;
 };
 
 /** A pending piece of feedback. When it came from a 圈範圍 gesture, `region` is set and x/y are its center. */

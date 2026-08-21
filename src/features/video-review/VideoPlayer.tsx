@@ -58,7 +58,7 @@ type Props = {
    */
   startAt?: number;
   /** Re-sign the storage URL. Called once when playback fails on an expired URL. */
-  onNeedsFreshUrl?: () => Promise<string | null>;
+  onNeedsFreshUrl?: (path: string) => Promise<string | null>;
   /** Fires ~4×/s while playing, plus on every seek. Not once per frame. */
   onTimeUpdate?: (seconds: number) => void;
   onDurationChange?: (seconds: number) => void;
@@ -113,6 +113,8 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
   latestSrc.current = src;
   /** One re-sign attempt per source; a second failure is a real failure. */
   const refreshed = useRef(false);
+  /** Concurrent media errors share one re-sign request. */
+  const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
   /** A seek asked for before the metadata arrived (e.g. switching cuts). */
   const pendingSeek = useRef<{ seconds: number; play: boolean } | null>(null);
   // Read inside the source-change effect, which must depend on srcKey alone.
@@ -123,16 +125,23 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
   const frameRef = useRef(onFrame);
   frameRef.current = onFrame;
   const clockRef = useRef(0);
+  /** Last requested position, including a seek issued just before an error. */
+  const positionRef = useRef(startAt ?? 0);
+  const playingRef = useRef(false);
+  const resumeAfterVisibilityRef = useRef(false);
 
   // A new source means a new everything: nothing measured about the previous
   // cut may leak into this one's clock, timeline or resume point.
   useEffect(() => {
     refreshed.current = false;
+    refreshPromiseRef.current = null;
     pendingSeek.current = startAtRef.current != null ? { seconds: startAtRef.current, play: false } : null;
+    positionRef.current = startAtRef.current ?? 0;
     clockRef.current = 0;
     setFailure(null);
     setClock(0);
     setPlaying(false);
+    playingRef.current = false;
     setDuration(knownDurationRef.current ?? 0);
     // Adopt whatever URL is current for the NEW path. Reading it from a ref
     // keeps this effect keyed on identity alone, so a re-signed URL for the
@@ -155,10 +164,12 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
           // Metadata is not in yet, so we cannot clamp and the browser would
           // drop the assignment. Remember it and apply it on loadedmetadata.
           pendingSeek.current = { seconds, play: Boolean(opts?.play) };
+          positionRef.current = Math.max(0, seconds);
           return;
         }
         const max = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : seconds;
         v.currentTime = Math.max(0, Math.min(seconds, max));
+        positionRef.current = v.currentTime;
         clockRef.current = v.currentTime;
         setClock(v.currentTime);
         frameRef.current?.(v.currentTime);
@@ -187,6 +198,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
       const v = videoRef.current;
       if (v) {
         const t = v.currentTime;
+        positionRef.current = t;
         clockRef.current = t;
         frameRef.current?.(t);
         // React only hears about it four times a second — enough for a clock,
@@ -203,8 +215,32 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
     return () => cancelAnimationFrame(raf);
   }, [playing, onTimeUpdate]);
 
+  // Mobile browsers may pause media while a tab is backgrounded. Keep the
+  // position outside React state and restore both the position and play intent
+  // when the page becomes visible again.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      const v = videoRef.current;
+      if (!v) return;
+      if (document.visibilityState === "hidden") {
+        positionRef.current = Number.isFinite(v.currentTime) ? v.currentTime : positionRef.current;
+        resumeAfterVisibilityRef.current = !v.paused && !v.ended;
+        return;
+      }
+      const target = positionRef.current;
+      if (v.readyState > 0 && Number.isFinite(target) && Math.abs(v.currentTime - target) > 0.15) {
+        v.currentTime = Math.max(0, target);
+      }
+      if (resumeAfterVisibilityRef.current && v.paused) void v.play().catch(() => undefined);
+      resumeAfterVisibilityRef.current = false;
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
   const setPlayState = useCallback(
     (next: boolean) => {
+      playingRef.current = next;
       setPlaying(next);
       onPlayingChange?.(next);
     },
@@ -233,16 +269,23 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
    */
   const handleError = useCallback(async () => {
     const v = videoRef.current;
-    const at = v?.currentTime ?? 0;
-    if (!refreshed.current && onNeedsFreshUrl) {
-      refreshed.current = true;
-      setBuffering(true);
-      const fresh = await onNeedsFreshUrl().catch(() => null);
+    const at = pendingSeek.current?.seconds ?? positionRef.current;
+    const shouldResume = Boolean((v && !v.paused && !v.ended) || playingRef.current || playing);
+    if (onNeedsFreshUrl && (!refreshed.current || refreshPromiseRef.current)) {
+      if (!refreshPromiseRef.current) {
+        refreshed.current = true;
+        setBuffering(true);
+        refreshPromiseRef.current = onNeedsFreshUrl(srcKey).catch(() => null);
+      }
+      const refresh = refreshPromiseRef.current;
+      if (!refresh) return;
+      const fresh = await refresh;
+      if (refreshPromiseRef.current === refresh) refreshPromiseRef.current = null;
       setBuffering(false);
       if (fresh) {
         // Resume where the viewer was: an expired signature should feel like a
         // hiccup, not like the video restarted.
-        pendingSeek.current = { seconds: at, play: false };
+        pendingSeek.current = { seconds: at, play: shouldResume };
         setPlaybackSrc(fresh);
         return;
       }
@@ -254,7 +297,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
       canRetry: true,
     });
     setPlayState(false);
-  }, [onNeedsFreshUrl, setPlayState, unsupportedNote, mimeType]);
+  }, [onNeedsFreshUrl, setPlayState, unsupportedNote, mimeType, srcKey, playing]);
 
   const toggle = useCallback(() => {
     const v = videoRef.current;
@@ -268,6 +311,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
     if (!v) return;
     const max = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : v.currentTime + delta;
     v.currentTime = Math.max(0, Math.min(v.currentTime + delta, max));
+    positionRef.current = v.currentTime;
     clockRef.current = v.currentTime;
     setClock(v.currentTime);
     frameRef.current?.(v.currentTime);
@@ -335,6 +379,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
               pendingSeek.current = null;
               const max = known > 0 ? Math.max(0, known - 0.05) : queued.seconds;
               v.currentTime = Math.max(0, Math.min(queued.seconds, max));
+              positionRef.current = v.currentTime;
               clockRef.current = v.currentTime;
               setClock(v.currentTime);
               frameRef.current?.(v.currentTime);
@@ -344,6 +389,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
           }}
           onSeeked={(e) => {
             const t = e.currentTarget.currentTime;
+            positionRef.current = t;
             clockRef.current = t;
             setClock(t);
             frameRef.current?.(t);
@@ -354,6 +400,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
             // background; the rAF loop handles the smooth case while playing.
             if (playing) return;
             const t = e.currentTarget.currentTime;
+            positionRef.current = t;
             clockRef.current = t;
             setClock(t);
             frameRef.current?.(t);

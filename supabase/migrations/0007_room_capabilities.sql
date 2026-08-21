@@ -333,6 +333,81 @@ create policy share_previews_delete on storage.objects
   );
 
 -- ---------------------------------------------------------------------------
+-- 不可被舊 migration 還原的護欄
+--
+-- Policy 有一個安靜的弱點：它是「名字 → 定義」的對應，而舊的 migration 檔案裡
+-- 還留著同名 policy 的舊定義。0005 是**刻意寫成可重複套用**的（它自己 drop 再
+-- create），所以任何重跑它的動作——重建環境、災難復原，或只是驗證它還能重跑，
+-- scripts/e2e/migrations.mjs 就固定會做一次——都會把 share_previews 的規則
+-- **還原成寬鬆版本**，而且不會有任何錯誤訊息。安全性倒退到沒有人會發現。
+--（0001 沒有這個問題：它的 create policy 沒有 drop，重跑會直接報錯而不是靜默降級。）
+--
+-- 所以真正的規則寫成 trigger。Trigger 的名字不出現在任何舊檔案裡，重放舊
+-- migration 不會動到它；policy 保留在上面當第一層，兩層一起是縱深防禦。
+--
+-- 與 rooms 的 trigger 一樣：auth.uid() 為 null 的維運路徑放行。
+-- ---------------------------------------------------------------------------
+
+create or replace function public.guard_media_write()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_room uuid;
+begin
+  if auth.uid() is null then
+    return coalesce(new, old);
+  end if;
+  v_room := coalesce(new.room_id, old.room_id);
+  if not public.can_manage_media(v_room) then
+    raise exception 'not allowed'
+      using hint = '這個房間裡你是檢視者：可以留言與標記，但不能改動版本或分享卡片。';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists versions_guard_write on public.versions;
+create trigger versions_guard_write
+  before insert or update or delete on public.versions
+  for each row execute function public.guard_media_write();
+
+drop trigger if exists share_previews_guard_write on public.share_previews;
+create trigger share_previews_guard_write
+  before insert or update or delete on public.share_previews
+  for each row execute function public.guard_media_write();
+
+/*
+ * 留言只有「刪掉別人的話」這一條要擋。作者本人與可管理媒體的人都可以刪。
+ * author_user_id 從 0004 起就存在；舊資料若是 null，交給 owner/editor 處理。
+ */
+create or replace function public.guard_comment_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    return old;
+  end if;
+  if old.author_user_id is distinct from auth.uid()
+     and not public.can_manage_media(old.room_id) then
+    raise exception 'not allowed'
+      using hint = '只有留言者本人或房主／協作者可以刪除這則留言。';
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists comments_guard_delete on public.comments;
+create trigger comments_guard_delete
+  before delete on public.comments
+  for each row execute function public.guard_comment_delete();
+
+-- ---------------------------------------------------------------------------
 -- RPC：房主調整角色與預設角色
 -- ---------------------------------------------------------------------------
 

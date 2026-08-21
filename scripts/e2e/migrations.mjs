@@ -553,6 +553,165 @@ try {
     );
   }
 
+  // ------------------------------------------------ capability + archive proofs
+  section("Capability model：reviewer / editor / owner");
+  const editor = psql("insert into auth.users default values returning id;").out;
+  const reviewer = psql("insert into auth.users default values returning id;").out;
+  const joiner = psql("insert into auth.users default values returning id;").out;
+  const freshJoiner = psql("insert into auth.users default values returning id;").out;
+  const capRoom = psql("select gen_random_uuid();").out;
+  const capToken = "capability-room-invite-token";
+  psql(
+    `set request.jwt.claim.sub = '${owner}';
+     select create_room_with_invite('${capRoom}'::uuid, 'Capability room', '${capToken}', 'Owner', '#111111');
+     insert into public.room_members (room_id, user_id, display_name, color, role)
+       values ('${capRoom}'::uuid, '${editor}'::uuid, 'Editor', '#222222', 'editor'),
+              ('${capRoom}'::uuid, '${reviewer}'::uuid, 'Reviewer', '#333333', 'reviewer');`,
+  );
+  const capVersion = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}'; insert into public.versions (id, room_id, label, sort_order, image_path) values ('${capVersion}'::uuid, '${capRoom}'::uuid, 'Capability cut', 0, 'capability.png');`);
+
+  const reviewerVersion = psql("select gen_random_uuid();").out;
+  as(reviewer, `insert into public.versions (id, room_id, label, sort_order, image_path) values ('${reviewerVersion}'::uuid, '${capRoom}'::uuid, 'blocked', 2, 'blocked.png');`);
+  as(reviewer, `update public.versions set label = 'blocked' where id = '${capVersion}'::uuid;`);
+  const reviewerVersionUpdate = as(owner, `select label from public.versions where id = '${capVersion}'::uuid;`).out;
+  as(reviewer, `delete from public.versions where id = '${capVersion}'::uuid;`);
+  ok("reviewer cannot insert/update/delete versions", reviewerVersionUpdate === "Capability cut" && as(owner, `select count(*) from public.versions where id = '${capVersion}'::uuid;`).out === "1");
+  const editorVersion = psql("select gen_random_uuid();").out;
+  ok("editor can insert/update/delete versions", !as(editor, `insert into public.versions (id, room_id, label, sort_order, image_path) values ('${editorVersion}'::uuid, '${capRoom}'::uuid, 'editor', 3, 'editor.png');`).failed && !as(editor, `update public.versions set label = 'editor updated' where id = '${editorVersion}'::uuid;`).failed && !as(editor, `delete from public.versions where id = '${editorVersion}'::uuid;`).failed);
+  const ownerVersion = psql("select gen_random_uuid();").out;
+  ok("owner can insert/update/delete versions", !as(owner, `insert into public.versions (id, room_id, label, sort_order, image_path) values ('${ownerVersion}'::uuid, '${capRoom}'::uuid, 'owner', 4, 'owner.png');`).failed && !as(owner, `update public.versions set label = 'owner updated' where id = '${ownerVersion}'::uuid;`).failed && !as(owner, `delete from public.versions where id = '${ownerVersion}'::uuid;`).failed);
+
+  const reviewerAssetPath = `rooms/${capRoom}/videos/${capVersion}/reviewer.mp4`;
+  psql(`insert into storage.objects (bucket_id, name) values ('room-assets', '${reviewerAssetPath}');`);
+  as(reviewer, `insert into storage.objects (bucket_id, name) values ('room-assets', 'rooms/${capRoom}/videos/${capVersion}/blocked.mp4');`);
+  as(reviewer, `update storage.objects set name = '${reviewerAssetPath}.changed' where bucket_id = 'room-assets' and name = '${reviewerAssetPath}';`);
+  as(reviewer, `delete from storage.objects where bucket_id = 'room-assets' and name = '${reviewerAssetPath}';`);
+  ok("reviewer cannot insert/update/delete room-assets objects", psql(`select name from storage.objects where bucket_id = 'room-assets' and name = '${reviewerAssetPath}';`).out === reviewerAssetPath && as(reviewer, `select count(*) from storage.objects where bucket_id = 'room-assets' and name = 'rooms/${capRoom}/videos/${capVersion}/blocked.mp4';`).out === "0");
+  const editorAssetPath = `rooms/${capRoom}/videos/${capVersion}/editor.mp4`;
+  ok("editor can insert/update/delete room-assets objects", !as(editor, `insert into storage.objects (bucket_id, name) values ('room-assets', '${editorAssetPath}');`).failed && !as(editor, `update storage.objects set name = '${editorAssetPath}.changed' where bucket_id = 'room-assets' and name = '${editorAssetPath}';`).failed && !as(editor, `delete from storage.objects where bucket_id = 'room-assets' and name = '${editorAssetPath}.changed';`).failed);
+  as(owner, `delete from storage.objects where bucket_id = 'room-assets' and name = '${reviewerAssetPath}';`);
+  const ownerAssetPath = `rooms/${capRoom}/versions/${capVersion}/poster.png`;
+  ok("owner can write room-assets objects", !as(owner, `insert into storage.objects (bucket_id, name) values ('room-assets', '${ownerAssetPath}');`).failed && !as(owner, `update storage.objects set name = '${ownerAssetPath}.changed' where bucket_id = 'room-assets' and name = '${ownerAssetPath}';`).failed && !as(owner, `delete from storage.objects where bucket_id = 'room-assets' and name = '${ownerAssetPath}.changed';`).failed);
+
+  const capPreview = psql("select gen_random_uuid();").out;
+  const previewInsert = `insert into public.share_previews (id, room_id, version_id, title, description) values ('${capPreview}'::uuid, '${capRoom}'::uuid, '${capVersion}'::uuid, 'capability', 'preview');`;
+  ok("reviewer cannot create share_previews", as(reviewer, previewInsert).failed);
+  ok("owner can create share_previews and reviewer can read it", !as(owner, previewInsert).failed && as(reviewer, `select count(*) from public.share_previews where id = '${capPreview}'::uuid;`).out === "1");
+  as(reviewer, `update public.share_previews set title = 'blocked' where id = '${capPreview}'::uuid;`);
+  as(reviewer, `delete from public.share_previews where id = '${capPreview}'::uuid;`);
+  ok("reviewer cannot modify/delete share_previews", as(owner, `select title, count(*) from public.share_previews where id = '${capPreview}'::uuid group by title;`).out === "capability|1");
+
+  const reviewerComment = psql("select gen_random_uuid();").out;
+  const ownerComment = psql("select gen_random_uuid();").out;
+  ok("reviewer can insert/update a comment and insert a reply", !as(reviewer, `insert into public.comments (id, room_id, version_id, author_name, body) values ('${reviewerComment}'::uuid, '${capRoom}'::uuid, '${capVersion}'::uuid, 'Reviewer', 'comment');`).failed && !as(reviewer, `update public.comments set resolved = true where id = '${reviewerComment}'::uuid;`).failed && !as(reviewer, `insert into public.comment_replies (id, room_id, comment_id, author_name, body) values (gen_random_uuid(), '${capRoom}'::uuid, '${reviewerComment}'::uuid, 'Reviewer', 'reply');`).failed);
+  as(owner, `insert into public.comments (id, room_id, version_id, author_name, body) values ('${ownerComment}'::uuid, '${capRoom}'::uuid, '${capVersion}'::uuid, 'Owner', 'owner comment');`);
+  as(reviewer, `delete from public.comments where id = '${ownerComment}'::uuid;`);
+  const ownerCommentStillThere = as(owner, `select count(*) from public.comments where id = '${ownerComment}'::uuid;`).out === "1";
+  ok("reviewer cannot delete another user's comment but can delete their own", ownerCommentStillThere && !as(reviewer, `delete from public.comments where id = '${reviewerComment}'::uuid;`).failed);
+  ok("editor/owner can delete another user's comment", !as(editor, `delete from public.comments where id = '${ownerComment}'::uuid;`).failed);
+
+  as(reviewer, `update public.room_members set role = 'editor' where room_id = '${capRoom}'::uuid and user_id = '${reviewer}'::uuid;`);
+  as(reviewer, `update public.room_members set role = 'owner' where room_id = '${capRoom}'::uuid and user_id = '${reviewer}'::uuid;`);
+  ok("reviewer cannot self-promote to editor or owner", as(owner, `select role from public.room_members where room_id = '${capRoom}'::uuid and user_id = '${reviewer}'::uuid;`).out === "reviewer");
+  const roomGuard = (uid, column, value) => as(uid, `update public.rooms set ${column} = ${value} where id = '${capRoom}'::uuid;`).failed;
+  ok("reviewer cannot change title/media/owner/invite/archive fields", [roomGuard(reviewer, "title", "'blocked'"), roomGuard(reviewer, "media_type", "'video'"), roomGuard(reviewer, "owner_user_id", `'${reviewer}'::uuid`), roomGuard(reviewer, "invite_hash", "'blocked'"), roomGuard(reviewer, "archived_at", "now()")].every(Boolean));
+  ok("editor can change title/media but not owner/invite", !roomGuard(editor, "title", "'editor title'") && !roomGuard(editor, "media_type", "'video'") && roomGuard(editor, "owner_user_id", `'${editor}'::uuid`) && roomGuard(editor, "invite_hash", "'blocked-again'"));
+  psql(`update public.rooms set title = 'Capability room', media_type = 'image' where id = '${capRoom}'::uuid;`);
+
+  ok("owner can promote reviewer to editor and demote back", !as(owner, `select set_member_role('${capRoom}'::uuid, '${reviewer}'::uuid, 'editor');`).failed && !as(owner, `select set_member_role('${capRoom}'::uuid, '${reviewer}'::uuid, 'reviewer');`).failed);
+  ok("non-owner cannot set a member role", as(editor, `select set_member_role('${capRoom}'::uuid, '${reviewer}'::uuid, 'editor');`).failed);
+  ok("owner cannot demote themself or pass owner", as(owner, `select set_member_role('${capRoom}'::uuid, '${owner}'::uuid, 'reviewer');`).failed && as(owner, `select set_member_role('${capRoom}'::uuid, '${reviewer}'::uuid, 'owner');`).failed);
+  // A room that predates 0007 keeps its behaviour: the column was backfilled to
+  // 'editor', so its link still hands out editors. Simulated the way a real one
+  // exists — inserted directly, without create_room_with_invite's 'reviewer'.
+  const legacyRoom = psql("select gen_random_uuid();").out;
+  const legacyToken = "legacy-room-invite-token-0001";
+  psql(`insert into public.rooms (id, owner_user_id, title, invite_hash)
+        values ('${legacyRoom}'::uuid, '${owner}'::uuid, 'Legacy room', encode(digest('${legacyToken}', 'sha256'), 'hex'));
+        insert into public.room_members (room_id, user_id, display_name, color, role)
+        values ('${legacyRoom}'::uuid, '${owner}'::uuid, 'Owner', '#c45c4a', 'owner');`);
+  ok(
+    "既有房間（欄位回填 editor）join 仍發 editor",
+    as(owner, `select default_member_role from public.rooms where id = '${legacyRoom}'::uuid;`).out === "editor"
+      && !as(joiner, `select join_room_by_invite('${legacyRoom}'::uuid, '${legacyToken}', 'Joiner', '#444444');`).failed
+      && as(owner, `select role from public.room_members where room_id = '${legacyRoom}'::uuid and user_id = '${joiner}'::uuid;`).out === "editor",
+  );
+  // Model a pre-capability room whose compatibility default was backfilled to
+  // editor; freshly created rooms below keep the new reviewer default.
+  as(owner, `select set_room_default_role('${capRoom}'::uuid, 'editor');`);
+  const freshRoom = psql("select gen_random_uuid();").out;
+  const freshToken = "fresh-reviewer-room-invite-token";
+  psql(`set request.jwt.claim.sub = '${owner}'; select create_room_with_invite('${freshRoom}'::uuid, 'Fresh room', '${freshToken}', 'Owner', '#111111');`);
+  ok("新房間 join 發 reviewer", !as(freshJoiner, `select join_room_by_invite('${freshRoom}'::uuid, '${freshToken}', 'Fresh joiner', '#555555');`).failed && as(owner, `select role from public.room_members where room_id = '${freshRoom}'::uuid and user_id = '${freshJoiner}'::uuid;`).out === "reviewer");
+  const p0 = as(stranger, `select create_room_with_invite('${capRoom}'::uuid, 'takeover', 'third-party-create-token', 'Stranger', '#999999');`);
+  ok("第三人不能用 create_room_with_invite 接管既有房間", p0.failed && as(owner, `select count(*) from public.room_members where room_id = '${capRoom}'::uuid and user_id = '${stranger}'::uuid;`).out === "0");
+
+  section("Version archive：discussion history is preserved");
+  const cleanVersion = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}'; insert into public.versions (id, room_id, label, sort_order, image_path) values ('${cleanVersion}'::uuid, '${capRoom}'::uuid, 'clean', 10, 'clean.png');`);
+  ok("沒有討論的版本仍可硬刪除", !as(owner, `delete from public.versions where id = '${cleanVersion}'::uuid;`).failed);
+  const discussionVersion = psql("select gen_random_uuid();").out;
+  const discussionComment = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}'; insert into public.versions (id, room_id, label, sort_order, image_path) values ('${discussionVersion}'::uuid, '${capRoom}'::uuid, 'discussion', 11, 'discussion.png'); insert into public.comments (id, room_id, version_id, author_name, body) values ('${discussionComment}'::uuid, '${capRoom}'::uuid, '${discussionVersion}'::uuid, 'Owner', 'keep this');`);
+  const discussionDelete = as(owner, `delete from public.versions where id = '${discussionVersion}'::uuid;`);
+  ok("有 comment 的版本硬刪除會被擋下", discussionDelete.failed && discussionDelete.err.includes("version-has-discussion"));
+  const strokeVersion = psql("select gen_random_uuid();").out;
+  const proposalVersion = psql("select gen_random_uuid();").out;
+  const preferenceVersion = psql("select gen_random_uuid();").out;
+  const previewVersion = psql("select gen_random_uuid();").out;
+  const archivePreview = psql("select gen_random_uuid();").out;
+  // Only one enabled preview per room (idx_share_previews_room_enabled), and
+  // the capability section left one behind. Retire it before filing the one
+  // this section needs.
+  psql(`update public.share_previews set enabled = false where id = '${capPreview}'::uuid;`);
+  psql(`set request.jwt.claim.sub = '${owner}'; insert into public.versions (id, room_id, label, sort_order, image_path) values ('${strokeVersion}'::uuid, '${capRoom}'::uuid, 'stroke', 12, 'stroke.png'), ('${proposalVersion}'::uuid, '${capRoom}'::uuid, 'proposal', 13, 'proposal.png'), ('${preferenceVersion}'::uuid, '${capRoom}'::uuid, 'preference', 14, 'preference.png'), ('${previewVersion}'::uuid, '${capRoom}'::uuid, 'preview', 15, 'preview.png'); insert into public.strokes (room_id, version_id, color, width, points) values ('${capRoom}'::uuid, '${strokeVersion}'::uuid, '#000', 2, '[]'::jsonb); insert into public.visual_proposals (room_id, version_id, author_name, name, payload) values ('${capRoom}'::uuid, '${proposalVersion}'::uuid, 'Owner', 'Proposal', '{}'::jsonb); insert into public.proposal_preferences (room_id, version_id, user_id, choice) values ('${capRoom}'::uuid, '${preferenceVersion}'::uuid, '${owner}'::uuid, 'yes'); insert into public.share_previews (id, room_id, version_id, title, description) values ('${archivePreview}'::uuid, '${capRoom}'::uuid, '${previewVersion}'::uuid, 'archive preview', 'preview');`);
+  for (const [label, version] of [["stroke", strokeVersion], ["visual_proposal", proposalVersion], ["proposal_preference", preferenceVersion], ["share_preview", previewVersion]]) {
+    const blocked = as(owner, `delete from public.versions where id = '${version}'::uuid;`);
+    ok(`有 ${label} 的版本硬刪除會被擋下`, blocked.failed && blocked.err.includes("version-has-discussion"));
+  }
+  ok("reviewer cannot archive/restore", as(reviewer, `select archive_version('${discussionVersion}'::uuid);`).failed && as(reviewer, `select restore_version('${discussionVersion}'::uuid);`).failed);
+  ok("archive_version keeps version and comments readable", !as(owner, `select archive_version('${discussionVersion}'::uuid);`).failed && as(reviewer, `select archived_at from public.versions where id = '${discussionVersion}'::uuid;`).out !== "" && as(reviewer, `select count(*) from public.comments where id = '${discussionComment}'::uuid;`).out === "1");
+  ok("restore_version clears archived_at", !as(owner, `select restore_version('${discussionVersion}'::uuid);`).failed && as(owner, `select archived_at is null from public.versions where id = '${discussionVersion}'::uuid;`).out === "t");
+  ok("get_share_preview_v2 reports archived without room/version ids", !as(owner, `select archive_version('${previewVersion}'::uuid);`).failed && asAnon(`select version_archived from public.get_share_preview_v2('${archivePreview}'::uuid);`).out === "t" && psql(`select array_to_string(p.proargnames, ',') from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_share_preview_v2';`).out === "p_preview_id,title,description,image_path,updated_at,version_archived");
+  ok("get_share_preview_v2 reports false after restore", !as(owner, `select restore_version('${previewVersion}'::uuid);`).failed && asAnon(`select version_archived from public.get_share_preview_v2('${archivePreview}'::uuid);`).out === "f");
+
+  // ------------------------------------------------------- replay safety --
+  //
+  // Policies are name→definition, and the OLD definitions still live in the old
+  // migration files. 0005 is deliberately idempotent (it drops and recreates
+  // its policies), so re-running it — rebuilding an environment, restoring a
+  // backup, or just checking it is still re-runnable, which this file does at
+  // line 163 — quietly reinstates the permissive `share_previews_all` with no
+  // error anywhere. 0001 is NOT re-runnable (its CREATE POLICY has no drop, so
+  // it fails loudly instead), which is why only 0005 is replayed here.
+  //
+  // The defence is that the real rules are triggers, whose names appear in no
+  // earlier file and which therefore survive any replay.
+  section("重放舊 migration 不得讓權限倒退");
+  psqlFile(join(MIGRATIONS, "0005_share_previews.sql"));
+  const replayVersion = psql("select gen_random_uuid();").out;
+  ok(
+    "檢視者仍然不能新增版本",
+    as(reviewer, `insert into public.versions (id, room_id, label, sort_order, image_path) values ('${replayVersion}'::uuid, '${capRoom}'::uuid, 'replay', 20, 'replay.png');`).failed,
+  );
+  // A DELETE filtered out by RLS affects zero rows and does NOT error, so the
+  // assertion has to be "the comment is still there", not "the call failed".
+  as(reviewer, `delete from public.comments where id = '${discussionComment}'::uuid;`);
+  ok(
+    "檢視者仍然刪不掉別人的留言",
+    as(owner, `select count(*) from public.comments where id = '${discussionComment}'::uuid;`).out === "1",
+  );
+  const replayPreview = psql("select gen_random_uuid();").out;
+  ok(
+    "重放 0005 之後，檢視者仍然不能建立分享卡片",
+    as(reviewer, `insert into public.share_previews (id, room_id, version_id, title, description) values ('${replayPreview}'::uuid, '${capRoom}'::uuid, '${capVersion}'::uuid, 'replayed', 'preview');`).failed,
+  );
+  ok(
+    "重放之後，房主仍然可以正常管理版本",
+    !as(owner, `insert into public.versions (id, room_id, label, sort_order, image_path) values ('${replayVersion}'::uuid, '${capRoom}'::uuid, 'replay', 20, 'replay.png');`).failed,
+  );
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {
