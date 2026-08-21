@@ -1036,8 +1036,15 @@ try {
     "S3. 反應不會改變播放狀態（不強制暫停）",
     beforeReact === (await A.evaluate(() => document.querySelector("video.v-video")?.paused)),
   );
-  const toastText = (await A.textContent(".toast, .m-toast").catch(() => null)) ?? "";
-  check("S3. 有輕量 toast 說明記在哪一秒", /已記在\s*\d+:\d{2}/.test(toastText), toastText.slice(0, 40));
+  // Several toasts can be on screen at once; the previous action's is still
+  // fading when this one arrives, so look at all of them rather than the first.
+  await A.waitForFunction(
+    () => [...document.querySelectorAll(".toast, .m-toast")].some((t) => /已記在/.test(t.textContent ?? "")),
+    null,
+    { timeout: 10000 },
+  ).catch(() => {});
+  const toastText = (await A.locator(".toast, .m-toast").allInnerTexts().catch(() => [])).join(" | ");
+  check("S3. 有輕量 toast 說明記在哪一秒", /已記在\s*\d+:\d{2}/.test(toastText), toastText.slice(0, 60));
 
   // 連點防護：同一秒附近再按一次同一個反應，不應該長出第二筆。
   await A.click(".v-reaction:has-text('太快')");
