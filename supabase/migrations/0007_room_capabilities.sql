@@ -220,12 +220,22 @@ create policy comments_delete on public.comments
 -- 這同時堵住「reviewer 覆寫別人版本的影片」與「reviewer 塞大檔進私有 bucket」。
 -- ---------------------------------------------------------------------------
 
+/*
+ * 寫入除了要有身分，路徑也必須是這個 App 真的會用的三種形狀之一。
+ *
+ * 原本的 policy 只看 [2] 是不是房間 id，也就是 `rooms/<room>/隨便什麼/…` 都收。
+ * 對一個已經是成員的人來說，那等於一個 200MB 上限的私人檔案倉庫，而且它會被
+ * 孤兒盤點（0009）視為「不屬於任何版本」而永遠對不起來。限制在 versions /
+ * videos / proposals，前端本來就只寫這三種（assets.ts、videoAssets.ts）。
+ */
 drop policy if exists room_assets_insert on storage.objects;
 create policy room_assets_insert on storage.objects
   for insert to authenticated
   with check (
     bucket_id = 'room-assets'
     and public.can_manage_media(((storage.foldername(name))[2])::uuid)
+    and (storage.foldername(name))[1] = 'rooms'
+    and (storage.foldername(name))[3] in ('versions', 'videos', 'proposals')
   );
 
 drop policy if exists room_assets_update on storage.objects;
