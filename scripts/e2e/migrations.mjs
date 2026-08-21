@@ -825,6 +825,153 @@ try {
     !as(owner, `insert into public.versions (id, room_id, label, sort_order, image_path) values ('${replayVersion}'::uuid, '${capRoom}'::uuid, 'replay', 20, 'replay.png');`).failed,
   );
 
+  // ======================= PR #32: 影片審片 =======================
+  section("影片審片：作者說明只有 owner/editor 能寫，reviewer 只能讀");
+  {
+    const vRoom = psql("select gen_random_uuid();").out;
+    const vVersion = psql("select gen_random_uuid();").out;
+    const vToken = "a-very-long-invite-token-for-review-2";
+    psql(
+      `set request.jwt.claim.sub = '${owner}';
+       select create_room_with_invite('${vRoom}'::uuid, '招生短片', '${vToken}', '主辦方', '#c45c4a');
+       update public.rooms set media_type = 'video' where id = '${vRoom}'::uuid;
+       insert into public.versions (id, room_id, label, sort_order, image_path, video_path, mime_type, media_kind, duration_seconds)
+         values ('${vVersion}'::uuid, '${vRoom}'::uuid, '初剪', 0, 'poster.png', 'cut.webm', 'video/webm', 'video', 83);`,
+    );
+    // A reviewer joins through the link, exactly like a partner from LINE.
+    const vReviewer = psql("insert into auth.users default values returning id;").out;
+    psql(`set request.jwt.claim.sub = '${vReviewer}'; select join_room_by_invite('${vRoom}'::uuid, '${vToken}', '夥伴', '#3d6b8c');`);
+    psql(`update public.room_members set role = 'reviewer' where room_id = '${vRoom}'::uuid and user_id = '${vReviewer}'::uuid;`);
+
+    const briefInsert = `insert into public.version_review_briefs (version_id, room_id, body, focus_tags, questions)
+       values ('${vVersion}'::uuid, '${vRoom}'::uuid, '這次想確認節奏', '["節奏","字幕"]'::jsonb, '["前 10 秒有吸引你嗎？"]'::jsonb);`;
+    ok("reviewer 不能寫作者說明", as(vReviewer, briefInsert).failed);
+    ok("owner 可以寫作者說明", !as(owner, briefInsert).failed);
+    ok(
+      "reviewer 讀得到作者說明",
+      as(vReviewer, `select body from public.version_review_briefs where version_id = '${vVersion}'::uuid;`).out === "這次想確認節奏",
+    );
+    ok(
+      "reviewer 不能改作者說明",
+      as(vReviewer, `update public.version_review_briefs set body = 'hacked' where version_id = '${vVersion}'::uuid;`).failed ||
+        as(owner, `select body from public.version_review_briefs where version_id = '${vVersion}'::uuid;`).out === "這次想確認節奏",
+    );
+    ok("最多三個問題", as(owner, `update public.version_review_briefs set questions = '["a","b","c","d"]'::jsonb where version_id = '${vVersion}'::uuid;`).failed);
+    ok("匿名讀不到作者說明", asAnon("select count(*) from public.version_review_briefs;").out !== "1");
+
+    section("影片審片：快速反應只能寫自己的，連點會被資料庫擋掉");
+    const react = (uid, t, type) =>
+      as(uid, `insert into public.video_reactions (room_id, version_id, user_id, time_seconds, reaction_type)
+                 values ('${vRoom}'::uuid, '${vVersion}'::uuid, '${uid}'::uuid, ${t}, '${type}');`);
+    ok("reviewer 可以按反應", !react(vReviewer, 21.2, "fast").failed);
+    ok("同一秒附近重複按同一個反應會被擋", react(vReviewer, 21.9, "fast").failed);
+    ok("同一時間不同反應可以並存", !react(vReviewer, 21.4, "love").failed);
+    ok("離得夠遠的同一反應可以再按", !react(vReviewer, 40.0, "fast").failed);
+    ok(
+      "不能用別人的身分按反應",
+      as(vReviewer, `insert into public.video_reactions (room_id, version_id, user_id, time_seconds, reaction_type)
+                       values ('${vRoom}'::uuid, '${vVersion}'::uuid, '${owner}'::uuid, 5, 'ok');`).failed,
+    );
+    ok("非成員按不了反應", react(stranger, 3, "ok").failed);
+    ok("不合法的反應種類被擋下", react(owner, 9, "angry").failed);
+    ok("匿名讀不到反應", asAnon("select count(*) from public.video_reactions;").out !== "1");
+
+    section("影片審片：verdict 一人一版一列，可改，不能改別人的");
+    const verdict = (uid, v) =>
+      as(uid, `insert into public.version_verdicts (version_id, user_id, room_id, verdict)
+                 values ('${vVersion}'::uuid, '${uid}'::uuid, '${vRoom}'::uuid, '${v}')
+               on conflict (version_id, user_id) do update set verdict = excluded.verdict;`);
+    ok("reviewer 可以表態", !verdict(vReviewer, "minor").failed);
+    ok("同一人再表態是更新，不是第二列", !verdict(vReviewer, "pass").failed &&
+      psql(`select count(*) from public.version_verdicts where version_id = '${vVersion}'::uuid and user_id = '${vReviewer}'::uuid;`).out === "1");
+    ok("verdict 只收三種語義", verdict(vReviewer, "五顆星").failed);
+    ok(
+      "不能改別人的 verdict",
+      as(owner, `update public.version_verdicts set verdict = 'revise' where user_id = '${vReviewer}'::uuid and version_id = '${vVersion}'::uuid;`).failed ||
+        psql(`select verdict from public.version_verdicts where user_id = '${vReviewer}'::uuid and version_id = '${vVersion}'::uuid;`).out === "pass",
+    );
+    ok("作者讀得到聚合", !as(owner, `select count(*) from public.version_verdicts where version_id = '${vVersion}'::uuid;`).failed);
+
+    section("影片審片：觀看進度只准前進，而且只有兩個事實");
+    as(vReviewer, `insert into public.version_review_progress (version_id, user_id, room_id, max_watched_seconds)
+                     values ('${vVersion}'::uuid, '${vReviewer}'::uuid, '${vRoom}'::uuid, 60);`);
+    as(vReviewer, `update public.version_review_progress set max_watched_seconds = 10
+                    where version_id = '${vVersion}'::uuid and user_id = '${vReviewer}'::uuid;`);
+    ok(
+      "倒帶重看不會把進度改小",
+      psql(`select max_watched_seconds from public.version_review_progress where user_id = '${vReviewer}'::uuid;`).out === "60",
+    );
+    ok(
+      "看完之後不會被清掉",
+      !as(vReviewer, `update public.version_review_progress set completed_at = now() where user_id = '${vReviewer}'::uuid and version_id = '${vVersion}'::uuid;`).failed &&
+        !as(vReviewer, `update public.version_review_progress set completed_at = null where user_id = '${vReviewer}'::uuid and version_id = '${vVersion}'::uuid;`).failed &&
+        psql(`select completed_at is not null from public.version_review_progress where user_id = '${vReviewer}'::uuid;`).out === "t",
+    );
+    ok(
+      "進度表只有 max_watched / completed 兩個事實，沒有行為欄位",
+      psql(
+        `select count(*) from information_schema.columns
+          where table_name = 'version_review_progress'
+            and column_name in ('play_count','pause_count','user_agent','device','ip','events','heatmap','session_id');`,
+      ).out === "0",
+    );
+
+    section("影片審片：回饋狀態——reviewer 保留 resolve，但不能標「處理中／不採用」");
+    const revComment = psql("select gen_random_uuid();").out;
+    as(vReviewer, `insert into public.comments (id, room_id, version_id, author_name, body, anchor_type, time_seconds)
+                     values ('${revComment}'::uuid, '${vRoom}'::uuid, '${vVersion}'::uuid, '夥伴', '這段太快', 'video-point', 21);`);
+    ok(
+      "0007 的既有能力保留：reviewer 仍可 resolve 自己的留言",
+      !as(vReviewer, `update public.comments set resolved = true where id = '${revComment}'::uuid;`).failed,
+    );
+    ok(
+      "resolved 會同步成 done（舊 client 也看得到正確狀態）",
+      psql(`select review_status from public.comments where id = '${revComment}'::uuid;`).out === "done",
+    );
+    ok(
+      "取消 resolved 會回到 open，不會變成 wontfix",
+      !as(vReviewer, `update public.comments set resolved = false where id = '${revComment}'::uuid;`).failed &&
+        psql(`select review_status from public.comments where id = '${revComment}'::uuid;`).out === "open",
+    );
+    const ownerComment2 = psql("select gen_random_uuid();").out;
+    as(owner, `insert into public.comments (id, room_id, version_id, author_name, body, anchor_type, time_seconds)
+                 values ('${ownerComment2}'::uuid, '${vRoom}'::uuid, '${vVersion}'::uuid, '主辦方', '字幕太快', 'video-point', 42);`);
+    ok(
+      "reviewer 不能把別人的回饋標成「不採用」",
+      as(vReviewer, `update public.comments set review_status = 'wontfix' where id = '${ownerComment2}'::uuid;`).failed,
+    );
+    const doingRes = as(owner, `update public.comments set review_status = 'doing' where id = '${ownerComment2}'::uuid;`);
+    ok(
+      "owner 可以標「處理中」與「不採用」",
+      !doingRes.failed &&
+        !as(owner, `update public.comments set review_status = 'wontfix' where id = '${ownerComment2}'::uuid;`).failed,
+      doingRes.err ? doingRes.err.split("\n").slice(0,3).join(" | ") : "",
+    );
+    ok(
+      "「不採用」也會讓舊 client 的 resolved 變 true",
+      psql(`select resolved from public.comments where id = '${ownerComment2}'::uuid;`).out === "t",
+    );
+    ok("review_status 只收四種", as(owner, `update public.comments set review_status = 'maybe' where id = '${ownerComment2}'::uuid;`).failed);
+
+    section("影片審片：0012 可以重複套用");
+    const shape = () =>
+      psql(
+        `select
+           (select count(*) from information_schema.columns where table_name in
+             ('version_review_briefs','video_reactions','version_verdicts','version_review_progress')) || '/' ||
+           (select count(*) from pg_policies where tablename in
+             ('version_review_briefs','video_reactions','version_verdicts','version_review_progress'));`,
+      ).out;
+    const before12 = shape();
+    psqlFile(join(MIGRATIONS, "0012_video_review_feedback.sql"));
+    ok("重跑 0012 之後欄位與 policy 數量完全一樣", before12 === shape(), `${before12} → ${shape()}`);
+    ok(
+      "重跑之後 reviewer 仍然不能寫作者說明",
+      as(vReviewer, `update public.version_review_briefs set body = 'hacked again' where version_id = '${vVersion}'::uuid;`).failed ||
+        psql(`select body from public.version_review_briefs where version_id = '${vVersion}'::uuid;`).out === "這次想確認節奏",
+    );
+  }
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

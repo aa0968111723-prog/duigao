@@ -21,7 +21,54 @@ const tables = {
   versions: [], comments: [], strokes: [], messages: [], visual_proposals: [],
   comment_supports: [], comment_replies: [], proposal_preferences: [],
   share_previews: [],
+  // 影片對稿 2.0 (PR #32)
+  version_review_briefs: [], video_reactions: [], version_verdicts: [],
+  version_review_progress: [],
 };
+
+/**
+ * Natural keys for the tables the app upserts into, standing in for the SQL
+ * primary keys. Without these an upsert would append instead of replacing and
+ * "one verdict per person per cut" would quietly stop being true.
+ */
+const CONFLICT_KEYS = {
+  version_review_briefs: ["version_id"],
+  version_verdicts: ["version_id", "user_id"],
+  version_review_progress: ["version_id", "user_id"],
+};
+
+/**
+ * The unique index that stops a double-tap becoming two dots: same person, same
+ * cut, same reaction, same two-second bucket.
+ */
+function reactionDedupeKey(row) {
+  return [row.version_id, row.user_id, row.reaction_type, Math.floor(Number(row.time_seconds) / 2)].join("|");
+}
+
+/**
+ * The `comments_sync_review_status` trigger from 0012.
+ *
+ * `resolved` and `review_status` are two views of one fact, and whichever one
+ * the caller actually changed wins. Modelled here so the browser suites see the
+ * same behaviour they will see against Postgres — including an old client that
+ * only knows `resolved`.
+ */
+function applyCommentStatus(row, before) {
+  const RESOLVED = ["done", "wontfix"];
+  if (!before) {
+    if (row.review_status && row.review_status !== "open") {
+      row.resolved = RESOLVED.includes(row.review_status);
+    } else {
+      row.review_status = row.resolved ? "done" : "open";
+    }
+    return;
+  }
+  if (row.review_status !== before.review_status) {
+    row.resolved = RESOLVED.includes(row.review_status);
+  } else if (row.resolved !== before.resolved) {
+    row.review_status = row.resolved ? "done" : "open";
+  }
+}
 const objects = new Map(); // `${bucket}/${path}` -> {buf, mime}
 const signedUrls = new Map(); // token -> { bucket, path, expiresAt }
 
@@ -345,23 +392,82 @@ export const server = http.createServer(async (req, res) => {
         faults.versionInsert = false;
         return json(res, 500, { message: "injected version metadata failure" });
       }
+      const prefer = String(req.headers.prefer || "");
+      const upsert = prefer.includes("resolution=merge-duplicates");
+      const written = [];
       for (const row of rows) {
         if (!isMember(row.room_id, uid)) return json(res, 403, { message: "not a member" });
-        if (tables[table].some((r) => r.id === row.id)) return json(res, 409, { message: "duplicate key value" });
-        const stored = { created_at: now(), updated_at: now(), ...row };
+        // `user_id uuid not null default auth.uid()`: the client never sends it
+        // for reactions / verdicts / progress, so the server has to fill it —
+        // and filling it here is also what makes "you can only write your own"
+        // testable.
+        const filled = { ...row };
+        if ("user_id" in (tables[table][0] ?? {}) || CONFLICT_KEYS[table] || table === "video_reactions") {
+          if (filled.user_id === undefined && table !== "version_review_briefs") filled.user_id = uid;
+        }
+        if (filled.user_id !== undefined && filled.user_id !== uid) {
+          return json(res, 403, { message: "new row violates row-level security policy" });
+        }
+
+        if (table === "video_reactions") {
+          const key = reactionDedupeKey({ ...filled, user_id: filled.user_id ?? uid });
+          if (tables[table].some((r) => reactionDedupeKey(r) === key)) {
+            return json(res, 409, { code: "23505", message: "duplicate key value violates unique constraint" });
+          }
+        }
+
+        const keys = CONFLICT_KEYS[table];
+        const existing = keys ? tables[table].find((r) => keys.every((k) => r[k] === filled[k])) : null;
+        if (existing && upsert) {
+          const before = { ...existing };
+          Object.assign(existing, filled, { updated_at: now() });
+          // The progress trigger: a rewind must never lower the high-water mark.
+          if (table === "version_review_progress") {
+            existing.max_watched_seconds = Math.max(
+              Number(before.max_watched_seconds) || 0,
+              Number(filled.max_watched_seconds) || 0,
+            );
+            existing.completed_at = before.completed_at ?? filled.completed_at ?? null;
+          }
+          written.push(existing);
+          emitChange({ table, type: "UPDATE", record: existing, oldRecord: before });
+          continue;
+        }
+        if (existing && !upsert) return json(res, 409, { code: "23505", message: "duplicate key value" });
+        if (tables[table].some((r) => r.id !== undefined && r.id === filled.id)) {
+          return json(res, 409, { code: "23505", message: "duplicate key value" });
+        }
+        const stored = {
+          id: filled.id ?? randomUUID(),
+          created_at: now(),
+          updated_at: now(),
+          ...filled,
+          user_id: filled.user_id ?? (table === "version_review_briefs" ? undefined : uid),
+        };
+        if (table === "comments") applyCommentStatus(stored, null);
         tables[table].push(stored);
+        written.push(stored);
         emitChange({ table, type: "INSERT", record: stored });
       }
+      if (prefer.includes("return=representation")) return respondRows(req, res, written);
       cors(res); res.writeHead(201); return res.end("[]");
     }
     if (req.method === "PATCH") {
       const patch = JSON.parse((await readBody(req)).toString() || "{}");
       const rows = filterRows(tables[table], url.searchParams).filter((r) => isMember(r.room_id, uid));
+      // Only the row's owner may edit their own verdict / progress, exactly as
+      // the RLS policies say.
+      if (["version_verdicts", "version_review_progress", "video_reactions"].includes(table)) {
+        if (rows.some((r) => r.user_id !== uid)) {
+          return json(res, 403, { message: "new row violates row-level security policy" });
+        }
+      }
       // `updated_at` moves on every write, exactly like the SQL trigger — the
       // client derives its cache-busting `?v=` from it.
       for (const row of rows) {
         const before = { ...row };
         Object.assign(row, patch, { updated_at: now() });
+        if (table === "comments") applyCommentStatus(row, before);
         emitChange({ table, type: "UPDATE", record: row, oldRecord: before });
       }
       if (String(req.headers.prefer || "").includes("return=representation")) return respondRows(req, res, rows);

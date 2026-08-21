@@ -22,11 +22,27 @@ export type TimelineMarker = {
   color: string;
 };
 
+/**
+ * A pile of 一鍵反應 at roughly the same moment, drawn as ONE marker.
+ *
+ * Six people tapping ⚡ at 00:21 is one fact about the cut, not six dots the
+ * author has to visually merge. Clustering happens before this component so the
+ * timeline only ever renders what it should show.
+ */
+export type ReactionCluster = {
+  id: string;
+  time: number;
+  emoji: string;
+  count: number;
+  label: string;
+};
+
 type Props = {
   duration: number;
   /** Registers a per-frame playhead listener. Returns an unsubscribe. */
   subscribe: (listener: (seconds: number) => void) => () => void;
   markers: TimelineMarker[];
+  reactions?: ReactionCluster[];
   selectedId: string | null;
   onSeek: (seconds: number) => void;
   onSelectMarker: (id: string) => void;
@@ -40,6 +56,7 @@ export function VideoTimeline({
   duration,
   subscribe,
   markers,
+  reactions,
   selectedId,
   onSeek,
   onSelectMarker,
@@ -174,11 +191,50 @@ export function VideoTimeline({
           onSelectMarker={onSelectMarker}
         />
 
+        <ReactionMarks clusters={reactions ?? []} duration={duration} onSeek={onSeek} />
+
         <div ref={headRef} className="v-playhead" aria-hidden />
       </div>
     </div>
   );
 }
+
+/**
+ * Reaction clusters, under the feedback markers and deliberately quieter: they
+ * are ambient signal, not items on a to-do list. Tapping one seeks there.
+ */
+const ReactionMarks = memo(function ReactionMarks({
+  clusters,
+  duration,
+  onSeek,
+}: {
+  clusters: ReactionCluster[];
+  duration: number;
+  onSeek: (seconds: number) => void;
+}) {
+  if (duration <= 0 || clusters.length === 0) return null;
+  return (
+    <>
+      {clusters.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          className="v-rmark"
+          style={{ ["--marker-left" as string]: `${clampFraction(c.time / duration) * 100}%` }}
+          aria-label={c.label}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSeek(c.time);
+          }}
+        >
+          <span aria-hidden>{c.emoji}</span>
+          {c.count > 1 && <b aria-hidden>{c.count}</b>}
+        </button>
+      ))}
+    </>
+  );
+});
 
 /**
  * Markers re-render only when the discussion changes. They sit above the track

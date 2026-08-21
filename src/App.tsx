@@ -12,6 +12,8 @@ import {
   type Point,
   type Room,
   type Stroke,
+  type ReviewType,
+  type VideoCategory,
   type MediaType,
   type Tool,
   type Version,
@@ -605,7 +607,7 @@ export function App() {
    * write as a poster pin — only the coordinates are a time.
    */
   const commitVideoComment = useCallback(
-    (anchor: VideoAnchor) => {
+    (anchor: VideoAnchor, category?: VideoCategory) => {
       const current = roomRef.current;
       if (!current || !guest || !form.body.trim()) return;
       const versionId = viewRef.current.versionId || current.versions[0]?.id;
@@ -626,9 +628,14 @@ export function App() {
         anchor,
         body: form.body.trim(),
         suggestion: form.suggestion.trim(),
-        problemType: form.type,
+        // A video room picks from 畫面／節奏／字幕／聲音／文案／其他 and is allowed
+        // to pick nothing at all — classifying must never be the price of
+        // speaking up. `problemType` is free text in the schema, so both lists
+        // share the column without either having to know about the other.
+        problemType: (category as ReviewType | undefined) ?? undefined,
         priority: form.priority,
         resolved: false,
+        reviewStatus: "open",
         createdAt: Date.now(),
       };
       pushUndo(current);
@@ -1189,9 +1196,51 @@ export function App() {
     setPreviewStrokeId(null);
   }, []);
 
+  /**
+   * 影片對稿 2.0 (#32).
+   *
+   * Every write is fire-and-forget with a user-facing error on failure: a
+   * reaction that does not reach the server must not freeze the video, and a
+   * verdict that is refused must say so rather than silently look saved.
+   */
+  const reviewFail = useCallback(
+    (what: string) => (err: unknown) => {
+      void err;
+      showToast(`${what}沒有成功，請再試一次。`, { tone: "error" });
+    },
+    [showToast],
+  );
+
   const video: VideoApi | null =
     room && roomMediaType(room) === "video"
-      ? { upload: videoUpload, commitVideoComment, refreshVideoUrl }
+      ? {
+          upload: videoUpload,
+          commitVideoComment,
+          refreshVideoUrl,
+          review: cloud.review,
+          // A local-only room has no membership row and no server to ask, so it
+          // behaves like a room you own — same rule the media controls use.
+          canManageReview: cloud.canManageMedia,
+          myUserId: guest?.id ?? "",
+          reviewOnline: cloudSession && Boolean(cloud.boundRoomId),
+          saveBrief: (versionId, input) => {
+            cloud.reviewApi.saveBrief(versionId, input).catch(reviewFail("作者說明"));
+          },
+          react: (versionId, time, type) => {
+            cloud.reviewApi.react(versionId, time, type).catch(reviewFail("這個反應"));
+          },
+          setVerdict: (versionId, verdict, note) => {
+            cloud.reviewApi.setVerdict(versionId, verdict, note).catch(reviewFail("表態"));
+          },
+          reportProgress: (versionId, maxWatched, completed) => {
+            // Deliberately silent: nobody asked for this, and a failed progress
+            // ping is not worth a toast over a playing video.
+            cloud.reviewApi.reportProgress(versionId, maxWatched, completed).catch(() => undefined);
+          },
+          setStatus: (commentId, status) => {
+            cloud.reviewApi.setStatus(commentId, status).catch(reviewFail("更新狀態"));
+          },
+        }
       : null;
 
   const api: WorkspaceApi | null = room

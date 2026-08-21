@@ -1,4 +1,4 @@
-import type { VideoAnchor } from "../../lib/types";
+import { VIDEO_CATEGORIES, type VideoAnchor, type VideoCategory } from "../../lib/types";
 import { ModalSheet } from "../../components/BottomSheet";
 import { PinFields } from "../discussion/PinFields";
 import type { WorkspaceApi } from "../../components/api";
@@ -16,6 +16,11 @@ import { formatTime } from "./media";
 type Props = {
   api: WorkspaceApi;
   anchor: VideoAnchor;
+  /** Optional bucket. Null is a first-class answer — see the note below. */
+  category: VideoCategory | null;
+  onCategory: (next: VideoCategory | null) => void;
+  /** Turn this moment into a stretch without losing what has been typed. */
+  onMakeRange?: () => void;
   /** Back to the timeline to pick again, keeping whatever was typed. */
   onRepick?: () => void;
   onCancel: () => void;
@@ -34,7 +39,17 @@ export function anchorHeading(anchor: VideoAnchor): string {
     : `${formatTime(anchor.time)} 這一刻`;
 }
 
-export function VideoCommentComposer({ api, anchor, onRepick, onCancel, onSubmit, onHeight }: Props) {
+export function VideoCommentComposer({
+  api,
+  anchor,
+  category,
+  onCategory,
+  onMakeRange,
+  onRepick,
+  onCancel,
+  onSubmit,
+  onHeight,
+}: Props) {
   const canSend = Boolean(api.form.body.trim());
   return (
     <ModalSheet
@@ -67,6 +82,32 @@ export function VideoCommentComposer({ api, anchor, onRepick, onCancel, onSubmit
           ? "這段哪裡需要調整？一句話就可以。"
           : "這個時間點哪裡需要調整？一句話就可以。"}
       </p>
+
+      {anchor.kind === "point" && onMakeRange && (
+        <button type="button" className="m-link v-compose-range" onClick={onMakeRange}>
+          改成一段
+        </button>
+      )}
+
+      {/*
+        Categories are optional on purpose. Making someone classify before they
+        may speak is how you turn "the music is too loud" into silence — so
+        nothing here is required, and 送出 never checks it.
+      */}
+      <div className="v-compose-cats" role="group" aria-label="這則回饋屬於（可略過）">
+        {VIDEO_CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            className={`v-tag ${category === cat ? "is-on" : ""}`}
+            aria-pressed={category === cat}
+            onClick={() => onCategory(category === cat ? null : cat)}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+
       <PinFields api={api} autoFocus />
     </ModalSheet>
   );
