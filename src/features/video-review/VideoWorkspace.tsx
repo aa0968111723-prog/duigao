@@ -848,9 +848,7 @@ export function VideoWorkspace({ api, presence }: Props) {
     <div
       className="m-app v-app"
       style={{
-        // The dock is sheet-peek + capture bar + toolbar. The stage reserves
-        // exactly that much, so the timeline never hides behind the button.
-        ["--m-peek" as string]: reactionsOpen ? "196px" : "116px",
+        ["--m-peek" as string]: "52px",
         ["--m-status" as string]: rangePick && !draft ? "48px" : "0px",
         ["--m-compose" as string]: `${composeInset}px`,
       }}
@@ -889,6 +887,7 @@ export function VideoWorkspace({ api, presence }: Props) {
         {briefCard}
         {player}
         {timeline}
+        {captureBar}
       </div>
 
       <div className="m-bottom">
@@ -908,13 +907,6 @@ export function VideoWorkspace({ api, presence }: Props) {
         </DragSheet>
 
         {rangeBar}
-
-        {/* In the dock, not in the stage area. The stage only reserves room for
-            the sheet's PEEK height, so anything sitting at its bottom edge
-            disappears under the discussion the moment somebody drags it up —
-            and ＋在這裡留言 is the one control a reviewer must always be able to
-            reach. Below the sheet and above the nav, it survives every snap. */}
-        {captureBar}
 
         <nav className="m-toolbar m-toolbar-4" aria-label="主要操作">
           <button

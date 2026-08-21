@@ -716,18 +716,13 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 12px 10px;
-  /* Part of the fixed dock on mobile, so it carries the dock's own surface —
-     otherwise the video shows through between the sheet and the nav. */
-  background: rgba(20, 18, 16, 0.98);
-  backdrop-filter: blur(18px);
-  border-top: 1px solid var(--line-soft);
+  padding: 6px 12px 0;
 }
 .v-capture-main {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 48px;
+  min-height: 44px;
   border: none;
   border-radius: var(--r-md);
   background: var(--accent);
@@ -875,11 +870,6 @@
 @media (min-width: 721px) {
   .v-reactions { grid-template-columns: repeat(6, 1fr); }
   .v-brief { margin: 0 0 10px; }
-  .v-capture {
-    padding: 10px 0 0;
-    background: none;
-    backdrop-filter: none;
-    border-top: none;
-  }
+  .v-capture { padding: 10px 0 0; }
   .v-capture-main { max-width: 260px; }
 }
