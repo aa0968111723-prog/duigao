@@ -39,7 +39,22 @@ export type CloudProposal = {
   revision: number;
 };
 
-export type CloudSnapshot = { room: Room; proposals: CloudProposal[] };
+/**
+ * What this person may do in this room.
+ *
+ * A room capability, not an account: anonymous auth is untouched, the visitor
+ * still only types a name. `owner`/`editor` may change the media versions
+ * themselves; `reviewer` reads everything and joins the discussion. The server
+ * enforces all of it (migration 0007) — this type exists so the UI can stop
+ * offering a button that would only fail.
+ */
+export type RoomRole = "owner" | "editor" | "reviewer";
+
+export function canManageMedia(role: RoomRole | null): boolean {
+  return role === "owner" || role === "editor";
+}
+
+export type CloudSnapshot = { room: Room; proposals: CloudProposal[]; role: RoomRole | null };
 
 const uuid = () => crypto.randomUUID();
 
@@ -78,8 +93,9 @@ function anchorColumns(pin: CommentPin): Record<string, unknown> {
  */
 async function versionFromRow(supabase: SupabaseClient, row: VersionRow): Promise<Version> {
   const poster = row.image_path ? await signedUrl(supabase, row.image_path).catch(() => "") : "";
+  const archivedAt = row.archived_at ?? undefined;
   if (row.media_kind !== "video") {
-    return { id: row.id, label: row.label, imageDataUrl: poster, kind: "image" };
+    return { id: row.id, label: row.label, imageDataUrl: poster, kind: "image", archivedAt };
   }
   const videoUrl = row.video_path ? await signedVideoUrl(supabase, row.video_path).catch(() => "") : "";
   return {
@@ -87,6 +103,7 @@ async function versionFromRow(supabase: SupabaseClient, row: VersionRow): Promis
     label: row.label,
     imageDataUrl: poster,
     kind: "video",
+    archivedAt,
     videoUrl,
     videoPath: row.video_path ?? undefined,
     duration: row.duration_seconds ?? undefined,
@@ -280,7 +297,7 @@ export async function joinRoom(supabase: SupabaseClient, roomId: string, token: 
 }
 
 export async function loadRoom(supabase: SupabaseClient, roomId: string): Promise<CloudSnapshot> {
-  const [roomRes, versionsRes, commentsRes, strokesRes, messagesRes, proposalsRes, supportsRes, repliesRes, prefsRes] =
+  const [roomRes, versionsRes, commentsRes, strokesRes, messagesRes, proposalsRes, supportsRes, repliesRes, prefsRes, roleRes] =
     await Promise.all([
       supabase.from("rooms").select("*").eq("id", roomId).single(),
       supabase.from("versions").select("*").eq("room_id", roomId).order("sort_order", { ascending: true }),
@@ -291,9 +308,19 @@ export async function loadRoom(supabase: SupabaseClient, roomId: string): Promis
       supabase.from("comment_supports").select("*").eq("room_id", roomId),
       supabase.from("comment_replies").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
       supabase.from("proposal_preferences").select("*").eq("room_id", roomId),
+      // The caller's own membership row. A member can always read it (0001's
+      // room_members_select), and it is the only place the role lives.
+      supabase.rpc("room_role", { p_room_id: roomId }),
     ]);
   if (roomRes.error) throw new CloudError(roomRes.error.message, "load");
   const roomRow = roomRes.data as RoomRow;
+
+  // An older deployment without migration 0007 has no room_role(); treating
+  // that as "editor" keeps those rooms working exactly as they do today
+  // rather than locking everyone out of their own uploads.
+  const role: RoomRole | null = roleRes.error
+    ? "editor"
+    : normaliseRole(roleRes.data as unknown);
 
   const versions: Version[] = await Promise.all(
     ((versionsRes.data as VersionRow[] | null) ?? []).map((row) => versionFromRow(supabase, row)),
@@ -324,7 +351,55 @@ export async function loadRoom(supabase: SupabaseClient, roomId: string): Promis
     })),
   );
 
-  return { room, proposals };
+  return { room, proposals, role };
+}
+
+function normaliseRole(value: unknown): RoomRole | null {
+  const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : null;
+  return raw === "owner" || raw === "editor" || raw === "reviewer" ? raw : null;
+}
+
+/**
+ * Archive a version instead of deleting it.
+ *
+ * Every child table points at versions with `on delete cascade`, so deleting a
+ * version that people have discussed takes the whole discussion with it. The
+ * database refuses that delete (migration 0008); this is the action that is
+ * always safe — the version leaves the picker, the discussion stays readable.
+ */
+export async function archiveVersion(supabase: SupabaseClient, versionId: string): Promise<void> {
+  const { error } = await supabase.rpc("archive_version", { p_version_id: versionId });
+  if (error) throw new CloudError(error.message, "write");
+}
+
+export async function restoreVersion(supabase: SupabaseClient, versionId: string): Promise<void> {
+  const { error } = await supabase.rpc("restore_version", { p_version_id: versionId });
+  if (error) throw new CloudError(error.message, "write");
+}
+
+/** Owner-only: change what a link visitor becomes when they join. */
+export async function setRoomDefaultRole(
+  supabase: SupabaseClient,
+  roomId: string,
+  role: "editor" | "reviewer",
+): Promise<void> {
+  const { error } = await supabase.rpc("set_room_default_role", { p_room_id: roomId, p_role: role });
+  if (error) throw new CloudError(error.message, "write");
+}
+
+/** Owner-only: promote a reviewer to editor, or put an editor back to reviewer. */
+export async function setMemberRole(
+  supabase: SupabaseClient,
+  roomId: string,
+  userId: string,
+  role: "editor" | "reviewer",
+): Promise<void> {
+  const { error } = await supabase.rpc("set_member_role", {
+    p_room_id: roomId,
+    p_user_id: userId,
+    p_role: role,
+  });
+  if (error) throw new CloudError(error.message, "write");
 }
 
 // ---- entity-level writes (never overwrite the whole room) ------------------

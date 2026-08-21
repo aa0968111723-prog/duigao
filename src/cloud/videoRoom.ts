@@ -170,9 +170,17 @@ async function signedOrEmpty(supabase: SupabaseClient, path: string): Promise<st
 }
 
 async function removeQuietly(supabase: SupabaseClient, paths: string[]): Promise<void> {
-  try {
-    await supabase.storage.from("room-assets").remove(paths);
-  } catch {
-    /* the row never landed either way; a retry will upsert over these */
+  // Storage cleanup is retryable: a transient 5xx at the exact moment metadata
+  // insertion fails must not turn a version into a permanent private-bucket
+  // orphan. `remove()` reports failures in its result rather than always
+  // throwing, so inspect both forms.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const { error } = await supabase.storage.from("room-assets").remove(paths);
+      if (!error) return;
+    } catch {
+      // Retry below; the original upload error remains the user-facing error.
+    }
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
   }
 }

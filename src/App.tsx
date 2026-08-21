@@ -902,9 +902,20 @@ export function App() {
    * The request would be killed by the browser anyway; aborting it ourselves is
    * what lets the cleanup path run, so a half-uploaded object does not sit in a
    * private bucket that nothing will ever reference.
+   *
+   * `pagehide` fires for two very different things, though, and only one of
+   * them is a close. On a phone it also fires when the page goes into the
+   * back/forward cache — switching apps to copy a link, taking a call — and the
+   * page usually comes back. Cancelling there means every upload dies the first
+   * time someone leaves the app, which on a 90MB video over mobile data is the
+   * whole upload. `event.persisted` tells the two apart: true means the page is
+   * frozen, not gone.
    */
   useEffect(() => {
-    const stop = () => videoCancelRef.current?.();
+    const stop = (e: PageTransitionEvent) => {
+      if (e.persisted) return; // going into bfcache; the upload may survive
+      videoCancelRef.current?.();
+    };
     window.addEventListener("pagehide", stop);
     return () => window.removeEventListener("pagehide", stop);
   }, []);

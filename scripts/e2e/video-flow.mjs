@@ -45,7 +45,7 @@ import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
 import { readFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
-import { start as startMock, requestLog, rows, faults, cloudRooms } from "./mock-supabase.mjs";
+import { start as startMock, requestLog, rows, faults, cloudRooms, storageObjects, expireSignedUrls } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54405;
 const APP_PORT = 4177;
@@ -440,6 +440,85 @@ try {
   check("E. 標記完成後 marker 弱化但還在", (await A.locator(".v-marker.is-done").count()) >= 1);
   check("E. 完成的項目沒有從討論裡消失", (await A.locator("article.m-item.is-done").count()) >= 1);
 
+  // ---------------------------- signed URL expiry + lifecycle reliability --
+  const signedPath = versionRow.video_path;
+  const signProbe = async (path, expiresIn) => {
+    const response = await fetch(`http://127.0.0.1:${MOCK_PORT}/storage/v1/object/sign/room-assets/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expiresIn }),
+    });
+    const body = await response.json();
+    return new URL(`/storage/v1${body.signedURL}`, `http://127.0.0.1:${MOCK_PORT}`);
+  };
+  faults.signTtl = 1;
+  const shortSigned = await signProbe(signedPath, 1);
+  const shortStatus = (await fetch(shortSigned)).status;
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  const expiredStatus = (await fetch(shortSigned)).status;
+  const freshSigned = await signProbe(signedPath, 30);
+  const freshStatus = (await fetch(freshSigned)).status;
+  faults.signTtl = null;
+  check("20. signed URL 過期後回 400/403，重新簽名取得新 URL", shortStatus === 200 && [400, 403].includes(expiredStatus) && freshStatus === 200 && String(shortSigned) !== String(freshSigned), `${shortStatus} -> ${expiredStatus} -> ${freshStatus}`);
+
+  const resumeAt = 2.6;
+  await A.evaluate((at) => {
+    const v = document.querySelector("video.v-video");
+    if (v) { v.currentTime = at; v.pause(); }
+  }, resumeAt);
+  await A.waitForTimeout(250);
+  expireSignedUrls(signedPath);
+  await A.evaluate(() => document.querySelector("video.v-video")?.dispatchEvent(new Event("error")));
+  await A.waitForTimeout(1800);
+  const afterResign = await currentTime(A);
+  check("20. 播放中 signed URL 過期，重新取得 URL 不會重設 currentTime", Math.abs(afterResign - resumeAt) < 0.8, `before=${resumeAt} after=${afterResign.toFixed(2)}`);
+
+  // Two error events arrive before the first signing request resolves. The
+  // player must share that promise, not install two fresh sources with two
+  // competing resume points.
+  const raceAt = 3.4;
+  await A.evaluate((at) => {
+    const v = document.querySelector("video.v-video");
+    if (v) { v.currentTime = at; v.pause(); v.dispatchEvent(new Event("error")); v.dispatchEvent(new Event("error")); }
+  }, raceAt);
+  await A.waitForTimeout(1800);
+  const afterRace = await currentTime(A);
+  check("23. 同時重新簽名兩次不會互相覆蓋播放位置", Math.abs(afterRace - raceAt) < 0.8, `before=${raceAt} after=${afterRace.toFixed(2)}`);
+
+  // Change the source once so this leg gets a fresh one-shot re-sign budget,
+  // then click a discussion card after its URL has expired.
+  await A.locator(".m-vchip").nth(1).click();
+  await playerReady(A);
+  await A.waitForTimeout(500);
+  await A.locator(".m-vchip").nth(0).click();
+  await playerReady(A);
+  await A.waitForTimeout(500);
+  await openDiscussion(A);
+  await A.evaluate(() => { const v = document.querySelector("video.v-video"); if (v) v.currentTime = 0; });
+  expireSignedUrls(signedPath);
+  await A.locator("article.m-item").first().click();
+  await A.evaluate(() => document.querySelector("video.v-video")?.dispatchEvent(new Event("error")));
+  await A.waitForTimeout(1800);
+  const afterCommentResign = await currentTime(A);
+  check("21. URL 過期後點後半段留言，重新簽名仍跳到留言時間", Math.abs(afterCommentResign - firstAnchor) < 0.9 && afterCommentResign > 0.5, `anchor=${firstAnchor.toFixed(2)} after=${afterCommentResign.toFixed(2)}`);
+
+  const backgroundAt = 2.1;
+  await A.evaluate(async (at) => {
+    const v = document.querySelector("video.v-video");
+    if (!v) return;
+    v.currentTime = at;
+    await v.play().catch(() => undefined);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    v.pause();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, backgroundAt);
+  await A.waitForTimeout(700);
+  const afterForeground = await currentTime(A);
+  const resumed = await A.evaluate(() => document.querySelector("video.v-video")?.paused === false);
+  check("22. hidden → visible 後播放位置保持且可繼續播放", Math.abs(afterForeground - backgroundAt) < 0.9 && resumed, `before=${backgroundAt} after=${afterForeground.toFixed(2)} resumed=${resumed}`);
+
   // ------------------------------------------- F: second cut keeps time ----
   const chipsBefore = await A.locator(".m-vchip").count();
   await A.setInputFiles('.m-vchip-add input[type="file"]', {
@@ -821,6 +900,7 @@ try {
   const Q = await ctxQ.newPage();
   await enterName(Q, APP, "會反悔的人");
   const roomsBeforeCancel = countRooms();
+  const objectsBeforeCancel = new Set(storageObjects.keys());
   await uploadVideo(Q, LONG);
   await Q.waitForSelector(".onboard-card .btn", { timeout: 60000 });
   await Q.click(".onboard-card .btn:has-text('取消')");
@@ -833,6 +913,8 @@ try {
     !recentTitles.some((t) => t.includes("未命名影片")),
     recentTitles.join(" / ") || "（沒有最近討論）",
   );
+  const leakedAfterCancel = [...storageObjects.keys()].filter((key) => !objectsBeforeCancel.has(key));
+  check("23. 中途取消後 mock Storage 不殘留該 version 的 video/poster", leakedAfterCancel.length === 0, leakedAfterCancel.join(" / ") || "no orphan objects");
   void roomsBeforeCancel;
 
   // Backend English — RLS wording, PostgREST codes — is not user copy.
@@ -851,6 +933,26 @@ try {
     shown.replace(/\n/g, " ").slice(0, 90),
   );
   check("Q. 取而代之的是可以照做的中文", shown.includes("影片上傳失敗") || shown.includes("再試"), "");
+  await Q.click(".onboard-card .btn:has-text('回首頁')").catch(() => undefined);
+  await Q.waitForSelector(".home-picks", { timeout: 30000 });
+
+  // Metadata failure happens after both Storage objects have landed. The mock
+  // fails the first cleanup request once; videoRoom.ts must retry and leave no
+  // object whose version row never existed.
+  const objectsBeforeMetadataFailure = new Set(storageObjects.keys());
+  faults.versionInsert = true;
+  faults.assetDelete = 1;
+  await uploadVideo(Q, SHORT, "metadata-fails.webm");
+  await Q.waitForSelector(".onboard-card", { timeout: 60000 });
+  await Q.waitForTimeout(500);
+  const leakedAfterMetadataFailure = [...storageObjects.keys()].filter((key) => !objectsBeforeMetadataFailure.has(key));
+  check(
+    "23. metadata 寫入失敗後 video/poster object 皆清乾淨",
+    leakedAfterMetadataFailure.length === 0 && faults.assetDelete === 0,
+    leakedAfterMetadataFailure.join(" / ") || "no orphan objects; cleanup retry succeeded",
+  );
+  faults.versionInsert = false;
+  faults.assetDelete = 0;
   await ctxQ.close();
 
   console.log(`\n${results.filter((r) => r.pass).length}/${results.length} checks passed`);

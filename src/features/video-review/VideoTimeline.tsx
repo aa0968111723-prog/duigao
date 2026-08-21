@@ -224,7 +224,9 @@ const Markers = memo(function Markers({
               .filter(Boolean)
               .join(" ")}
             style={{
-              left: `${left}%`,
+              // Fed through --marker-left so the stylesheet can clamp it and
+              // keep a 0:00 marker's tap target inside the viewport.
+              ["--marker-left" as string]: `${left}%`,
               ...(isRange ? { width: `${Math.max(width, 1.5)}%` } : {}),
               ["--marker" as string]: m.color,
             }}

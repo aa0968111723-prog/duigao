@@ -23,6 +23,7 @@ const tables = {
   share_previews: [],
 };
 const objects = new Map(); // `${bucket}/${path}` -> {buf, mime}
+const signedUrls = new Map(); // token -> { bucket, path, expiresAt }
 
 /**
  * Every request the app made, as `METHOD /path`. Lets a run assert not just the
@@ -43,10 +44,24 @@ export const faults = {
   videoUpload: false,
   /** Next createSignedUrl fails, for the "row landed, signing did not" case. */
   sign: false,
+  /** Override createSignedUrl TTL in seconds for expiry tests. */
+  signTtl: null,
+  /** Fail this many room-assets deletes before allowing cleanup to succeed. */
+  assetDelete: 0,
+  /** Fail the next versions insert after Storage has accepted the bytes. */
+  versionInsert: false,
 };
 
 /** Row access for assertions (e.g. which version a preview currently points at). */
 export const rows = tables;
+export const storageObjects = objects;
+
+/** Expire every token for a path, modelling a signed URL expiring in-place. */
+export function expireSignedUrls(path) {
+  for (const token of signedUrls.values()) {
+    if (token.path === path) token.expiresAt = 0;
+  }
+}
 
 /**
  * The rooms themselves, for assertions that care about rooms with nothing in
@@ -303,6 +318,10 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === "POST") {
       const body = JSON.parse((await readBody(req)).toString() || "[]");
       const rows = Array.isArray(body) ? body : [body];
+      if (table === "versions" && faults.versionInsert) {
+        faults.versionInsert = false;
+        return json(res, 500, { message: "injected version metadata failure" });
+      }
       for (const row of rows) {
         if (!isMember(row.room_id, uid)) return json(res, 403, { message: "not a member" });
         if (tables[table].some((r) => r.id === row.id)) return json(res, 409, { message: "duplicate key value" });
@@ -351,9 +370,17 @@ export const server = http.createServer(async (req, res) => {
       const [bucket, ...rel] = tail;
       const path = decodeURIComponent(rel.join("/"));
       if (req.method === "POST") {
-        await readBody(req);
+        const body = JSON.parse((await readBody(req)).toString() || "{}");
         if (faults.sign) return json(res, 500, { message: "injected signing failure" });
-        return json(res, 200, { signedURL: `/object/sign/${bucket}/${path}?token=mock` });
+        const token = randomUUID();
+        const ttl = Number(faults.signTtl ?? body.expiresIn ?? 3600);
+        signedUrls.set(token, { bucket, path, expiresAt: Date.now() + Math.max(0, ttl) * 1000 });
+        return json(res, 200, { signedURL: `/object/sign/${bucket}/${path}?token=${token}` });
+      }
+      const token = url.searchParams.get("token");
+      const signed = token ? signedUrls.get(token) : null;
+      if (!signed || signed.bucket !== bucket || signed.path !== path || signed.expiresAt <= Date.now()) {
+        return json(res, 403, { message: "signed URL expired or invalid" });
       }
       const obj = objects.get(`${bucket}/${path}`);
       if (!obj) { cors(res); res.writeHead(404); return res.end(); }
@@ -391,6 +418,10 @@ export const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req)).toString() || "{}");
       if (bucket === "share-previews" && faults.previewDelete) {
         return json(res, 500, { message: "injected delete failure" });
+      }
+      if (bucket === "room-assets" && faults.assetDelete > 0) {
+        faults.assetDelete -= 1;
+        return json(res, 500, { message: "injected room-assets delete failure" });
       }
       const gone = [];
       for (const prefix of body.prefixes ?? []) {

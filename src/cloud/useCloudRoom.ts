@@ -25,7 +25,9 @@ import {
   insertReply as repoInsertReply,
   insertStroke,
   joinRoom,
+  canManageMedia,
   loadRoom,
+  type RoomRole,
   setCommentResolved,
   setPreference,
   setRoomTitle,
@@ -142,6 +144,13 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteInvalid, setInviteInvalid] = useState(false);
+  /**
+   * This visitor's capability in the bound room. Null until the first snapshot
+   * lands (and in a local-only session); the UI treats "unknown" as "cannot
+   * manage" only after the room is actually bound, so a purely local room keeps
+   * behaving like a room you own.
+   */
+  const [role, setRole] = useState<RoomRole | null>(null);
   const [bindNonce, setBindNonce] = useState(0);
 
   const boundRef = useRef<string | null>(null); // cloud room id
@@ -157,6 +166,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     setStatus("syncing");
     try {
       const snap = await loadRoom(supabase, rid);
+      setRole(snap.role);
       onSnapshot(snap.room);
       saveRoom(snap.room).catch(() => undefined);
       revisions.current = new Map(snap.proposals.map((p) => [p.id, p.revision]));
@@ -489,9 +499,15 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     ): VideoUploadHandle | null => {
       const rid = input.roomId ?? boundRef.current;
       if (!supabase || !rid) return null;
+      // Storage RLS refuses a reviewer's upload anyway (migration 0007); this
+      // stops a 100MB transfer that was always going to end in a 403.
+      if (boundRef.current === rid && role === "reviewer") {
+        showToast("你在這個房間是「檢視者」，可以留言但不能換版本。請房主把你設為協作者。");
+        return null;
+      }
       return uploadVideoVersion(supabase, { ...input, roomId: rid }, onPhase);
     },
-    [supabase],
+    [supabase, role, showToast],
   );
 
   /** A signed video URL expires mid-session; the player asks for a fresh one. */
@@ -569,6 +585,10 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     inviteUrl,
     inviteInvalid,
     boundRoomId: boundRef.current,
+    role,
+    // A local-only room has no membership row and no server to ask; it belongs
+    // to whoever is holding the phone, so it stays fully editable.
+    canManageMedia: boundRef.current ? canManageMedia(role) : true,
     active: Boolean(supabase),
     ensureShared,
     ensureCloudRoom,

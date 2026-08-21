@@ -54,7 +54,18 @@ export type Version = {
   fileSize?: number;
   width?: number;
   height?: number;
+  /**
+   * Archived versions stay loaded — their discussion is still readable and a
+   * shared link may still point at them — but they drop out of the version
+   * picker so the room shows what is current. ISO string, or absent.
+   */
+  archivedAt?: string;
 };
+
+/** The versions a picker should offer: everything still on the table. */
+export function activeVersions(versions: Version[]): Version[] {
+  return versions.filter((v) => !v.archivedAt);
+}
 
 export type ReviewType = "文字" | "排版" | "圖片" | "顏色" | "資訊錯誤" | "其他";
 export type ReviewPriority = "一般" | "重要" | "急";
