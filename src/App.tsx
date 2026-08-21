@@ -1221,7 +1221,10 @@ export function App() {
           // A local-only room has no membership row and no server to ask, so it
           // behaves like a room you own — same rule the media controls use.
           canManageReview: cloud.canManageMedia,
-          myUserId: guest?.id ?? "",
+          // The cloud id, not the local `g_…` guest id: every per-user review
+          // row is keyed by auth.uid(), so anything else never matches and
+          // "you already said what you think" silently stops being true.
+          myUserId: cloud.userId ?? "",
           reviewOnline: cloudSession && Boolean(cloud.boundRoomId),
           saveBrief: (versionId, input) => {
             cloud.reviewApi.saveBrief(versionId, input).catch(reviewFail("作者說明"));

@@ -1125,6 +1125,10 @@ try {
   await dismissVerdict(A);
   await A.click(".m-tool:has-text('更多')");
   await A.waitForSelector(".m-modal-body", { timeout: 10000 });
+  // The entry only knows it is a CHANGE once the verdict has come back from the
+  // server, which is also the check that "my verdict" is keyed by the right id.
+  await A.waitForSelector("button:has-text('改變我的看法')", { timeout: 20000 }).catch(() => {});
+  check("S7. 表態過之後入口變成「改變我的看法」", await A.isVisible("button:has-text('改變我的看法')"));
   await A.click("button:has-text('改變我的看法')");
   await A.waitForSelector(".v-verdict", { timeout: 10000 });
   await A.click(".v-verdict-btn:has-text('可以過')");

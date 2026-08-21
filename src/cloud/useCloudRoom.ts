@@ -222,6 +222,13 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   const [bindNonce, setBindNonce] = useState(0);
   /** 影片對稿 2.0 (#32). Empty and untouched for image rooms. */
   const [review, setReview] = useState<ReviewData>(EMPTY_REVIEW);
+  /**
+   * This visitor's CLOUD id (`auth.uid()`), which is what every per-user row is
+   * keyed by. Deliberately not `guest.id` — that is a locally generated `g_…`
+   * string for display, and matching it against a database `user_id` would mean
+   * "my verdict" and "my reaction" never find anything.
+   */
+  const [userId, setUserId] = useState<string | null>(null);
 
   const boundRef = useRef<string | null>(null); // cloud room id
   const unsubRef = useRef<Unsubscribe | null>(null);
@@ -357,7 +364,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     setInviteInvalid(false);
     (async () => {
       try {
-        await ensureSession(supabase);
+        setUserId(await ensureSession(supabase));
         if (isGuestSession && token) {
           await joinRoom(supabase, targetRoomId, token, guest);
         }
@@ -769,5 +776,6 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     preview,
     review,
     reviewApi,
+    userId,
   };
 }
