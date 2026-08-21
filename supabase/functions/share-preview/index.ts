@@ -1,5 +1,5 @@
 /**
- * 文宣討論區 — share preview landing page (PR #21)
+ * 對稿 — share preview landing page (PR #21, media-aware since #30)
  *
  * WHY THIS EXISTS AT ALL
  * A permanent share link keeps its secret in the URL fragment:
@@ -39,9 +39,36 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUB
 /** Where a real person is sent, fragment intact. Set as a function secret. */
 const APP_ORIGIN = (Deno.env.get("APP_ORIGIN") ?? "").replace(/\/+$/, "");
 
-const BRAND = "文宣討論區";
-const DEFAULT_DESCRIPTION = "幫我看一下這張文宣，點需要調整的位置留一句話就可以，不用改原稿。";
-const GENERIC_COVER = `${APP_ORIGIN}/og-cover.png`;
+/**
+ * Media-aware fallbacks (PR #30).
+ *
+ * A card with no room-specific content still has to say what it is. Before
+ * this, every fallback said 文宣討論區 — so a revoked or cover-less VIDEO card
+ * advertised itself as a poster review. The function still knows nothing about
+ * the room: `media_type` is the single extra field the public projection
+ * returns, and it carries no room, version or invite identity with it.
+ *
+ * These strings are the server-side half of `src/lib/sharePresentation.ts`;
+ * they are duplicated rather than imported because an Edge Function cannot
+ * reach into the app bundle, and they are asserted equal in
+ * scripts/e2e/share-preview.mjs so they cannot drift apart silently.
+ */
+type MediaType = "image" | "video";
+
+const COPY: Record<MediaType, { brand: string; description: string; cover: string; open: string }> = {
+  image: {
+    brand: "文宣討論區",
+    description: "幫我看一下這張文宣，點需要調整的位置留一句話就可以，不用改原稿。",
+    cover: `${APP_ORIGIN}/og-cover.png`,
+    open: "開啟文宣討論區",
+  },
+  video: {
+    brand: "影片對稿",
+    description: "幫我看一下這支影片，在需要調整的時間點留一句話就可以。",
+    cover: `${APP_ORIGIN}/og-video-cover.png`,
+    open: "開啟影片對稿",
+  },
+};
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -69,11 +96,17 @@ const CRAWLER_UA =
   /facebookexternalhit|facebookcatalog|meta-externalagent|twitterbot|linebot|line-podcast|slackbot|discordbot|telegrambot|skypeuripreview|pinterestbot|redditbot|embedly|quora link preview|bitlybot|nuzzel|vkshare|w3c_validator|google-inspectiontool|bingbot|googlebot|applebot|yandexbot|yandeximages|developers\.google\.com\/\+\/web\/snippet/i;
 
 type Preview = {
-  title: string;
-  description: string;
+  title: string | null;
+  description: string | null;
   image_path: string | null;
+  /** Present from get_share_preview_v3 onwards; absent on the older RPCs. */
+  media_type?: string | null;
   updated_at: string;
 };
+
+function mediaTypeOf(preview: Preview | null): MediaType {
+  return preview?.media_type === "video" ? "video" : "image";
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -113,22 +146,40 @@ function publicImageUrl(path: string, version: string): string {
   return `${SUPABASE_URL}/storage/v1/object/public/share-previews/${encoded}?v=${encodeURIComponent(version)}`;
 }
 
+async function callRpc(fn: string, previewId: string): Promise<Preview[] | null> {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: ANON_KEY,
+      authorization: `Bearer ${ANON_KEY}`,
+    },
+    body: JSON.stringify({ p_preview_id: previewId }),
+    signal: AbortSignal.timeout(4000),
+  });
+  // 404 is the one status worth telling apart: it means this project has not
+  // run 0011 yet, which is a deploy-order fact, not a broken preview.
+  if (res.status === 404) return null;
+  if (!res.ok) return [];
+  const rows = (await res.json()) as Preview[] | null;
+  return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * Read the public card projection.
+ *
+ * Deliberately forward- AND backward-compatible: the function may be deployed
+ * before migration 0011 lands (or rolled back after it), so a missing
+ * `get_share_preview_v3` falls through to the original RPC instead of turning
+ * every card into a redirector. The older RPC returns no media_type, which is
+ * exactly the 圖片 default.
+ */
 async function loadPreview(previewId: string): Promise<Preview | null> {
   if (!SUPABASE_URL || !ANON_KEY) return null;
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_share_preview`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        apikey: ANON_KEY,
-        authorization: `Bearer ${ANON_KEY}`,
-      },
-      body: JSON.stringify({ p_preview_id: previewId }),
-      signal: AbortSignal.timeout(4000),
-    });
-    if (!res.ok) return null;
-    const rows = (await res.json()) as Preview[] | null;
-    return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    let rows = await callRpc("get_share_preview_v3", previewId);
+    if (rows === null) rows = (await callRpc("get_share_preview", previewId)) ?? [];
+    return rows.length > 0 ? rows[0] : null;
   } catch {
     // A preview is an enhancement. Losing it must never lose the redirect.
     return null;
@@ -141,7 +192,9 @@ function renderHtml(opts: {
   image: string;
   pageUrl: string;
   redirect: boolean;
+  media: MediaType;
 }): string {
+  const copy = COPY[opts.media];
   const title = escapeHtml(opts.title);
   const description = escapeHtml(opts.description);
   const image = escapeHtml(opts.image);
@@ -179,7 +232,7 @@ ${opts.redirect ? "  location.replace(target);\n" : ""}})();</script>`;
 <title>${title}</title>
 <meta name="description" content="${description}">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="${escapeHtml(BRAND)}">
+<meta property="og:site_name" content="${escapeHtml(copy.brand)}">
 <meta property="og:title" content="${title}">
 <meta property="og:description" content="${description}">
 <meta property="og:image" content="${image}">
@@ -214,7 +267,7 @@ ${opts.redirect ? "  location.replace(target);\n" : ""}})();</script>`;
 <img src="${image}" alt="${title}" width="1200" height="630">
 <h1>${title}</h1>
 <p>${description}</p>
-<a id="open" href="${appOrigin}">開啟文宣討論區</a>
+<a id="open" href="${appOrigin}">${escapeHtml(copy.open)}</a>
 </div>
 ${script}
 </body>
@@ -241,29 +294,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const previewId = previewIdFrom(url);
   const preview = previewId ? await loadPreview(previewId) : null;
 
-  // Unknown, revoked, or thumbnail-off previews all land on the generic card.
-  // The redirect below still works, so a stale link keeps opening the room.
-  const title = clamp(preview?.title?.trim() || BRAND, 70);
-  const description = clamp(preview?.description?.trim() || DEFAULT_DESCRIPTION, 160);
+  // Unknown, revoked, or cover-less previews all land on the generic card — but
+  // on the RIGHT generic card. A revoked video preview still reports its
+  // media_type (and nothing else), so it says 影片對稿 rather than pretending to
+  // be a poster. The redirect below works in every one of those cases, so a
+  // stale link keeps opening the room.
+  const media = mediaTypeOf(preview);
+  const copy = COPY[media];
+  const title = clamp(preview?.title?.trim() || copy.brand, 70);
+  const description = clamp(preview?.description?.trim() || copy.description, 160);
   const image = preview?.image_path
     ? publicImageUrl(preview.image_path, String(Date.parse(preview.updated_at) || 0))
-    : GENERIC_COVER;
+    : copy.cover;
 
   const ua = req.headers.get("user-agent") ?? "";
   const html = renderHtml({
     title,
     description,
     image,
+    media,
     pageUrl: canonicalUrl(previewId, `${url.origin}${url.pathname}`),
     redirect: !CRAWLER_UA.test(ua),
   });
 
   const headers = new Headers({
     "content-type": "text/html; charset=utf-8",
-    // Deliberately short. Turning 顯示文宣縮圖 off deletes the thumbnail
-    // immediately, so the real protection is the missing object — but the card
-    // itself should stop advertising it quickly too, and an unfurl burst is
-    // still absorbed.
+    // Deliberately short. Turning 顯示文宣縮圖 / 顯示影片封面 off deletes the
+    // thumbnail immediately, so the real protection is the missing object — but
+    // the card itself should stop advertising it quickly too, and an unfurl
+    // burst is still absorbed. It is also what lets a freshly customised title
+    // reach LINE without waiting out a long cache.
     "cache-control": "public, max-age=60",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",

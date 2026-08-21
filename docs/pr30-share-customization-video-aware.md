@@ -217,3 +217,74 @@ UI 用人話：`重新產生分享預覽`。
 - 不做 AI 生封面
 - 不新增主導航
 - 不重寫 #27 TUS / #29 影片最佳化
+
+---
+
+## 實作結果
+
+### 一、race 的實際成因與修法
+
+`openShare` 拿到 `ensureShared()` 的結果之後就把 sheet 設成
+`ready(url = appUrl, preview = building)`，並在背景才建立卡片。ShareSheet 對
+`building` 沒有任何限制，所以 `複製連結` / `傳到 LINE` / `其他方式分享` 在那個
+window 內全部可按，送出去的就是 `https://app/#room=…&invite=…`。爬蟲抓不到
+fragment，於是 LINE 顯示通用卡片——即使房間早就有 poster frame 與
+`share_previews` row。
+
+修法把「可以分享」從 `kind === "ready"` 移到 `preview` 上：
+
+- `building`：顯示「正在準備影片／文宣分享預覽…」，三個分享動作全部 disabled，
+  LINE 按鈕改成「正在準備 LINE 預覽…」，網址輸入框不出現。
+- `on` / `off`：`state.url = buildPreviewShareUrl(preview.id, appUrl)`，解除限制。
+- `unavailable`：顯示「這次沒有產生預覽縮圖，但分享連結仍可使用。」並要求按下
+  「仍要分享（這次沒有縮圖）」才交出 `appUrl`——不是靜默降級。
+
+`withPreviewTimeout`（6 秒）確保慢速網路不會永遠卡在 `building`；逾時走的是
+`unavailable` 那條有告知的路。晚到的結果仍然可以靠 `shareSeq` 補上。
+
+`複製原始安全連結` 放在「更多」裡，是進階 fallback，不是主要操作。
+
+### 二、presentation model
+
+`src/lib/sharePresentation.ts` 是唯一的文案來源：`sharePresentation(mediaType,
+roomTitle)` 回傳 sectionTitle / brand / defaultTitle / defaultDescription /
+thumbnailLabel / privacyCopy / preparingCopy / coverAutoLabel / inviteText。
+ShareSheet、LINE deep link、`navigator.share`、clipboard 文字全部讀同一份，
+Edge Function 的那一份是逐字複製並由 `share-preview.mjs` 斷言相同。
+
+### 三、資料結構
+
+`supabase/migrations/0011_share_preview_customization.sql`：
+
+| 欄位 | 用途 |
+|---|---|
+| `media_type` | `image` / `video`，決定通用封面與品牌字 |
+| `cover_source` | `auto` / `custom` / `none` |
+| `title_customized` | true 之後 `rooms.title` 改名不再覆蓋卡片標題 |
+| `description_customized` | 同上，對應說明 |
+
+`show_thumbnail` 保留並與 `cover_source <> 'none'` 同步，所以 0005 的
+`get_share_preview` 與 0008 的 `_v2` 行為完全沒變（也因此整套 migration 仍可重放）。
+新的 `get_share_preview_v3` 只多回 `media_type` 與 `revoked`，撤銷的卡片會回一列
+但 title / description / image_path 全是 null。
+
+Edge Function 先打 v3，遇到 404 才退回舊的 `get_share_preview`——函式可以先於
+migration 部署，也可以在 migration rollback 之後照常運作。
+
+### 四、封面規則
+
+| 模式 | 換版本 | 來源 |
+|---|---|---|
+| `auto` | 重新畫成新版的 poster frame / 文宣 | `versions.image_path`（影片是上傳時擷取的 poster frame） |
+| `custom` | **不動** | 使用者上傳的圖，client-side render 成 1200×630 |
+| `none` | 不適用 | 沒有封面，退到 `og-cover.png` / `og-video-cover.png` |
+
+`auto` + 影片會加上 play glyph 與 `1:23` 這類 duration badge；`custom` 乾淨呈現，
+不再額外疊播放鍵。兩者都走 `renderShareThumbnail()` 的 contain 邏輯，不 cover
+crop、不拉伸，輸出 WebP 優先並壓到 700KB 以下。原圖從不進 public bucket。
+
+### 五、安全
+
+沒有放寬任何一條：invite 只在 URL fragment；`share_previews` 沒有任何
+`%invite%` 欄位；v3 不回 `room_id` / `version_id` / `created_by`；`room-assets`
+仍然私有；沒有新增 bucket；沒有 service role 進前端。

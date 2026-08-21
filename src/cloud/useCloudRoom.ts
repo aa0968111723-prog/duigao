@@ -35,7 +35,12 @@ import {
   upsertProposal,
   type CloudProposal,
 } from "./roomRepository";
-import { ensureRoomPreview, rotateRoomPreview, type SharePreview } from "./sharePreview";
+import {
+  ensureRoomPreview,
+  rotateRoomPreview,
+  type SharePreview,
+  type SharePreviewPatch,
+} from "./sharePreview";
 import { uploadVideoVersion, type VideoUploadHandle, type VideoUploadInput } from "./videoRoom";
 import { signedVideoUrl } from "./videoAssets";
 import { subscribeRoom, type Unsubscribe } from "./roomSync";
@@ -69,9 +74,20 @@ export type ShareResult =
  */
 export type SharePreviewApi = {
   /** Create or refresh this room's preview. null = nothing to preview yet. */
-  ensure: (opts?: { versionId?: string; showThumbnail?: boolean }) => Promise<SharePreview | null>;
+  ensure: (opts?: PreviewOpts) => Promise<SharePreview | null>;
   /** Revoke the current preview id and mint a new one. */
-  rotate: (opts?: { versionId?: string; showThumbnail?: boolean }) => Promise<SharePreview | null>;
+  rotate: (opts?: PreviewOpts) => Promise<SharePreview | null>;
+};
+
+/**
+ * `patch` carries edits to the CARD only. Nothing in it can reach rooms.title,
+ * the version image, the poster frame or the original upload — that separation
+ * is the whole point of customising a share (PR #30).
+ */
+export type PreviewOpts = {
+  versionId?: string;
+  showThumbnail?: boolean;
+  patch?: SharePreviewPatch;
 };
 
 type Params = {
@@ -537,7 +553,9 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
       if (rows.length === 0) return null; // nothing worth putting on a card yet
       const chosen = rows.find((v) => v.id === versionHint) ?? rows[0];
       const title = ((roomRes.data as { title?: string } | null)?.title ?? "").trim();
-      return { roomId: rid, versionId: chosen.id, title: title || "文宣討論區" };
+      // An empty room title falls back inside sharePresentation(), which knows
+      // whether the product label should be 文宣討論區 or 影片對稿.
+      return { roomId: rid, versionId: chosen.id, title };
     },
     [supabase],
   );
@@ -545,19 +563,33 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   // A video room's card says what a video room asks for. The picture is the
   // poster frame, which is already this version's stored image — so the whole
   // Open Graph pipeline, and the anonymous read surface behind it, is unchanged.
-  const previewExtras = () =>
-    room && roomMediaType(room) === "video" ? { mediaType: "video" as const } : {};
+  //
+  // It is written for image rooms too, not only video ones: `media_type` is what
+  // the Edge Function reads to pick a fallback brand, so leaving it implicit
+  // would make an untouched poster card indistinguishable from a row that
+  // predates the column.
+  const previewExtras = () => ({ mediaType: room ? roomMediaType(room) : ("image" as const) });
 
   const preview: SharePreviewApi = {
     ensure: async (opts) => {
       const target = await resolvePreviewTarget(opts?.versionId);
       if (!target || !supabase) return null;
-      return ensureRoomPreview(supabase, { ...target, ...previewExtras(), showThumbnail: opts?.showThumbnail });
+      return ensureRoomPreview(supabase, {
+        ...target,
+        ...previewExtras(),
+        showThumbnail: opts?.showThumbnail,
+        patch: opts?.patch,
+      });
     },
     rotate: async (opts) => {
       const target = await resolvePreviewTarget(opts?.versionId);
       if (!target || !supabase) return null;
-      return rotateRoomPreview(supabase, { ...target, ...previewExtras(), showThumbnail: opts?.showThumbnail });
+      return rotateRoomPreview(supabase, {
+        ...target,
+        ...previewExtras(),
+        showThumbnail: opts?.showThumbnail,
+        patch: opts?.patch,
+      });
     },
   };
 

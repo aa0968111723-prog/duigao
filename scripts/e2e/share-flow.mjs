@@ -30,7 +30,7 @@ import { readFile as read } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname, normalize } from "node:path";
 import { deflateSync } from "node:zlib";
-import { start as startMock, requestLog, faults, rows } from "./mock-supabase.mjs";
+import { start as startMock, requestLog, faults, rows, cloudRooms } from "./mock-supabase.mjs";
 
 const MOCK_PORT = 54399;
 const APP_PORT = 4173;
@@ -298,13 +298,13 @@ try {
   faults.previewDelete = true;
   await A.click(".m-share-toggle input");
   await A.waitForFunction(
-    () => (document.querySelector(".m-share-preview")?.textContent ?? "").includes("沒有產生連結預覽"),
+    () => (document.querySelector(".m-share-preview")?.textContent ?? "").includes("沒有產生預覽縮圖"),
     null,
     { timeout: 30000 },
   ).catch(() => {});
   check(
     "A. 縮圖刪不掉時不會假裝已經關閉",
-    ((await A.textContent(".m-share-preview")) ?? "").includes("沒有產生連結預覽"),
+    ((await A.textContent(".m-share-preview")) ?? "").includes("沒有產生預覽縮圖"),
     (await A.textContent(".m-share-preview"))?.trim(),
   );
   check(
@@ -367,13 +367,25 @@ try {
   await openShareSheet(A);
   await A.waitForSelector(".m-share-preview", { timeout: 30000 }).catch(() => null);
   await A.waitForFunction(
-    () => (document.querySelector(".m-share-preview")?.textContent ?? "").includes("沒有產生連結預覽"),
+    () => (document.querySelector(".m-share-preview")?.textContent ?? "").includes("沒有產生預覽縮圖"),
     null,
     { timeout: 30000 },
   ).catch(() => {});
   const failedText = (await A.textContent(".m-share-preview")) ?? "";
+  check("A. 縮圖上傳失敗時說明預覽沒產生", failedText.includes("沒有產生預覽縮圖"), failedText.trim());
+  // PR #30: a failed card is no longer a silent fallback. Nothing is shareable
+  // until the host has been told there will be no thumbnail and said so.
+  const sheetText = (await A.textContent(".m-more")) ?? "";
+  check(
+    "A. 縮圖失敗時先告知這次不會有縮圖",
+    sheetText.includes("這次沒有產生預覽縮圖，但分享連結仍可使用"),
+    sheetText.slice(0, 80),
+  );
+  check("A. 縮圖失敗時不先把連結攤在那裡", !(await A.$("input.m-share-url")));
+  check("A. 縮圖失敗時提供明確的「仍要分享」", Boolean(await A.$("button:has-text('仍要分享')")));
+  await A.click("button:has-text('仍要分享')");
+  await A.waitForSelector("input.m-share-url", { timeout: 15000 });
   const failedUrl = await A.inputValue("input.m-share-url");
-  check("A. 縮圖上傳失敗時說明預覽沒產生", failedText.includes("沒有產生連結預覽"), failedText.trim());
   check(
     "A. 縮圖上傳失敗仍給得出永久 room+invite 連結",
     /#room=[0-9a-f-]{36}&invite=[A-Za-z0-9_-]{20,}$/.test(failedUrl),
@@ -393,6 +405,152 @@ try {
   check(
     "A. 恢復後 ShareSheet 又是完整的預覽卡片",
     ((await A.textContent(".m-share-preview")) ?? "").includes("顯示文宣縮圖"),
+  );
+  await A.click(".m-close");
+  await openShareSheet(A);
+  await A.waitForSelector("input.m-share-url", { timeout: 30000 });
+
+  // ================= PR #30: 文宣語境 + 自訂分享內容（圖片房） =================
+  // 1) media copy: an image room must never talk about 影片.
+  {
+    const sheet = (await A.textContent(".m-more")) ?? "";
+    check("PR30. 圖片房不會出現「這支影片」", !sheet.includes("這支影片"), sheet.slice(0, 120));
+    check("PR30. 圖片房不會出現「影片封面」", !sheet.includes("影片封面"));
+    check("PR30. 圖片房的 toggle 仍是「顯示文宣縮圖」", sheet.includes("顯示文宣縮圖"));
+    check(
+      "PR30. 圖片房的隱私說明仍是文宣說法",
+      sheet.includes("低解析度文宣預覽"),
+      sheet.slice(0, 200),
+    );
+  }
+
+  // 2) the invite text that actually travels, straight off the LINE deep link.
+  const lineHref = (await A.getAttribute("a.m-row-line", "href")) ?? "";
+  const lineText = decodeURIComponent(lineHref.split("?")[1] ?? "");
+  check("PR30. 圖片房 LINE 文案講「這張文宣」", lineText.includes("這張文宣"), lineText.slice(0, 60));
+  check("PR30. 圖片房 LINE 文案不講「這支影片」", !lineText.includes("這支影片"));
+  check(
+    "PR30. LINE 帶出去的是 share-preview 連結，不是原始 App URL",
+    lineText.includes("/functions/v1/share-preview/") && !/\n\s*http:\/\/127\.0\.0\.1:4173\/#room=/.test(lineText),
+    lineText.split("\n").pop()?.replace(/invite=.*/, "invite=<redacted>") ?? "",
+  );
+
+  // 3) 自訂分享標題：卡片改了，房間名沒改。
+  const roomTitleBefore = rows.share_previews[0] ? cloudRooms.get(rows.share_previews[0].room_id)?.title : null;
+  await A.click("button:has-text('自訂分享內容')");
+  await A.waitForSelector(".m-share-custom", { timeout: 10000 });
+  await A.fill(".m-share-custom input.m-input", "期初茶會文宣｜對外版");
+  await A.fill(".m-share-custom textarea", "只要看標題排版就好，其他不用動。");
+  await A.click("button:has-text('儲存分享內容')");
+  await A.waitForFunction(
+    () => (document.querySelector(".m-share-preview-title")?.textContent ?? "").includes("對外版"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check(
+    "PR30. 自訂標題寫進 share_previews",
+    rows.share_previews[0]?.title === "期初茶會文宣｜對外版",
+    JSON.stringify(rows.share_previews[0]?.title),
+  );
+  check(
+    "PR30. 自訂說明寫進 share_previews",
+    rows.share_previews[0]?.description === "只要看標題排版就好，其他不用動。",
+    JSON.stringify(rows.share_previews[0]?.description),
+  );
+  check(
+    "PR30. 自訂標題不會改到房間名稱",
+    cloudRooms.get(rows.share_previews[0].room_id)?.title === roomTitleBefore,
+    `${roomTitleBefore} → ${cloudRooms.get(rows.share_previews[0].room_id)?.title}`,
+  );
+  check("PR30. 自訂後 title_customized 為 true", rows.share_previews[0]?.title_customized === true);
+  {
+    const href = (await A.getAttribute("a.m-row-line", "href")) ?? "";
+    check(
+      "PR30. LINE 文案用的是自訂標題",
+      decodeURIComponent(href).includes("期初茶會文宣｜對外版"),
+      decodeURIComponent(href).slice(0, 60),
+    );
+  }
+
+  // 4) 關掉 ShareSheet 再打開，自訂內容要還在（來源是雲端，不是本機草稿）。
+  await A.click(".m-close");
+  await openShareSheet(A);
+  await A.waitForSelector("input.m-share-url", { timeout: 30000 });
+  await A.click("button:has-text('自訂分享內容')");
+  check(
+    "PR30. 重開 ShareSheet 後自訂標題還在",
+    (await A.inputValue(".m-share-custom input.m-input")) === "期初茶會文宣｜對外版",
+  );
+  check(
+    "PR30. 重開 ShareSheet 後自訂說明還在",
+    (await A.inputValue(".m-share-custom textarea")) === "只要看標題排版就好，其他不用動。",
+  );
+
+  // 5) 自訂封面：上傳的圖被 render 成 1200×630 衍生檔，原圖不進 bucket。
+  requestLog.length = 0;
+  await A.setInputFiles("input.m-share-file", { name: "cover.png", mimeType: "image/png", buffer: POSTER2 });
+  await A.waitForFunction(
+    () => document.querySelector('input[value="custom"]')?.checked === true,
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check("PR30. 自訂封面把 cover_source 設成 custom", rows.share_previews[0]?.cover_source === "custom", String(rows.share_previews[0]?.cover_source));
+  check(
+    "PR30. 自訂封面上傳到 share-previews，不是 room-assets",
+    requestLog.some((r) => r.startsWith("POST /storage/v1/object/share-previews/")) &&
+      !requestLog.some((r) => r.startsWith("POST /storage/v1/object/room-assets/")),
+    requestLog.filter((r) => r.includes("/storage/")).join(" | "),
+  );
+  {
+    const previewId = rows.share_previews[0].id;
+    const card = await A.evaluate(
+      async (u) => (await fetch(u, { cache: "no-store" })).text(),
+      `http://127.0.0.1:${MOCK_PORT}/functions/v1/share-preview/${previewId}`,
+    );
+    check(
+      "PR30. 自訂封面之後 og:image 指向自訂封面",
+      /og:image[^>]*share-previews/.test(card) && !card.includes("og-cover.png"),
+      /<meta property="og:image" content="([^"]*)"/.exec(card)?.[1] ?? "",
+    );
+    check("PR30. 自訂封面之後 og:title 是自訂標題", card.includes("期初茶會文宣｜對外版"));
+  }
+
+  // 6) 不顯示封面：檔案真的刪掉，卡片退回通用封面。
+  await A.click('.m-share-covers input[value="none"]');
+  await A.waitForFunction(
+    () => Boolean(document.querySelector(".m-share-preview-thumb.is-generic")) &&
+      !document.querySelector(".m-share-preview-thumb.is-generic").textContent.includes("準備中"),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check("PR30. 不顯示封面把 cover_source 設成 none", rows.share_previews[0]?.cover_source === "none", String(rows.share_previews[0]?.cover_source));
+  check("PR30. 不顯示封面會刪掉公開的縮圖檔", !rows.share_previews[0]?.thumbnail_path, JSON.stringify(rows.share_previews[0]?.thumbnail_path));
+  check("PR30. 不顯示封面時 show_thumbnail 也跟著關", rows.share_previews[0]?.show_thumbnail === false);
+
+  // 7) 恢復預設：標題／說明回到房間預設，封面回到 auto。
+  await A.click("button:has-text('恢復預設')");
+  await A.waitForFunction(
+    () => Boolean(document.querySelector("img.m-share-preview-thumb")),
+    null,
+    { timeout: 30000 },
+  ).catch(() => {});
+  check("PR30. 恢復預設後 cover_source 回到 auto", rows.share_previews[0]?.cover_source === "auto", String(rows.share_previews[0]?.cover_source));
+  check("PR30. 恢復預設後標題回到房間名", rows.share_previews[0]?.title === roomTitleBefore, JSON.stringify(rows.share_previews[0]?.title));
+  check("PR30. 恢復預設後 title_customized 回到 false", rows.share_previews[0]?.title_customized === false);
+  check(
+    "PR30. 恢復預設後說明回到文宣預設文案",
+    (rows.share_previews[0]?.description ?? "").includes("這張文宣"),
+    JSON.stringify(rows.share_previews[0]?.description),
+  );
+
+  // 8) 進階 fallback：原始安全連結仍拿得到，但不是主要操作。
+  await A.click("button.m-link:has-text('更多')");
+  await A.waitForSelector(".m-share-advanced", { timeout: 10000 });
+  const advancedText = (await A.textContent(".m-share-advanced")) ?? "";
+  check("PR30. 「複製原始安全連結」放在更多裡面", advancedText.includes("複製原始安全連結"));
+  check(
+    "PR30. 主要操作區沒有原始安全連結",
+    !((await A.textContent(".m-more > button.m-row-primary")) ?? "").includes("原始"),
   );
   await A.click(".m-close");
   await openShareSheet(A);

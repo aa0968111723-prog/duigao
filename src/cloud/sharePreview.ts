@@ -3,9 +3,11 @@ import { ASSET_BUCKET } from "./assets";
 import { CloudError } from "./errors";
 import { SUPABASE_URL } from "./config";
 import { renderShareThumbnail, type ThumbnailDecoration } from "./shareThumbnail";
+import type { MediaType } from "../lib/types";
+import { isCoverSource, sharePresentation, type CoverSource } from "../lib/sharePresentation";
 
 /**
- * Open Graph share previews (PR #21).
+ * Open Graph share previews (PR #21, made media-aware and customisable in #30).
  *
  * A share link's secret lives in the URL fragment, which no browser sends to a
  * server — that is what keeps `#room=<uuid>&invite=<token>` safe, and also why
@@ -14,29 +16,35 @@ import { renderShareThumbnail, type ThumbnailDecoration } from "./shareThumbnail
  *
  *   https://<project>.supabase.co/functions/v1/share-preview/<previewId>#room=…&invite=…
  *
- * This module owns the client half: turning the ORIGINAL poster into a small
- * derived thumbnail, publishing it to the dedicated public `share-previews`
- * bucket, and keeping one `share_previews` row per room in step.
+ * This module owns the client half: turning the ORIGINAL poster (or a video's
+ * poster frame, or a cover the host picked) into a small derived thumbnail,
+ * publishing it to the dedicated public `share-previews` bucket, and keeping one
+ * `share_previews` row per room in step.
  *
- * Two rules shape everything here:
+ * Three rules shape everything here:
  *   1. The thumbnail is rendered from the version image itself — never from a
  *      screenshot of the DOM, which would drag in pins, regions, proposal
- *      overlays and toolbars. The card must look like a clean poster.
+ *      overlays, the video transport bar and toolbars. The card must look like
+ *      a clean poster or a clean frame.
  *   2. A preview is an enhancement. Every function below is allowed to fail;
- *      callers fall back to the plain permanent `#room=…&invite=…` URL and
- *      sharing carries on.
+ *      the permanent `#room=…&invite=…` URL keeps working either way.
+ *   3. Customising a card is NOT editing the room. Title, description and cover
+ *      written here never touch `rooms.title`, the version image, the poster
+ *      frame or the original upload — a room called 未命名影片 can be shared as
+ *      「淡江招生短片｜第一剪」 and stay 未命名影片.
  */
 
 export const PREVIEW_BUCKET = "share-previews";
 
 export { renderShareThumbnail } from "./shareThumbnail";
+export type { CoverSource } from "../lib/sharePresentation";
 
-export const DEFAULT_PREVIEW_DESCRIPTION =
-  "幫我看一下這張文宣，點需要調整的位置留一句話就可以，不用改原稿。";
-
-/** A video is reviewed in time, so its card asks for the thing time affords. */
-export const VIDEO_PREVIEW_DESCRIPTION =
-  "幫我看一下這支影片，在需要調整的時間點留一句話就可以。";
+/**
+ * The card's default sentence. Re-exported from the presentation model rather
+ * than re-typed here: the ShareSheet, the LINE message and the Edge Function
+ * all have to say the same thing, and two copies of a sentence is how they stop.
+ */
+export { IMAGE_SHARE_DESCRIPTION, VIDEO_SHARE_DESCRIPTION } from "../lib/sharePresentation";
 
 export type SharePreview = {
   id: string;
@@ -46,6 +54,15 @@ export type SharePreview = {
   description: string;
   thumbnailPath: string | null;
   showThumbnail: boolean;
+  /** What the card is about — decides its copy, its glyph and its fallback. */
+  mediaType: MediaType;
+  coverSource: CoverSource;
+  /**
+   * Whether the host typed this title/description themselves. Once they have,
+   * a room rename must not silently overwrite what they wrote.
+   */
+  titleCustomized: boolean;
+  descriptionCustomized: boolean;
   updatedAt: string;
 };
 
@@ -57,8 +74,15 @@ type PreviewRow = {
   description: string;
   thumbnail_path: string | null;
   show_thumbnail: boolean;
+  media_type?: string | null;
+  cover_source?: string | null;
+  title_customized?: boolean | null;
+  description_customized?: boolean | null;
   updated_at: string;
 };
+
+const ROW_COLUMNS =
+  "id, room_id, version_id, title, description, thumbnail_path, show_thumbnail, media_type, cover_source, title_customized, description_customized, updated_at";
 
 function fromRow(row: PreviewRow): SharePreview {
   return {
@@ -69,6 +93,12 @@ function fromRow(row: PreviewRow): SharePreview {
     description: row.description,
     thumbnailPath: row.thumbnail_path,
     showThumbnail: row.show_thumbnail,
+    mediaType: row.media_type === "video" ? "video" : "image",
+    // Rows written before #30 carry no cover_source; `show_thumbnail` is the
+    // only intent they recorded, so read it as the auto/none it always meant.
+    coverSource: isCoverSource(row.cover_source) ? row.cover_source : row.show_thumbnail ? "auto" : "none",
+    titleCustomized: row.title_customized === true,
+    descriptionCustomized: row.description_customized === true,
     updatedAt: row.updated_at,
   };
 }
@@ -139,7 +169,7 @@ function cardDuration(seconds: number | null): string | undefined {
 export async function loadRoomPreview(supabase: SupabaseClient, roomId: string): Promise<SharePreview | null> {
   const { data, error } = await supabase
     .from("share_previews")
-    .select("id, room_id, version_id, title, description, thumbnail_path, show_thumbnail, updated_at")
+    .select(ROW_COLUMNS)
     .eq("room_id", roomId)
     .eq("enabled", true)
     .maybeSingle();
@@ -173,11 +203,11 @@ async function revokeThumbnail(supabase: SupabaseClient, path: string | null | u
 async function writeThumbnail(
   supabase: SupabaseClient,
   previewId: string,
-  imageUrl: string,
+  source: string | Blob,
   previousPath: string | null,
   decoration?: ThumbnailDecoration,
 ): Promise<string> {
-  const { blob, mime } = await renderShareThumbnail(imageUrl, decoration);
+  const { blob, mime } = await renderShareThumbnail(source, decoration);
   const ext = mime === "image/webp" ? "webp" : "jpg";
   const path = `${previewId}/cover.${ext}`;
   const { error } = await supabase.storage
@@ -190,17 +220,87 @@ async function writeThumbnail(
   return path;
 }
 
+/**
+ * A change to what the CARD says, never to what the ROOM is.
+ *
+ * `undefined` leaves a field alone; `null` clears the customisation and hands
+ * the field back to the room's own title / the media type's default sentence.
+ */
+export type SharePreviewPatch = {
+  title?: string | null;
+  description?: string | null;
+  coverSource?: CoverSource;
+  /** Bytes for a host-picked cover. Implies `coverSource: "custom"`. */
+  customCover?: Blob;
+};
+
 export type EnsurePreviewInput = {
   roomId: string;
   versionId: string;
+  /** The ROOM's title — only ever a default for the card. */
   title: string;
   /** "video" swaps the card's sentence and puts a play glyph on the frame. */
-  mediaType?: "image" | "video";
-  /** Explicit override; otherwise an existing row's choice wins, else on. */
+  mediaType?: MediaType;
+  /** Legacy 顯示縮圖 toggle. Maps onto `auto` / `none`. */
   showThumbnail?: boolean;
   /** Re-render the thumbnail even when nothing about the source changed. */
   force?: boolean;
+  /** Host edits to the card itself. */
+  patch?: SharePreviewPatch;
 };
+
+/** What the card's title should be, given the room, the row and this edit. */
+function resolveTitle(
+  input: EnsurePreviewInput,
+  existing: SharePreview | null,
+  fallback: string,
+): { title: string; customized: boolean } {
+  const patch = input.patch;
+  if (patch && "title" in patch) {
+    const next = (patch.title ?? "").trim();
+    // An explicit clear — or an edit the host emptied out — is 恢復預設, not a
+    // blank card.
+    if (patch.title === null || !next) return { title: fallback, customized: false };
+    return { title: next, customized: true };
+  }
+  // A room rename should keep flowing into an untouched card, and must never
+  // overwrite one the host wrote themselves.
+  if (existing?.titleCustomized) return { title: existing.title, customized: true };
+  return { title: fallback, customized: false };
+}
+
+function resolveDescription(
+  input: EnsurePreviewInput,
+  existing: SharePreview | null,
+  fallback: string,
+): { description: string; customized: boolean } {
+  const patch = input.patch;
+  if (patch && "description" in patch) {
+    const next = (patch.description ?? "").trim();
+    if (patch.description === null || !next) return { description: fallback, customized: false };
+    return { description: next, customized: true };
+  }
+  if (existing?.descriptionCustomized) return { description: existing.description, customized: true };
+  return { description: fallback, customized: false };
+}
+
+/**
+ * Where the picture comes from after this call.
+ *
+ * The legacy boolean toggle still has to work — it is the one-tap control in
+ * the sheet — so `true` means "show something again", which is the host's own
+ * cover if they uploaded one and the room's own frame otherwise.
+ */
+function resolveCoverSource(input: EnsurePreviewInput, existing: SharePreview | null): CoverSource {
+  const patch = input.patch;
+  if (patch?.customCover) return "custom";
+  if (patch?.coverSource) return patch.coverSource;
+  if (typeof input.showThumbnail === "boolean") {
+    if (!input.showThumbnail) return "none";
+    return existing?.coverSource === "custom" ? "custom" : "auto";
+  }
+  return existing?.coverSource ?? "auto";
+}
 
 /**
  * Create or refresh the room's share preview and return it.
@@ -214,15 +314,27 @@ export async function ensureRoomPreview(
   input: EnsurePreviewInput,
 ): Promise<SharePreview> {
   const existing = await loadRoomPreview(supabase, input.roomId);
-  const showThumbnail = input.showThumbnail ?? existing?.showThumbnail ?? true;
-  const title = input.title.trim() || "文宣討論區";
+  const mediaType: MediaType = input.mediaType === "video" ? "video" : "image";
+  const present = sharePresentation(mediaType, input.title);
   const previewId = existing?.id ?? crypto.randomUUID();
 
-  const isVideo = input.mediaType === "video";
+  const { title, customized: titleCustomized } = resolveTitle(input, existing, present.defaultTitle);
+  const { description, customized: descriptionCustomized } = resolveDescription(
+    input,
+    existing,
+    present.defaultDescription,
+  );
+  const coverSource = resolveCoverSource(input, existing);
+  const showThumbnail = coverSource !== "none";
+
   const base = {
     title,
-    description: isVideo ? VIDEO_PREVIEW_DESCRIPTION : DEFAULT_PREVIEW_DESCRIPTION,
+    description,
     show_thumbnail: showThumbnail,
+    media_type: mediaType,
+    cover_source: coverSource,
+    title_customized: titleCustomized,
+    description_customized: descriptionCustomized,
   };
 
   if (existing) {
@@ -241,35 +353,53 @@ export async function ensureRoomPreview(
   }
 
   let thumbnailPath: string | null = existing?.thumbnailPath ?? null;
-  // Re-sharing the same version should not re-upload an identical image; only
-  // a new version, a first share, or an explicit refresh re-renders.
-  const stale = !thumbnailPath || existing?.versionId !== input.versionId || Boolean(input.force);
-  if (showThumbnail && stale) {
-    const source = await versionImageUrl(supabase, input.roomId, input.versionId);
-    if (source) {
-      thumbnailPath = await writeThumbnail(
-        supabase,
-        previewId,
-        source.url,
-        thumbnailPath,
-        isVideo ? { play: true, durationLabel: cardDuration(source.durationSeconds) } : undefined,
-      );
-    } else if (thumbnailPath) {
-      // Nothing to render from any more: drop the stale image rather than keep
-      // advertising a picture that no longer belongs to this version.
+
+  if (coverSource === "none") {
+    if (thumbnailPath) {
       await revokeThumbnail(supabase, thumbnailPath);
       thumbnailPath = null;
     }
-  } else if (!showThumbnail && thumbnailPath) {
-    await revokeThumbnail(supabase, thumbnailPath);
-    thumbnailPath = null;
+  } else if (coverSource === "custom") {
+    // Only new bytes cause a write. Without them the host's cover is left
+    // exactly as it is — which is what makes it survive a version switch.
+    if (input.patch?.customCover) {
+      thumbnailPath = await writeThumbnail(supabase, previewId, input.patch.customCover, thumbnailPath);
+    }
+  } else {
+    // auto: follow the room. Re-sharing the same version should not re-upload
+    // an identical image; only a new version, a first share, a switch back from
+    // a custom cover, or an explicit refresh re-renders.
+    const stale =
+      !thumbnailPath ||
+      existing?.versionId !== input.versionId ||
+      existing?.coverSource !== "auto" ||
+      Boolean(input.force);
+    if (stale) {
+      const source = await versionImageUrl(supabase, input.roomId, input.versionId);
+      if (source) {
+        thumbnailPath = await writeThumbnail(
+          supabase,
+          previewId,
+          source.url,
+          thumbnailPath,
+          mediaType === "video"
+            ? { play: true, durationLabel: cardDuration(source.durationSeconds) }
+            : undefined,
+        );
+      } else if (thumbnailPath) {
+        // Nothing to render from any more: drop the stale image rather than keep
+        // advertising a picture that no longer belongs to this version.
+        await revokeThumbnail(supabase, thumbnailPath);
+        thumbnailPath = null;
+      }
+    }
   }
 
   const { data, error } = await supabase
     .from("share_previews")
     .update({ thumbnail_path: thumbnailPath, version_id: input.versionId })
     .eq("id", previewId)
-    .select("id, room_id, version_id, title, description, thumbnail_path, show_thumbnail, updated_at")
+    .select(ROW_COLUMNS)
     .single();
   if (error || !data) throw new CloudError(error?.message ?? "preview update failed", "preview");
   return fromRow(data as PreviewRow);
@@ -279,6 +409,9 @@ export async function ensureRoomPreview(
  * Revoke the current preview and mint a fresh id. Links already sitting in a
  * LINE thread keep working (they still carry room+invite) but fall back to the
  * generic card — the poster is no longer reachable through the old id.
+ *
+ * The host's customisation is NOT thrown away with the id: a rotate is about
+ * defeating a stale social cache, not about undoing what they wrote.
  */
 export async function rotateRoomPreview(
   supabase: SupabaseClient,
@@ -295,8 +428,18 @@ export async function rotateRoomPreview(
       .eq("id", existing.id);
     if (error) throw new CloudError(error.message, "preview");
   }
+  // A rotated custom cover has no bytes left to point at, so the new card falls
+  // back to the room's own frame unless the host re-uploads.
+  const carried: SharePreviewPatch = {
+    ...(input.patch ?? {}),
+    ...(existing?.titleCustomized && !(input.patch && "title" in input.patch) ? { title: existing.title } : {}),
+    ...(existing?.descriptionCustomized && !(input.patch && "description" in input.patch)
+      ? { description: existing.description }
+      : {}),
+  };
   return ensureRoomPreview(supabase, {
     ...input,
+    patch: carried,
     showThumbnail: input.showThumbnail ?? existing?.showThumbnail ?? true,
     force: true,
   });

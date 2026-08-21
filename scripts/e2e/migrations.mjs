@@ -280,6 +280,116 @@ try {
     );
   }
 
+  section("get_share_preview_v3：多回 media_type，其他一樣不外洩 (PR #30)");
+  {
+    const cols = psql(
+      `select string_agg(p.proargnames[i], ',' order by i)
+       from pg_proc p, generate_series(1, array_length(p.proargnames, 1)) i
+       where p.proname = 'get_share_preview_v3' and p.proargmodes[i] = 't';`,
+    ).out;
+    ok(
+      "回傳欄位是 title/description/image_path/media_type/updated_at/version_archived/revoked",
+      cols === "title,description,image_path,media_type,updated_at,version_archived,revoked",
+      cols,
+    );
+    for (const forbidden of ["room_id", "version_id", "created_by"]) {
+      ok(`v3 一樣不回傳 ${forbidden}`, !cols.split(",").includes(forbidden));
+    }
+
+    ok(
+      "圖片房的卡片預設 media_type = image",
+      asAnon(`select media_type from public.get_share_preview_v3('${previewId}'::uuid);`).out === "image",
+    );
+
+    // A video room's card must be able to say so even with nothing else left.
+    const videoRoom = psql("select gen_random_uuid();").out;
+    const videoVersion = psql("select gen_random_uuid();").out;
+    const videoPreview = psql("select gen_random_uuid();").out;
+    psql(
+      `set request.jwt.claim.sub = '${owner}';
+       select create_room_with_invite('${videoRoom}'::uuid, '未命名影片', 'a-very-long-invite-token-for-video', '主辦方', '#c45c4a');
+       update public.rooms set media_type = 'video' where id = '${videoRoom}'::uuid;
+       insert into public.versions (id, room_id, label, sort_order, image_path, video_path, mime_type, media_kind, duration_seconds)
+         values ('${videoVersion}'::uuid, '${videoRoom}'::uuid, '初剪', 0, 'poster.png', 'cut.webm', 'video/webm', 'video', 83);
+       insert into public.share_previews (id, room_id, version_id, title, description, media_type, thumbnail_path)
+         values ('${videoPreview}'::uuid, '${videoRoom}'::uuid, '${videoVersion}'::uuid, '淡江招生短片｜第一剪', '幫我看一下這支影片', 'video', '${videoPreview}/cover.webp');`,
+    );
+    ok(
+      "影片房的卡片 media_type = video",
+      asAnon(`select media_type from public.get_share_preview_v3('${videoPreview}'::uuid);`).out === "video",
+    );
+    ok(
+      "撤銷後仍回得出 media_type（才知道要用「影片對稿」當招牌）",
+      !as(owner, `update public.share_previews set enabled = false where id = '${videoPreview}'::uuid;`).failed &&
+        asAnon(`select media_type from public.get_share_preview_v3('${videoPreview}'::uuid);`).out === "video",
+    );
+    ok(
+      "撤銷後標題與縮圖都是 null（看不到原本寫了什麼）",
+      asAnon(
+        `select coalesce(title, 'NULL') || '/' || coalesce(image_path, 'NULL')
+           from public.get_share_preview_v3('${videoPreview}'::uuid);`,
+      ).out === "NULL/NULL",
+    );
+    ok(
+      "撤銷後 revoked = true",
+      asAnon(`select revoked from public.get_share_preview_v3('${videoPreview}'::uuid);`).out === "t",
+    );
+    ok(
+      "舊的 get_share_preview 對撤銷的卡片仍然完全查不到（行為沒變）",
+      asAnon(`select count(*) from public.get_share_preview('${videoPreview}'::uuid);`).out === "0",
+    );
+    ok(
+      "猜 room id 一樣拿不到 v3",
+      asAnon(`select count(*) from public.get_share_preview_v3('${videoRoom}'::uuid);`).out === "0",
+    );
+
+    // The new columns are constrained, not free text: a typo'd cover_source
+    // would silently mean "no cover" everywhere downstream.
+    ok(
+      "media_type 只收 image/video",
+      as(owner, `update public.share_previews set media_type = 'gif' where id = '${videoPreview}'::uuid;`).failed,
+    );
+    ok(
+      "cover_source 只收 auto/custom/none",
+      as(owner, `update public.share_previews set cover_source = 'whatever' where id = '${videoPreview}'::uuid;`).failed,
+    );
+    ok(
+      "cover_source 預設是 auto，自訂旗標預設是 false",
+      psql(
+        `select cover_source || '/' || title_customized || '/' || description_customized
+           from public.share_previews where id = '${previewId}'::uuid;`,
+      ).out === "auto/false/false",
+    );
+    ok(
+      "0011 之前的 row 也補到 auto（show_thumbnail 就是它當年的意思）",
+      psql("select count(*) from public.share_previews where cover_source is null;").out === "0",
+    );
+    ok(
+      "分享自訂不會、也不能寫回 rooms.title",
+      psql(`select title from public.rooms where id = '${videoRoom}'::uuid;`).out === "未命名影片",
+    );
+    ok(
+      "share_previews 沒有任何欄位叫 invite",
+      psql(
+        `select count(*) from information_schema.columns
+          where table_name = 'share_previews' and column_name ilike '%invite%';`,
+      ).out === "0",
+    );
+  }
+
+  section("0011 可以重複套用（idempotent）");
+  {
+    const shape = () =>
+      psql(
+        `select
+           (select count(*) from information_schema.columns where table_name = 'share_previews') || '/' ||
+           (select count(*) from pg_constraint where conname like 'share_previews_%_check');`,
+      ).out;
+    const before = shape();
+    psqlFile(join(MIGRATIONS, "0011_share_preview_customization.sql"));
+    ok("重跑 0011 之後欄位與 constraint 數量完全一樣", before === shape(), `${before} → ${shape()}`);
+  }
+
   section("updated_at trigger：每次寫入都會前進（cache busting）");
   {
     const before = as(owner, `select updated_at from public.share_previews where id = '${previewId}'::uuid;`).out;
@@ -510,6 +620,9 @@ try {
     );
     psql(`delete from public.share_previews where id = '${videoPreviewId}'::uuid;`);
 
+    // 0011 adds media_type on a NEW function (v3). This assertion is what keeps
+    // the old one re-runnable: changing v1's return type would make a replay of
+    // 0005 fail with "cannot change return type of existing function".
     ok(
       "get_share_preview 的輸出欄位沒有變（沒有 media_type、沒有 room_id）",
       psql(
