@@ -80,8 +80,12 @@ export function ReviewBrief({ brief, canEdit, online, onSave }: Props) {
     setOpen(true);
   };
 
+  // Both exits land back on the collapsed card. Dropping the author into the
+  // read-only sheet after they just pressed 儲存 would make them close the same
+  // brief twice to get back to the video.
   const cancelEdit = () => {
     setEditing(false);
+    setOpen(false);
     setBody(brief?.body ?? "");
     setTags(brief?.focusTags ?? []);
     setQuestions(brief?.questions ?? []);
@@ -94,6 +98,7 @@ export function ReviewBrief({ brief, canEdit, online, onSave }: Props) {
       questions: questions.map((q) => q.trim()).filter(Boolean).slice(0, MAX_BRIEF_QUESTIONS),
     });
     setEditing(false);
+    setOpen(false);
   };
 
   const toggleTag = (tag: VideoCategory) => {
