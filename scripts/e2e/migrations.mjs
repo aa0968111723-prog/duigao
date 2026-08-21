@@ -50,7 +50,15 @@ const PG_CANDIDATES = [
 
 const PG_BIN = PG_CANDIDATES.find((d) => existsSync(join(d, `initdb${EXE}`)));
 if (!PG_BIN) {
-  console.log("略過：找不到 PostgreSQL 執行檔（initdb / pg_ctl）。設定 PG_BIN 可指定路徑。");
+  // 在開發者機器上「找不到 Postgres 就跳過」是體貼；在 release gate 上那叫假綠。
+  // 這支測試是 RLS 與房間能力規則唯一的守門員，靜默 exit 0 會讓一條「檢視者
+  // 可以刪別人版本」的 migration 一路通過 CI。CI 請設 REQUIRE_PG=1。
+  console.log("找不到 PostgreSQL 執行檔（initdb / pg_ctl）。設定 PG_BIN 可指定路徑。");
+  if (process.env.REQUIRE_PG === "1") {
+    console.error("REQUIRE_PG=1：migration 測試是 release gate，不能因為缺少資料庫就算通過。");
+    process.exit(1);
+  }
+  console.log("略過（本機開發模式）。");
   process.exit(0);
 }
 const bin = (name) => join(PG_BIN, `${name}${EXE}`);
