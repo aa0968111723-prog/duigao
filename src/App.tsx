@@ -545,9 +545,15 @@ export function App() {
           if (isNewRoom) {
             // The bind already cached an empty snapshot; leaving it behind puts
             // a room in 最近討論 that opens to nothing.
+            //
+            // Awaited, not fire-and-forget: the home screen reads 最近討論
+            // straight from IndexedDB, so a delete still in flight when the
+            // screen renders leaves exactly the empty room this is removing.
+            // Locally the write usually wins the race; on a slower machine it
+            // does not, which is what made this show up only in CI.
             const cloudId = cloudRef.current.forgetCloudRoom(base.id);
-            deleteRoom(base.id).catch(() => undefined);
-            if (cloudId) deleteRoom(cloudId).catch(() => undefined);
+            await deleteRoom(base.id).catch(() => undefined);
+            if (cloudId) await deleteRoom(cloudId).catch(() => undefined);
             if ((roomRef.current?.versions.length ?? 0) === 0) setRoom(null);
           }
         } else if (!belongsToThisUpload.has(roomRef.current?.id ?? "")) {
