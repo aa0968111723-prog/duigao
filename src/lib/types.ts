@@ -70,6 +70,140 @@ export function activeVersions(versions: Version[]): Version[] {
 export type ReviewType = "文字" | "排版" | "圖片" | "顏色" | "資訊錯誤" | "其他";
 export type ReviewPriority = "一般" | "重要" | "急";
 
+/* ------------------------------------------------------ 影片對稿 2.0 (#32) -- */
+
+/**
+ * What a piece of VIDEO feedback is about.
+ *
+ * Deliberately a different list from `ReviewType`: a poster is wrong about
+ * 排版 or 顏色, a cut is wrong about 節奏 or 聲音. They share the storage
+ * column (`comments.problem_type`) because both are "which bucket is this",
+ * and the column has always been free text with the list living in the client.
+ */
+export const VIDEO_CATEGORIES = ["畫面", "節奏", "字幕", "聲音", "文案", "其他"] as const;
+export type VideoCategory = (typeof VIDEO_CATEGORIES)[number];
+
+export function isVideoCategory(value: unknown): value is VideoCategory {
+  return typeof value === "string" && (VIDEO_CATEGORIES as readonly string[]).includes(value);
+}
+
+/**
+ * The author's triage state for one piece of feedback.
+ *
+ * Four states, not a boolean, because "處理中" and "不採用" are real answers a
+ * reviewer deserves and `resolved` cannot express either. `resolved` is still
+ * written and still correct (done/wontfix ⇒ true); the database keeps the two
+ * in step, so a client that only knows the boolean is never shown a lie.
+ */
+export const REVIEW_STATUSES = ["open", "doing", "done", "wontfix"] as const;
+export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
+
+export const REVIEW_STATUS_LABEL: Record<ReviewStatus, string> = {
+  open: "待處理",
+  doing: "處理中",
+  done: "已修改",
+  wontfix: "不採用",
+};
+
+/** Only these two are new author powers; open/done are reachable by anyone. */
+export const AUTHOR_ONLY_STATUSES: ReviewStatus[] = ["doing", "wontfix"];
+
+export function isReviewStatus(value: unknown): value is ReviewStatus {
+  return typeof value === "string" && (REVIEW_STATUSES as readonly string[]).includes(value);
+}
+
+/** `resolved` as the four-state sees it — the one place the mapping is written. */
+export function statusFromResolved(resolved: boolean): ReviewStatus {
+  return resolved ? "done" : "open";
+}
+
+export function resolvedFromStatus(status: ReviewStatus): boolean {
+  return status === "done" || status === "wontfix";
+}
+
+/**
+ * 一鍵反應 — the way to say something without typing.
+ *
+ * Stored as an English key so the label is a rendering decision; the emoji is
+ * part of the label because on a phone it is the fastest thing to aim at.
+ */
+export const REACTION_TYPES = ["ok", "confused", "slow", "fast", "fun", "love"] as const;
+export type ReactionType = (typeof REACTION_TYPES)[number];
+
+export const REACTION_LABEL: Record<ReactionType, { emoji: string; text: string }> = {
+  ok: { emoji: "👍", text: "可以" },
+  confused: { emoji: "🤔", text: "看不懂" },
+  slow: { emoji: "⏩", text: "太慢" },
+  fast: { emoji: "⚡", text: "太快" },
+  fun: { emoji: "😂", text: "有感" },
+  love: { emoji: "✨", text: "喜歡" },
+};
+
+export type VideoReaction = {
+  id: string;
+  versionId: string;
+  userId: string;
+  time: number;
+  type: ReactionType;
+  createdAt: number;
+};
+
+/**
+ * 看完之後這一版過不過.
+ *
+ * Three decisions rather than a star rating: a review meeting ends with "ship
+ * it / tweak it / redo it", never with 3.4 stars.
+ */
+export const VERDICTS = ["pass", "minor", "revise"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  pass: "可以過",
+  minor: "小修即可",
+  revise: "需要再調整",
+};
+
+export function isVerdict(value: unknown): value is Verdict {
+  return typeof value === "string" && (VERDICTS as readonly string[]).includes(value);
+}
+
+export type VersionVerdict = {
+  versionId: string;
+  userId: string;
+  verdict: Verdict;
+  note?: string;
+  updatedAt: number;
+};
+
+/**
+ * The author's note for one cut: what this version is, and what they want
+ * looked at. Per version on purpose — 初剪 and 二剪 ask for different things,
+ * and a stale brief is worse than none.
+ */
+export type ReviewBrief = {
+  versionId: string;
+  body: string;
+  /** Which of VIDEO_CATEGORIES the author wants attention on. */
+  focusTags: VideoCategory[];
+  /** At most three. More than that is a questionnaire, not a brief. */
+  questions: string[];
+  updatedAt: number;
+};
+
+export const MAX_BRIEF_QUESTIONS = 3;
+
+/**
+ * Deliberately only two facts per person per cut: how far they got, and
+ * whether they finished. No play/pause log, no device, no heatmap — the team
+ * needs "has everyone seen it", not surveillance.
+ */
+export type ReviewProgress = {
+  versionId: string;
+  userId: string;
+  maxWatched: number;
+  completedAt?: number;
+};
+
 export type CommentPin = {
   id: string;
   versionId: string;
@@ -91,8 +225,19 @@ export type CommentPin = {
   problemType?: ReviewType;
   priority?: ReviewPriority;
   resolved: boolean;
+  /**
+   * The author's triage state. Absent on rows written before #32 and on local
+   * rooms — read it through `commentStatus()`, which falls back to `resolved`
+   * so the two models can never disagree on screen.
+   */
+  reviewStatus?: ReviewStatus;
   createdAt: number;
 };
+
+/** The four-state for a comment, however old the row is. */
+export function commentStatus(pin: Pick<CommentPin, "resolved" | "reviewStatus">): ReviewStatus {
+  return pin.reviewStatus ?? statusFromResolved(pin.resolved);
+}
 
 export type Stroke = {
   id: string;

@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Guest, Room, Version } from "../lib/types";
+import type {
+  Guest,
+  ReactionType,
+  ReviewBrief,
+  ReviewProgress,
+  ReviewStatus,
+  Room,
+  Verdict,
+  Version,
+  VersionVerdict,
+  VideoReaction,
+} from "../lib/types";
 import { roomMediaType } from "../lib/types";
 import { saveRoom } from "../lib/store";
 import type { ShowToast } from "../toast";
@@ -41,6 +52,19 @@ import {
   type SharePreview,
   type SharePreviewPatch,
 } from "./sharePreview";
+import {
+  addReaction,
+  clearBrief,
+  loadBriefs,
+  loadProgress,
+  loadReactions,
+  loadVerdicts,
+  reportProgress,
+  saveBrief,
+  saveVerdict,
+  setReviewStatus,
+  type BriefInput,
+} from "./videoReview";
 import { uploadVideoVersion, type VideoUploadHandle, type VideoUploadInput } from "./videoRoom";
 import { signedVideoUrl } from "./videoAssets";
 import { subscribeRoom, type Unsubscribe } from "./roomSync";
@@ -77,6 +101,34 @@ export type SharePreviewApi = {
   ensure: (opts?: PreviewOpts) => Promise<SharePreview | null>;
   /** Revoke the current preview id and mint a new one. */
   rotate: (opts?: PreviewOpts) => Promise<SharePreview | null>;
+};
+
+/**
+ * Everything 影片對稿 2.0 adds on top of comments (#32).
+ *
+ * Kept OUT of `Room` on purpose. Room is cached in IndexedDB, sent over PeerJS
+ * and replayed into image workspaces; threading four review tables through it
+ * would put video-only data on every one of those paths for no benefit. This is
+ * a separate slice that only a video room ever reads.
+ */
+export type ReviewData = {
+  briefs: ReviewBrief[];
+  reactions: VideoReaction[];
+  verdicts: VersionVerdict[];
+  progress: ReviewProgress[];
+};
+
+export const EMPTY_REVIEW: ReviewData = { briefs: [], reactions: [], verdicts: [], progress: [] };
+
+export type ReviewApi = {
+  /** owner/editor only; RLS refuses a reviewer regardless of what the UI shows. */
+  saveBrief: (versionId: string, input: BriefInput) => Promise<void>;
+  clearBrief: (versionId: string) => Promise<void>;
+  /** Returns false when the tap was a duplicate inside the 2s bucket. */
+  react: (versionId: string, time: number, type: ReactionType) => Promise<boolean>;
+  setVerdict: (versionId: string, verdict: Verdict, note?: string) => Promise<void>;
+  reportProgress: (versionId: string, maxWatched: number, completed: boolean) => Promise<void>;
+  setStatus: (commentId: string, status: ReviewStatus) => Promise<void>;
 };
 
 /**
@@ -168,6 +220,15 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
    */
   const [role, setRole] = useState<RoomRole | null>(null);
   const [bindNonce, setBindNonce] = useState(0);
+  /** 影片對稿 2.0 (#32). Empty and untouched for image rooms. */
+  const [review, setReview] = useState<ReviewData>(EMPTY_REVIEW);
+  /**
+   * This visitor's CLOUD id (`auth.uid()`), which is what every per-user row is
+   * keyed by. Deliberately not `guest.id` — that is a locally generated `g_…`
+   * string for display, and matching it against a database `user_id` would mean
+   * "my verdict" and "my reaction" never find anything.
+   */
+  const [userId, setUserId] = useState<string | null>(null);
 
   const boundRef = useRef<string | null>(null); // cloud room id
   const unsubRef = useRef<Unsubscribe | null>(null);
@@ -175,6 +236,34 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   const pending = useRef<Array<() => Promise<void>>>([]);
   const reloadTimer = useRef<number | null>(null);
   const supabase = getSupabase();
+
+  /**
+   * Pull the four review tables for a video room.
+   *
+   * Best-effort by design: a room whose database has not run 0012 yet, or a
+   * transient failure, must still leave the video playable and the comments
+   * readable. An empty slice degrades the review UI, never the room.
+   */
+  const reloadReview = useCallback(
+    async (rid: string, mediaType: string) => {
+      if (!supabase || mediaType !== "video") {
+        setReview(EMPTY_REVIEW);
+        return;
+      }
+      try {
+        const [briefs, reactions, verdicts, progress] = await Promise.all([
+          loadBriefs(supabase, rid),
+          loadReactions(supabase, rid),
+          loadVerdicts(supabase, rid),
+          loadProgress(supabase, rid),
+        ]);
+        setReview({ briefs, reactions, verdicts, progress });
+      } catch {
+        /* the room still works; only the review extras are missing */
+      }
+    },
+    [supabase],
+  );
 
   const reload = useCallback(async () => {
     const rid = boundRef.current;
@@ -188,10 +277,15 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
       revisions.current = new Map(snap.proposals.map((p) => [p.id, p.revision]));
       applyCloudProposals(rid, snap.proposals.map(proposalToStore));
       setStatus("synced");
+      // After the room, not with it: the review slice is an enhancement and must
+      // never delay the video or the discussion appearing. Riding on `reload`
+      // also means every realtime nudge and every reconnect refreshes it, which
+      // is exactly the "at least reload after reconnect" the spec asks for.
+      void reloadReview(rid, roomMediaType(snap.room));
     } catch {
       setStatus("error");
     }
-  }, [supabase, onSnapshot]);
+  }, [supabase, onSnapshot, reloadReview]);
 
   const scheduleReload = useCallback(() => {
     if (reloadTimer.current) window.clearTimeout(reloadTimer.current);
@@ -270,7 +364,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     setInviteInvalid(false);
     (async () => {
       try {
-        await ensureSession(supabase);
+        setUserId(await ensureSession(supabase));
         if (isGuestSession && token) {
           await joinRoom(supabase, targetRoomId, token, guest);
         }
@@ -593,6 +687,56 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     },
   };
 
+  /**
+   * Every write refreshes the slice from the server rather than patching local
+   * state. These are low-frequency, human-paced actions (one tap, one save), so
+   * a round trip is cheap — and it keeps one source of truth instead of two
+   * that can drift when a write is rejected by RLS.
+   */
+  const refreshReview = () => {
+    const rid = boundRef.current;
+    if (rid && room) void reloadReview(rid, roomMediaType(room));
+  };
+
+  const reviewApi: ReviewApi = {
+    saveBrief: async (versionId, input) => {
+      const rid = boundRef.current;
+      if (!supabase || !rid) return;
+      await saveBrief(supabase, rid, versionId, input);
+      refreshReview();
+    },
+    clearBrief: async (versionId) => {
+      if (!supabase) return;
+      await clearBrief(supabase, versionId);
+      refreshReview();
+    },
+    react: async (versionId, time, type) => {
+      const rid = boundRef.current;
+      if (!supabase || !rid) return false;
+      const added = await addReaction(supabase, rid, versionId, time, type);
+      if (added) refreshReview();
+      return Boolean(added);
+    },
+    setVerdict: async (versionId, verdict, note) => {
+      const rid = boundRef.current;
+      if (!supabase || !rid) return;
+      await saveVerdict(supabase, rid, versionId, verdict, note);
+      refreshReview();
+    },
+    reportProgress: async (versionId, maxWatched, completed) => {
+      const rid = boundRef.current;
+      if (!supabase || !rid) return;
+      await reportProgress(supabase, rid, versionId, maxWatched, completed);
+      // No refresh: progress is written far more often than it is read, and
+      // nobody is watching their own number change while the video plays.
+    },
+    setStatus: async (commentId, status) => {
+      if (!supabase) return;
+      await setReviewStatus(supabase, commentId, status);
+      scheduleReload();
+    },
+  };
+
   const writes: CloudWrites = {
     setTitle: (title) => run(() => setRoomTitle(supabase!, boundRef.current!, title)),
     insertComment: (pin) => run(() => insertComment(supabase!, boundRef.current!, pin)),
@@ -630,5 +774,8 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     retry,
     writes,
     preview,
+    review,
+    reviewApi,
+    userId,
   };
 }

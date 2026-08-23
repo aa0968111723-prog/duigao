@@ -11,6 +11,7 @@ import type {
   Stroke,
   VideoAnchor,
 } from "../lib/types";
+import { isReviewStatus } from "../lib/types";
 import { normalizeRegion } from "../lib/region";
 
 /** User-facing sync state. Never exposes the transport (Supabase/PeerJS/RLS). */
@@ -89,6 +90,8 @@ export type CommentRow = {
   problem_type: string | null;
   priority: string | null;
   resolved: boolean;
+  /** PR #32 four-state. Absent when reading a database without 0012. */
+  review_status?: string | null;
   created_at: string;
 };
 
@@ -169,6 +172,11 @@ export function commentFromRow(row: CommentRow): CommentPin {
     problemType: (row.problem_type as ReviewType | null) ?? undefined,
     priority: (row.priority as ReviewPriority | null) ?? undefined,
     resolved: row.resolved,
+    // A database without 0012 sends nothing here, and a room that has never
+    // been triaged sends 'open'. Both mean the same thing, and `commentStatus()`
+    // derives it from `resolved` when it is missing — so the two models cannot
+    // disagree no matter which schema answered.
+    ...(isReviewStatus(row.review_status) ? { reviewStatus: row.review_status } : {}),
     createdAt: ms(row.created_at),
   };
 }

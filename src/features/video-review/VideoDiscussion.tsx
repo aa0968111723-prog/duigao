@@ -1,5 +1,14 @@
 import { useMemo, useState } from "react";
-import type { CommentPin, Room } from "../../lib/types";
+import {
+  commentStatus,
+  REVIEW_STATUSES,
+  REVIEW_STATUS_LABEL,
+  VIDEO_CATEGORIES,
+  type CommentPin,
+  type ReviewStatus,
+  type Room,
+  type VideoCategory,
+} from "../../lib/types";
 import { CommentCard } from "../discussion/CommentCard";
 import type { WorkspaceApi } from "../../components/api";
 import { anchorLabel, anchorStart, isVideoComment } from "./anchors";
@@ -51,13 +60,27 @@ export function sortVideoComments(list: CommentPin[], sort: VideoSort): CommentP
   }
 }
 
+/** 全部 plus the six video buckets. `null` means no filter at all. */
+type CategoryFilter = VideoCategory | null;
+
 export function VideoDiscussion({ api, versionId, selectedId, onSelect, compact }: Props) {
   const [sort, setSort] = useState<VideoSort>("time");
+  const [category, setCategory] = useState<CategoryFilter>(null);
   const { room } = api;
+  const canManage = api.video?.canManageReview ?? false;
 
-  const items = useMemo(
-    () => sortVideoComments(videoCommentsOf(room, versionId), sort),
-    [room, versionId, sort],
+  const all = useMemo(() => videoCommentsOf(room, versionId), [room, versionId]);
+
+  const items = useMemo(() => {
+    const filtered = category ? all.filter((c) => c.problemType === category) : all;
+    return sortVideoComments(filtered, sort);
+  }, [all, category, sort]);
+
+  // Only offer a bucket somebody actually used: six dead chips on a phone is
+  // six taps of disappointment.
+  const usedCategories = useMemo(
+    () => VIDEO_CATEGORIES.filter((cat) => all.some((c) => c.problemType === cat)),
+    [all],
   );
 
   return (
@@ -77,6 +100,32 @@ export function VideoDiscussion({ api, versionId, selectedId, onSelect, compact 
         ))}
       </div>
 
+      {usedCategories.length > 0 && (
+        <div className="v-catrow" role="tablist" aria-label="回饋分類">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={category === null}
+            className={`m-chip ${category === null ? "is-on" : ""}`}
+            onClick={() => setCategory(null)}
+          >
+            全部
+          </button>
+          {usedCategories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              role="tab"
+              aria-selected={category === cat}
+              className={`m-chip ${category === cat ? "is-on" : ""}`}
+              onClick={() => setCategory(cat)}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="m-list">
         {items.length === 0 && (
           <div className="m-discuss-empty">
@@ -91,18 +140,44 @@ export function VideoDiscussion({ api, versionId, selectedId, onSelect, compact 
           </div>
         )}
         {items.map((c) => (
-          <CommentCard
-            key={c.id}
-            api={api}
-            pin={c}
-            compact={compact}
-            selected={c.id === selectedId}
-            anchorLabel={anchorLabel(c)}
-            onSelect={() => onSelect(c)}
-            onToggleResolve={() => api.toggleResolve(c.id)}
-          />
+          <div key={c.id} className="v-item">
+            <CommentCard
+              api={api}
+              pin={c}
+              compact={compact}
+              selected={c.id === selectedId}
+              anchorLabel={anchorLabel(c)}
+              onSelect={() => onSelect(c)}
+              onToggleResolve={() => api.toggleResolve(c.id)}
+            />
+            {/* The four-state is the AUTHOR's工作流. A reviewer keeps the plain
+                完成 toggle the card already has and never sees this strip —
+                which is also what the database enforces, so the UI is not the
+                only thing standing between a reviewer and 「不採用」. */}
+            {canManage && <StatusStrip api={api} pin={c} />}
+          </div>
         ))}
       </div>
     </>
+  );
+}
+
+/** 待處理 / 處理中 / 已修改 / 不採用 for one piece of feedback. */
+function StatusStrip({ api, pin }: { api: WorkspaceApi; pin: CommentPin }) {
+  const current = commentStatus(pin);
+  return (
+    <div className="v-status" role="group" aria-label={`這則回饋的處理狀態（目前：${REVIEW_STATUS_LABEL[current]}）`}>
+      {REVIEW_STATUSES.map((status: ReviewStatus) => (
+        <button
+          key={status}
+          type="button"
+          className={`v-status-btn ${current === status ? "is-on" : ""}`}
+          aria-pressed={current === status}
+          onClick={() => api.video?.setStatus(pin.id, status)}
+        >
+          {REVIEW_STATUS_LABEL[status]}
+        </button>
+      ))}
+    </div>
   );
 }
