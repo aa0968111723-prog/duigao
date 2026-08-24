@@ -1,0 +1,32 @@
+name: agent-release-gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  agent-read-layer:
+    runs-on: ubuntu-latest
+    env:
+      AGENT_PR_TITLE: ${{ github.event.pull_request.title || 'manual verification' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test:agent
+      - run: npm run agent:context
+      - run: npm run agent:gate
+
+  # Existing build.yml remains authoritative for browser E2E and PostgreSQL/RLS
+  # tests, keeping those heavy suites in one workflow rather than duplicating them.

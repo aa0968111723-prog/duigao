@@ -1,0 +1,187 @@
+export const featureDefinitions = [
+  {
+    id: "image-review", name: "Image review workspace", priority: 2,
+    source: [
+      { path: "src/features/image-review/ImageWorkspace.tsx" },
+      { path: "src/features/image-review/Stage.tsx", contains: ["annotation", "pointer"] },
+    ],
+    tests: [{ path: "scripts/e2e/share-flow.mjs", contains: ["image"] }],
+    docs: [{ path: "README.md", contains: ["圖片"] }], minimum: { source: 2, tests: 1 },
+  },
+  {
+    id: "video-review", name: "Video review workspace", priority: 1,
+    source: [
+      { path: "src/features/video-review/VideoWorkspace.tsx", contains: ["VideoPlayer", "VideoDiscussion"] },
+      { path: "src/cloud/videoReview.ts", contains: ["version_review_briefs", "version_verdicts"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0012_video_review_feedback.sql", contains: ["version_review_briefs", "video_reactions"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["審片", "review brief"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md" }, { path: "docs/pr34-implement-video-review-feedback-2.md" }],
+    minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "video-upload", name: "Video upload", priority: 2,
+    source: [
+      { path: "src/cloud/videoAssets.ts", contains: ["uploadVideoWithProgress", "XMLHttpRequest"] },
+      { path: "src/App.tsx", contains: ["addVideoFile", "cloudRef.current.uploadVideo"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0006_video_rooms.sql", contains: ["video_path", "room-assets"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["upload", "video"] }],
+    docs: [{ path: "docs/pr23-video-review-plan.md" }], minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "video-playback", name: "Video playback", priority: 2,
+    source: [{ path: "src/features/video-review/VideoPlayer.tsx", contains: ["video", "currentTime"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["play", "currentTime"], match: "any" }],
+    docs: [{ path: "docs/pr23-video-review-plan.md" }], minimum: { source: 1, tests: 1 },
+  },
+  {
+    id: "video-point-comments", name: "Video point comments", priority: 2,
+    source: [
+      { path: "src/features/video-review/anchors.ts", contains: ["point", "time"] },
+      { path: "src/features/video-review/VideoCommentComposer.tsx", contains: ["anchor"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0006_video_rooms.sql", contains: ["video-point", "time_seconds"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["point", "comment"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["時間點回饋"] }], minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "video-range-comments", name: "Video range comments", priority: 2,
+    source: [
+      { path: "src/features/video-review/anchors.ts", contains: ["range", "start", "end"] },
+      { path: "src/features/video-review/VideoWorkspace.tsx", contains: ["rangePick", "range"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0006_video_rooms.sql", contains: ["video-range", "time_seconds", "end_time_seconds"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["range", "區間"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["時間區間回饋"] }], minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "tus-resumable-upload", name: "TUS resumable upload", priority: 1,
+    source: [{ path: "src/cloud/videoAssets.ts", contains: ["tus", "resumable upload"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["tus", "resumable upload"] }],
+    docs: [{ path: "docs/pr27-resumable-video-upload.md", contains: ["TUS"] }], minimum: { source: 1, tests: 1 },
+  },
+  {
+    id: "video-transcode", name: "Video transcode", priority: 1,
+    source: [{ path: "src/cloud/videoAssets.ts", contains: ["transcode", "optimized"] }],
+    migrations: [{ path: "supabase/migrations/0006_video_rooms.sql", contains: ["optimized_video_path"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["transcode", "optimized"] }],
+    docs: [{ path: "docs/pr29-video-optimize-transcode.md", contains: ["transcode", "轉碼"], match: "any" }], minimum: { source: 1, migrations: 1, tests: 1 },
+  },
+  {
+    id: "share-preview", name: "Share preview", priority: 2,
+    source: [
+      { path: "src/cloud/sharePreview.ts", contains: ["SharePreview", "preview"] },
+      { path: "supabase/functions/share-preview/index.ts", contains: ["open graph", "thumbnail"], match: "any" },
+    ],
+    migrations: [{ path: "supabase/migrations/0005_share_previews.sql", contains: ["share_previews", "share-previews"] }],
+    tests: [{ path: "scripts/e2e/share-preview.mjs", contains: ["preview"] }],
+    docs: [{ path: "docs/pr21-share-og-preview.md" }], minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "line-preview", name: "LINE-compatible link preview", priority: 2,
+    source: [{ path: "supabase/functions/share-preview/index.ts", contains: ["og:image", "twitter:card"] }],
+    tests: [{ path: "scripts/e2e/share-preview.mjs", contains: ["og:image", "line"], match: "any" }],
+    docs: [{ path: "docs/pr21-share-og-preview.md", contains: ["LINE"] }], minimum: { source: 1, tests: 1 },
+  },
+  {
+    id: "custom-share-cover", name: "Custom share cover", priority: 2,
+    source: [
+      { path: "src/components/ShareSheet.tsx", contains: ["cover", "custom"] },
+      { path: "src/cloud/shareThumbnail.ts", contains: ["thumbnail", "Blob"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0011_share_preview_customization.sql", contains: ["cover_source", "media_type"] }],
+    tests: [{ path: "scripts/e2e/share-preview.mjs", contains: ["cover", "custom"], match: "any" }],
+    docs: [{ path: "docs/pr30-share-customization-video-aware.md" }], minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "version-archive", name: "Version archive", priority: 2,
+    source: [{ path: "src/features/video-review/VideoVersionSelector.tsx", contains: ["archiv"] }],
+    migrations: [{ path: "supabase/migrations/0008_version_archive.sql", contains: ["archived_at", "archive_version"] }],
+    tests: [{ path: "scripts/e2e/migrations.mjs", contains: ["archive", "reviewer"] }],
+    docs: [{ path: "docs/pr25-next-upload-pipeline.md", contains: ["封存"] }], minimum: { source: 1, migrations: 1, tests: 1 },
+  },
+  {
+    id: "room-capabilities", name: "Room capabilities", priority: 1,
+    source: [{ path: "src/cloud/roomRepository.ts", contains: ["RoomRole", "canManageMedia"] }],
+    migrations: [{ path: "supabase/migrations/0007_room_capabilities.sql", contains: ["can_manage_media", "reviewer"] }],
+    tests: [{ path: "scripts/e2e/migrations.mjs", contains: ["capability", "reviewer"] }],
+    docs: [{ path: "docs/pr25-next-upload-pipeline.md" }], minimum: { source: 1, migrations: 1, tests: 1 },
+  },
+  {
+    id: "orphan-asset-cleanup", name: "Orphan asset cleanup", priority: 2,
+    source: [{ path: "src/cloud/videoRoom.ts", contains: ["remove", "orphan"] }],
+    migrations: [{ path: "supabase/migrations/0009_asset_orphans.sql", contains: ["purge_orphaned_room_assets", "orphaned_room_assets"] }],
+    tests: [{ path: "scripts/e2e/migrations.mjs", contains: ["orphaned_room_assets"] }],
+    docs: [{ path: "docs/device-release-gate.md", contains: ["orphan"] }], minimum: { source: 1, migrations: 1, tests: 1 },
+  },
+  {
+    id: "video-review-brief", name: "Video review brief", priority: 2,
+    source: [
+      { path: "src/features/video-review/ReviewBrief.tsx", contains: ["brief", "save"] },
+      { path: "src/cloud/videoReview.ts", contains: ["version_review_briefs", "saveBrief"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0012_video_review_feedback.sql", contains: ["version_review_briefs"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["review brief", "說明"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["Review Brief"] }], minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "quick-reactions", name: "Quick reactions", priority: 2,
+    source: [
+      { path: "src/features/video-review/QuickReactions.tsx", contains: ["reaction"] },
+      { path: "src/cloud/videoReview.ts", contains: ["video_reactions", "addReaction"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0012_video_review_feedback.sql", contains: ["video_reactions"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["reaction", "反應"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["Quick Reactions"] }], minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "verdict", name: "Version verdict", priority: 2,
+    source: [
+      { path: "src/features/video-review/VerdictSheet.tsx", contains: ["verdict"] },
+      { path: "src/cloud/videoReview.ts", contains: ["version_verdicts", "saveVerdict"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0012_video_review_feedback.sql", contains: ["version_verdicts"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["verdict", "可以過"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["Version Verdict"] }], minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "review-progress", name: "Review progress", priority: 2,
+    source: [{ path: "src/cloud/videoReview.ts", contains: ["version_review_progress", "reportProgress"] }],
+    migrations: [{ path: "supabase/migrations/0012_video_review_feedback.sql", contains: ["version_review_progress"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["progress", "進度"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["查看進度"] }], minimum: { source: 1, migrations: 1, tests: 1 },
+  },
+  {
+    id: "review-summary", name: "Review summary", priority: 2,
+    source: [
+      { path: "src/features/video-review/ReviewSummary.tsx", contains: ["summary"] },
+      { path: "src/features/video-review/summary.ts", contains: ["summarize", "comments"] },
+    ],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["summary", "摘要"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["審片摘要"] }], minimum: { source: 2, tests: 1 },
+  },
+  {
+    id: "version-comparison", name: "Version comparison", priority: 1,
+    source: [{ path: "src/features/video-review/VideoWorkspace.tsx", contains: ["compareVersion", "compareMode"] }],
+    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["version comparison", "版本比較"], match: "any" }],
+    docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["版本"] }], minimum: { source: 1, tests: 1 },
+  },
+];
+
+export const architectureDefinitions = [
+  { name: "App entry", paths: ["src/main.tsx"], responsibility: "Boot React and normalize inbound legacy share URLs.", dependsOn: ["Workspace router"] },
+  { name: "Workspace router", paths: ["src/App.tsx", "src/components/RoomWorkspace.tsx"], responsibility: "Select image or video workspace and coordinate room state.", dependsOn: ["Image review", "Video review", "Cloud layer"] },
+  { name: "Image review", paths: ["src/features/image-review"], responsibility: "Immutable image annotation and comparison workspace.", dependsOn: ["Discussion", "Cloud layer"] },
+  { name: "Video review", paths: ["src/features/video-review"], responsibility: "Playback, temporal feedback, review brief, reactions, verdicts, and summary.", dependsOn: ["Discussion", "Cloud layer", "Storage/upload"] },
+  { name: "Discussion", paths: ["src/features/discussion"], responsibility: "Shared pin comments and discussion cards.", dependsOn: ["Cloud layer"] },
+  { name: "Cloud layer", paths: ["src/cloud"], responsibility: "Supabase persistence, realtime, mapping, invites, and signed media access.", dependsOn: ["Authentication", "Storage/upload", "Migrations"] },
+  { name: "Authentication", paths: ["src/cloud/auth.ts", "src/cloud/invite.ts"], responsibility: "Anonymous sessions and fragment-only room invite capability.", dependsOn: ["Cloud layer"] },
+  { name: "Storage/upload", paths: ["src/cloud/assets.ts", "src/cloud/videoAssets.ts", "src/cloud/videoRoom.ts"], responsibility: "Private room-assets paths, signed URLs, upload, cancellation, and cleanup.", dependsOn: ["Cloud layer", "Migrations"] },
+  { name: "Share preview", paths: ["src/cloud/sharePreview.ts", "src/cloud/shareThumbnail.ts", "supabase/functions/share-preview/index.ts"], responsibility: "Derived public preview cards without exposing original room media.", dependsOn: ["Cloud layer", "Migrations"] },
+  { name: "IndexedDB cache", paths: ["src/lib/store.ts"], responsibility: "Local cache and offline layer; never the cloud source of truth.", dependsOn: [] },
+  { name: "Migrations", paths: ["supabase/migrations"], responsibility: "Versioned Postgres schema, RLS, RPC, and Storage policy truth.", dependsOn: [] },
+  { name: "Tests", paths: ["scripts/e2e", "scripts/tests"], responsibility: "Browser, migration/RLS, and agent-layer release evidence.", dependsOn: ["Build"] },
+  { name: "Build", paths: ["package.json", "vite.config.ts", "tsconfig.json"], responsibility: "TypeScript validation and Vite production bundle.", dependsOn: [] },
+  { name: "Deployment config", paths: ["vercel.json", "zbpack.json", "supabase/config.toml", ".github/workflows"], responsibility: "Hosting, Supabase, and CI release configuration.", dependsOn: ["Build", "Migrations", "Tests"] },
+];

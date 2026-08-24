@@ -1,5 +1,7 @@
 # 文宣討論區
 
+> AI 代理開始工作前先執行 `npm run agent:context`；功能、修復或安全 PR 必須通過 `npm run agent:gate`。`AUTOMERGE REQUIRES AGENT_GATE_PASS`。
+
 手機優先的文宣討論工具。把 Canva / Adobe 做好的活動文宣變成一條連結傳給夥伴，大家不直接修改原稿，只在畫面上指出哪裡需要調整。
 
 > 海報是主畫面，討論比編輯更快。

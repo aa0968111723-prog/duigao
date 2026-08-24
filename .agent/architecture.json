@@ -1,0 +1,163 @@
+{
+  "schemaVersion": "1.0.0",
+  "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
+  "components": [
+    {
+      "name": "App entry",
+      "path": [
+        "src/main.tsx"
+      ],
+      "responsibility": "Boot React and normalize inbound legacy share URLs.",
+      "dependsOn": [
+        "Workspace router"
+      ]
+    },
+    {
+      "name": "Workspace router",
+      "path": [
+        "src/App.tsx",
+        "src/components/RoomWorkspace.tsx"
+      ],
+      "responsibility": "Select image or video workspace and coordinate room state.",
+      "dependsOn": [
+        "Image review",
+        "Video review",
+        "Cloud layer"
+      ]
+    },
+    {
+      "name": "Image review",
+      "path": [
+        "src/features/image-review"
+      ],
+      "responsibility": "Immutable image annotation and comparison workspace.",
+      "dependsOn": [
+        "Discussion",
+        "Cloud layer"
+      ]
+    },
+    {
+      "name": "Video review",
+      "path": [
+        "src/features/video-review"
+      ],
+      "responsibility": "Playback, temporal feedback, review brief, reactions, verdicts, and summary.",
+      "dependsOn": [
+        "Discussion",
+        "Cloud layer",
+        "Storage/upload"
+      ]
+    },
+    {
+      "name": "Discussion",
+      "path": [
+        "src/features/discussion"
+      ],
+      "responsibility": "Shared pin comments and discussion cards.",
+      "dependsOn": [
+        "Cloud layer"
+      ]
+    },
+    {
+      "name": "Cloud layer",
+      "path": [
+        "src/cloud"
+      ],
+      "responsibility": "Supabase persistence, realtime, mapping, invites, and signed media access.",
+      "dependsOn": [
+        "Authentication",
+        "Storage/upload",
+        "Migrations"
+      ]
+    },
+    {
+      "name": "Authentication",
+      "path": [
+        "src/cloud/auth.ts",
+        "src/cloud/invite.ts"
+      ],
+      "responsibility": "Anonymous sessions and fragment-only room invite capability.",
+      "dependsOn": [
+        "Cloud layer"
+      ]
+    },
+    {
+      "name": "Storage/upload",
+      "path": [
+        "src/cloud/assets.ts",
+        "src/cloud/videoAssets.ts",
+        "src/cloud/videoRoom.ts"
+      ],
+      "responsibility": "Private room-assets paths, signed URLs, upload, cancellation, and cleanup.",
+      "dependsOn": [
+        "Cloud layer",
+        "Migrations"
+      ]
+    },
+    {
+      "name": "Share preview",
+      "path": [
+        "src/cloud/sharePreview.ts",
+        "src/cloud/shareThumbnail.ts",
+        "supabase/functions/share-preview/index.ts"
+      ],
+      "responsibility": "Derived public preview cards without exposing original room media.",
+      "dependsOn": [
+        "Cloud layer",
+        "Migrations"
+      ]
+    },
+    {
+      "name": "IndexedDB cache",
+      "path": [
+        "src/lib/store.ts"
+      ],
+      "responsibility": "Local cache and offline layer; never the cloud source of truth.",
+      "dependsOn": []
+    },
+    {
+      "name": "Migrations",
+      "path": [
+        "supabase/migrations"
+      ],
+      "responsibility": "Versioned Postgres schema, RLS, RPC, and Storage policy truth.",
+      "dependsOn": []
+    },
+    {
+      "name": "Tests",
+      "path": [
+        "scripts/e2e",
+        "scripts/tests"
+      ],
+      "responsibility": "Browser, migration/RLS, and agent-layer release evidence.",
+      "dependsOn": [
+        "Build"
+      ]
+    },
+    {
+      "name": "Build",
+      "path": [
+        "package.json",
+        "vite.config.ts",
+        "tsconfig.json"
+      ],
+      "responsibility": "TypeScript validation and Vite production bundle.",
+      "dependsOn": []
+    },
+    {
+      "name": "Deployment config",
+      "path": [
+        "vercel.json",
+        "zbpack.json",
+        "supabase/config.toml",
+        ".github/workflows"
+      ],
+      "responsibility": "Hosting, Supabase, and CI release configuration.",
+      "dependsOn": [
+        "Build",
+        "Migrations",
+        "Tests"
+      ]
+    }
+  ]
+}

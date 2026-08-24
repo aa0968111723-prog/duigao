@@ -1,0 +1,748 @@
+{
+  "schemaVersion": "1.0.0",
+  "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
+  "generatedAt": "2026-08-23T21:23:53.000Z",
+  "git": {
+    "branch": "codex/agent-read-layer",
+    "sha": "46e4f1bda7f9bf077fbd658afe0218fee616cf0e",
+    "mainSha": "46e4f1bda7f9bf077fbd658afe0218fee616cf0e",
+    "dirty": true
+  },
+  "project": {
+    "name": "duigao",
+    "product": "圖片與影片對稿協作工具",
+    "positioning": "手機優先、只標記不改原稿的圖片／影片對稿協作工具",
+    "primaryLanguage": "zh-Hant",
+    "architectureComponents": [
+      "App entry",
+      "Workspace router",
+      "Image review",
+      "Video review",
+      "Discussion",
+      "Cloud layer",
+      "Authentication",
+      "Storage/upload",
+      "Share preview",
+      "IndexedDB cache",
+      "Migrations",
+      "Tests",
+      "Build",
+      "Deployment config"
+    ],
+    "openPrs": {
+      "status": "available",
+      "items": []
+    },
+    "environment": {
+      "VITE_SUPABASE_URL": "missing",
+      "VITE_SUPABASE_PUBLISHABLE_KEY": "missing"
+    }
+  },
+  "features": {
+    "custom-share-cover": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/cloud/shareThumbnail.ts",
+          "src/components/ShareSheet.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0011_share_preview_customization.sql"
+        ],
+        "tests": [
+          "scripts/e2e/share-preview.mjs"
+        ],
+        "docs": [
+          "docs/pr30-share-customization-video-aware.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr30-share-customization-video-aware.md",
+        "scripts/e2e/share-preview.mjs",
+        "src/cloud/shareThumbnail.ts",
+        "src/components/ShareSheet.tsx",
+        "supabase/migrations/0011_share_preview_customization.sql"
+      ],
+      "missing": []
+    },
+    "image-review": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/features/image-review/ImageWorkspace.tsx",
+          "src/features/image-review/Stage.tsx"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/e2e/share-flow.mjs"
+        ],
+        "docs": [
+          "README.md"
+        ]
+      },
+      "relatedFiles": [
+        "README.md",
+        "scripts/e2e/share-flow.mjs",
+        "src/features/image-review/ImageWorkspace.tsx",
+        "src/features/image-review/Stage.tsx"
+      ],
+      "missing": []
+    },
+    "line-preview": {
+      "status": "implemented",
+      "confidence": 0.87,
+      "evidence": {
+        "source": [
+          "supabase/functions/share-preview/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/e2e/share-preview.mjs"
+        ],
+        "docs": [
+          "docs/pr21-share-og-preview.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr21-share-og-preview.md",
+        "scripts/e2e/share-preview.mjs",
+        "supabase/functions/share-preview/index.ts"
+      ],
+      "missing": []
+    },
+    "orphan-asset-cleanup": {
+      "status": "partial",
+      "confidence": 0.67,
+      "evidence": {
+        "source": [
+          "src/cloud/videoRoom.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0009_asset_orphans.sql"
+        ],
+        "tests": [],
+        "docs": []
+      },
+      "relatedFiles": [
+        "src/cloud/videoRoom.ts",
+        "supabase/migrations/0009_asset_orphans.sql"
+      ],
+      "missing": [
+        "tests: need 1, found 0"
+      ]
+    },
+    "quick-reactions": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts",
+          "src/features/video-review/QuickReactions.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "src/features/video-review/QuickReactions.tsx",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "missing": []
+    },
+    "review-progress": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "missing": []
+    },
+    "review-summary": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/features/video-review/ReviewSummary.tsx",
+          "src/features/video-review/summary.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/ReviewSummary.tsx",
+        "src/features/video-review/summary.ts"
+      ],
+      "missing": []
+    },
+    "room-capabilities": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/cloud/roomRepository.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0007_room_capabilities.sql"
+        ],
+        "tests": [
+          "scripts/e2e/migrations.mjs"
+        ],
+        "docs": [
+          "docs/pr25-next-upload-pipeline.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr25-next-upload-pipeline.md",
+        "scripts/e2e/migrations.mjs",
+        "src/cloud/roomRepository.ts",
+        "supabase/migrations/0007_room_capabilities.sql"
+      ],
+      "missing": []
+    },
+    "share-preview": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/cloud/sharePreview.ts",
+          "supabase/functions/share-preview/index.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0005_share_previews.sql"
+        ],
+        "tests": [
+          "scripts/e2e/share-preview.mjs"
+        ],
+        "docs": [
+          "docs/pr21-share-og-preview.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr21-share-og-preview.md",
+        "scripts/e2e/share-preview.mjs",
+        "src/cloud/sharePreview.ts",
+        "supabase/functions/share-preview/index.ts",
+        "supabase/migrations/0005_share_previews.sql"
+      ],
+      "missing": []
+    },
+    "tus-resumable-upload": {
+      "status": "spec_only",
+      "confidence": 0.95,
+      "evidence": {
+        "source": [],
+        "migrations": [],
+        "tests": [],
+        "docs": [
+          "docs/pr27-resumable-video-upload.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr27-resumable-video-upload.md"
+      ],
+      "missing": [
+        "source: need 1, found 0",
+        "tests: need 1, found 0"
+      ]
+    },
+    "verdict": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts",
+          "src/features/video-review/VerdictSheet.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "src/features/video-review/VerdictSheet.tsx",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "missing": []
+    },
+    "version-archive": {
+      "status": "partial",
+      "confidence": 0.67,
+      "evidence": {
+        "source": [],
+        "migrations": [
+          "supabase/migrations/0008_version_archive.sql"
+        ],
+        "tests": [
+          "scripts/e2e/migrations.mjs"
+        ],
+        "docs": [
+          "docs/pr25-next-upload-pipeline.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr25-next-upload-pipeline.md",
+        "scripts/e2e/migrations.mjs",
+        "supabase/migrations/0008_version_archive.sql"
+      ],
+      "missing": [
+        "source: need 1, found 0"
+      ]
+    },
+    "version-comparison": {
+      "status": "spec_only",
+      "confidence": 0.95,
+      "evidence": {
+        "source": [],
+        "migrations": [],
+        "tests": [],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md"
+      ],
+      "missing": [
+        "source: need 1, found 0",
+        "tests: need 1, found 0"
+      ]
+    },
+    "video-playback": {
+      "status": "implemented",
+      "confidence": 0.87,
+      "evidence": {
+        "source": [
+          "src/features/video-review/VideoPlayer.tsx"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr23-video-review-plan.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr23-video-review-plan.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/VideoPlayer.tsx"
+      ],
+      "missing": []
+    },
+    "video-point-comments": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/features/video-review/VideoCommentComposer.tsx",
+          "src/features/video-review/anchors.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0006_video_rooms.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/VideoCommentComposer.tsx",
+        "src/features/video-review/anchors.ts",
+        "supabase/migrations/0006_video_rooms.sql"
+      ],
+      "missing": []
+    },
+    "video-range-comments": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/features/video-review/VideoWorkspace.tsx",
+          "src/features/video-review/anchors.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0006_video_rooms.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/VideoWorkspace.tsx",
+        "src/features/video-review/anchors.ts",
+        "supabase/migrations/0006_video_rooms.sql"
+      ],
+      "missing": []
+    },
+    "video-review": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts",
+          "src/features/video-review/VideoWorkspace.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md",
+          "docs/pr34-implement-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "docs/pr34-implement-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "src/features/video-review/VideoWorkspace.tsx",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "missing": []
+    },
+    "video-review-brief": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts",
+          "src/features/video-review/ReviewBrief.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "src/features/video-review/ReviewBrief.tsx",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "missing": []
+    },
+    "video-transcode": {
+      "status": "spec_only",
+      "confidence": 0.95,
+      "evidence": {
+        "source": [],
+        "migrations": [],
+        "tests": [],
+        "docs": [
+          "docs/pr29-video-optimize-transcode.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr29-video-optimize-transcode.md"
+      ],
+      "missing": [
+        "source: need 1, found 0",
+        "migrations: need 1, found 0",
+        "tests: need 1, found 0"
+      ]
+    },
+    "video-upload": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/App.tsx",
+          "src/cloud/videoAssets.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0006_video_rooms.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr23-video-review-plan.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/pr23-video-review-plan.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/App.tsx",
+        "src/cloud/videoAssets.ts",
+        "supabase/migrations/0006_video_rooms.sql"
+      ],
+      "missing": []
+    }
+  },
+  "database": {
+    "repoMigrationHead": "0012",
+    "migrationFiles": [
+      "supabase/migrations/0001_cloud_rooms.sql",
+      "supabase/migrations/0002_feedback.sql",
+      "supabase/migrations/0003_comment_regions.sql",
+      "supabase/migrations/0004_reconcile_cloud_architecture.sql",
+      "supabase/migrations/0005_share_previews.sql",
+      "supabase/migrations/0006_video_rooms.sql",
+      "supabase/migrations/0007_room_capabilities.sql",
+      "supabase/migrations/0008_version_archive.sql",
+      "supabase/migrations/0009_asset_orphans.sql",
+      "supabase/migrations/0010_security_definer_acl.sql",
+      "supabase/migrations/0011_share_preview_customization.sql",
+      "supabase/migrations/0012_video_review_feedback.sql"
+    ],
+    "productionMigrationHead": "unknown",
+    "productionMigrationExpectation": "0012",
+    "requiresLiveCheck": true
+  },
+  "tests": {
+    "requiredCommands": [
+      "npm run test:agent",
+      "npm run test:migrations",
+      "npm run test:share-e2e",
+      "npm run test:share-preview",
+      "npm run test:video"
+    ],
+    "buildCommands": [
+      "npm run build",
+      "npm run build:local"
+    ],
+    "releaseGateCommand": "npm run agent:gate",
+    "latestResults": "not_run",
+    "note": "Context generation discovers thresholds; agent:gate and CI execute them."
+  },
+  "knownGaps": [
+    {
+      "id": "tus-resumable-upload",
+      "status": "spec_only",
+      "priority": 1,
+      "missing": [
+        "source: need 1, found 0",
+        "tests: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "docs/pr27-resumable-video-upload.md"
+      ]
+    },
+    {
+      "id": "version-comparison",
+      "status": "spec_only",
+      "priority": 1,
+      "missing": [
+        "source: need 1, found 0",
+        "tests: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md"
+      ]
+    },
+    {
+      "id": "video-transcode",
+      "status": "spec_only",
+      "priority": 1,
+      "missing": [
+        "source: need 1, found 0",
+        "migrations: need 1, found 0",
+        "tests: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "docs/pr29-video-optimize-transcode.md"
+      ]
+    },
+    {
+      "id": "orphan-asset-cleanup",
+      "status": "partial",
+      "priority": 2,
+      "missing": [
+        "tests: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "src/cloud/videoRoom.ts",
+        "supabase/migrations/0009_asset_orphans.sql"
+      ]
+    },
+    {
+      "id": "version-archive",
+      "status": "partial",
+      "priority": 2,
+      "missing": [
+        "source: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "docs/pr25-next-upload-pipeline.md",
+        "scripts/e2e/migrations.mjs",
+        "supabase/migrations/0008_version_archive.sql"
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "code": "FEATURE_CLAIM_MISMATCH",
+      "feature": "tus-resumable-upload",
+      "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
+    },
+    {
+      "code": "FEATURE_CLAIM_MISMATCH",
+      "feature": "version-comparison",
+      "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
+    },
+    {
+      "code": "FEATURE_CLAIM_MISMATCH",
+      "feature": "video-transcode",
+      "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
+    }
+  ],
+  "releaseReadiness": {
+    "status": "structurally_ready_tests_not_run",
+    "automergeAllowed": false,
+    "rule": "AUTOMERGE REQUIRES AGENT_GATE_PASS",
+    "structuralChecks": [
+      {
+        "code": "DOCS_ONLY_PROTECTION",
+        "ok": true,
+        "message": "Implementation claims include executable evidence or the change is documentation-only by intent."
+      },
+      {
+        "code": "REQUIRED_TEST_SCRIPTS",
+        "ok": true,
+        "message": "Required build, E2E, migration, and agent scripts exist."
+      },
+      {
+        "code": "MIGRATION_ORDER",
+        "ok": true,
+        "message": "Migration order is contiguous through 0012_video_review_feedback.sql."
+      },
+      {
+        "code": "INVITE_FRAGMENT_ONLY",
+        "ok": true,
+        "message": "Invite secrets are built and parsed from the URL fragment only."
+      },
+      {
+        "code": "ROOM_ASSETS_PRIVATE",
+        "ok": true,
+        "message": "room-assets is created private and no migration widens it."
+      },
+      {
+        "code": "REVIEWER_NO_MEDIA_MANAGEMENT",
+        "ok": true,
+        "message": "Capability policy and migration E2E cover reviewer media denial."
+      },
+      {
+        "code": "ORIGINAL_MEDIA_IMMUTABLE",
+        "ok": true,
+        "message": "Uploads create version-addressed originals and no original mutation API was detected."
+      },
+      {
+        "code": "SECRETS_NOT_EMITTED",
+        "ok": true,
+        "message": "No secret, access token, JWT, or invite-token value was emitted."
+      },
+      {
+        "code": "SOURCE_TEST_EVIDENCE",
+        "ok": true,
+        "message": "Changed feature source/test evidence is consistent."
+      },
+      {
+        "code": "TYPESCRIPT_AND_BUILD",
+        "ok": true,
+        "message": "Build execution skipped for structural evaluation."
+      }
+    ],
+    "requiredAction": "Run npm run agent:gate and all CI/E2E checks on the final diff."
+  },
+  "nextRecommendedWork": [
+    {
+      "rank": 1,
+      "feature": "tus-resumable-upload",
+      "status": "spec_only",
+      "reason": "source: need 1, found 0; tests: need 1, found 0"
+    },
+    {
+      "rank": 2,
+      "feature": "version-comparison",
+      "status": "spec_only",
+      "reason": "source: need 1, found 0; tests: need 1, found 0"
+    },
+    {
+      "rank": 3,
+      "feature": "video-transcode",
+      "status": "spec_only",
+      "reason": "source: need 1, found 0; migrations: need 1, found 0; tests: need 1, found 0"
+    },
+    {
+      "rank": 4,
+      "feature": "orphan-asset-cleanup",
+      "status": "partial",
+      "reason": "tests: need 1, found 0"
+    },
+    {
+      "rank": 5,
+      "feature": "version-archive",
+      "status": "partial",
+      "reason": "source: need 1, found 0"
+    }
+  ],
+  "forbiddenActions": [
+    "Modify original image/video bytes.",
+    "Put invite secrets in query strings, logs, state files, or database plaintext.",
+    "Make room-assets public.",
+    "Grant reviewers upload, replace, archive, or delete media capabilities.",
+    "Merge a feature/fix/security implementation that changes only docs.",
+    "Auto-merge unless npm run agent:gate passes."
+  ]
+}
