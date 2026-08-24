@@ -2,7 +2,6 @@ node_modules/
 dist/
 *.local
 .DS_Store
-package-lock.json
 
 # adversarial-test working dirs (raw artifacts stay local)
 _grok_reliability/

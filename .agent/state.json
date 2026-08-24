@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-23T21:23:53.000Z",
+  "generatedAt": "2026-08-24T15:36:22.000Z",
   "git": {
     "branch": "codex/agent-read-layer",
-    "sha": "46e4f1bda7f9bf077fbd658afe0218fee616cf0e",
+    "sha": "0afb35117cf422a7817133f710732a689112bae2",
     "mainSha": "46e4f1bda7f9bf077fbd658afe0218fee616cf0e",
     "dirty": true
   },
@@ -31,7 +31,16 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": []
+      "items": [
+        {
+          "baseRefName": "main",
+          "headRefName": "codex/agent-read-layer",
+          "isDraft": false,
+          "number": 35,
+          "title": "feat: add evidence-based AI Agent Read Layer",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/35"
+        }
+      ]
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
