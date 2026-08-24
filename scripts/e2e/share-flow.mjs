@@ -594,12 +594,17 @@ try {
     bodyText.includes("目前暫時無法載入") ? "still showing the generic failure" : "room rendered",
   );
   check("A. 430×932 夥伴視圖沒有水平溢出", await noHorizontalOverflow(B));
+  const storagePosterLoaded = await B.waitForFunction(
+    () => {
+      const img = [...document.images].find((item) => item.src.includes("/storage/"));
+      return Boolean(img && img.complete && img.naturalWidth > 0);
+    },
+    null,
+    { timeout: 10000 },
+  ).then(() => true).catch(() => false);
   check(
     "A. 夥伴看到的海報真的從雲端 Storage 載入",
-    await B.evaluate(() => {
-      const img = [...document.images].find((i) => i.src.includes("/storage/"));
-      return Boolean(img && img.complete && img.naturalWidth > 0);
-    }),
+    storagePosterLoaded,
   );
   await ctxB.close();
 

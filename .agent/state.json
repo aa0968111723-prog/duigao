@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-24T15:36:22.000Z",
+  "generatedAt": "2026-08-24T15:38:58.000Z",
   "git": {
     "branch": "codex/agent-read-layer",
-    "sha": "0afb35117cf422a7817133f710732a689112bae2",
+    "sha": "c3d1e1efe672966ccb162baf70c2f7a7ed5d97f5",
     "mainSha": "46e4f1bda7f9bf077fbd658afe0218fee616cf0e",
     "dirty": true
   },
