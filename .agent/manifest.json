@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "1.0.0",
+  "project": "duigao",
+  "product": "圖片與影片對稿協作工具",
+  "primaryLanguage": "zh-Hant",
+  "frontend": {
+    "framework": "React",
+    "build": "Vite",
+    "language": "TypeScript"
+  },
+  "cloud": {
+    "provider": "Supabase",
+    "sourceOfTruth": "Postgres",
+    "cache": "IndexedDB",
+    "realtime": true
+  },
+  "workspaces": {
+    "image": "src/features/image-review",
+    "video": "src/features/video-review",
+    "discussion": "src/features/discussion"
+  },
+  "criticalPaths": [
+    ".github/workflows",
+    "package.json",
+    "scripts/e2e",
+    "scripts/tests",
+    "src/App.tsx",
+    "src/cloud",
+    "src/cloud/assets.ts",
+    "src/cloud/auth.ts",
+    "src/cloud/invite.ts",
+    "src/cloud/sharePreview.ts",
+    "src/cloud/shareThumbnail.ts",
+    "src/cloud/videoAssets.ts",
+    "src/cloud/videoRoom.ts",
+    "src/components/RoomWorkspace.tsx",
+    "src/features/discussion",
+    "src/features/image-review",
+    "src/features/video-review",
+    "src/lib/store.ts",
+    "src/main.tsx",
+    "supabase/config.toml",
+    "supabase/functions/share-preview/index.ts",
+    "supabase/migrations",
+    "tsconfig.json",
+    "vercel.json",
+    "vite.config.ts",
+    "zbpack.json"
+  ],
+  "testCommands": [
+    "npm run test:agent",
+    "npm run test:migrations",
+    "npm run test:share-e2e",
+    "npm run test:share-preview",
+    "npm run test:video"
+  ],
+  "packageScripts": [
+    "agent:context",
+    "agent:gate",
+    "agent:query",
+    "agent:state",
+    "build",
+    "build:local",
+    "check:cloud-env",
+    "dev",
+    "make:og-cover",
+    "preview",
+    "test:agent",
+    "test:migrations",
+    "test:share-e2e",
+    "test:share-preview",
+    "test:video"
+  ],
+  "agentContextCommand": "npm run agent:context"
+}

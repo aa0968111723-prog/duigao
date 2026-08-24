@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "1.0.0",
+  "invariants": [
+    {
+      "id": "original-media-immutable",
+      "severity": "critical",
+      "rule": "Original image/video must never be modified.",
+      "enforcement": [
+        "source review",
+        "E2E",
+        "agent gate"
+      ]
+    },
+    {
+      "id": "invite-fragment-only",
+      "severity": "critical",
+      "rule": "Invite secret may only exist in URL fragment.",
+      "enforcement": [
+        "src/cloud/invite.ts",
+        "agent gate"
+      ]
+    },
+    {
+      "id": "room-assets-private",
+      "severity": "critical",
+      "rule": "room-assets must remain private.",
+      "enforcement": [
+        "Supabase migration",
+        "RLS E2E",
+        "agent gate"
+      ]
+    },
+    {
+      "id": "reviewer-no-media-management",
+      "severity": "critical",
+      "rule": "Reviewer cannot upload/replace/delete versions.",
+      "enforcement": [
+        "room capability RLS",
+        "migration E2E",
+        "agent gate"
+      ]
+    },
+    {
+      "id": "feature-pr-not-docs-only",
+      "severity": "critical",
+      "rule": "Feature implementation PR cannot contain only docs.",
+      "enforcement": [
+        "agent gate",
+        "GitHub Actions"
+      ]
+    },
+    {
+      "id": "cloud-source-of-truth",
+      "severity": "high",
+      "rule": "Supabase is the cloud source of truth; IndexedDB is cache/offline only.",
+      "enforcement": [
+        "architecture review"
+      ]
+    },
+    {
+      "id": "reviewer-progressive-disclosure",
+      "severity": "high",
+      "rule": "Reviewer UX stays minimal; deep features use progressive disclosure.",
+      "enforcement": [
+        "UI review",
+        "browser E2E"
+      ]
+    },
+    {
+      "id": "workspaces-separated",
+      "severity": "high",
+      "rule": "Image and video workspaces remain separate.",
+      "enforcement": [
+        "architecture scan",
+        "browser E2E"
+      ]
+    }
+  ]
+}

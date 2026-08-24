@@ -13,7 +13,12 @@
     "test:share-e2e": "node scripts/e2e/share-flow.mjs",
     "test:share-preview": "node scripts/e2e/share-preview.mjs",
     "test:video": "node scripts/e2e/video-flow.mjs",
-    "test:migrations": "node scripts/e2e/migrations.mjs"
+    "test:migrations": "node scripts/e2e/migrations.mjs",
+    "test:agent": "node --test scripts/tests/agent-layer.test.mjs",
+    "agent:context": "node scripts/agent-context.mjs",
+    "agent:state": "node scripts/agent-context.mjs --json",
+    "agent:query": "node scripts/agent-context.mjs",
+    "agent:gate": "node scripts/agent-release-gate.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

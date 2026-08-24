@@ -33,10 +33,14 @@ export type UrlInvite = { roomId: string; invite: string | null };
 
 /** Parse `#room=<id>&invite=<secret>` (or legacy `#room=<code>`). */
 export function readInviteFromUrl(): UrlInvite | null {
-  const source = location.hash + location.search;
-  const room = /[#?&]room=([^&]+)/i.exec(source);
+  // Legacy room ids may still arrive in either place, but capability secrets
+  // are parsed from the fragment only. Queries reach servers and referrers;
+  // fragments do not.
+  const roomSource = location.hash + location.search;
+  const inviteSource = location.hash;
+  const room = /[#?&]room=([^&]+)/i.exec(roomSource);
   if (!room) return null;
-  const invite = /[#?&]invite=([^&]+)/i.exec(source);
+  const invite = /[#&]invite=([^&]+)/i.exec(inviteSource);
   return {
     roomId: decodeURIComponent(room[1]),
     invite: invite ? decodeURIComponent(invite[1]) : null,

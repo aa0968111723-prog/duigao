@@ -1,0 +1,1077 @@
+{
+  "schemaVersion": "1.0.0",
+  "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
+  "evidenceModel": {
+    "implemented": "All feature-specific executable evidence thresholds are met (normally source+test or source+migration+test).",
+    "partial": "Some executable evidence exists, but a required integration, migration, route, or test is absent.",
+    "spec_only": "Documentation exists and no executable evidence exists.",
+    "missing": "No source, migration, test, or documentation evidence exists.",
+    "precedence": [
+      "source",
+      "migrations",
+      "tests",
+      "git_diff",
+      "deployment",
+      "pr_metadata",
+      "docs"
+    ]
+  },
+  "features": [
+    {
+      "id": "custom-share-cover",
+      "name": "Custom share cover",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/shareThumbnail.ts",
+          "src/components/ShareSheet.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0011_share_preview_customization.sql"
+        ],
+        "tests": [
+          "scripts/e2e/share-preview.mjs"
+        ],
+        "docs": [
+          "docs/pr30-share-customization-video-aware.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr30-share-customization-video-aware.md",
+        "scripts/e2e/share-preview.mjs",
+        "src/cloud/shareThumbnail.ts",
+        "src/components/ShareSheet.tsx",
+        "supabase/migrations/0011_share_preview_customization.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "image-review",
+      "name": "Image review workspace",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/image-review/ImageWorkspace.tsx",
+          "src/features/image-review/Stage.tsx"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/e2e/share-flow.mjs"
+        ],
+        "docs": [
+          "README.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "README.md",
+        "scripts/e2e/share-flow.mjs",
+        "src/features/image-review/ImageWorkspace.tsx",
+        "src/features/image-review/Stage.tsx"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "line-preview",
+      "name": "LINE-compatible link preview",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "supabase/functions/share-preview/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/e2e/share-preview.mjs"
+        ],
+        "docs": [
+          "docs/pr21-share-og-preview.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.87,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr21-share-og-preview.md",
+        "scripts/e2e/share-preview.mjs",
+        "supabase/functions/share-preview/index.ts"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "orphan-asset-cleanup",
+      "name": "Orphan asset cleanup",
+      "status": "partial",
+      "evidence": {
+        "source": [
+          "src/cloud/videoRoom.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0009_asset_orphans.sql"
+        ],
+        "tests": [],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        }
+      ],
+      "confidence": 0.67,
+      "implemented": [
+        "source",
+        "migrations"
+      ],
+      "missing": [
+        "tests: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "src/cloud/videoRoom.ts",
+        "supabase/migrations/0009_asset_orphans.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Executable evidence is incomplete: tests: need 1, found 0."
+      ]
+    },
+    {
+      "id": "quick-reactions",
+      "name": "Quick reactions",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts",
+          "src/features/video-review/QuickReactions.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "src/features/video-review/QuickReactions.tsx",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "review-progress",
+      "name": "Review progress",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "review-summary",
+      "name": "Review summary",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/video-review/ReviewSummary.tsx",
+          "src/features/video-review/summary.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/ReviewSummary.tsx",
+        "src/features/video-review/summary.ts"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "room-capabilities",
+      "name": "Room capabilities",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/roomRepository.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0007_room_capabilities.sql"
+        ],
+        "tests": [
+          "scripts/e2e/migrations.mjs"
+        ],
+        "docs": [
+          "docs/pr25-next-upload-pipeline.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr25-next-upload-pipeline.md",
+        "scripts/e2e/migrations.mjs",
+        "src/cloud/roomRepository.ts",
+        "supabase/migrations/0007_room_capabilities.sql"
+      ],
+      "priority": 1,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "share-preview",
+      "name": "Share preview",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/sharePreview.ts",
+          "supabase/functions/share-preview/index.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0005_share_previews.sql"
+        ],
+        "tests": [
+          "scripts/e2e/share-preview.mjs"
+        ],
+        "docs": [
+          "docs/pr21-share-og-preview.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr21-share-og-preview.md",
+        "scripts/e2e/share-preview.mjs",
+        "src/cloud/sharePreview.ts",
+        "supabase/functions/share-preview/index.ts",
+        "supabase/migrations/0005_share_previews.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "tus-resumable-upload",
+      "name": "TUS resumable upload",
+      "status": "spec_only",
+      "evidence": {
+        "source": [],
+        "migrations": [],
+        "tests": [],
+        "docs": [
+          "docs/pr27-resumable-video-upload.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        }
+      ],
+      "confidence": 0.95,
+      "implemented": [],
+      "missing": [
+        "source: need 1, found 0",
+        "tests: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "docs/pr27-resumable-video-upload.md"
+      ],
+      "priority": 1,
+      "notes": [
+        "Documentation exists, but executable source/migration/test evidence does not."
+      ]
+    },
+    {
+      "id": "verdict",
+      "name": "Version verdict",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts",
+          "src/features/video-review/VerdictSheet.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "src/features/video-review/VerdictSheet.tsx",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "version-archive",
+      "name": "Version archive",
+      "status": "partial",
+      "evidence": {
+        "source": [],
+        "migrations": [
+          "supabase/migrations/0008_version_archive.sql"
+        ],
+        "tests": [
+          "scripts/e2e/migrations.mjs"
+        ],
+        "docs": [
+          "docs/pr25-next-upload-pipeline.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.67,
+      "implemented": [
+        "migrations",
+        "tests"
+      ],
+      "missing": [
+        "source: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "docs/pr25-next-upload-pipeline.md",
+        "scripts/e2e/migrations.mjs",
+        "supabase/migrations/0008_version_archive.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Executable evidence is incomplete: source: need 1, found 0."
+      ]
+    },
+    {
+      "id": "version-comparison",
+      "name": "Version comparison",
+      "status": "spec_only",
+      "evidence": {
+        "source": [],
+        "migrations": [],
+        "tests": [],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        }
+      ],
+      "confidence": 0.95,
+      "implemented": [],
+      "missing": [
+        "source: need 1, found 0",
+        "tests: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md"
+      ],
+      "priority": 1,
+      "notes": [
+        "Documentation exists, but executable source/migration/test evidence does not."
+      ]
+    },
+    {
+      "id": "video-playback",
+      "name": "Video playback",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/video-review/VideoPlayer.tsx"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr23-video-review-plan.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.87,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr23-video-review-plan.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/VideoPlayer.tsx"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "video-point-comments",
+      "name": "Video point comments",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/video-review/VideoCommentComposer.tsx",
+          "src/features/video-review/anchors.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0006_video_rooms.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/VideoCommentComposer.tsx",
+        "src/features/video-review/anchors.ts",
+        "supabase/migrations/0006_video_rooms.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "video-range-comments",
+      "name": "Video range comments",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/video-review/VideoWorkspace.tsx",
+          "src/features/video-review/anchors.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0006_video_rooms.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/VideoWorkspace.tsx",
+        "src/features/video-review/anchors.ts",
+        "supabase/migrations/0006_video_rooms.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "video-review",
+      "name": "Video review workspace",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts",
+          "src/features/video-review/VideoWorkspace.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md",
+          "docs/pr34-implement-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "docs/pr34-implement-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "src/features/video-review/VideoWorkspace.tsx",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "priority": 1,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "video-review-brief",
+      "name": "Video review brief",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/videoReview.ts",
+          "src/features/video-review/ReviewBrief.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0012_video_review_feedback.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr32-video-review-feedback-2.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/cloud/videoReview.ts",
+        "src/features/video-review/ReviewBrief.tsx",
+        "supabase/migrations/0012_video_review_feedback.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "video-transcode",
+      "name": "Video transcode",
+      "status": "spec_only",
+      "evidence": {
+        "source": [],
+        "migrations": [],
+        "tests": [],
+        "docs": [
+          "docs/pr29-video-optimize-transcode.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 0,
+          "satisfied": false
+        }
+      ],
+      "confidence": 0.95,
+      "implemented": [],
+      "missing": [
+        "source: need 1, found 0",
+        "migrations: need 1, found 0",
+        "tests: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "docs/pr29-video-optimize-transcode.md"
+      ],
+      "priority": 1,
+      "notes": [
+        "Documentation exists, but executable source/migration/test evidence does not."
+      ]
+    },
+    {
+      "id": "video-upload",
+      "name": "Video upload",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/App.tsx",
+          "src/cloud/videoAssets.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0006_video_rooms.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
+        "docs": [
+          "docs/pr23-video-review-plan.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/pr23-video-review-plan.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/App.tsx",
+        "src/cloud/videoAssets.ts",
+        "supabase/migrations/0006_video_rooms.sql"
+      ],
+      "priority": 2,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    }
+  ]
+}

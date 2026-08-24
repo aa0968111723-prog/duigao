@@ -486,7 +486,6 @@ export function App() {
       const cancel = () => {
         abandoned = true;
         handleCancel?.();
-        setVideoUpload({ state: "idle" });
       };
       videoCancelRef.current = cancel;
       setVideoUpload({ state: "preparing", progress: 0, cancel });
@@ -549,7 +548,6 @@ export function App() {
         showToast(isNewRoom ? "影片好了，開始留意見吧" : `已新增${label}`, { tone: "success" });
       } catch (err) {
         if (isUploadCancelled(err) || err instanceof CancelledUpload || abandoned) {
-          setVideoUpload({ state: "idle" });
           showToast("已取消上傳");
           // A room created for an upload nobody wants must not keep the local
           // id tied to an empty cloud room — the next attempt would make a
@@ -568,6 +566,10 @@ export function App() {
             if (cloudId) await deleteRoom(cloudId).catch(() => undefined);
             if ((roomRef.current?.versions.length ?? 0) === 0) setRoom(null);
           }
+          // Keep the first-upload screen mounted until the IndexedDB deletes
+          // above finish. Switching to idle earlier renders Home immediately,
+          // where 最近討論 can observe the empty cached room for one frame.
+          setVideoUpload({ state: "idle" });
         } else if (!belongsToThisUpload.has(roomRef.current?.id ?? "")) {
           // The upload failed after the person had already moved on. Telling
           // whichever room they are in now that something failed there would be

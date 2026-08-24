@@ -1412,8 +1412,21 @@ try {
   const roomsBeforeCancel = countRooms();
   const objectsBeforeCancel = new Set(storageObjects.keys());
   await uploadVideo(Q, LONG);
-  await Q.waitForSelector(".onboard-card .btn", { timeout: 60000 });
-  await Q.click(".onboard-card .btn:has-text('取消')");
+  // Click in the same browser task that first observes the button. A regular
+  // Playwright click waits for layout stability; on a fast CI runner the
+  // upload can finish and React can detach the button during that wait, which
+  // tests Playwright's actionability retry instead of cancellation.
+  await Q.waitForFunction(
+    () => {
+      const button = [...document.querySelectorAll(".onboard-card .btn")]
+        .find((node) => node.textContent?.includes("取消"));
+      if (!(button instanceof HTMLButtonElement)) return false;
+      button.click();
+      return true;
+    },
+    null,
+    { timeout: 60000 },
+  );
   await Q.waitForSelector(".home-picks", { timeout: 30000 });
   check("Q. 取消第一支上傳會回到首頁", await Q.isVisible(".home-picks"));
 
