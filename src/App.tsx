@@ -927,12 +927,13 @@ export function App() {
   );
 
   const upsertNodes = useCallback(
-    (nodes: WhiteboardNode[]) => {
+    (nodes: WhiteboardNode[], persist: "now" | "end" = "now") => {
       updateRoom((r) => {
         const byId = new Map((r.whiteboardNodes ?? []).map((node) => [node.id, node]));
         for (const node of nodes) byId.set(node.id, node);
         return { ...r, whiteboardNodes: [...byId.values()] };
       });
+      void persist;
       nodes.forEach((node) => cloudRef.current.writes.upsertNode?.(node));
       const current = roomRef.current;
       const board = current?.whiteboards?.find((item) => item.id === nodes[0]?.whiteboardId);

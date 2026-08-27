@@ -39,7 +39,7 @@ export type WhiteboardApi = {
   onRenameBoard: (id: string, title: string) => void;
   onUpsertNode: (node: WhiteboardNode, persist?: "now" | "end") => void;
   onDeleteNode: (id: string) => void;
-  onUpsertNodes: (nodes: WhiteboardNode[]) => void;
+  onUpsertNodes: (nodes: WhiteboardNode[], persist?: "now" | "end") => void;
   onCreateEdge: (edge: WhiteboardEdge) => void;
   onShareNode: (node: WhiteboardNode) => void;
   onOpenContent: (branchId: string, opts?: { startTime?: number; endTime?: number }) => void;
@@ -141,27 +141,36 @@ const NodeView = memo(function NodeView({
 function RoomContentPicker({
   room,
   onPick,
+  onPickAsset,
   initialKind = "all",
 }: {
   room: Room;
   onPick: (branch: RoomBranch) => void;
-  initialKind?: "all" | "poster" | "video" | "plan";
+  onPickAsset?: (version: import("../../lib/types").Version) => void;
+  initialKind?: "all" | "poster" | "video" | "plan" | "asset";
 }) {
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"all" | "poster" | "video" | "plan">(initialKind);
+  const [kind, setKind] = useState<"all" | "poster" | "video" | "plan" | "asset">(initialKind);
   const branches = (room.branches ?? []).filter((branch) => branch.status !== "archived");
   const filtered = branches.filter((branch) => {
+    if (kind === "asset") return false;
     if (kind !== "all" && branch.branchType !== kind && !(kind === "plan" && branch.branchType === "copy")) return false;
     return !query.trim() || branch.name.toLowerCase().includes(query.trim().toLowerCase());
+  });
+  const assets = (room.versions ?? []).filter((version) => {
+    if (kind !== "asset" && kind !== "all") return false;
+    if (kind === "all") return false;
+    const hay = `${version.label} ${version.mimeType ?? ""} ${version.kind ?? ""}`.toLowerCase();
+    return !query.trim() || hay.includes(query.trim().toLowerCase());
   });
   return (
     <div className="wb-sheet" data-testid="wb-content-picker">
       <h3>放入房間內容</h3>
       <input className="text-input wb-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜尋檔名、標籤、類型…" aria-label="搜尋房間內容" />
       <div className="rd-tabs" style={{ marginTop: 0 }}>
-        {(["all", "poster", "video", "plan"] as const).map((item) => (
+        {(["all", "poster", "video", "plan", "asset"] as const).map((item) => (
           <button type="button" key={item} className={kind === item ? "is-active" : ""} onClick={() => setKind(item)}>
-            {item === "all" ? "全部" : item === "poster" ? "文宣" : item === "video" ? "影片" : "企劃"}
+            {item === "all" ? "全部" : item === "poster" ? "文宣" : item === "video" ? "影片" : item === "plan" ? "企劃" : "素材"}
           </button>
         ))}
       </div>
@@ -186,7 +195,16 @@ function RoomContentPicker({
             </button>
           );
         })}
-        {!filtered.length && <p className="project-muted">這個房間還沒有符合的內容</p>}
+        {assets.map((version) => (
+          <button type="button" className="wb-content-item" key={version.id} onClick={() => onPickAsset?.(version)}>
+            <span aria-hidden>{version.kind === "video" ? "▶" : "▧"}</span>
+            <span>
+              <strong>{version.label}</strong>
+              <small>{version.mimeType || version.kind || "素材"}{version.fileSize ? ` · ${Math.round(version.fileSize / 1024)} KB` : ""}</small>
+            </span>
+          </button>
+        ))}
+        {!filtered.length && !assets.length && <p className="project-muted">這個房間還沒有符合的內容</p>}
       </div>
     </div>
   );
@@ -243,7 +261,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
   const [videoStart, setVideoStart] = useState("00:40");
   const [videoEnd, setVideoEnd] = useState("");
-  const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan">("all");
+  const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan" | "asset">("all");
+  const [previewNodes, setPreviewNodes] = useState<WhiteboardNode[] | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; zoom: number } | null>(null);
   const drag = useRef<{ ids: string[]; origin: { x: number; y: number }; last: { x: number; y: number } } | null>(null);
@@ -268,8 +287,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     setCamera(focusCamera(node, viewport));
   }, [api.focusNodeId, nodes, viewport]);
 
-  const rendered = useMemo(() => visibleNodes(nodes, camera, viewport), [nodes, camera, viewport]);
-  const hits = search.trim() ? findNodes(nodes, search) : [];
+  const liveNodes = previewNodes ?? nodes;
+  const rendered = useMemo(() => visibleNodes(liveNodes, camera, viewport), [liveNodes, camera, viewport]);
+  const hits = search.trim() ? findNodes(liveNodes, search) : [];
 
   const persistSoon = useRef<number | null>(null);
   const persistNodes = useCallback((next: WhiteboardNode[]) => {
@@ -297,7 +317,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     }
     const rect = wrapRef.current!.getBoundingClientRect();
     const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
-    const hit = nodeHit(nodes, world.x, world.y);
+    const hit = nodeHit(liveNodes, world.x, world.y);
     if (hit) {
       if (multiSelect || event.shiftKey) {
         setSelected((current) => current.includes(hit.id) ? current.filter((id) => id !== hit.id) : [...current, hit.id]);
@@ -360,8 +380,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const dx = world.x - drag.current.last.x;
     const dy = world.y - drag.current.last.y;
     drag.current.last = world;
-    const moved = moveNodes(nodes, drag.current.ids, dx, dy);
-    api.onUpsertNodes(moved.filter((node) => drag.current!.ids.includes(node.id)));
+    const moved = moveNodes(liveNodes, drag.current.ids, dx, dy);
+    setPreviewNodes(moved);
     const now = performance.now();
     if (now - lastBroadcast.current > BROADCAST_THROTTLE_MS) lastBroadcast.current = now;
   };
@@ -374,11 +394,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       longPress.current = null;
     }
     if (marquee) {
-      setSelected(marqueeHits(nodes, marquee.a, marquee.b));
+      setSelected(marqueeHits(liveNodes, marquee.a, marquee.b));
       setMarquee(null);
     }
     if (drag.current?.ids.length) {
-      persistNodes(nodes.filter((node) => drag.current!.ids.includes(node.id)));
+      const source = previewNodes ?? liveNodes;
+      persistNodes(source.filter((node) => drag.current!.ids.includes(node.id)));
+      setPreviewNodes(null);
     }
     drag.current = null;
   };
@@ -386,7 +408,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const onDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const rect = wrapRef.current!.getBoundingClientRect();
     const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
-    const hit = nodeHit(nodes, world.x, world.y);
+    const hit = nodeHit(liveNodes, world.x, world.y);
     if (hit) {
       setEditingId(hit.id);
       setCamera(focusCamera(hit, viewport, camera.zoom * 1.12));
@@ -420,19 +442,33 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const version = latestBranchVersion(api.room, branch.id);
     const summary = branchSummary(api.room, branch.id);
     const plan: PlanDocument | undefined = api.room.plans?.find((item) => item.branchId === branch.id);
-    const isVideo = branch.branchType === "video";
     addAtView("room_content", {
       title: branch.name,
       mediaKind: branch.branchType === "copy" ? "plan" : branch.branchType,
       versionLabel: version?.label ?? summary.latestLabel,
       openCommentCount: summary.openCommentCount,
-      thumbnailUrl: version?.kind === "image" ? version.imageDataUrl : undefined,
+      thumbnailUrl: version?.kind === "image" && version.imageDataUrl && !version.imageDataUrl.startsWith("data:")
+        ? version.imageDataUrl
+        : undefined,
       subtitle: plan ? `更新於 ${relative(plan.updatedAt)}` : undefined,
       duration: version?.duration,
       startTime: range?.startTime,
       endTime: range?.endTime,
     }, { linkedEntityType: "branch", linkedEntityId: branch.id });
     setPendingVideo(null);
+  };
+
+  const placeAsset = (version: import("../../lib/types").Version) => {
+    addAtView("room_content", {
+      title: version.label,
+      filename: version.mimeType,
+      mediaKind: "asset",
+      versionLabel: version.label,
+      duration: version.duration,
+      thumbnailUrl: version.kind === "image" && version.imageDataUrl && !version.imageDataUrl.startsWith("data:")
+        ? version.imageDataUrl
+        : undefined,
+    }, { linkedEntityType: "version", linkedEntityId: version.id });
   };
 
   const pickBranch = (branch: RoomBranch) => {
@@ -446,7 +482,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     placeBranch(branch);
   };
 
-  const selectedNode = nodes.find((node) => node.id === selected[0]);
+  const selectedNode = liveNodes.find((node) => node.id === selected[0]);
   const polls: RoomPoll[] = api.room.polls ?? [];
 
   if (!board) return <BoardList api={api} />;
@@ -476,8 +512,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         <div className="wb-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
           <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
             {edges.map((edge) => {
-              const source = nodes.find((node) => node.id === edge.sourceNodeId);
-              const target = nodes.find((node) => node.id === edge.targetNodeId);
+              const source = liveNodes.find((node) => node.id === edge.sourceNodeId);
+              const target = liveNodes.find((node) => node.id === edge.targetNodeId);
               if (!source || !target) return null;
               const x1 = source.x + source.width / 2;
               const y1 = source.y + source.height / 2;
@@ -577,7 +613,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 {ADD_OPTIONS.map((item) => (
                   <button type="button" key={item.label} onClick={() => {
                     if (item.type === "content" || item.type === "image") {
-                      setContentKind(item.type === "image" ? "poster" : "all");
+                      setContentKind(item.type === "image" ? "asset" : "all");
                       setSheet("content");
                       return;
                     }
@@ -596,7 +632,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
           <section className="project-sheet" role="dialog" aria-label="房間內容">
             <div className="project-sheet-grip" />
-            <RoomContentPicker room={api.room} onPick={pickBranch} initialKind={contentKind} />
+            <RoomContentPicker room={api.room} onPick={pickBranch} onPickAsset={placeAsset} initialKind={contentKind} />
             <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
           </section>
         </div>

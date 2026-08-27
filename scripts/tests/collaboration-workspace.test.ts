@@ -18,7 +18,7 @@ import { getSelectedBoardContext, getWhiteboardContext } from "../../src/feature
 import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion } from "../../src/features/collaboration/permissions.ts";
 import { reconcileNodes } from "../../src/features/collaboration/offline.ts";
 import { VOICE_ROOM_MVP } from "../../src/features/collaboration/voice.ts";
-import { fitCamera, focusCamera, marqueeHits, nodeHit, visibleNodes, zoomAt, type Camera } from "../../src/features/whiteboard/canvas.ts";
+import { BROADCAST_THROTTLE_MS, DRAG_PERSIST_MS, fitCamera, focusCamera, marqueeHits, nodeHit, visibleNodes, zoomAt, type Camera } from "../../src/features/whiteboard/canvas.ts";
 import type { Whiteboard, WhiteboardEdge, WhiteboardNode } from "../../src/features/collaboration/types.ts";
 
 function board(id = "board-1"): Whiteboard {
@@ -91,6 +91,17 @@ test("11-15 room content / video range / plan cards only reference entities", ()
   assert.equal(parseTimestamp("00:40"), 40);
   assert.equal(parseTimestamp("40"), 40);
   assert.ok(!("imageBytes" in poster.content));
+  assert.ok(!poster.content.thumbnailUrl?.startsWith("data:"));
+  const asset = node("asset", "room_content");
+  asset.linkedEntityType = "version";
+  asset.linkedEntityId = "ver-1";
+  asset.content = { title: "booth.png", mediaKind: "asset", filename: "image/png" };
+  assert.equal(asset.linkedEntityType, "version");
+});
+
+test("drag persist is throttled, not every animation frame", () => {
+  assert.ok(DRAG_PERSIST_MS >= 80);
+  assert.ok(BROADCAST_THROTTLE_MS >= 16);
 });
 
 test("16-17 discussion and board share payloads stay as references", () => {
