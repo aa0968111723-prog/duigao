@@ -479,7 +479,6 @@ begin
   new.version := old.version + 1;
   if new.status = 'decided' and old.status is distinct from 'decided' then
     new.finalized_at := coalesce(new.finalized_at, now());
-    new.finalized_by := coalesce(new.finalized_by, auth.uid());
   end if;
   new.updated_at := now();
   return new;
@@ -522,22 +521,32 @@ create trigger whiteboards_no_delete
   before delete on public.whiteboards
   for each row execute function public.prevent_whiteboard_hard_delete();
 
-create or replace function public.write_collaboration_audit()
+create or replace function public.write_whiteboard_audit()
 returns trigger
 language plpgsql
 security definer
 set search_path = ''
 as $$
 begin
-  if tg_table_name = 'whiteboards' and tg_op = 'INSERT' then
+  if tg_op = 'INSERT' then
     insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload)
     values (new.room_id, 'whiteboard_created', auth.uid(), jsonb_build_object('whiteboardId', new.id, 'title', new.title));
-  elsif tg_table_name = 'whiteboards' and tg_op = 'UPDATE'
-        and new.archived_at is not null and old.archived_at is null then
+  elsif tg_op = 'UPDATE' and new.archived_at is not null and old.archived_at is null then
     insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload)
     values (new.room_id, 'whiteboard_archived', auth.uid(), jsonb_build_object('whiteboardId', new.id, 'title', new.title));
-  elsif tg_table_name = 'decision_records' and tg_op = 'UPDATE'
-        and new.status = 'decided' and old.status is distinct from 'decided' then
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.write_decision_audit()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE' and new.status = 'decided' and old.status is distinct from 'decided' then
     insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload)
     values (new.room_id, 'decision_finalized', auth.uid(), jsonb_build_object('decisionId', new.id, 'title', new.title));
   end if;
@@ -548,19 +557,25 @@ $$;
 drop trigger if exists whiteboards_audit_insert on public.whiteboards;
 create trigger whiteboards_audit_insert
   after insert on public.whiteboards
-  for each row execute function public.write_collaboration_audit();
+  for each row execute function public.write_whiteboard_audit();
 drop trigger if exists whiteboards_audit_archive on public.whiteboards;
 create trigger whiteboards_audit_archive
   after update of archived_at on public.whiteboards
-  for each row execute function public.write_collaboration_audit();
+  for each row execute function public.write_whiteboard_audit();
 drop trigger if exists decision_records_audit on public.decision_records;
 create trigger decision_records_audit
   after update of status on public.decision_records
-  for each row execute function public.write_collaboration_audit();
+  for each row execute function public.write_decision_audit();
 
-revoke execute on function public.touch_collaboration_row() from public, anon, authenticated;
+drop function if exists public.touch_collaboration_row();
+revoke execute on function public.touch_whiteboard() from public, anon, authenticated;
+revoke execute on function public.touch_whiteboard_node() from public, anon, authenticated;
+revoke execute on function public.touch_discussion_message() from public, anon, authenticated;
+revoke execute on function public.touch_decision_record() from public, anon, authenticated;
 revoke execute on function public.prevent_whiteboard_hard_delete() from public, anon, authenticated;
-revoke execute on function public.write_collaboration_audit() from public, anon, authenticated;
+drop function if exists public.write_collaboration_audit();
+revoke execute on function public.write_whiteboard_audit() from public, anon, authenticated;
+revoke execute on function public.write_decision_audit() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- RLS
