@@ -1533,6 +1533,54 @@ try {
   faults.versionInsertRoomId = null;
   faults.assetDeleteTargetPath = null;
   faults.assetDeleteFaultCount = 0;
+
+  // ---- 24. 首次上傳半路死亡：重試沿用同一間房（PR-01c） -------------------
+  // 慢裝置的典型死法：create_room RPC 成功、room_branches POST 死掉。
+  // 修復前：映射沒存 → 重試另開新房、文案說是網路問題。修復後：RPC 成功
+  // 即存 pendingSetup 映射 → 誠實文案 → 重試補完設定並沿用同房。
+  {
+    await Q.click(".onboard-card .btn:has-text('回首頁')").catch(() => undefined);
+    await Q.waitForSelector(".home-picks", { timeout: 30000 });
+    const roomIdsBefore = new Set(cloudRooms.keys());
+    faults.branchInsertNextRoom = true;
+    await uploadVideo(Q, SHORT, "setup-dies.webm");
+    // 不吞 wait（Grok 01c F3）：等不到誠實文案就帶診斷紅掉。
+    const copyAppeared = await Q.waitForFunction(
+      () => document.querySelector(".onboard-card")?.textContent?.includes("初始化沒完成") ?? false,
+      null,
+      { timeout: 60000 },
+    ).then(() => true).catch(() => false);
+    const failCopy = await Q.innerText(".onboard-card").catch(() => "");
+    check("24. 失敗卡等到了 setup 文案（非逾時）", copyAppeared, failCopy.slice(0, 80));
+    const bornIds = [...cloudRooms.keys()].filter((id) => !roomIdsBefore.has(id));
+    check("24. 死亡當下恰好誕生一間房（RPC 已成功）", bornIds.length === 1, `born=${bornIds.length}`);
+    const armedRoomId = bornIds[0];
+    check(
+      "24. 半路死亡的文案說真話（不是「檢查網路」，且說會沿用同房）",
+      failCopy.includes("初始化沒完成") && failCopy.includes("沿用") && !failCopy.includes("檢查網路"),
+      failCopy.replace(/[\r\n]+/g, " ").slice(0, 80),
+    );
+    // 重試：從失敗卡重新選同一支檔
+    const retryZone = Q.locator(".onboard-card input[type=file]").first();
+    await retryZone.setInputFiles({ name: "setup-dies.webm", mimeType: "video/webm", buffer: SHORT });
+    const playerCame = await playerReady(Q).then(() => true).catch(() => false);
+    check("24. 重試成功進到播放器", playerCame);
+    check(
+      "24. 重試沿用死亡當下那間房，沒有另開新房",
+      [...cloudRooms.keys()].filter((id) => !roomIdsBefore.has(id)).length === 1,
+      `newRooms=${[...cloudRooms.keys()].filter((id) => !roomIdsBefore.has(id)).length}`,
+    );
+    check(
+      "24. 沿用的房已補完設定（media_type=video — completeRoomSetup 的可觀測結果）",
+      cloudRooms.get(armedRoomId)?.media_type === "video",
+      `media_type=${cloudRooms.get(armedRoomId)?.media_type}`,
+    );
+    const landed = rows.versions.filter((row) => row.room_id === armedRoomId).length;
+    check("24. 影片版本落在死亡當下那間房", landed >= 1, `versions in armed room = ${landed}`);
+    faults.branchInsertNextRoom = false;
+    faults.branchInsertRoomId = null;
+  }
+
   await ctxQ.close();
 
   console.log(`\n${results.filter((r) => r.pass).length}/${results.length} checks passed`);

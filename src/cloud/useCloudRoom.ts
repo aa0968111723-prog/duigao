@@ -34,6 +34,7 @@ import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
   addVersion as repoAddVersion,
+  completeRoomSetup,
   createRoom,
   deleteRelation,
   deleteStroke as repoDeleteStroke,
@@ -271,9 +272,10 @@ function proposalToPayload(doc: VisualProposal): Record<string, unknown> {
  *
  * Filing it under the cloud id as well makes the room self-describing.
  */
-function rememberCloudRoom(localRoomId: string, roomId: string, token: string): void {
-  saveCloudMapping(localRoomId, { roomId, token });
-  saveCloudMapping(roomId, { roomId, token });
+function rememberCloudRoom(localRoomId: string, roomId: string, token: string, pendingSetup?: boolean): void {
+  const mapping = pendingSetup ? { roomId, token, pendingSetup: true as const } : { roomId, token };
+  saveCloudMapping(localRoomId, mapping);
+  saveCloudMapping(roomId, mapping);
 }
 
 /**
@@ -786,15 +788,35 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       }
       const mapped = getCloudMapping(target.id);
       if (mapped) {
+        if (mapped.pendingSetup) {
+          // 上一次 create 死在 RPC 之後：房間列在，設定未確認。先冪等
+          // 補完（PATCH＋branch upsert），成功才清旗標 — 失敗就原樣拋出，
+          // 映射留著，下一次重試仍沿用同一間房。
+          setStatus("syncing");
+          await ensureSession(supabase);
+          await completeRoomSetup(supabase, target, mapped.roomId);
+          rememberCloudRoom(target.id, mapped.roomId, mapped.token);
+        }
         boundRef.current = mapped.roomId;
         const url = buildInviteUrl(mapped.roomId, mapped.token);
         setInviteUrl(url);
+        if (mapped.pendingSetup) {
+          setStatus("synced");
+          setBindNonce((n) => n + 1);
+        }
         return { roomId: mapped.roomId, url };
       }
       setStatus("syncing");
       await ensureSession(supabase);
       const token = generateInviteToken();
-      const { roomId } = await createRoom(supabase, { room: target, proposals: [] }, guest, token);
+      // 無版本可搬的房（影片首上傳在同手勢現建的那種）啟用早期映射：
+      // RPC 一成功就記下 pendingSetup 映射，之後任何一步死掉，重試都
+      // 沿用同一間房（NOTE_SLOW_DEVICE_FIRSTUPLOAD）。有版本要搬的房
+      // 維持全成功才記映射的舊語意 — 半途映射會讓重試跳過版本搬移。
+      const earlyMap = (target.versions?.length ?? 0) === 0
+        ? (roomId: string) => rememberCloudRoom(target.id, roomId, token, true)
+        : undefined;
+      const { roomId } = await createRoom(supabase, { room: target, proposals: [] }, guest, token, earlyMap);
       rememberCloudRoom(target.id, roomId, token);
       boundRef.current = roomId;
       const url = buildInviteUrl(roomId, token);
@@ -985,12 +1007,16 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     insertStroke: (stroke) => run(`stroke:${stroke.id}`, () => insertStroke(supabase!, boundRef.current!, stroke)),
     deleteStroke: (id) => run(`stroke-del:${id}`, () => repoDeleteStroke(supabase!, id)),
     insertMessage: (msg) => run(`message:${msg.id}`, () => insertMessage(supabase!, boundRef.current!, msg)),
-    addVersion: (label, sortOrder, imageDataUrl, branchId) =>
+    addVersion: (label, sortOrder, imageDataUrl, branchId) => {
+      // 穩定 id 在排隊當下鑄一次：run() 的 duplicate-key=acknowledge 因此
+      // 對 replay 真正冪等（回應丟失的重送不會複製版本）。
+      const stableId = crypto.randomUUID();
       run(`version:${branchId ?? "room"}:${sortOrder}:${label}`, async () => {
-        const v: Version = await repoAddVersion(supabase!, boundRef.current!, label, sortOrder, imageDataUrl, branchId);
+        const v: Version = await repoAddVersion(supabase!, boundRef.current!, label, sortOrder, imageDataUrl, branchId, stableId);
         void v;
         scheduleReload();
-      }),
+      });
+    },
     createBranch: (branch) => runAndWait(`branch-insert:${branch.id}`, () => insertBranch(supabase!, branch)),
     updateBranch: (branchId, patch) => run(`branch:${branchId}`, () => updateBranch(supabase!, boundRef.current!, branchId, patch)),
     savePlan: (plan) => run(`plan:${plan.branchId}`, () => upsertPlan(supabase!, plan, boundRef.current!)),

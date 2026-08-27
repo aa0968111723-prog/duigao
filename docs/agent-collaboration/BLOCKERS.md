@@ -38,7 +38,12 @@
 
 - 程式契約兩端已在（HMAC + 測試），但 duigao edge 需要 `TKU_ZEN_AGENT_URL` + shared secret 設定於 Supabase Functions env；目前無法從本機驗證線上是否已設。PR-04 驗收需一次 live 探測（agent-status 端點）。
 
-## NOTE_SLOW_DEVICE_FIRSTUPLOAD（PR-01c 工作項，2026-08-28 發現）
+## NOTE_SLOW_DEVICE_FIRSTUPLOAD（已解 — PR-01c，2026-08-28）
+
+**解法**：create_room RPC 成功即存 pendingSetup 映射；重試經 completeRoomSetup
+冪等補完設定並沿用同一間房；錯誤文案分流（setup ≠ 網路）。證據：
+video-flow check 24（5 斷言）。原始記錄留存如下。
+
 
 - 現象：CPU 飽和時（本機 6×burner；CI 2-core 偶發）影片首次上傳在
   ensureCloudRoom 完成 create_room_with_invite＋rooms PATCH＋room_branches

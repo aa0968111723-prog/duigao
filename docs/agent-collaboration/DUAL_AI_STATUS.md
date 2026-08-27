@@ -25,6 +25,8 @@
 | pr02a | rounds/pr02/grok-findings-02a.json | rounds/pr02/claude-adjudication-02a.md；#50 |
 | pr02b | rounds/pr02/grok-findings-02b.json（F2 blocking：refetch no-op） | rounds/pr02/claude-adjudication-02b.md；loadWhiteboard 真 refetch＋version-first reconcile；#51 |
 | pr02c | rounds/pr02/grok-findings-02c.json（F1-F3 blocking） | rounds/pr02/claude-adjudication-02c.md：護盾不推進 ack、in-flight echo 護盾、heal=replaceBoardGraph；F4 記錄接受風險 |
+| pr02d | rounds/pr02/grok-findings-02d.json（MUST_FIX；F1 與 Claude 自審獨立收斂） | rounds/pr02/claude-adjudication-02d.md：branch+time video 錨已修；F2 測試全收緊 |
+| pr04-audit | rounds/pr04/grok-findings-04-audit.json（PASS，全 low） | rounds/pr04/claude-adjudication-04-audit.md：F1 探針補強；F2 以 ECMA-262 反駁 |
 
 ## 紀律
 
