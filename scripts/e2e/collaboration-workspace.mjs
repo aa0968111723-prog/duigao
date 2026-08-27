@@ -411,11 +411,15 @@ try {
             null,
             { timeout: 20000 },
           );
-          check("兩分頁：B 不重開就看到 A 的新節點與文字", true);
+          const bSeen = await B.evaluate(() => [...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("跨分頁增量")));
+          check("兩分頁：B 不重開就看到 A 的新節點與文字", bSeen);
 
-          // reload 風暴不見了：這段期間不得出現任何整房快照 GET
+          // reload 風暴不見了：整房快照與板 GET 都必須為 0 —
+          // 後者證明 B 看到的是 realtime row-patch，不是任何 heal 的
+          // loadWhiteboard 替代路徑（Grok pr02c F6）。
           const fullReloads = requestLog.filter((line) => line.startsWith("GET /rest/v1/rooms?select=*")).length;
-          check("row-patch 取代整房 reload（rooms 快照 GET = 0）", fullReloads === 0, "fullReloads=" + fullReloads);
+          const boardFetches = requestLog.filter((line) => line.includes("GET /rest/v1/whiteboard_nodes")).length;
+          check("row-patch 取代整房 reload（rooms 快照 GET=0 且板 GET=0）", fullReloads === 0 && boardFetches === 0, `fullReloads=${fullReloads} boardFetches=${boardFetches}`);
         } finally {
           await ctxB.close();
         }

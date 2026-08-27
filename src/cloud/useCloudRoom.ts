@@ -211,6 +211,12 @@ type Params = {
   onSnapshot: (room: Room) => void;
   /** 白板增量（PR-02c）：走專屬回呼，不經 applyRemoteRoom（deep-link 消耗不得重跑）。 */
   onBoardPatch?: (patch: BoardPatch) => void;
+  /**
+   * 板級自癒（Grok pr02c F3）：整板以雲端 graph 替換 — 走 applyRemoteRoom
+   * 會被空陣列守門與 reconcile 的「本地補回」擋住，斷線期間的 DELETE
+   * 永遠癒不掉。
+   */
+  onBoardReplace?: (whiteboardId: string, graph: { nodes: import("../features/collaboration/types").WhiteboardNode[]; edges: import("../features/collaboration/types").WhiteboardEdge[] }) => void;
   showToast: ShowToast;
 };
 
@@ -271,7 +277,7 @@ function rememberCloudRoom(localRoomId: string, roomId: string, token: string): 
  * Binds the active room to the cloud when configured. Inert (returns
  * local-only) otherwise, so the local IndexedDB + PeerJS path is untouched.
  */
-export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, showToast }: Params) {
+export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, onBoardReplace, showToast }: Params) {
   const [status, setStatus] = useState<SyncStatus>(isCloudConfigured ? "connecting" : "local-only");
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
@@ -305,6 +311,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   activeWhiteboardRef.current = activeWhiteboardId ?? null;
   const onBoardPatchRef = useRef(onBoardPatch);
   onBoardPatchRef.current = onBoardPatch;
+  const onBoardReplaceRef = useRef(onBoardReplace);
+  onBoardReplaceRef.current = onBoardReplace;
   roomRef.current = room;
   activeBranchRef.current = activeBranchId ?? null;
   const supabase = getSupabase();
@@ -401,6 +409,11 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     if (!supabase || !rid) return false;
     try {
       const graph = await loadWhiteboardGraph(supabase, rid, whiteboardId);
+      if (onBoardReplaceRef.current) {
+        // 整板替換：斷線期間的 DELETE 也癒得掉（Grok pr02c F3）。
+        onBoardReplaceRef.current(whiteboardId, graph);
+        return true;
+      }
       const current = roomRef.current;
       if (!current) return false;
       const otherNodes = (current.whiteboardNodes ?? []).filter((node) => node.whiteboardId !== whiteboardId);
@@ -674,6 +687,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       void (async () => {
         await flushPending();
         await reload();
+        if (activeWhiteboardRef.current) await loadWhiteboard(activeWhiteboardRef.current);
       })();
     } else {
       setStatus("connecting");

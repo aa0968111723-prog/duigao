@@ -27,7 +27,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 import { buildDiscussionContext, getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "../../src/features/collaboration/links.ts";
 import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion, stickyTextInputProps } from "../../src/features/collaboration/permissions.ts";
-import { applyBoardPatches, applyPendingCloudWrites, applyPendingNodeEdits, decideNodeWriteRetry, isBrowserOnline, isCloudWriteAcknowledged, reconcileNodes } from "../../src/features/collaboration/offline.ts";
+import { applyBoardPatches, applyPendingCloudWrites, replaceBoardGraph, applyPendingNodeEdits, decideNodeWriteRetry, isBrowserOnline, isCloudWriteAcknowledged, reconcileNodes } from "../../src/features/collaboration/offline.ts";
 import {
   collaborationSliceFromRoom,
   collaborationSliceHasRows,
@@ -536,7 +536,7 @@ test("applyBoardPatches：version gate 擋 echo 與亂序、ack 水位無條件�
   assert.equal(out.nodes.length, 2);
 });
 
-test("applyBoardPatches：拖曳護盾讓路但 ack 仍推進；edge 以 id 去重/移除", () => {
+test("applyBoardPatches：護盾讓路且不推進 ack（409 歸 02b）；edge 以 id 去重/移除", () => {
   const node = (id: string, version: number) => ({
     id, whiteboardId: "b", roomId: "r", nodeType: "text", x: 0, y: 0, width: 100, height: 80,
     content: { text: "拖曳中" }, version, createdAt: 1, updatedAt: 1,
@@ -550,6 +550,46 @@ test("applyBoardPatches：拖曳護盾讓路但 ack 仍推進；edge 以 id 去�
     { type: "edge-delete", id: "e1" },
   ], new Set(["n1"]));
   assert.equal((out.nodes[0] as { version: number }).version, 1);
-  assert.equal(acked.get("n1"), 9); // 護盾讓路但水位推進，拖完 persist 用舊版會走 02b 衝突
+  // 護盾期間 ack 不推進（Grok pr02c F1）：persist 用舊 acked 去撞 409，
+  // 由 02b 的 drop+refetch 誠實接手 — 絕不等版本 LWW 靜默覆蓋別人的內容。
+  assert.equal(acked.get("n1"), 1);
   assert.deepEqual(out.edges.map((item) => (item as { id: string }).id), ["e2"]);
+});
+
+test("in-flight 的節點：自己的 WAL echo（acked+1）不得覆蓋打字中的內容", () => {
+  const node = (id: string, version: number, text: string) => ({
+    id, whiteboardId: "b", roomId: "r", nodeType: "text", x: 0, y: 0, width: 100, height: 80,
+    content: { text }, version, createdAt: 1, updatedAt: 1,
+  }) as never;
+  const acked = new Map([["n1", 3]]);
+  // 第一鍵已送出（in-flight），echo version=4 先到；本地已打到第二鍵
+  const out = applyBoardPatches([node("n1", 3, "第二鍵")], [], acked, [
+    { type: "node-upsert", node: node("n1", 4, "第一鍵") },
+  ], new Set(["n1"]));
+  assert.equal(out.changed, false);
+  assert.equal((out.nodes[0] as { content: { text: string } }).content.text, "第二鍵");
+  assert.equal(acked.get("n1"), 3); // ack 由 HTTP 結果推進，不由 echo
+});
+
+test("replaceBoardGraph：遠端已刪的節點消失、acked 清除；護盾節點保留", () => {
+  const node = (id: string, board: string, version: number, text = "") => ({
+    id, whiteboardId: board, roomId: "r", nodeType: "text", x: 0, y: 0, width: 100, height: 80,
+    content: { text }, version, createdAt: 1, updatedAt: 1,
+  }) as never;
+  const acked = new Map([["gone", 5], ["stay", 2], ["typing", 2], ["other", 1]]);
+  const result = replaceBoardGraph(
+    [node("gone", "b1", 5), node("stay", "b1", 2, "舊"), node("typing", "b1", 2, "打字中"), node("other", "b2", 1)],
+    [],
+    acked,
+    "b1",
+    { nodes: [node("stay", "b1", 6, "雲端新"), node("typing", "b1", 4, "雲端版")], edges: [] },
+    new Set(["typing"]),
+  );
+  const ids = result.nodes.map((item) => (item as { id: string }).id).sort();
+  assert.deepEqual(ids, ["other", "stay", "typing"]); // gone 消失、b2 不動
+  assert.equal(acked.has("gone"), false);
+  assert.equal(acked.get("stay"), 6);
+  assert.equal(acked.get("typing"), 2); // 護盾中不推進
+  const typing = result.nodes.find((item) => (item as { id: string }).id === "typing");
+  assert.equal((typing as { content: { text: string } }).content.text, "打字中"); // 打字中的內容保留
 });

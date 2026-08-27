@@ -94,6 +94,7 @@ import {
   clearPendingEditIf,
   applyBoardPatches,
   decideNodeWriteRetry,
+  replaceBoardGraph,
   isBrowserOnline,
   isCloudWriteAcknowledged,
   listPendingEdits,
@@ -388,11 +389,15 @@ export function App() {
   // Cloud persistence (only active when VITE_SUPABASE_* are set). Inert in
   // local-only mode, so the IndexedDB + PeerJS path below is unchanged.
   // ---- 白板即時增量（PR-02c） ------------------------------------------
-  // 收到的 row-patch 進佇列，一個 animation frame 內合併成單次 setRoom：
-  // arrange 之類的爆量寫入不會變成 N 次 render + N 次 IDB trackSave。
+  // 收到的 row-patch 進佇列，一個 animation frame 內合併成單次 setRoom，
+  // arrange 之類的爆量寫入只付一次 render（遠端 patch 走 setRoom，
+  // 本來就不經 updateRoom/trackSave — 這裡省的是 render，不是 IDB 寫）。
   const boardPatchQueue = useRef<import("./cloud/useCloudRoom").BoardPatch[]>([]);
   const boardPatchScheduled = useRef(false);
   const draggingNodeIds = useRef<ReadonlySet<string> | null>(null);
+  // persist in-flight 的節點：自己的 WAL echo（version=acked+1）會早於
+  // HTTP ack 到達，這期間 inbound 不得覆蓋打字中的內容（Grok pr02c F2）。
+  const inFlightNodeIds = useRef<Set<string>>(new Set());
   const flushBoardPatches = useCallback(() => {
     boardPatchScheduled.current = false;
     const batch = boardPatchQueue.current;
@@ -400,12 +405,15 @@ export function App() {
     if (!batch.length) return;
     setRoom((current) => {
       if (!current) return current;
+      const shielded = new Set(inFlightNodeIds.current);
+      for (const id of draggingNodeIds.current ?? []) shielded.add(id);
       const result = applyBoardPatches(
         current.whiteboardNodes ?? [],
         current.whiteboardEdges ?? [],
         lastAckedNodeVersion.current,
-        batch,
-        draggingNodeIds.current,
+        // 換房殘留的 patch 丟棄（Grok pr02c F5）
+        batch.filter((patch) => patch.type !== "node-upsert" || patch.node.roomId === current.id),
+        shielded,
       );
       if (!result.changed) return current;
       return { ...current, whiteboardNodes: result.nodes, whiteboardEdges: result.edges };
@@ -418,7 +426,24 @@ export function App() {
     requestAnimationFrame(flushBoardPatches);
   }, [flushBoardPatches]);
 
-  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, showToast });
+  const onBoardReplace = useCallback((whiteboardId: string, graph: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] }) => {
+    const shielded = new Set(inFlightNodeIds.current);
+    for (const id of draggingNodeIds.current ?? []) shielded.add(id);
+    setRoom((current) => {
+      if (!current) return current;
+      const result = replaceBoardGraph(
+        current.whiteboardNodes ?? [],
+        current.whiteboardEdges ?? [],
+        lastAckedNodeVersion.current,
+        whiteboardId,
+        graph,
+        shielded,
+      );
+      return { ...current, whiteboardNodes: result.nodes, whiteboardEdges: result.edges };
+    });
+  }, []);
+
+  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onBoardReplace, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
 
@@ -1349,6 +1374,10 @@ export function App() {
       const roomId = roomRef.current?.id ?? stamped[0]?.roomId ?? "";
       const persistCloud = async (node: WhiteboardNode) => {
         const prev = nodePersistChain.current.get(node.id) ?? Promise.resolve();
+        // in-flight 標記：自己的 WAL echo 在 HTTP ack 前不得覆蓋本地內容
+        // （Grok pr02c F2）；ack 落地後 lastAcked=result.version，晚到的
+        // echo 變成 == acked 被 gate 擋下。
+        inFlightNodeIds.current.add(node.id);
         const next = prev.catch(() => undefined).then(async () => {
           const latest = roomRef.current?.whiteboardNodes?.find((item) => item.id === node.id) ?? node;
           const acked = lastAckedNodeVersion.current.get(latest.id) ?? latest.version ?? 1;
@@ -1371,6 +1400,10 @@ export function App() {
             // 的 nodes 是空的、換不到節點（Grok pr02b F2）。toast 等圖真的
             // 換完才說，而且說實話。
             await clearPendingEdit(`node:${node.id}`);
+            // 這趟航班已以衝突告終：先移出 in-flight，讓板級 refetch 能
+            // 真正採納伺服器列（否則護盾把該 drop 的本地內容保住、acked
+            // 不前進，之後每一筆都 409 空轉）。
+            inFlightNodeIds.current.delete(node.id);
             const refreshed = await cloudRef.current.loadWhiteboard?.(node.whiteboardId).catch(() => false);
             showToast(
               refreshed
@@ -1393,7 +1426,11 @@ export function App() {
           }
         });
         nodePersistChain.current.set(node.id, next);
-        await next;
+        try {
+          await next;
+        } finally {
+          inFlightNodeIds.current.delete(node.id);
+        }
       };
       if (isBrowserOnline()) {
         stamped.forEach((node) => void persistCloud(node));

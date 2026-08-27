@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T20:48:38.000Z",
+  "generatedAt": "2026-08-27T21:03:04.000Z",
   "git": {
     "branch": "feat/board-realtime-rowpatch-02c",
-    "sha": "0d278a781e5fa33a9fa74c9bff3d128daa810573",
+    "sha": "384389af8e5227b30c09357bfccd8927d03f0a07",
     "mainSha": "0d278a781e5fa33a9fa74c9bff3d128daa810573",
     "dirty": true
   },
