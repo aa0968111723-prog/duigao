@@ -1406,6 +1406,56 @@ try {
     !as(owner, `insert into public.room_discussion_messages (room_id, author_name, kind, body, payload) values ('${capRoom}'::uuid, 'Owner', 'attachment', 'again.pdf', '{"path":"rooms/${capRoom}/attachments/${attMsg}/again.pdf","mime":"application/pdf"}'::jsonb);`).failed,
   );
 
+  section("0019：AI 套用稽核事件");
+  psqlFile(join(MIGRATIONS, "0019_ai_apply_audit.sql"));
+
+  // (a) 成員可寫自己的 ai_proposal_applied
+  ok(
+    "owner 可寫 ai_proposal_applied（actor=自己）",
+    !as(owner, `insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload) values ('${capRoom}'::uuid, 'ai_proposal_applied', '${owner}'::uuid, '{"proposal_id":"p1","type":"create_poll","label":"投票"}'::jsonb);`).failed,
+  );
+  // (b) 偽造 actor 被 policy 擋下
+  ok(
+    "actor 冒名（別人的 uid）被擋",
+    as(owner, `insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload) values ('${capRoom}'::uuid, 'ai_proposal_applied', '${stranger}'::uuid, '{}'::jsonb);`).failed,
+  );
+  // (c) trigger 專屬型別不可被 client 偽造
+  ok(
+    "client 不能偽造 decision_finalized（trigger 專屬型別）",
+    as(owner, `insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload) values ('${capRoom}'::uuid, 'decision_finalized', '${owner}'::uuid, '{}'::jsonb);`).failed,
+  );
+  // (d) 非成員不能寫別房的稽核
+  ok(
+    "非成員不能寫別房的 ai_proposal_applied",
+    as(stranger, `insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload) values ('${capRoom}'::uuid, 'ai_proposal_applied', '${stranger}'::uuid, '{}'::jsonb);`).failed,
+  );
+  // (e) append-only：沒有 update / delete 授權
+  ok(
+    "稽核列 append-only（update 無授權）",
+    as(owner, `update public.collaboration_audit_events set payload = '{}'::jsonb where room_id = '${capRoom}'::uuid;`).failed,
+  );
+  ok(
+    "稽核列 append-only（delete 無授權）",
+    as(owner, `delete from public.collaboration_audit_events where room_id = '${capRoom}'::uuid;`).failed,
+  );
+  // (f) select 仍是成員限定
+  ok(
+    "非成員讀不到稽核列",
+    as(stranger, `select count(*) from public.collaboration_audit_events where room_id = '${capRoom}'::uuid;`).out === "0",
+  );
+  // (g) 冪等＋0014 replay 不復活舊 CHECK
+  const auditShape = () => psql(`select
+    (select count(*) from pg_policies where tablename = 'collaboration_audit_events') || '/' ||
+    (select count(*) from pg_constraint where conname = 'collaboration_audit_events_event_type_check');`).out;
+  const auditBefore = auditShape();
+  psqlFile(join(MIGRATIONS, "0019_ai_apply_audit.sql"));
+  ok("重跑 0019 後 policy / constraint 形狀不變", auditBefore === auditShape(), `${auditBefore} → ${auditShape()}`);
+  psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
+  ok(
+    "0014 replay 之後 ai_proposal_applied 仍可寫（CHECK 不復活、grant 不被撤銷）",
+    !as(owner, `insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload) values ('${capRoom}'::uuid, 'ai_proposal_applied', '${owner}'::uuid, '{"proposal_id":"p2","type":"add_whiteboard_node","label":"再套一次"}'::jsonb);`).failed,
+  );
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

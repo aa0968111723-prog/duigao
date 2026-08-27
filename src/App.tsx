@@ -1645,6 +1645,17 @@ export function App() {
           audit(`已套用 AI 提案：${proposal.label}`);
         }
         appliedAiProposalIds.current.add(proposal.id);
+        // 機器稽核列（0019）：cloud 房才寫；失敗不回滾套用（套用本身已
+        // 成功），但要誠實說稽核沒記到 — 討論串的「已套用」訊息仍在。
+        if (cloudRef.current.boundRoomId) {
+          void cloudRef.current.writes.recordAiApplyAudit?.({
+            proposalId: proposal.id,
+            proposalType: proposal.type,
+            label: proposal.label,
+          }).then((recorded) => {
+            if (!recorded) showToast("稽核紀錄暫時沒寫成（套用本身已完成）", { tone: "info" });
+          });
+        }
         showToast("已套用 AI 提案", { tone: "success" });
         return { ok: true, message: "已套用。原稿沒有被改寫。" };
       } catch {

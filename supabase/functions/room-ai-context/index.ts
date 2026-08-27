@@ -367,7 +367,9 @@ async function handle(request: Request): Promise<Response> {
     const plan = planByBranch.get(asset.branchId);
     if (!plan) continue;
     const content = [text(plan.description), blockText(plan.blocks)].filter(Boolean).join("\n");
-    if (content) asset.chunks = [{ id: `${asset.assetId}:plan`, chunkIndex: 0, content: scrubText(content).slice(0, 8000), heading: asset.title, section: "企劃內容" }, ...(asset.chunks ?? [])].slice(0, 24);
+    // cap 對齊：scrubText 內部已截到 5000，這裡寫 8000 是死上限（pr00
+    // audit F8）— 有效上限就是 5000，明著寫。
+    if (content) asset.chunks = [{ id: `${asset.assetId}:plan`, chunkIndex: 0, content: scrubText(content).slice(0, 5000), heading: asset.title, section: "企劃內容" }, ...(asset.chunks ?? [])].slice(0, 24);
   }
 
   const discussionText = [
