@@ -1238,10 +1238,12 @@ try {
   section("素材庫：0016 RLS");
   const libRoom = psql("select gen_random_uuid();").out;
   const libShared = psql("select gen_random_uuid();").out;
+  const libRoomInsert = as(owner, `insert into public.library_assets (id, scope, room_id, title, summary, topics, kind) values ('${libRoom}'::uuid, 'room', '${capRoom}'::uuid, '茶會文宣', '春季茶會主視覺', array['茶會'], 'poster');`);
+  const libSharedInsert = as(owner, `insert into public.library_assets (id, scope, title, summary, topics, kind) values ('${libShared}'::uuid, 'shared', '社團 Logo', '固定標誌', array['主視覺'], 'image');`);
   ok(
     "owner 可以寫房間素材與共用素材",
-    !as(owner, `insert into public.library_assets (id, scope, room_id, title, summary, topics, kind) values ('${libRoom}'::uuid, 'room', '${capRoom}'::uuid, '茶會文宣', '春季茶會主視覺', array['茶會'], 'poster');`).failed
-      && !as(owner, `insert into public.library_assets (id, scope, title, summary, topics, kind) values ('${libShared}'::uuid, 'shared', '社團 Logo', '固定標誌', array['主視覺'], 'image');`).failed,
+    !libRoomInsert.failed && !libSharedInsert.failed,
+    `${libRoomInsert.err} | ${libSharedInsert.err}`,
   );
   ok(
     "reviewer 可讀但不能寫 library",
@@ -1255,6 +1257,58 @@ try {
   const libraryBefore = libraryShape();
   psqlFile(join(MIGRATIONS, "0016_asset_library.sql"));
   ok("重跑 0016 後 tables / policies 數量不變", libraryBefore === libraryShape(), `${libraryBefore} → ${libraryShape()}`);
+
+  section("0017：共用素材與提案作者 ACL");
+  // 0016 replay recreates the old shared UPDATE/DELETE policies. Re-apply 0017
+  // so the author ACL is what we probe, then prove 0017 is itself idempotent.
+  psqlFile(join(MIGRATIONS, "0017_author_acl.sql"));
+  const stamped = as(owner, `select created_by from public.library_assets where id = '${libShared}'::uuid;`);
+  ok(
+    "共用素材 insert 會 stamp created_by",
+    stamped.out === owner,
+    `${stamped.out} vs ${owner}`,
+  );
+  const editorHijack = as(editor, `update public.library_assets set title = 'hijack' where id = '${libShared}'::uuid returning id;`);
+  const afterHijack = as(owner, `select title from public.library_assets where id = '${libShared}'::uuid;`);
+  ok(
+    "同房 editor 不能改別人建立的共用素材",
+    editorHijack.out === "" && afterHijack.out === "社團 Logo",
+    `returned=${editorHijack.out} title=${afterHijack.out} err=${editorHijack.err}`,
+  );
+  ok(
+    "建立者仍可更新自己的共用素材",
+    !as(owner, `update public.library_assets set title = '社團 Logo 更新' where id = '${libShared}'::uuid;`).failed,
+  );
+  const ownerProposal = psql("select gen_random_uuid();").out;
+  const reviewerProposal = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可建立提案",
+    !as(owner, `insert into public.visual_proposals (id, room_id, version_id, name, payload) values ('${ownerProposal}'::uuid, '${capRoom}'::uuid, '${capVersion}'::uuid, 'Owner proposal', '{}'::jsonb);`).failed,
+  );
+  const reviewerSteal = as(reviewer, `update public.visual_proposals set name = 'stolen' where id = '${ownerProposal}'::uuid returning id;`);
+  const afterSteal = as(owner, `select name from public.visual_proposals where id = '${ownerProposal}'::uuid;`);
+  ok(
+    "reviewer 不能直接 UPDATE 別人的提案",
+    reviewerSteal.out === "" && afterSteal.out === "Owner proposal",
+    `returned=${reviewerSteal.out} name=${afterSteal.out} err=${reviewerSteal.err}`,
+  );
+  ok(
+    "reviewer 可用 upsert 建立自己的提案，但不能覆寫別人的",
+    !as(reviewer, `select upsert_visual_proposal('${reviewerProposal}'::uuid, '${capRoom}'::uuid, '${capVersion}'::uuid, 'Reviewer', 'Mine', '{}'::jsonb, null);`).failed
+      && as(reviewer, `select upsert_visual_proposal('${ownerProposal}'::uuid, '${capRoom}'::uuid, '${capVersion}'::uuid, 'Reviewer', 'stolen', '{}'::jsonb, 1);`).failed,
+  );
+  ok(
+    "owner 仍可用 upsert 更新自己的提案",
+    !as(owner, `select upsert_visual_proposal('${ownerProposal}'::uuid, '${capRoom}'::uuid, '${capVersion}'::uuid, 'Owner', 'Owner proposal 2', '{}'::jsonb, 1);`).failed
+      && as(owner, `select name from public.visual_proposals where id = '${ownerProposal}'::uuid;`).out === "Owner proposal 2",
+  );
+  const aclShape = () => psql(`select
+    (select count(*) from pg_policies where tablename = 'visual_proposals') || '/' ||
+    (select count(*) from pg_policies where tablename = 'library_assets') || '/' ||
+    (select count(*) from pg_trigger where tgname = 'library_assets_stamp_author');`).out;
+  const aclBefore = aclShape();
+  psqlFile(join(MIGRATIONS, "0017_author_acl.sql"));
+  ok("重跑 0017 後 policies / trigger 數量不變", aclBefore === aclShape(), `${aclBefore} → ${aclShape()}`);
 
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {

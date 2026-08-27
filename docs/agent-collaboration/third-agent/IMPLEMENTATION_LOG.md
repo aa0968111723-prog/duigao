@@ -17,3 +17,10 @@ Branch: `codex/third-agent-context-path-strip`
 
 - `stripSecrets` now drops `poster_storage_path`, `image_path`, `video_path` and camelCase aliases so 0015 metadata cannot ride into Room Context.
 - Test: `scripts/tests/room-context-strip.test.ts` drives the shipped helper.
+## 2026-08-28 — RLS author ACL
+
+Branch: `codex/third-agent-rls-author-acl`
+
+- 0017: shared library mutate = created_by only; visual proposal write = author or can_manage_media.
+- `upsert_visual_proposal` rejects non-author reviewers.
+- Tests in `scripts/e2e/migrations.mjs`.

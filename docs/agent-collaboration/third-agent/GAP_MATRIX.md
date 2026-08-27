@@ -139,6 +139,7 @@ Status key: OPEN / FIXED_THIS_PR / BLOCKED / PHYSICAL_DEVICE_PENDING
 - commit: —
 - test: AUTOMATED_VERIFIED for 390×844 Android Chrome emulation after this PR’s AI sheet path
 
+<<<<<<< HEAD
 ## TA-010
 
 - severity: P2 (privacy leak if metadata is copied into context)
@@ -153,3 +154,34 @@ Status key: OPEN / FIXED_THIS_PR / BLOCKED / PHYSICAL_DEVICE_PENDING
 - status: FIXED_THIS_PR
 - commit: this branch
 - test: `scripts/tests/room-context-strip.test.ts`
+=======
+## TA-011
+
+- severity: P1
+- area: RLS
+- claim: shared library is room-safe
+- actual evidence: 0016 UPDATE/DELETE allowed any owner/editor of any room to mutate every shared row
+- reproduction: editor of room A updates a shared logo created by another user
+- affected users: every shared library asset
+- root cause: membership exists-check without created_by
+- recommended fix: stamp created_by; shared mutate = author only
+- release blocker: yes if shared library is used
+- status: FIXED_THIS_PR
+- commit: this branch
+- test: migrations 0017 section
+
+## TA-012
+
+- severity: P1
+- area: RLS
+- claim: reviewer cannot overwrite another member's proposals
+- actual evidence: visual_proposals FOR ALL members + SECURITY DEFINER upsert only checks is_room_member
+- reproduction: reviewer `upsert_visual_proposal` on an owner's proposal id
+- affected users: proposal authors
+- root cause: membership treated as write grant
+- recommended fix: author or can_manage_media
+- release blocker: yes for proposal integrity
+- status: FIXED_THIS_PR
+- commit: this branch
+- test: migrations 0017 section
+>>>>>>> origin/main
