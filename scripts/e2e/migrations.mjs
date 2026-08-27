@@ -1438,9 +1438,27 @@ try {
     "稽核列 append-only（delete 無授權）",
     as(owner, `delete from public.collaboration_audit_events where room_id = '${capRoom}'::uuid;`).failed,
   );
+  // (e2) actor NULL：with check 三值邏輯只收 true，NULL 被擋（Grok 04 F1）
+  ok(
+    "actor_user_id NULL 被 with check 擋下",
+    as(owner, `insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload) values ('${capRoom}'::uuid, 'ai_proposal_applied', null, '{}'::jsonb);`).failed,
+  );
+  // (e3) anon 完全進不來（0014 revoke all from anon）
+  ok(
+    "anon 不能寫稽核列",
+    asAnon(`insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload) values ('${capRoom}'::uuid, 'ai_proposal_applied', null, '{}'::jsonb);`).failed,
+  );
+  ok(
+    "anon 不能讀稽核列",
+    asAnon(`select count(*) from public.collaboration_audit_events;`).failed,
+  );
   // (f) select 仍是成員限定
   ok(
-    "非成員讀不到稽核列",
+    "owner 讀得到自己房的稽核列（列確實存在）",
+    Number(as(owner, `select count(*) from public.collaboration_audit_events where room_id = '${capRoom}'::uuid;`).out) >= 1,
+  );
+  ok(
+    "非成員讀不到稽核列（同一張非空表 — 是 RLS 濾掉，不是空表偽陰）",
     as(stranger, `select count(*) from public.collaboration_audit_events where room_id = '${capRoom}'::uuid;`).out === "0",
   );
   // (g) 冪等＋0014 replay 不復活舊 CHECK
