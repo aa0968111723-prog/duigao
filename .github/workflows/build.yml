@@ -78,14 +78,13 @@ jobs:
         with:
           node-version: 20
       - run: npm install
-      # playwright is deliberately NOT a devDependency: it would make a plain
-      # `npm install` pull a browser nobody asked for. The suites import it at
-      # runtime and say so when it is missing, so CI installs it here without
-      # writing it into the manifest.
+      # Playwright is a devDependency for the checked-in browser suites. The
+      # browser binary is still installed explicitly here, so npm install does
+      # not download Chromium for every local install.
       - name: Install Playwright
         run: |
-          npm i -D --no-save playwright
           npx playwright install --with-deps chromium
+      - run: npm run test:review-viewer
       - run: npm run test:video
       - run: npm run test:share-e2e
       - run: npm run test:share-preview

@@ -129,6 +129,22 @@
   .m-vchip.is-on { background: var(--ink); border-color: var(--ink); color: #17140f; font-weight: 500; }
   .m-vchip-add { padding: 0 12px; border-style: dashed; }
 
+  /* ---------- immersive poster review viewer ---------- */
+  .immersive-head {
+    min-height: calc(58px + env(safe-area-inset-top));
+    padding: calc(8px + env(safe-area-inset-top)) 8px 8px;
+  }
+  .immersive-back { padding-right: 11px; }
+  .immersive-zoom { min-width: 38px; font-size: 12px; }
+  .immersive-head-actions { gap: 4px; }
+  .immersive-control-btn { padding-inline: 10px; font-size: 12px; }
+  .immersive-zoom-bar {
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    max-width: calc(100% - 24px);
+  }
+  .immersive-zoom-bar button { min-height: 40px; padding-inline: 11px; }
+  .immersive-comment-hint { max-width: calc(100% - 24px); }
+
   /* ---------- poster ---------- */
   /* While a sheet is open the poster refits above it, so the spot you just
      marked stays on screen even with the keyboard up. */

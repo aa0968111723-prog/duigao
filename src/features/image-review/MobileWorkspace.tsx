@@ -10,6 +10,7 @@ import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UploadZone } from "../../components/UploadZone";
 import { Viewer } from "./Stage";
+import { ImmersiveViewer } from "./ImmersiveViewer";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
 import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "../../components/api";
 
@@ -43,6 +44,7 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [dockHeight, setDockHeight] = useState(0);
   const [composeInset, setComposeInset] = useState(0);
   const [nudge, setNudge] = useState(false);
+  const [immersiveOpen, setImmersiveOpen] = useState(false);
   const chatRef = useRef<HTMLInputElement>(null);
   const proposalMode = proposalSession != null;
 
@@ -87,6 +89,7 @@ export function MobileWorkspace({ api, presence }: Props) {
       api.setTool("pan");
       api.setView({ ...view, versionId: target.versionId, compareMode: "single" });
       api.selectPin(commentId);
+      setImmersiveOpen(true);
       setTab("items");
       setSnap("half");
     },
@@ -157,6 +160,24 @@ export function MobileWorkspace({ api, presence }: Props) {
     api.selectPin(null);
     api.setTool("region");
     setSnap("peek");
+  };
+
+  const closeImmersive = () => {
+    if (api.draftPin) api.cancelPin();
+    api.setTool("pan");
+    api.selectPin(null);
+    api.setPreviewStroke(null);
+    setImmersiveOpen(false);
+  };
+
+  const focusComment = (commentId: string) => {
+    const target = room.comments.find((comment) => comment.id === commentId);
+    if (!target) return;
+    api.setTool("pan");
+    api.selectPin(commentId);
+    api.setView({ ...view, versionId: target.versionId, compareMode: "single" });
+    setNudge(false);
+    setImmersiveOpen(true);
   };
 
   /** 重新圈選: drop the draft and immediately arm the circle gesture again. */
@@ -237,7 +258,7 @@ export function MobileWorkspace({ api, presence }: Props) {
       </div>
 
       <div className="m-stage-area">
-        <Viewer api={api} compact />
+        <Viewer api={api} compact onOpenImmersive={() => setImmersiveOpen(true)} />
         {nudge && !task && !draftPin && (
           <div className="m-nudge" role="note">
             <span>還有哪一個地方最需要調整？</span>
@@ -257,6 +278,8 @@ export function MobileWorkspace({ api, presence }: Props) {
           </div>
         )}
       </div>
+
+      {immersiveOpen && <ImmersiveViewer api={api} onClose={closeImmersive} />}
 
       <div className="m-bottom">
         {proposalSession ? (
@@ -332,13 +355,7 @@ export function MobileWorkspace({ api, presence }: Props) {
                     pin={c}
                     compact
                     selected={c.id === selectedPinId}
-                    onSelect={() => {
-                      // Discussion owns the text; the artwork only shows this
-                      // one locator (a thin region box for circled feedback).
-                      api.setTool("pan");
-                      api.selectPin(c.id);
-                      api.setView({ ...view, versionId: c.versionId, compareMode: "single" });
-                    }}
+                    onSelect={() => focusComment(c.id)}
                     onToggleResolve={() => api.toggleResolve(c.id)}
                     relatedProposals={roomProposals.docs.filter((d) => d.linkedCommentId === c.id)}
                     onCreateProposal={() => proposeFromPin(c.id)}

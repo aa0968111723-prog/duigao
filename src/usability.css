@@ -141,6 +141,7 @@
 /* View mode can use the browser's native pinch zoom. Annotation modes keep
    touch-action:none from styles.css so drawing and pin placement stay precise. */
 .stage.tool-pan.is-interactive { touch-action: pan-x pan-y pinch-zoom; }
+.stage.stage-zoomable.tool-pan.is-interactive { touch-action: none; }
 
 /* Disabled rows remain visible so people discover Undo, but cannot be tapped. */
 .m-row:disabled { opacity: 0.42; cursor: default; }
