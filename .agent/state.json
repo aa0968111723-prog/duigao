@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T17:48:30.000Z",
+  "generatedAt": "2026-08-27T17:53:21.000Z",
   "git": {
     "branch": "feat/discussion-room-shell",
-    "sha": "481d59b6ad6d184f04177f5d3ee4d03ee9dfad35",
-    "mainSha": "9b8d388fe507ab76a69ca87a06f8d223884f1c14",
-    "dirty": true
+    "sha": "a3211dbf9eca60f89a4e6635c9a009a5ab7ac4bf",
+    "mainSha": "77f6f9d59c20d9418a6cc705a4ab4a8ac15aee44",
+    "dirty": false
   },
   "project": {
     "name": "duigao",
@@ -45,27 +45,11 @@
         },
         {
           "baseRefName": "main",
-          "headRefName": "codex/third-agent-rls-author-acl",
-          "isDraft": false,
-          "number": 47,
-          "title": "fix(rls): author-only writes for shared library and visual proposals",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/47"
-        },
-        {
-          "baseRefName": "main",
           "headRefName": "codex/third-agent-context-path-strip",
           "isDraft": false,
           "number": 46,
           "title": "fix(ai): strip poster/image/video storage paths from Room Context",
           "url": "https://github.com/aa0968111723-prog/duigao/pull/46"
-        },
-        {
-          "baseRefName": "main",
-          "headRefName": "codex/third-agent-offline-stale-replay",
-          "isDraft": false,
-          "number": 45,
-          "title": "fix(offline): stop stale run() replay from overwriting newer cloud writes",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/45"
         }
       ]
     },
@@ -976,7 +960,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0016",
+    "repoMigrationHead": "0017",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -993,10 +977,11 @@
       "supabase/migrations/0013_project_room_branches.sql",
       "supabase/migrations/0014_collaboration_workspace.sql",
       "supabase/migrations/0015_asset_intelligence.sql",
-      "supabase/migrations/0016_asset_library.sql"
+      "supabase/migrations/0016_asset_library.sql",
+      "supabase/migrations/0017_author_acl.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0016",
+    "productionMigrationExpectation": "0017",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1145,7 +1130,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0016_asset_library.sql."
+        "message": "Migration order is contiguous through 0017_author_acl.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",
