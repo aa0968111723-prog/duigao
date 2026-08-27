@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T17:55:19.000Z",
+  "generatedAt": "2026-08-27T18:21:45.000Z",
   "git": {
     "branch": "feat/discussion-room-shell",
-    "sha": "b4a078dc5802363c6fc97c0fe215946ddeacf0d6",
+    "sha": "1587985a5287e96e5bb33be98eb7dc58f253d2c8",
     "mainSha": "77f6f9d59c20d9418a6cc705a4ab4a8ac15aee44",
     "dirty": true
   },
@@ -34,24 +34,7 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": [
-        {
-          "baseRefName": "main",
-          "headRefName": "feat/discussion-room-shell",
-          "isDraft": false,
-          "number": 48,
-          "title": "PR-01a: 討論成為房間殼 — 對稿 overlay、推進面板、送出重試、single 房討論 drawer",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/48"
-        },
-        {
-          "baseRefName": "main",
-          "headRefName": "codex/third-agent-context-path-strip",
-          "isDraft": false,
-          "number": 46,
-          "title": "fix(ai): strip poster/image/video storage paths from Room Context",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/46"
-        }
-      ]
+      "items": []
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",

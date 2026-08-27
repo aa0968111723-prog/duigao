@@ -521,9 +521,11 @@ export function VideoWorkspace({ api, presence }: Props) {
         const max = p?.duration() ?? duration;
         seekTo(Math.min(max, (p?.currentTime() ?? 0) + 5));
       } else if (e.key === "Escape") {
-        if (draft) cancelDraft();
-        else if (rangePick) setRangePick(null);
-        else if (api.selectedPinId) api.selectPin(null);
+        // 消費掉的 Escape 標記 defaultPrevented：外層（對稿 overlay）以此
+        // 判斷這一下已被內層 ladder 用掉，一次只關一件事。
+        if (draft) { e.preventDefault(); cancelDraft(); }
+        else if (rangePick) { e.preventDefault(); setRangePick(null); }
+        else if (api.selectedPinId) { e.preventDefault(); api.selectPin(null); }
       }
     };
     window.addEventListener("keydown", onKey);

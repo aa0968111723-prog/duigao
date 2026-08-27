@@ -25,3 +25,17 @@ collaboration 39、multi-branch 9 全綠｜agent:gate PASS。
 
 殘餘（非阻擋）：drawer 內 Escape 交由宿主 sheet；acked-ghost 路徑由與 failed-ghost
 共用的對帳機制覆蓋（E2E 直接驗 failed 路徑）。
+
+## Round 2（grok-findings-round2 = grok r2 驗收）
+
+裁決 MUST_FIX：8 FIXED、F3/F9 PARTIAL（皆為修復引入）。處置：
+
+| # | Finding | 處置 |
+|---|---|---|
+| N1 (high, F3 殘餘) | 隔離 effect 在 bind re-key 時刪掉 in-flight sending（roomId 還是本機 id）；insert 失敗會無聲消失 | **已修**：對帳抽成純函式 reconcileOutbox（遷移→補送→隔離，處理 bound/re-key 分兩次 render 到達的兩種順序；prevBound 守門擋 A→B 誤遷）。新增 scripts/tests/discussion-outbox.test.ts 6 例，含 Grok 指定的兩個情境（re-key 中 ghost 存活、A→B 不補送） |
+| N2 (medium, F9 殘餘) | document bubble 先於 window bubble，defaultPrevented 協議死路；一次 Escape 關兩層 | **已修**：overlay/pane 的判定推遲到同步派發完成後（setTimeout 0 讀 defaultPrevented，順序無關）；Video ladder 與 BottomSheet 消費時補 preventDefault |
+
+Round-2 複驗：outbox unit 6/6；collaboration-e2e 26/26、review-viewer 26/26、
+video 158/158、multi-branch 21/21（隔離跑；同機並行多 suite 時有負載 flake，
+CI 2-core 兩度綠）。殘餘：drawer 內 Escape 由宿主 sheet 持有（DragSheet 無
+keydown，行為與 main 相同）。

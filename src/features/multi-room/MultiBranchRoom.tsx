@@ -481,9 +481,16 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   useEffect(() => {
     if (!api.workspace && !pushedPane) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (api.workspace) api.onBackToRoom();
-      else setPushedPane(null);
+      if (event.key !== "Escape") return;
+      // 內層 ladder（pin/draft/modal…）消費時會 preventDefault，但監聽器
+      // 執行順序不可靠（document bubble 先於 window bubble）。把判定推遲到
+      // 同步派發全部跑完之後，defaultPrevented 才是完整事實 — 一次 Escape
+      // 只關一件事（Grok pr01a r2 N2）。
+      setTimeout(() => {
+        if (event.defaultPrevented) return;
+        if (api.workspace) api.onBackToRoom();
+        else setPushedPane(null);
+      }, 0);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

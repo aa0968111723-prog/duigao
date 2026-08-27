@@ -126,7 +126,8 @@ export function ModalSheet({ title, onClose, dismissible = true, action, onHeigh
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // modal 是最內層：Escape 一律由它消費並標記，外層不得再關一件事。
+      if (e.key === "Escape") { e.preventDefault(); onClose(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
