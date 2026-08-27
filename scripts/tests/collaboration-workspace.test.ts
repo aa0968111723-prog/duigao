@@ -15,12 +15,13 @@ import {
   moveNodes,
   parseTimestamp,
   stampPersistedNode,
+  touchWhiteboardNodeVersion,
 } from "../../src/features/collaboration/nodes.ts";
 import { arrangeBoard, arrangeFlow, arrangeGrid, arrangeMindmap } from "../../src/features/collaboration/layout.ts";
 import { buildDiscussionContext, getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "../../src/features/collaboration/links.ts";
 import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion, stickyTextInputProps } from "../../src/features/collaboration/permissions.ts";
-import { applyPendingCloudWrites, applyPendingNodeEdits, isBrowserOnline, isCloudWriteAcknowledged, reconcileNodes } from "../../src/features/collaboration/offline.ts";
+import { applyPendingCloudWrites, applyPendingNodeEdits, decideNodeWriteRetry, isBrowserOnline, isCloudWriteAcknowledged, reconcileNodes } from "../../src/features/collaboration/offline.ts";
 import {
   collaborationSliceFromRoom,
   collaborationSliceHasRows,
@@ -261,7 +262,7 @@ test("voice stays a boundary, not a shipped MVP claim", () => {
   assert.equal(VOICE_ROOM_MVP, false);
 });
 
-test("sequential persists advance and adopt node versions so the second edit is not stale", () => {
+test("persists send last-acked version and adopt the trigger increment", () => {
   const store = new Map<string, number>();
   const touch = (item: WhiteboardNode) => {
     const current = store.get(item.id);
@@ -269,8 +270,7 @@ test("sequential persists advance and adopt node versions so the second edit is 
       store.set(item.id, item.version);
       return item.version;
     }
-    if (item.version !== current && item.version < current) throw new Error("stale-write");
-    const next = current + 1;
+    const next = touchWhiteboardNodeVersion(item.version, current);
     store.set(item.id, next);
     return next;
   };
@@ -280,27 +280,44 @@ test("sequential persists advance and adopt node versions so the second edit is 
   assert.equal(touch(client), 1);
 
   const afterFirst = applyNodePatch(client, { content: { text: "招" } });
-  client = stampPersistedNode(afterFirst, client);
-  const server2 = touch(client);
+  assert.equal(afterFirst.version, 1, "patch must not advance the lock before write");
+  const write1 = stampPersistedNode(afterFirst, client);
+  assert.equal(write1.version, 1);
+  const server2 = touch(write1);
   assert.equal(server2, 2);
-  client = adoptPersistedNode(client, { ...client, version: server2 });
+  client = adoptPersistedNode(afterFirst, { ...write1, version: server2 });
+  assert.equal(client.version, 2);
+  assert.equal(client.content.text, "招");
 
   const afterSecond = applyNodePatch(client, { content: { text: "招生" } });
-  client = stampPersistedNode(afterSecond, client);
-  assert.equal(touch(client), 3);
-  assert.equal(client.content.text, "招生");
+  assert.equal(afterSecond.version, 2);
+  const write2 = stampPersistedNode(afterSecond, client);
+  assert.equal(write2.version, 2);
+  assert.equal(touch(write2), 3);
 
-  const stale = node("sticky", "text", 0, 0, "old");
-  stale.version = 1;
-  assert.throws(() => touch(stale), /stale-write/);
+  const other = applyNodePatch(node("sticky", "text", 0, 0, "別人"), { content: { text: "覆蓋" } });
+  assert.throws(() => touch(stampPersistedNode(other, 1)), /stale-write/);
 });
 
-test("move and persist stamp increment version for an existing node", () => {
+test("pre-incrementing both editors to version 2 would silently overwrite", () => {
+  assert.equal(touchWhiteboardNodeVersion(2, 1), 2);
+  assert.equal(touchWhiteboardNodeVersion(2, 2), 3, "equal version is accepted and overwrites");
+  assert.throws(() => touchWhiteboardNodeVersion(1, 2), /stale-write/);
+});
+
+test("move keeps last-acked version as the write precondition", () => {
   const original = node("n1", "text", 10, 10, "招生");
   const moved = moveNodes([original], [original.id], 8, 0)[0];
-  assert.equal(moved.version, 2);
+  assert.equal(moved.version, 1);
   const stamped = stampPersistedNode(moved, original);
-  assert.equal(stamped.version, 2);
+  assert.equal(stamped.version, 1);
+  assert.equal(stamped.x, 18);
+});
+
+test("failed node writes retry only via the durable queue", () => {
+  assert.deepEqual(decideNodeWriteRetry("success"), { acknowledged: true, queueDurable: false, queueMemory: false });
+  assert.deepEqual(decideNodeWriteRetry("unbound"), { acknowledged: false, queueDurable: true, queueMemory: false });
+  assert.deepEqual(decideNodeWriteRetry("failed"), { acknowledged: false, queueDurable: true, queueMemory: false });
 });
 
 test("first-share remaps local collaboration ids onto the new cloud room", () => {
