@@ -210,6 +210,9 @@ try {
     await page.getByRole("button", { name: "心智圖" }).click();
     await fillEditing(page, "招生");
     check("便利貼／心智圖可直接打字", (await page.locator("textarea.wb-node-text").inputValue()) === "招生");
+    await fillEditing(page, "招生規劃");
+    check("同一節點第二次改字不會因 stale-write 卡住", (await page.locator("textarea.wb-node-text").inputValue()) === "招生規劃");
+    await fillEditing(page, "招生");
 
     for (const child of ["擺攤", "茶會", "演講"]) {
       if (child !== "擺攤") await searchNode(page, "招生");
