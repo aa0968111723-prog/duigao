@@ -31,3 +31,14 @@ export function canToggleOpenEdit(role: RoomRole | null, localRoom: boolean): bo
   if (localRoom && !role) return true;
   return role === "owner";
 }
+
+/** Sticky / text nodes stay visible, but view-only reviewers cannot mutate them. */
+export function stickyTextInputProps(
+  canEdit: boolean,
+  onChange: (text: string) => void,
+): { readOnly: boolean; onChange?: (event: { target: { value: string } }) => void } {
+  return {
+    readOnly: !canEdit,
+    onChange: canEdit ? (event) => onChange(event.target.value) : undefined,
+  };
+}

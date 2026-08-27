@@ -15,7 +15,7 @@ import {
   parseTimestamp,
 } from "../collaboration/nodes";
 import { arrangeBoard } from "../collaboration/layout";
-import { canEditBoard } from "../collaboration/permissions";
+import { canEditBoard, stickyTextInputProps } from "../collaboration/permissions";
 import { formatEditorLine } from "../collaboration/presence";
 import type { NodeType, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardNode } from "../collaboration/types";
 import { BROADCAST_THROTTLE_MS, DRAG_PERSIST_MS, LONG_PRESS_MS, fitCamera, focusCamera, marqueeHits, nodeHit, screenToWorld, visibleNodes, zoomAt, type Camera } from "./canvas";
@@ -74,26 +74,30 @@ const NodeView = memo(function NodeView({
   node,
   selected,
   editing,
+  canEdit,
   onChangeText,
 }: {
   node: WhiteboardNode;
   selected: boolean;
   editing: boolean;
+  canEdit: boolean;
   onChangeText: (text: string) => void;
 }) {
   const content = node.content;
   const className = `wb-node wb-node-${node.nodeType} ${selected ? "is-selected" : ""} ${editing ? "is-editing" : ""}`;
   const style = { left: node.x, top: node.y, width: node.width, height: node.height };
   if (node.nodeType === "text" || (editing && (node.nodeType === "flow" || node.nodeType === "mindmap"))) {
+    const textProps = stickyTextInputProps(canEdit, onChangeText);
     return (
       <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type={node.nodeType}>
         <textarea
           className="wb-node-text"
           value={content.text ?? ""}
           placeholder={node.nodeType === "text" ? "直接打字…" : "步驟"}
-          onChange={(event) => onChangeText(event.target.value)}
+          readOnly={textProps.readOnly}
+          onChange={textProps.onChange}
           onPointerDown={(event) => event.stopPropagation()}
-          autoFocus={editing}
+          autoFocus={editing && canEdit}
         />
       </div>
     );
@@ -411,7 +415,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
     const hit = nodeHit(liveNodes, world.x, world.y);
     if (hit) {
-      setEditingId(hit.id);
+      if (canEdit) setEditingId(hit.id);
       setCamera(focusCamera(hit, viewport, camera.zoom * 1.12));
     }
   };
@@ -529,6 +533,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               node={node}
               selected={selected.includes(node.id)}
               editing={editingId === node.id}
+              canEdit={canEdit}
               onChangeText={(text) => api.onUpsertNode(applyNodePatch(node, { content: { ...node.content, text } }), "now")}
             />
           ))}
