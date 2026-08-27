@@ -16,6 +16,7 @@ import {
 } from "../collaboration/nodes";
 import { arrangeBoard } from "../collaboration/layout";
 import { canEditBoard } from "../collaboration/permissions";
+import { formatEditorLine } from "../collaboration/presence";
 import type { NodeType, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardNode } from "../collaboration/types";
 import { BROADCAST_THROTTLE_MS, DRAG_PERSIST_MS, LONG_PRESS_MS, fitCamera, focusCamera, marqueeHits, nodeHit, screenToWorld, visibleNodes, zoomAt, type Camera } from "./canvas";
 import "./whiteboard.css";
@@ -507,7 +508,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       >
         <div className="wb-presence" data-testid="wb-presence">
           <span>{api.online > 0 ? `${api.online} 人在線` : "只有你"}</span>
-          {api.editors[0] ? <span>{api.editors[0].name}正在編輯「{api.editors[0].whiteboardTitle ?? board.title}」</span> : null}
+          {api.editors[0] ? <span>{formatEditorLine(api.editors[0], board.title)}</span> : null}
         </div>
         <div className="wb-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
           <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
@@ -667,7 +668,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 </button>
               )}
               <button type="button" className="wb-card" onClick={() => setSheet("poll")}>放入既有投票</button>
-              {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-create-poll" onClick={() => { const id = api.onCreatePoll("主視覺要不要換？", ["要，換成 B 版", "先維持 A 版"]); if (id) addAtView("poll", { pollQuestion: "主視覺要不要換？", voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) }); }}>＋投票</button>}
+              {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-create-poll" onClick={() => { const id = api.onCreatePoll("主視覺要不要換？", ["要，換成 B 版", "先維持 A 版"]); if (id) addAtView("poll", { pollQuestion: "主視覺要不要換？", voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) }); setSheet(null); }}>＋投票</button>}
               {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-write-decision" onClick={() => { api.onCreateDecision("已決定：採用 B 版", undefined, "decided"); addAtView("decision", { text: "已決定：採用 B 版", sourceLabel: "決策區" }); setSheet(null); }}>寫下決策</button>}
               {polls.map((poll) => (
                 <button type="button" className="wb-card" key={poll.id} onClick={() => { addAtView("poll", { pollQuestion: poll.question, voteCount: (api.room.pollVotes ?? []).filter((vote) => vote.pollId === poll.id).length }, { linkedEntityType: "poll", linkedEntityId: poll.id }); }}>

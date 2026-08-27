@@ -14,9 +14,11 @@ import {
   parseTimestamp,
 } from "../../src/features/collaboration/nodes.ts";
 import { arrangeBoard, arrangeFlow, arrangeGrid, arrangeMindmap } from "../../src/features/collaboration/layout.ts";
-import { getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
+import { buildDiscussionContext, getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
+import { discussionPayloadFromNode, stickyFromDiscussion } from "../../src/features/collaboration/links.ts";
 import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion } from "../../src/features/collaboration/permissions.ts";
-import { reconcileNodes } from "../../src/features/collaboration/offline.ts";
+import { applyPendingNodeEdits, isBrowserOnline, reconcileNodes } from "../../src/features/collaboration/offline.ts";
+import { collectBoardEditors, formatEditorLine, stampWriter } from "../../src/features/collaboration/presence.ts";
 import { VOICE_ROOM_MVP } from "../../src/features/collaboration/voice.ts";
 import { BROADCAST_THROTTLE_MS, DRAG_PERSIST_MS, fitCamera, focusCamera, marqueeHits, nodeHit, visibleNodes, zoomAt, type Camera } from "../../src/features/whiteboard/canvas.ts";
 import type { Whiteboard, WhiteboardEdge, WhiteboardNode } from "../../src/features/collaboration/types.ts";
@@ -106,10 +108,29 @@ test("drag persist is throttled, not every animation frame", () => {
 
 test("16-17 discussion and board share payloads stay as references", () => {
   const sticky = createSticky({ whiteboardId: "board-1", roomId: "room-1", createdBy: "me", text: "主視覺要不要換？" });
-  const fromDiscussion = { whiteboardId: sticky.whiteboardId, nodeId: sticky.id, title: "招生規劃 · 主視覺要不要換？" };
-  const fromBoard = { whiteboardId: sticky.whiteboardId, nodeId: sticky.id };
-  assert.equal(fromDiscussion.nodeId, sticky.id);
-  assert.equal(fromBoard.whiteboardId, "board-1");
+  const payload = discussionPayloadFromNode(sticky, "招生規劃");
+  assert.equal(payload.nodeId, sticky.id);
+  assert.equal(payload.whiteboardId, "board-1");
+  assert.equal(payload.title, "招生規劃 · 主視覺要不要換？");
+  const back = stickyFromDiscussion({
+    id: "m1",
+    roomId: "room-1",
+    authorId: "me",
+    authorName: "招生",
+    authorColor: "#111",
+    kind: "node",
+    body: sticky.content.text ?? "",
+    payload,
+    createdAt: 1,
+    updatedAt: 1,
+  }, sticky.whiteboardId, "me");
+  assert.equal(back.content.text, "主視覺要不要換？");
+  assert.equal(back.nodeType, "text");
+  const ctx = buildDiscussionContext("room-1", [{
+    id: "m1", roomId: "room-1", authorId: "me", authorName: "招生", authorColor: "#111",
+    kind: "node", body: "主視覺要不要換？", payload, createdAt: 1, updatedAt: 1,
+  }], []);
+  assert.equal(ctx.messages[0].payload.nodeId, sticky.id);
 });
 
 test("18-19 poll reference and decision nodes reuse existing ids", () => {
@@ -134,6 +155,17 @@ test("20-22 local optimistic node/edge updates are last-write", () => {
   assert.equal(merged[0].content.text, "local");
   const deleted = reconcileNodes([local], [remote], [{ id: "p", roomId: "room-1", kind: "node", op: "delete", payload: { id: "n1" }, createdAt: 1 }]);
   assert.equal(deleted.length, 0);
+  const queued = applyPendingNodeEdits([remote], [{ id: "p2", roomId: "room-1", kind: "node", op: "upsert", payload: local, createdAt: 2 }]);
+  assert.equal(queued[0].content.text, "local");
+  assert.equal(isBrowserOnline(), true);
+});
+
+test("presence lists recent other writers, not cursors", () => {
+  const recent = stampWriter(node("n1", "text", 0, 0, "招生"), { id: "u2", name: "小明" }, 1_000);
+  const stale = stampWriter(node("n2", "text", 0, 0, "舊"), { id: "u3", name: "過期" }, 1);
+  const editors = collectBoardEditors([recent, stale], { id: "me", name: "我" }, { now: 1_200, windowMs: 500 });
+  assert.deepEqual(editors.map((item) => item.name), ["小明"]);
+  assert.equal(formatEditorLine(editors[0], "招生規劃"), "小明正在編輯「招生規劃」");
 });
 
 test("23-24 reviewer defaults to view; owner/editor collaborate; rooms stay isolated", () => {

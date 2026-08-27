@@ -84,6 +84,9 @@ export type NodeContent = {
   sourceLabel?: string;
   href?: string;
   groupIds?: string[];
+  /** Mobile-safe presence stamp. Never a cursor stream. */
+  lastWriterId?: string;
+  lastWriterName?: string;
 };
 
 export type WhiteboardNode = {

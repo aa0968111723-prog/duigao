@@ -78,6 +78,24 @@ export async function clearPendingEdit(id: string): Promise<void> {
  * Cloud rows win when their updatedAt/version is newer; pending local edits
  * that the server never saw stay queued.
  */
+export function isBrowserOnline(): boolean {
+  return typeof navigator === "undefined" || navigator.onLine !== false;
+}
+
+export function applyPendingNodeEdits(nodes: WhiteboardNode[], pending: PendingEdit[]): WhiteboardNode[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  for (const edit of pending.filter((item) => item.kind === "node").sort((a, b) => a.createdAt - b.createdAt)) {
+    if (edit.op === "delete") {
+      const payload = edit.payload as { id?: string };
+      if (payload.id) byId.delete(payload.id);
+      continue;
+    }
+    const node = edit.payload as WhiteboardNode;
+    if (node?.id) byId.set(node.id, node);
+  }
+  return [...byId.values()];
+}
+
 export function reconcileNodes(local: WhiteboardNode[], remote: WhiteboardNode[], pending: PendingEdit[]): WhiteboardNode[] {
   const byId = new Map(remote.map((node) => [node.id, node]));
   for (const node of local) {

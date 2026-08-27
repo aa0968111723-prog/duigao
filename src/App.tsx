@@ -58,9 +58,18 @@ import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
 import { MultiBranchRoom, type MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
-import { createSticky } from "./features/collaboration/nodes";
-import type { DiscussionMessage, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { saveBoardSnapshot } from "./features/collaboration/offline";
+import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
+import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
+import { collectBoardEditors, stampWriter } from "./features/collaboration/presence";
+import {
+  clearPendingEdit,
+  isBrowserOnline,
+  listPendingEdits,
+  loadBoardSnapshot,
+  queuePendingEdit,
+  reconcileNodes,
+  saveBoardSnapshot,
+} from "./features/collaboration/offline";
 import "./usability.css";
 import "./features/whiteboard/whiteboard.css";
 import "./features/room-discussion/discussion.css";
@@ -258,12 +267,26 @@ export function App() {
   const applyRemoteRoom = useCallback((next: Room) => {
     const normalized = normalizeRoomBranches(next);
     setRoom((current) => {
-      const keepNodes = current?.whiteboardNodes?.length && !normalized.whiteboardNodes?.length;
-      const keepEdges = current?.whiteboardEdges?.length && !normalized.whiteboardEdges?.length;
+      const incomingNodes = normalized.whiteboardNodes ?? [];
+      const currentNodes = current?.whiteboardNodes ?? [];
+      const incomingEdges = normalized.whiteboardEdges ?? [];
+      const currentEdges = current?.whiteboardEdges ?? [];
+      const whiteboardNodes = incomingNodes.length === 0 && currentNodes.length
+        ? currentNodes
+        : incomingNodes.length && currentNodes.length
+          ? reconcileNodes(currentNodes, incomingNodes, [])
+          : incomingNodes.length
+            ? incomingNodes
+            : currentNodes;
+      const whiteboardEdges = incomingEdges.length === 0 && currentEdges.length
+        ? currentEdges
+        : incomingEdges.length
+          ? incomingEdges
+          : currentEdges;
       return {
         ...normalized,
-        whiteboardNodes: keepNodes ? current.whiteboardNodes : normalized.whiteboardNodes,
-        whiteboardEdges: keepEdges ? current.whiteboardEdges : normalized.whiteboardEdges,
+        whiteboardNodes,
+        whiteboardEdges,
       };
     });
     if (roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
@@ -928,26 +951,42 @@ export function App() {
 
   const upsertNodes = useCallback(
     (nodes: WhiteboardNode[], persist: "now" | "end" = "now") => {
+      const writer = { id: cloud.userId ?? guest?.id ?? "local", name: guest?.name ?? "我" };
+      const stamped = nodes.map((node) => stampWriter(node, writer));
       updateRoom((r) => {
         const byId = new Map((r.whiteboardNodes ?? []).map((node) => [node.id, node]));
-        for (const node of nodes) byId.set(node.id, node);
+        for (const node of stamped) byId.set(node.id, node);
         return { ...r, whiteboardNodes: [...byId.values()] };
       });
       void persist;
-      nodes.forEach((node) => cloudRef.current.writes.upsertNode?.(node));
+      const roomId = roomRef.current?.id ?? stamped[0]?.roomId ?? "";
+      if (isBrowserOnline()) {
+        stamped.forEach((node) => cloudRef.current.writes.upsertNode?.(node));
+      } else {
+        stamped.forEach((node) => {
+          void queuePendingEdit({
+            id: `node:${node.id}`,
+            roomId,
+            kind: "node",
+            op: "upsert",
+            payload: node,
+            createdAt: Date.now(),
+          });
+        });
+      }
       const current = roomRef.current;
-      const board = current?.whiteboards?.find((item) => item.id === nodes[0]?.whiteboardId);
+      const board = current?.whiteboards?.find((item) => item.id === stamped[0]?.whiteboardId);
       if (current && board) {
         void saveBoardSnapshot({
           whiteboardId: board.id,
           roomId: current.id,
           whiteboard: board,
-          nodes: [...(current.whiteboardNodes ?? []).filter((node) => node.whiteboardId !== board.id), ...nodes],
+          nodes: [...(current.whiteboardNodes ?? []).filter((node) => node.whiteboardId !== board.id), ...stamped],
           edges: current.whiteboardEdges ?? [],
         });
       }
     },
-    [updateRoom],
+    [cloud.userId, guest, updateRoom],
   );
 
   const upsertNode = useCallback(
@@ -962,7 +1001,18 @@ export function App() {
         whiteboardNodes: (r.whiteboardNodes ?? []).filter((node) => node.id !== id),
         whiteboardEdges: (r.whiteboardEdges ?? []).filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id),
       }));
-      cloudRef.current.writes.deleteNode?.(id);
+      if (isBrowserOnline()) {
+        cloudRef.current.writes.deleteNode?.(id);
+        return;
+      }
+      void queuePendingEdit({
+        id: `node-del:${id}`,
+        roomId: roomRef.current?.id ?? "",
+        kind: "node",
+        op: "delete",
+        payload: { id },
+        createdAt: Date.now(),
+      });
     },
     [updateRoom],
   );
@@ -981,7 +1031,7 @@ export function App() {
       sendDiscussion({
         kind: "node",
         body: node.content.text || node.content.title || "看這個節點",
-        payload: { whiteboardId: node.whiteboardId, nodeId: node.id, title: board ? `${board.title} · ${node.content.text || node.content.title || "節點"}` : node.content.text },
+        payload: discussionPayloadFromNode(node, board?.title),
       });
     },
     [sendDiscussion],
@@ -989,11 +1039,7 @@ export function App() {
 
   const addMessageToBoard = useCallback(
     (message: DiscussionMessage, whiteboardId: string) => {
-      const node = createSticky({
-        whiteboardId,
-        roomId: roomRef.current?.id ?? "",
-        createdBy: cloud.userId ?? guest?.id ?? "local",
-        text: message.body,
+      const node = stickyFromDiscussion(message, whiteboardId, cloud.userId ?? guest?.id ?? "local", {
         x: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 4) * 24,
         y: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 5) * 24,
       });
@@ -1055,6 +1101,29 @@ export function App() {
     updateRoom((r) => ({ ...r, allowBoardEdit: !r.allowBoardEdit }));
     cloudRef.current.writes.setAllowBoardEdit?.(!(roomRef.current?.allowBoardEdit));
   }, [cloud.role, showToast, updateRoom]);
+
+  useEffect(() => {
+    const flushPendingBoardEdits = () => {
+      const current = roomRef.current;
+      if (!current || !isBrowserOnline()) return;
+      void listPendingEdits(current.id).then(async (pending) => {
+        for (const edit of pending) {
+          if (edit.kind !== "node") continue;
+          if (edit.op === "upsert") {
+            cloudRef.current.writes.upsertNode?.(edit.payload as WhiteboardNode);
+          }
+          if (edit.op === "delete") {
+            const payload = edit.payload as { id?: string };
+            if (payload.id) cloudRef.current.writes.deleteNode?.(payload.id);
+          }
+          await clearPendingEdit(edit.id);
+        }
+      });
+    };
+    window.addEventListener("online", flushPendingBoardEdits);
+    flushPendingBoardEdits();
+    return () => window.removeEventListener("online", flushPendingBoardEdits);
+  }, [room?.id]);
 
   /**
    * File one piece of video feedback: same comment, same discussion, same cloud
@@ -1816,6 +1885,15 @@ export function App() {
     );
   }
 
+  const boardEditors = collectBoardEditors(
+    room?.whiteboardNodes ?? [],
+    { id: cloud.userId ?? guest?.id ?? "local", name: guest?.name ?? "我" },
+    { whiteboardId: activeWhiteboardId ?? undefined },
+  ).map((editor) => ({
+    ...editor,
+    whiteboardTitle: room?.whiteboards?.find((board) => board.id === (editor.whiteboardId ?? activeWhiteboardId))?.title,
+  }));
+
   const projectApi: MultiBranchRoomApi | null = room?.projectMode
     ? {
         room: normalizedRoom ?? room,
@@ -1864,7 +1942,29 @@ export function App() {
         onOpenWhiteboard: (id) => {
           setActiveWhiteboardId(id);
           if (!id) setFocusNodeId(null);
-          if (id) void cloudRef.current.loadWhiteboard?.(id);
+          if (!id) return;
+          void cloudRef.current.loadWhiteboard?.(id);
+          void loadBoardSnapshot(id).then((snap) => {
+            if (!snap) return;
+            setRoom((current) => {
+              if (!current) return current;
+              const existing = (current.whiteboardNodes ?? []).filter((node) => node.whiteboardId === id);
+              if (existing.length) {
+                return {
+                  ...current,
+                  whiteboardNodes: reconcileNodes(existing, snap.nodes, []),
+                };
+              }
+              return {
+                ...current,
+                whiteboardNodes: [...(current.whiteboardNodes ?? []), ...snap.nodes],
+                whiteboardEdges: [
+                  ...(current.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId !== id),
+                  ...snap.edges,
+                ],
+              };
+            });
+          });
         },
         onFocusNode: setFocusNodeId,
         onUpsertNode: upsertNode,
@@ -1879,7 +1979,7 @@ export function App() {
         activeWhiteboardId,
         focusNodeId,
         online: cloud.online || peerCount,
-        editors: [] as PresenceEditor[],
+        editors: boardEditors,
         onShare: openShare,
         onGoHome: () => {
           clearUndo();
