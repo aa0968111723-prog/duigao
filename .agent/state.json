@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-24T15:38:58.000Z",
+  "generatedAt": "2026-08-24T15:50:53.000Z",
   "git": {
-    "branch": "codex/agent-read-layer",
-    "sha": "c3d1e1efe672966ccb162baf70c2f7a7ed5d97f5",
-    "mainSha": "46e4f1bda7f9bf077fbd658afe0218fee616cf0e",
+    "branch": "codex/review-viewer-2",
+    "sha": "9a04a11ff8ba4a539771e1b2c20c0456b2176f20",
+    "mainSha": "9a04a11ff8ba4a539771e1b2c20c0456b2176f20",
     "dirty": true
   },
   "project": {
@@ -31,16 +31,7 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": [
-        {
-          "baseRefName": "main",
-          "headRefName": "codex/agent-read-layer",
-          "isDraft": false,
-          "number": 35,
-          "title": "feat: add evidence-based AI Agent Read Layer",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/35"
-        }
-      ]
+      "items": []
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -563,9 +554,11 @@
     "requiredCommands": [
       "npm run test:agent",
       "npm run test:migrations",
+      "npm run test:review-viewer",
       "npm run test:share-e2e",
       "npm run test:share-preview",
-      "npm run test:video"
+      "npm run test:video",
+      "npm run test:viewer-geometry"
     ],
     "buildCommands": [
       "npm run build",

@@ -50,9 +50,11 @@
   "testCommands": [
     "npm run test:agent",
     "npm run test:migrations",
+    "npm run test:review-viewer",
     "npm run test:share-e2e",
     "npm run test:share-preview",
-    "npm run test:video"
+    "npm run test:video",
+    "npm run test:viewer-geometry"
   ],
   "packageScripts": [
     "agent:context",
@@ -67,9 +69,11 @@
     "preview",
     "test:agent",
     "test:migrations",
+    "test:review-viewer",
     "test:share-e2e",
     "test:share-preview",
-    "test:video"
+    "test:video",
+    "test:viewer-geometry"
   ],
   "agentContextCommand": "npm run agent:context"
 }

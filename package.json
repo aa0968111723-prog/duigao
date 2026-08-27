@@ -13,6 +13,8 @@
     "test:share-e2e": "node scripts/e2e/share-flow.mjs",
     "test:share-preview": "node scripts/e2e/share-preview.mjs",
     "test:video": "node scripts/e2e/video-flow.mjs",
+    "test:review-viewer": "node scripts/e2e/review-viewer.mjs",
+    "test:viewer-geometry": "tsx --test scripts/tests/review-viewer-geometry.test.ts",
     "test:migrations": "node scripts/e2e/migrations.mjs",
     "test:agent": "node --test scripts/tests/agent-layer.test.mjs",
     "agent:context": "node scripts/agent-context.mjs",
@@ -30,6 +32,8 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
+    "playwright": "^1.62.1",
+    "tsx": "^4.23.12",
     "typescript": "~5.8.3",
     "vite": "^6.3.3"
   }
