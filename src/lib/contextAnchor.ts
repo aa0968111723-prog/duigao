@@ -136,19 +136,26 @@ type NodeLinkFields = Pick<WhiteboardNode, "id" | "whiteboardId" | "content"> &
 
 /**
  * 節點 → 錨。link 齊備（type＋id）才算數 —— 半截 link 在讀側從來讀不出
- * 東西，這裡把同一條規則講明。version link 帶 content.startTime 時升級成
- * video 錨（節點指著影片的某一刻/某一段，versionId 是真實事實）。
+ * 東西，這裡把同一條規則講明。version 或 branch link 帶 content.startTime
+ * 時升級成 video 錨（節點指著影片的某一刻/某一段）。
  */
 export function anchorFromNode(node: NodeLinkFields): ContextAnchor {
   if (node.linkedEntityType && node.linkedEntityId) {
-    if (node.linkedEntityType === "version") {
+    // version link（placeAsset/AI）與 branch link（placeBranch 的影片段落
+    // 上板）都可能帶 content.startTime — 兩者都是 video 錨，各自帶回
+    // 自己真實知道的 id，不互相捏造。
+    if (node.linkedEntityType === "version" || node.linkedEntityType === "branch") {
       const start = finiteTime(node.content.startTime);
       if (start !== null) {
+        const ids =
+          node.linkedEntityType === "version"
+            ? { versionId: node.linkedEntityId }
+            : { branchId: node.linkedEntityId };
         const end = Number(node.content.endTime);
         if (Number.isFinite(end) && end > start) {
-          return { type: "video-range", startTime: start, endTime: end, versionId: node.linkedEntityId };
+          return { type: "video-range", startTime: start, endTime: end, ...ids };
         }
-        return { type: "video-point", time: start, versionId: node.linkedEntityId };
+        return { type: "video-point", time: start, ...ids };
       }
     }
     return { type: "entity", entityType: node.linkedEntityType, entityId: node.linkedEntityId };
@@ -165,21 +172,20 @@ export function anchorToNodeLink(anchor: ContextAnchor): {
   linkedEntityId?: string;
   content?: { startTime?: number; endTime?: number };
 } {
+  const videoLink = (times: { startTime?: number; endTime?: number }, branchId?: string, versionId?: string) => {
+    // 節點機制只有一個 link 位：branch 是可導航的那個事實，優先；
+    // 沒有 branch 才寫 version。兩者皆無 → 無表示法。
+    if (branchId) return { linkedEntityType: "branch" as const, linkedEntityId: branchId, content: times };
+    if (versionId) return { linkedEntityType: "version" as const, linkedEntityId: versionId, content: times };
+    return {};
+  };
   switch (anchor.type) {
     case "entity":
       return { linkedEntityType: anchor.entityType, linkedEntityId: anchor.entityId };
     case "video-point":
-      return anchor.versionId
-        ? { linkedEntityType: "version", linkedEntityId: anchor.versionId, content: { startTime: anchor.time } }
-        : {};
+      return videoLink({ startTime: anchor.time }, anchor.branchId, anchor.versionId);
     case "video-range":
-      return anchor.versionId
-        ? {
-            linkedEntityType: "version",
-            linkedEntityId: anchor.versionId,
-            content: { startTime: anchor.startTime, endTime: anchor.endTime },
-          }
-        : {};
+      return videoLink({ startTime: anchor.startTime, endTime: anchor.endTime }, anchor.branchId, anchor.versionId);
     default:
       return {};
   }

@@ -240,3 +240,41 @@ test("openTarget：video-range 開在起點（range 的導航語意=從頭播這
     startTime: 3,
   });
 });
+
+test("節點：branch link＋content 時間（placeBranch 影片段落上板）→ video 錨帶 branchId", () => {
+  const anchor = anchorFromNode({
+    id: "n1",
+    whiteboardId: "b1",
+    linkedEntityType: "branch",
+    linkedEntityId: "br7",
+    content: { startTime: 12, endTime: 30 },
+  });
+  assert.deepEqual(anchor, { type: "video-range", startTime: 12, endTime: 30, branchId: "br7" });
+  // 導航：帶 startTime 開 content — 板上「打開內容」按鈕的既有語意
+  assert.deepEqual(openTarget(anchor), { surface: "content", branchId: "br7", startTime: 12 });
+  // 寫回節點 link：branch 優先、時間進 content
+  assert.deepEqual(anchorToNodeLink(anchor), {
+    linkedEntityType: "branch",
+    linkedEntityId: "br7",
+    content: { startTime: 12, endTime: 30 },
+  });
+});
+
+test("節點：branch link 無時間 → entity branch（不捏造時間）", () => {
+  const anchor = anchorFromNode({
+    id: "n1",
+    whiteboardId: "b1",
+    linkedEntityType: "branch",
+    linkedEntityId: "br7",
+    content: {},
+  });
+  assert.deepEqual(anchor, { type: "entity", entityType: "branch", entityId: "br7" });
+});
+
+test("anchorToNodeLink：video 臂同時有 branch 與 version → branch 優先（單一 link 位）", () => {
+  assert.deepEqual(anchorToNodeLink({ type: "video-point", time: 3, branchId: "br1", versionId: "v1" }), {
+    linkedEntityType: "branch",
+    linkedEntityId: "br1",
+    content: { startTime: 3 },
+  });
+});
