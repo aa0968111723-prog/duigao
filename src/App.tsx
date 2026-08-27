@@ -53,7 +53,7 @@ import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { RoomWorkspace } from "./components/RoomWorkspace";
 import { Home } from "./components/Home";
-import { UniversalIntake } from "./components/UniversalIntake";
+import { INTAKE_PROFILES, UniversalIntake } from "./components/UniversalIntake";
 import { ShareSheet, type ShareCard, type ShareCustomization, type ShareState } from "./components/ShareSheet";
 import { sharePresentation } from "./lib/sharePresentation";
 import {
@@ -1175,6 +1175,12 @@ export function App() {
     async (files: File[]) => {
       const file = files[0];
       if (!file || !guest) return;
+      // 大小閘放在這裡：迴紋針（UniversalIntake maxBytes）與檔案貼上
+      // 走同一道（Grok pr01b 建議 — 貼上不該繞過 25MB）。
+      if (file.size > INTAKE_PROFILES.attachment.maxBytes) {
+        showToast(`檔案太大了，附件單檔上限 ${Math.round(INTAKE_PROFILES.attachment.maxBytes / 1024 / 1024)}MB。`, { tone: "error" });
+        return;
+      }
       const roomId = cloudRef.current.boundRoomId;
       if (!roomId) {
         // 附件路徑在上傳當下就得綁 cloud room id（storage RLS 也照它驗），
