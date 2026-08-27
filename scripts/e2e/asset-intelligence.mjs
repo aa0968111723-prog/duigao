@@ -144,7 +144,14 @@ try {
         relations: [],
         permissions: { role: "owner", canAsk: true, selectedCount: 0 },
         truncated: false,
-        answer: { text: "這張照片適合當擺攤活動紀錄或社群貼文；若作主視覺，請留意背景資訊較多。", citations: [{ sourceId: INTELLIGENCE_ASSET }], actions: [] },
+        answer: {
+          text: "這張照片適合當擺攤活動紀錄或社群貼文；若作主視覺，請留意背景資訊較多。",
+          citations: [{ sourceId: INTELLIGENCE_ASSET }],
+          actions: [
+            { type: "add_whiteboard_node", label: "把主視覺放上白板", payload: { text: "擺攤主視覺", nodeType: "text" } },
+            { type: "create_comment", label: "把這句留到討論", payload: { body: "這張適合當擺攤紀錄" } },
+          ],
+        },
         agent: { provider: "none", status: "unconfigured" },
       }),
     });
@@ -170,6 +177,21 @@ try {
   await page.waitForSelector('[data-testid="room-ai-answer"]', { timeout: 10000 });
   check("快速提問能顯示房間證據與答案", (await page.getByTestId("room-ai-answer").innerText()).includes("這張照片適合"));
   check("AI 回答保留可點擊來源", await page.locator(".asset-ai-citations button").count() === 1);
+  check("AI 提案先預覽、不會自動寫入", await page.getByTestId("ai-proposal").count() === 2 && await page.getByTestId("apply-proposal").count() === 2);
+  await page.getByTestId("apply-proposal").nth(1).click();
+  await page.waitForFunction(() => [...document.querySelectorAll("[data-testid=ai-proposal]")].some((el) => el.textContent?.includes("已套用")), null, { timeout: 8000 });
+  check("套用討論提案會寫入而不改原稿", await page.getByText("已套用。原稿沒有被改寫。").count() === 1);
+  await page.getByTestId("apply-proposal").first().click();
+  await page.waitForFunction(() => [...document.querySelectorAll("[data-testid=ai-proposal]")].filter((el) => el.textContent?.includes("已套用")).length >= 2, null, { timeout: 8000 });
+  check("套用白板提案走 0014 production node", await page.getByTestId("apply-proposal").count() === 0);
+  await page.getByLabel("關閉 AI").click();
+  await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 8000 });
+  await page.waitForFunction(() => Number(document.querySelector("[data-testid=wb-stats]")?.getAttribute("data-nodes") || 0) >= 1, null, { timeout: 8000 });
+  const nodeValue = await page.locator('[data-testid^="wb-node-"] textarea').first().inputValue().catch(() => "");
+  const nodeLabel = await page.locator('[data-testid^="wb-node-"]').first().innerText().catch(() => "");
+  check("白板出現套用後的 production 節點", nodeValue.includes("擺攤主視覺") || nodeLabel.includes("擺攤主視覺"));
+  await page.getByRole("button", { name: "對話" }).click();
+  check("討論看得到套用後的留言", (await page.locator("body").innerText()).includes("這張適合當擺攤紀錄"));
   await page.screenshot({ path: join(tempRoot, "asset-intelligence-android.png"), fullPage: false });
   await context.close();
 } finally {

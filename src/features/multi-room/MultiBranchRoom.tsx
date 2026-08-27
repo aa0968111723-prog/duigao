@@ -447,6 +447,13 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   useEffect(() => {
     if (activeBranch) setTab(activeBranch.branchType === "plan" || activeBranch.branchType === "copy" ? "plan" : "content");
   }, [activeBranch?.id, activeBranch?.branchType]);
+
+  useEffect(() => {
+    if (api.activeWhiteboardId) {
+      setTab("discuss");
+      setDiscussPane("board");
+    }
+  }, [api.activeWhiteboardId]);
   useEffect(() => {
     if (api.activeWhiteboardId) {
       setTab("discuss");

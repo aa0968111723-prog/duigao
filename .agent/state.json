@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T13:28:36.000Z",
+  "generatedAt": "2026-08-27T16:19:11.000Z",
   "git": {
-    "branch": "agent/collaborative-intelligence-workspace",
-    "sha": "438b590d2a2bde862adab525f5a8b671a74a5354",
-    "mainSha": "5cf3f06eeaed9310db1cfa1759928d0b94f50662",
+    "branch": "codex/third-agent-ai-proposal-apply",
+    "sha": "ddb916e2f9d47d0effeda12f707be182de5cba90",
+    "mainSha": "ddb916e2f9d47d0effeda12f707be182de5cba90",
     "dirty": true
   },
   "project": {
@@ -34,16 +34,7 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": [
-        {
-          "baseRefName": "main",
-          "headRefName": "agent/collaborative-intelligence-workspace",
-          "isDraft": true,
-          "number": 38,
-          "title": "Collaborative Intelligence Workspace 1.0 / 智慧協作工作台 1.0",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/38"
-        }
-      ]
+      "items": []
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -857,22 +848,24 @@
     },
     "whiteboard-apply-back": {
       "status": "implemented",
-      "confidence": 0.9,
+      "confidence": 0.92,
       "evidence": {
         "source": [
-          "src/ai/roomContext.ts",
-          "src/collaboration/whiteboard.ts"
+          "src/App.tsx",
+          "src/ai/proposals.ts",
+          "src/features/asset-intelligence/RoomAiSheet.tsx"
         ],
         "migrations": [],
         "tests": [
-          "scripts/tests/collaboration.test.ts"
+          "scripts/tests/ai-proposals.test.ts"
         ],
         "docs": []
       },
       "relatedFiles": [
-        "scripts/tests/collaboration.test.ts",
-        "src/ai/roomContext.ts",
-        "src/collaboration/whiteboard.ts"
+        "scripts/tests/ai-proposals.test.ts",
+        "src/App.tsx",
+        "src/ai/proposals.ts",
+        "src/features/asset-intelligence/RoomAiSheet.tsx"
       ],
       "missing": []
     },
