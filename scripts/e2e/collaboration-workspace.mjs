@@ -16,7 +16,7 @@ import http from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { start as startMock } from "./mock-supabase.mjs";
+import { faults, start as startMock } from "./mock-supabase.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54418;
@@ -172,29 +172,29 @@ try {
     await page.waitForSelector(".home-picks", { timeout: 20000 });
     await page.getByRole("button", { name: /建立活動房/ }).click();
     await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 10000 });
-    check("討論 tab 在第一屏", await page.locator(".project-tabs button").filter({ hasText: "討論" }).count() === 1);
-    check("第一屏仍是四個房間入口", await page.locator(".project-tabs button").count() === 4);
+    // 討論就是房間殼（PR-01a）：第一屏是討論 feed + composer，
+    // 總覽/內容/企劃是入口 chips，不再是互相競爭的四分頁。
+    check("第一屏就是討論殼", await page.getByTestId("discussion-feed").count() === 1 && await page.getByLabel("房間討論").count() === 1);
+    check("入口 chips 取代四分頁", await page.locator(".project-entry-chips button").count() === 3 && await page.locator(".project-tabs").count() === 0);
+    check("語音是一行邊界說明，不佔 pane", (await page.getByTestId("voice-boundary").innerText()).includes("語音") && await page.getByTestId("voice-boundary").locator("button").count() === 0);
 
     await chooseCreate(page, "擺攤計畫", "plan");
     await page.waitForSelector('[data-testid="plan-editor"]', { timeout: 10000 });
     await page.locator(".project-back-button").click({ force: true });
-    await page.waitForSelector(".project-tabs", { timeout: 10000 });
+    await page.waitForSelector(".project-entry-chips", { timeout: 10000 });
 
-    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
     await chooseCreate(page, "擺攤文宣", "poster", { name: "booth.png", mimeType: "image/png", buffer: TINY_PNG });
     await page.waitForSelector("img.stage-img", { timeout: 20000 });
     await page.waitForFunction(() => document.querySelector("img.stage-img")?.naturalWidth > 0, null, { timeout: 20000 });
     await page.locator("button.m-home").click();
-    await page.waitForSelector(".project-tabs", { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
 
     const videoBytes = await recordWebm(page);
-    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
     await chooseCreate(page, "招生影片", "video", { name: "admission.webm", mimeType: "video/webm", buffer: videoBytes });
     await page.waitForSelector("video.v-video", { timeout: 90000 });
     await page.locator("button.m-home").click();
-    await page.waitForSelector(".project-tabs", { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
 
-    await page.locator('.project-tabs button').filter({ hasText: "討論" }).click();
     await page.getByRole("button", { name: "對話", exact: true }).click();
     await page.getByLabel("房間討論").fill("先把招生流程攤在白板上");
     await page.getByRole("button", { name: "送出" }).click();
@@ -299,8 +299,41 @@ try {
     check("討論與白板互相連得起來", (await page.getByTestId("discussion-feed").innerText()).length > 0);
     check("決策區看得到已決定", (await page.getByTestId("decision-area").innerText()).includes("採用 B 版"));
 
-    await page.getByRole("button", { name: "語音", exact: true }).click();
     check("語音是架構邊界而不是半成品 MVP", (await page.getByTestId("voice-boundary").innerText()).includes("語音"));
+
+    // --- PR-01a 新增檢查 ---------------------------------------------
+    // 鍵盤：composer 是 fixed dock，--kb 升起時要騎在鍵盤上、feed 保持可捲。
+    await page.evaluate(() => document.documentElement.style.setProperty("--kb", "300px"));
+    await page.waitForTimeout(120);
+    {
+      const box = await page.getByLabel("房間討論").boundingBox();
+      const viewport = page.viewportSize();
+      check("鍵盤升起時 composer 在鍵盤上方", Boolean(box && viewport && box.y + box.height <= viewport.height - 290), JSON.stringify(box));
+    }
+    await page.evaluate(() => document.documentElement.style.setProperty("--kb", "0px"));
+
+    // 失敗送出：mock 注入一次 insert 失敗 → 樂觀列顯示未送出，重試後恢復，
+    // 且訊息只出現一次（id 冪等）。
+    faults.discussionInsert = true;
+    await page.getByLabel("房間討論").fill("這句會先失敗");
+    await page.getByRole("button", { name: "送出" }).click();
+    await page.waitForSelector(".rd-msg.is-failed [data-testid='discussion-retry'], .rd-msg.is-failed", { timeout: 15000 });
+    check("失敗的討論訊息看得到、可重試", await page.locator(".rd-msg.is-failed").count() === 1 && await page.getByTestId("discussion-retry").count() === 1);
+    // wholesale 快照替換不能吃掉 ghost：先送一句成功的（觸發 realtime
+    // reload → 整包快照不含失敗那句），失敗列必須還在（Grok pr01a F4/F7）。
+    await page.getByLabel("房間討論").fill("這句會成功並觸發快照");
+    await page.locator(".rd-composer").getByRole("button", { name: "送出" }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("這句會成功並觸發快照"), null, { timeout: 15000 });
+    await page.waitForTimeout(600);
+    check("失敗的 ghost 活過整包快照替換", await page.locator(".rd-msg.is-failed").count() === 1, "failed rows=" + await page.locator(".rd-msg.is-failed").count());
+    await page.getByTestId("discussion-retry").click();
+    await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 });
+    await page.waitForTimeout(400);
+    {
+      const feedText = await page.getByTestId("discussion-feed").innerText();
+      const occurrences = feedText.split("這句會先失敗").length - 1;
+      check("重試後訊息恢復且只出現一次", occurrences === 1, "occurrences=" + occurrences);
+    }
 
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
     await page.screenshot({ path: join(ROOT, "output", "playwright", "collaboration-mobile.png"), fullPage: true });

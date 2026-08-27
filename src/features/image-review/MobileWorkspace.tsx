@@ -372,6 +372,8 @@ export function MobileWorkspace({ api, presence }: Props) {
                   />
                 ))}
               </div>
+            ) : api.discussionDrawer ? (
+              api.discussionDrawer
             ) : (
               <>
                 <div className="m-list">

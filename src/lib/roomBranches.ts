@@ -138,9 +138,22 @@ export function mergeRoomBranch(room: Room, detail: Room, branchId: string): Roo
     relations: detail.relations ?? room.relations,
     polls: detail.polls ?? room.polls,
     pollVotes: detail.pollVotes ?? room.pollVotes,
+    // 討論殼在 branch 對稿期間仍然掛著；collab slice 明寫 fallback 規則
+    // （branch 快照缺鍵時沿用房間現值），不再默默依賴 ...detail 的展開。
+    discussion: detail.discussion ?? room.discussion,
+    discussionSupports: detail.discussionSupports ?? room.discussionSupports,
+    whiteboards: detail.whiteboards ?? room.whiteboards,
+    decisions: detail.decisions ?? room.decisions,
+    allowBoardEdit: detail.allowBoardEdit ?? room.allowBoardEdit,
     plans: [
       ...(room.plans ?? []).filter((plan) => plan.branchId !== branchId),
-      ...(detail.plans ?? []),
+      // Branch reload 與使用者連續編輯會賽跑：快照發出時的 plan 可能比
+      // 本地這一刻的還舊，整包蓋回去會把剛打的段落吃掉。以 updatedAt
+      // 保新 — 本地較新就留本地，遠端較新（別人存的）才接受。
+      ...(detail.plans ?? []).map((incoming) => {
+        const local = room.plans?.find((plan) => plan.branchId === incoming.branchId);
+        return local && local.updatedAt > incoming.updatedAt ? local : incoming;
+      }),
     ],
     updatedAt: Math.max(room.updatedAt, detail.updatedAt),
   });

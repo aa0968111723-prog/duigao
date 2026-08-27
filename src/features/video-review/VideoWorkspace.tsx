@@ -521,9 +521,11 @@ export function VideoWorkspace({ api, presence }: Props) {
         const max = p?.duration() ?? duration;
         seekTo(Math.min(max, (p?.currentTime() ?? 0) + 5));
       } else if (e.key === "Escape") {
-        if (draft) cancelDraft();
-        else if (rangePick) setRangePick(null);
-        else if (api.selectedPinId) api.selectPin(null);
+        // 消費掉的 Escape 標記 defaultPrevented：外層（對稿 overlay）以此
+        // 判斷這一下已被內層 ladder 用掉，一次只關一件事。
+        if (draft) { e.preventDefault(); cancelDraft(); }
+        else if (rangePick) { e.preventDefault(); setRangePick(null); }
+        else if (api.selectedPinId) { e.preventDefault(); api.selectPin(null); }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -568,7 +570,7 @@ export function VideoWorkspace({ api, presence }: Props) {
 
   // Memoized on what it actually shows: a playing video must not re-render
   // every card, and the clock deliberately is not one of these inputs (§16).
-  const discussion = useMemo(
+  const feedbackList = useMemo(
     () => (
       <VideoDiscussion
         api={api}
@@ -579,6 +581,20 @@ export function VideoWorkspace({ api, presence }: Props) {
       />
     ),
     [api, version.id, focusComment, isMobile],
+  );
+  // 房級討論 drawer（雲端 single 房才有）；有的話討論位變成
+  // 「回饋｜房間討論」兩段，回饋維持既有的逐格意見流程。
+  const [discussTab, setDiscussTab] = useState<"feedback" | "room">("feedback");
+  const discussion = api.discussionDrawer ? (
+    <>
+      <div className="m-sheet-tabs v-discuss-tabs">
+        <button type="button" className={discussTab === "feedback" ? "is-on" : ""} onClick={() => setDiscussTab("feedback")}>回饋</button>
+        <button type="button" className={discussTab === "room" ? "is-on" : ""} onClick={() => setDiscussTab("room")}>房間討論</button>
+      </div>
+      {discussTab === "feedback" ? feedbackList : api.discussionDrawer}
+    </>
+  ) : (
+    feedbackList
   );
 
   const briefCard = version && (

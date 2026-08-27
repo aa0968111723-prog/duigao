@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 
+// `--kb` 可能同時有多個掛載者（討論殼的 composer 與疊在上面的對稿工作區都
+// 需要它）。無條件 removeProperty 會讓「先卸載的那個」把還活著的使用者的
+// 鍵盤高度歸零，所以用 ref-count：最後一個離開的人才清掉屬性。
+let kbConsumers = 0;
+
 /**
  * Publishes the on-screen keyboard height as `--kb` so fixed sheets can sit on
  * top of it instead of being pushed off-screen, and returns the usable height
@@ -11,6 +16,7 @@ export function useViewport(): number {
   useEffect(() => {
     const root = document.documentElement;
     const vv = window.visualViewport;
+    kbConsumers += 1;
 
     const update = () => {
       if (vv) {
@@ -32,7 +38,8 @@ export function useViewport(): number {
       window.removeEventListener("orientationchange", update);
       vv?.removeEventListener("resize", update);
       vv?.removeEventListener("scroll", update);
-      root.style.removeProperty("--kb");
+      kbConsumers = Math.max(0, kbConsumers - 1);
+      if (kbConsumers === 0) root.style.removeProperty("--kb");
     };
   }, []);
 

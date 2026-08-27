@@ -427,6 +427,25 @@ try {
   await page.getByTestId("viewer-close").click();
   await page.waitForSelector('[data-testid="immersive-viewer"]', { state: "detached", timeout: 10000 });
   check("關閉 viewer 回到原有文宣對稿流程", await page.locator(".m-stage-area .stage").count() === 1 && !(await page.locator('[data-testid="immersive-viewer"]').count()));
+
+  // PR-01a：single 雲端房的房級討論 drawer 掛在既有討論 sheet 的聊天 tab 裡
+  //（不是 tab 殼），對稿工作區佈局不變。
+  await closeDiscussionToPeek(page);
+  // 圖片房是 local-first：第一次分享才建立雲端房。房級討論是雲端面，
+  // 所以先分享（綁定）再驗 drawer。
+  await page.locator("button.m-share").click();
+  await page.waitForSelector("input.m-share-url", { timeout: 30000 });
+  await page.locator(".m-modal").getByRole("button", { name: "關閉", exact: true }).click();
+  await openDiscussion(page);
+  await page.locator(".m-sheet-tabs button").filter({ hasText: "聊天" }).click();
+  await page.waitForSelector('[data-testid="discussion-drawer"]', { timeout: 15000 });
+  check("聊天位掛的是房級討論 drawer", await page.getByTestId("discussion-drawer").count() === 1);
+  await page.getByLabel("房間討論").fill("drawer 打個招呼");
+  await page.getByRole("button", { name: "送出" }).click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("drawer 打個招呼"), null, { timeout: 15000 });
+  check("drawer 可送出房級討論", (await page.getByTestId("discussion-feed").innerText()).includes("drawer 打個招呼"));
+  check("drawer 沒有把決定/投票/白板塞給對稿", await page.getByTestId("decision-area").count() === 0 && (await page.getByTestId("discussion-drawer").innerText()).includes("drawer 打個招呼"));
+  await closeDiscussionToPeek(page);
   await ctx.close();
 
   // ----------------------------------------------- second phone viewport

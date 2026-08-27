@@ -338,7 +338,10 @@ export function planFromRow(row: PlanRow): PlanDocument {
     branchId: row.branch_id,
     title: row.title,
     description: row.description,
-    blocks: blocks.filter((block): block is PlanBlock => Boolean(block && typeof block === "object" && "id" in block && "kind" in block)) ,
+    blocks: blocks.filter((block): block is PlanBlock => Boolean(block && typeof block === "object" && "id" in block && "kind" in block)),
+    // summary 路徑的 select 不含 blocks（lazy）；標記起來，讓合併端能分辨
+    // 「沒查」與「真的清空」。
+    ...(row.blocks === undefined ? { blocksOmitted: true } : {}),
     updatedBy: row.updated_by ?? undefined,
     updatedAt: ms(row.updated_at),
   };

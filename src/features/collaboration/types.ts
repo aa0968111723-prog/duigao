@@ -121,6 +121,8 @@ export type WhiteboardEdge = {
 
 export type DiscussionPayload = {
   quotedBody?: string;
+  /** 唯讀併入的 legacy（0001 messages）列：討論表沒有這個 id，互動一律關閉。 */
+  legacy?: boolean;
   branchId?: string;
   versionId?: string;
   whiteboardId?: string;

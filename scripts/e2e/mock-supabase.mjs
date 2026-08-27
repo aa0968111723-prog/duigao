@@ -138,6 +138,8 @@ export const faults = {
   //   first room-assets DELETE containing that path -> 500 once (counted)
   // Requests belonging to other rooms can never consume the injection.
   versionInsertNextRoom: false,
+  // 一次性的討論訊息寫入失敗（驗證 composer 的「未送出 · 重試」）。
+  discussionInsert: false,
   versionInsertRoomId: null,
   assetDeleteTargetPath: null,
   assetDeleteFaultCount: 0,
@@ -489,6 +491,10 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === "POST") {
       const body = JSON.parse((await readBody(req)).toString() || "[]");
       const rows = Array.isArray(body) ? body : [body];
+      if (table === "room_discussion_messages" && faults.discussionInsert) {
+        faults.discussionInsert = false;
+        return json(res, 500, { message: "injected discussion insert failure" });
+      }
       if (table === "versions" && faults.versionInsert) {
         faults.versionInsert = false;
         return json(res, 500, { message: "injected version metadata failure" });

@@ -316,6 +316,9 @@ export type PlanDocument = {
   title: string;
   description: string;
   blocks: PlanBlock[];
+  /** 唯一由 summary 載入路徑設置：該列的 blocks 欄位沒有被查詢（lazy），
+   *  空陣列不代表「內容被清空」。合併時不可拿去覆蓋有內容的版本。 */
+  blocksOmitted?: boolean;
   updatedBy?: string;
   updatedAt: number;
 };

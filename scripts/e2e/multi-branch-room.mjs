@@ -19,7 +19,7 @@
  */
 import { execFileSync } from "node:child_process";
 import http from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { requestLog, start as startMock } from "./mock-supabase.mjs";
@@ -146,6 +146,19 @@ async function chooseCreate(page, name, type, file) {
   await current.locator("button.project-submit").click();
 }
 
+async function closePushedPane(page) {
+  // 面板關閉是 state 更新；點擊與 unmount 之間可能夾著 realtime 重繪，
+  // 用「點到消失為止」的輪詢取代單次點擊。
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const back = page.locator(".project-push-head .project-back-button");
+    if (!(await back.count())) return;
+    await back.click({ force: true }).catch(() => undefined);
+    const gone = await page.waitForFunction(() => !document.querySelector(".project-push-pane"), null, { timeout: 3000 }).then(() => true).catch(() => false);
+    if (gone) return;
+  }
+  throw new Error("push pane did not close");
+}
+
 const tempRoot = mkdtempSync(join(process.env.TEMP ?? process.cwd(), "duigao-multi-branch-"));
 const dist = join(tempRoot, "cloud");
 let mock;
@@ -178,10 +191,21 @@ try {
     await page.getByRole("button", { name: /建立活動房/ }).click();
     await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 10000 });
 
-    check("Android 手機第一屏是簡單活動房導覽", await page.locator(".project-tabs button").count() === 4 && await page.locator(".project-bottom-nav button").count() === 4);
+    // 討論就是房間殼：進房第一屏是討論 feed + composer + 三個入口 chips，
+    // 不再有互相競爭的四分頁（PR-01a）。
+    check(
+      "Android 手機第一屏就是討論殼",
+      await page.getByTestId("discussion-feed").count() === 1
+        && await page.getByLabel("房間討論").count() === 1
+        && await page.locator(".project-entry-chips button").count() === 3
+        && await page.locator(".project-tabs, .project-bottom-nav").count() === 0,
+    );
     check("活動房首頁沒有 desktop sidebar", await page.locator(".sidebar, .desktop-sidebar").count() === 0);
     check("390×844 沒有水平溢出", await noHorizontalOverflow(page));
+    await page.getByTestId("open-overview-pane").click();
     check("新活動房顯示清楚空狀態", (await page.locator(".project-welcome").innerText()).includes("這間房還沒有內容"));
+    await closePushedPane(page);
+    check("總覽面板返回後回到討論殼", await page.getByTestId("discussion-feed").count() === 1);
 
     await chooseCreate(page, "擺攤計畫", "plan");
     await page.waitForSelector('[data-testid="plan-editor"]', { timeout: 10000 });
@@ -198,7 +222,7 @@ try {
     check("手機企劃可快速編輯段落與 checkbox", await page.locator('input[aria-label="段落內容"]').first().inputValue() === "目標：招募新生" && await page.locator('input[aria-label="完成項目"]').isChecked());
 
     await page.locator(".project-back-button").click();
-    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
+    await page.getByTestId("open-content-pane").click();
     const poster = { name: "演講文宣", mimeType: "image/png", buffer: TINY_PNG };
     await page.getByRole("button", { name: /新增文宣/ }).click();
     const posterSheet = page.getByTestId("create-content-sheet");
@@ -208,10 +232,17 @@ try {
     await page.waitForSelector(".m-stage-area .stage", { timeout: 20000 });
     await page.waitForFunction(() => document.querySelector("img.stage-img")?.naturalWidth > 0, null, { timeout: 20000 });
     check("文宣分支進入既有 review workspace", await page.locator(".m-stage-area img.stage-img").count() === 1);
+    // 對稿是 overlay：殼在底下持續掛著，不是整棵樹替換（PR-01a 核心）。
+    check("對稿 overlay 打開時討論殼仍掛著", await page.getByTestId("branch-workspace-overlay").count() === 1 && await page.getByTestId("multi-branch-room").count() === 1);
     await page.locator("button.m-home").click();
-    await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 10000 });
+    await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 20000 });
+    check("返回後回到討論殼（不需重新載入）", await page.getByTestId("discussion-feed").count() === 1);
+    // 推進面板的狀態會跨 overlay 保留（建立文宣前開的內容面板還在）——
+    // 這是設計行為；要去總覽先把它收起來。
+    check("內容面板狀態跨對稿 overlay 保留", await page.getByTestId("content-pane").count() === 1);
+    await closePushedPane(page);
 
-    await page.locator('.project-tabs button').filter({ hasText: "總覽" }).click();
+    await page.getByTestId("open-overview-pane").click();
     const decisions = page.getByTestId("decisions");
     await decisions.getByRole("button", { name: "＋ 新增" }).click();
     const pollSheet = page.getByRole("dialog", { name: "新增待決策" });
@@ -223,8 +254,9 @@ try {
     await page.waitForSelector('[data-testid^="poll-"]', { timeout: 10000 });
     await page.getByRole("button", { name: "A 版" }).click();
     check("總覽可直接建立與投票待決策", (await decisions.innerText()).includes("茶會文宣 A / B 哪版？") && (await decisions.innerText()).includes("1 人已投") && await decisions.locator(".project-poll-option.is-chosen").count() === 1);
+    await closePushedPane(page);
 
-    await page.locator('.project-tabs button').filter({ hasText: "企劃" }).click();
+    await page.getByTestId("open-plan-pane").click();
     await page.locator('[data-testid="plan-branches"] .project-branch-card').filter({ hasText: "擺攤計畫" }).click();
     await page.locator('select[aria-label="選擇相關內容"]').selectOption({ label: "演講文宣" });
     await page.getByRole("button", { name: "加入" }).click();
@@ -236,7 +268,7 @@ try {
     await page.locator(".project-back-button").click();
 
     const videoBytes = await recordWebm(page);
-    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
+    await page.getByTestId("open-content-pane").click();
     await page.getByRole("button", { name: /新增影片/ }).click();
     const videoSheet = page.getByTestId("create-content-sheet");
     await videoSheet.locator('input:not([type="file"])').first().fill("招生影片");
@@ -246,13 +278,21 @@ try {
     check("影片分支沿用既有播放器並能載入", await page.locator("video.v-video").count() === 1);
     check("影片分支沒有把文宣版本串進來", await page.locator(".m-vchip:not(.m-vchip-add)").count() === 1);
     await page.locator("button.m-home").click();
-    await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 15000 });
-    await page.waitForFunction(() => document.querySelectorAll('.project-branch-card').length >= 3, null, { timeout: 15000 });
-    check("同一房間可同時看文宣、影片、企劃分支", (await page.locator(".project-branch-card").allTextContents()).some((text) => text.includes("演講文宣")) && (await page.locator(".project-branch-card").allTextContents()).some((text) => text.includes("招生影片")) && (await page.locator(".project-branch-card").allTextContents()).some((text) => text.includes("擺攤計畫")));
+    await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
+    // 影片是從內容面板建立的：返回後面板仍開著（狀態保留），先數卡再收合。
+    await page.waitForFunction(() => document.querySelectorAll('.project-branch-card').length >= 2, null, { timeout: 15000 });
+    await closePushedPane(page);
+    await page.getByTestId("open-overview-pane").click();
+    await page.waitForFunction(() => document.querySelectorAll('.project-branch-card').length >= 1, null, { timeout: 15000 });
+    {
+      const overviewTexts = await page.locator(".project-update-row, .project-branch-card").allTextContents();
+      check("同一房間可同時看文宣、影片、企劃分支", ["演講文宣", "招生影片", "擺攤計畫"].every((name) => overviewTexts.some((text) => text.includes(name))), overviewTexts.join(" / "));
+    }
+    await closePushedPane(page);
 
     // A branch share is intentionally checked from a real workspace. The
     // preview path may change, but its fragment must remain the app target.
-    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
+    await page.getByTestId("open-content-pane").click();
     await page.locator('[data-testid="poster-branches"] .project-branch-card').filter({ hasText: "演講文宣" }).click();
     await page.locator("button.m-share").click();
     await page.waitForSelector("input.m-share-url", { timeout: 30000 });
@@ -294,6 +334,15 @@ try {
       await deepPage.click("button.btn-primary");
       await deepPage.waitForSelector("input[aria-label=\"文宣名稱\"]", { timeout: 30000 });
       check("branch deep-link 直接開到指定文宣", await deepPage.locator('input[aria-label="文宣名稱"]').inputValue() === "演講文宣");
+      // one-shot：返回討論殼後，別的 realtime 快照不得把人再推回分支
+      //（Grok pr01a F6/F7）。用一句討論訊息當 nudge。
+      await deepPage.locator("button.m-home").click();
+      await deepPage.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
+      await deepPage.getByLabel("房間討論").fill("nudge 一下");
+      await deepPage.getByRole("button", { name: "送出" }).click();
+      await deepPage.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("nudge 一下"), null, { timeout: 15000 });
+      await deepPage.waitForTimeout(600);
+      check("deep-link 是一次性的：返回後快照不再推回分支", !(await deepPage.getByTestId("branch-workspace-overlay").count()));
     } finally {
       await deepContext.close();
     }
@@ -302,7 +351,7 @@ try {
     await page.screenshot({ path: join(ROOT, "output", "playwright", "multi-branch-mobile.png"), fullPage: true });
     check("手機活動房完成 journey 後仍沒有水平溢出", await noHorizontalOverflow(page));
   } catch (error) {
-    check("同房多分支手機 acceptance journey", false, error instanceof Error ? error.message : String(error));
+    check("同房多分支手機 acceptance journey", false, (error instanceof Error ? error.stack : String(error)).slice(0, 600));
   } finally {
     await context.close();
   }
