@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T04:41:53.000Z",
+  "generatedAt": "2026-08-27T13:04:08.000Z",
   "git": {
     "branch": "codex/multi-branch-room-1",
-    "sha": "8422766763fe319b3fff51d83f3a11edbd9bb4b9",
+    "sha": "9cf833c2c9541894f9d9290f8e266c502950f892",
     "mainSha": "cec65183b598d9a588a346a636a4201f20ef6370",
-    "dirty": true
+    "dirty": false
   },
   "project": {
     "name": "duigao",
@@ -32,7 +32,16 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": []
+      "items": [
+        {
+          "baseRefName": "main",
+          "headRefName": "agent/collaborative-intelligence-workspace",
+          "isDraft": false,
+          "number": 38,
+          "title": "Collaborative Intelligence Workspace 1.0 / 智慧協作工作台 1.0",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/38"
+        }
+      ]
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
