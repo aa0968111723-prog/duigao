@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { UniversalIntake, type IntakeHandle } from "../../components/UniversalIntake";
 import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { VOICE_ROOM_MVP, voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
@@ -36,7 +37,68 @@ export type RoomDiscussionApi = {
   showRoomActions?: boolean;
   /** 語音邊界說明；single 房 drawer 不顯示（語音是房間殼的事）。 */
   showVoiceNote?: boolean;
+  /** 附件（PR-01b）：有提供才渲染迴紋針；上傳中由 attachBusy 鎖住。 */
+  onAttach?: (files: File[]) => void;
+  attachBusy?: boolean;
+  onReject?: (reason: string) => void;
+  /** 貼上／送出偵測為純 URL 時建立連結卡；回 false 則按一般文字送出。 */
+  onSendLink?: (url: string) => boolean;
+  /** 附件卡的 signed URL 解析（App 持有 client 與快取；本元件純呈現）。 */
+  resolveAssetUrl?: (path: string) => Promise<string>;
 };
+
+function humanSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** http/https 之外（javascript:/data:…）一律拒開 — href 是成員任意輸入。 */
+function safeHref(href?: string): string | null {
+  if (!href) return null;
+  try {
+    const parsed = new URL(href);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function AttachmentCard({ message, resolve }: { message: DiscussionMessage; resolve?: (path: string) => Promise<string> }) {
+  const [failed, setFailed] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const path = message.payload.path ?? "";
+  const mime = message.payload.mime ?? "";
+  const name = message.payload.name ?? message.payload.title ?? "附件";
+  const size = humanSize(message.payload.size);
+  const isAudio = mime.startsWith("audio/");
+  const open = async () => {
+    if (!resolve || !path) return;
+    try {
+      const url = await resolve(path);
+      if (isAudio) setAudioUrl(url);
+      else window.open(url, "_blank", "noopener,noreferrer");
+      setFailed(false);
+    } catch {
+      setFailed(true); // 簽名失敗（物件不見／離線）：與未送出的 is-failed 視覺區分
+    }
+  };
+  return (
+    <div className="rd-attachment" data-testid="attachment-card">
+      <span className="rd-attachment-name">📎 {name}</span>
+      {size ? <span className="rd-attachment-size">{size}</span> : null}
+      {audioUrl ? (
+        <audio controls src={audioUrl} className="rd-attachment-audio" />
+      ) : (
+        <button type="button" className="rd-ref" onClick={open} disabled={!resolve || !path}>
+          {isAudio ? "播放" : "開啟"}
+        </button>
+      )}
+      {failed && <span className="rd-attachment-broken">目前打不開這個附件</span>}
+    </div>
+  );
+}
+
 
 function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("zh-Hant", { hour: "2-digit", minute: "2-digit" });
@@ -49,6 +111,7 @@ function PollMini({ poll, room }: { poll: RoomPoll; room: Room }) {
 
 export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [pane, setPane] = useState<"chat" | "board">(api.pane ?? "chat");
+  const attachRef = useRef<IntakeHandle>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [boardPick, setBoardPick] = useState<DiscussionMessage | null>(null);
   const [reply, setReply] = useState<DiscussionMessage | null>(null);
@@ -144,6 +207,19 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   {message.payload.title ?? "房間內容"}
                 </button>
               )}
+              {message.kind === "attachment" && (
+                <AttachmentCard message={message} resolve={api.resolveAssetUrl} />
+              )}
+              {message.kind === "link" && (() => {
+                const href = safeHref(message.payload.href);
+                return href ? (
+                  <a className="rd-ref rd-link" href={href} target="_blank" rel="noopener noreferrer" data-testid="link-card">
+                    🔗 {message.payload.title ?? href}
+                  </a>
+                ) : (
+                  <span className="rd-ref">（不支援的連結）</span>
+                );
+              })()}
               {sendState === "failed" && api.onRetry && (
                 <button type="button" className="rd-retry" data-testid="discussion-retry" onClick={() => api.onRetry?.(message.id)}>
                   未送出 · 重試
@@ -173,15 +249,45 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           className="rd-composer"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!api.draft.trim()) return;
-            api.onSend({ body: api.draft.trim(), replyToId: reply?.id, payload: reply ? { quotedBody: reply.body } : {} });
+            const text = api.draft.trim();
+            if (!text) return;
+            // 純 URL 送出成連結卡；其他一律文字。onSendLink 拒收就退回文字。
+            if (/^https?:\/\/\S+$/i.test(text) && api.onSendLink?.(text)) {
+              api.setDraft("");
+              setReply(null);
+              return;
+            }
+            api.onSend({ body: text, replyToId: reply?.id, payload: reply ? { quotedBody: reply.body } : {} });
             setReply(null);
           }}
         >
+          {api.onAttach && (
+            <>
+              <UniversalIntake ref={attachRef} profile="attachment" mode="trigger" onFiles={(files) => files && api.onAttach?.([...files])} onReject={api.onReject} />
+              <button
+                type="button"
+                className="rd-attach-button"
+                aria-label="附加檔案"
+                data-testid="composer-attach"
+                disabled={api.attachBusy}
+                onClick={() => attachRef.current?.open()}
+              >
+                {api.attachBusy ? "…" : "📎"}
+              </button>
+            </>
+          )}
           <input
             className="text-input"
             value={api.draft}
             onChange={(event) => api.setDraft(event.target.value)}
+            onPaste={(event) => {
+              // 只攔檔案貼上；文字貼上不動。
+              const files = event.clipboardData?.files;
+              if (files?.length && api.onAttach) {
+                event.preventDefault();
+                api.onAttach([...files]);
+              }
+            }}
             placeholder={reply ? `回覆 ${reply.authorName}` : "這週先主推哪一份？"}
             aria-label="房間討論"
           />

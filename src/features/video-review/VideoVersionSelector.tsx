@@ -1,6 +1,5 @@
 import type { Version } from "../../lib/types";
-import { UploadZone } from "../../components/UploadZone";
-import { VIDEO_ACCEPT } from "./media";
+import { UniversalIntake } from "../../components/UniversalIntake";
 
 /**
  * 初剪｜改一｜改二 — plus the one action that adds the next cut.
@@ -35,9 +34,9 @@ export function VideoVersionSelector({ versions, currentId, onSelect, onAddFiles
         </button>
       ))}
       {canAdd && (
-        <UploadZone onFiles={onAddFiles} accept={VIDEO_ACCEPT} multiple={false} className="m-vchip m-vchip-add">
+        <UniversalIntake profile="video" mode="zone" onFiles={onAddFiles} className="m-vchip m-vchip-add">
           <span aria-hidden>＋</span>
-        </UploadZone>
+        </UniversalIntake>
       )}
     </div>
   );

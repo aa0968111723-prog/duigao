@@ -1,6 +1,6 @@
 import type { Room } from "../lib/types";
 import { roomMediaType } from "../lib/types";
-import { UploadZone } from "./UploadZone";
+import { UniversalIntake } from "./UniversalIntake";
 import { VIDEO_ACCEPT, VIDEO_LIMIT_HINT } from "../features/video-review/media";
 
 type Props = {
@@ -39,7 +39,7 @@ export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvail
             <small>把文宣、影片、企劃放在同一間</small>
           </span>
         </button>
-        <UploadZone onFiles={onFiles} className="home-pick">
+        <UniversalIntake profile="poster" mode="zone" onFiles={onFiles} className="home-pick">
           <span className="home-pick-icon" aria-hidden>
             🖼
           </span>
@@ -47,13 +47,13 @@ export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvail
             <b>圖片文宣對稿</b>
             <small>海報、社群圖、簡報圖</small>
           </span>
-        </UploadZone>
+        </UniversalIntake>
 
         {videoAvailable ? (
-          <UploadZone
+          <UniversalIntake
+            profile="video"
+            mode="zone"
             onFiles={onVideoFiles}
-            accept={VIDEO_ACCEPT}
-            multiple={false}
             className="home-pick home-pick-video"
           >
             <span className="home-pick-icon" aria-hidden>
@@ -63,7 +63,7 @@ export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvail
               <b>影片對稿</b>
               <small>短片、動畫、宣傳影片（{VIDEO_LIMIT_HINT}）</small>
             </span>
-          </UploadZone>
+          </UniversalIntake>
         ) : (
           <div className="home-pick is-disabled" aria-disabled="true">
             <span className="home-pick-icon" aria-hidden>

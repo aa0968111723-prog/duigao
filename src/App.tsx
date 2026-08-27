@@ -34,6 +34,7 @@ import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGue
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { getSupabase } from "./cloud/client";
+import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
   askRoomContext,
   enqueueAssetAnalysis,
@@ -52,7 +53,7 @@ import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { RoomWorkspace } from "./components/RoomWorkspace";
 import { Home } from "./components/Home";
-import { UploadZone } from "./components/UploadZone";
+import { UniversalIntake } from "./components/UniversalIntake";
 import { ShareSheet, type ShareCard, type ShareCustomization, type ShareState } from "./components/ShareSheet";
 import { sharePresentation } from "./lib/sharePresentation";
 import {
@@ -1136,12 +1137,13 @@ export function App() {
   );
 
   const sendDiscussion = useCallback(
-    (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => {
+    (input?: { id?: string; body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => {
       if (!guest) return;
       const body = (input?.body ?? chatInput).trim();
       if (!body && !input?.kind) return;
       const message: DiscussionMessage = {
-        id: crypto.randomUUID(),
+        // 附件卡的 storage 路徑以 messageId 為鍵，所以允許呼叫端先發 id。
+        id: input?.id ?? crypto.randomUUID(),
         roomId: roomRef.current?.id ?? "",
         authorId: cloud.userId ?? guest.id,
         authorName: guest.name,
@@ -1162,6 +1164,74 @@ export function App() {
     },
     [chatInput, claim, cloud.userId, guest, updateRoom],
   );
+
+  // ---- 討論附件（PR-01b Universal Intake） --------------------------------
+  // 順序固定：驗證 → 上傳（upsert:false）→ insertDiscussion。上傳成功但
+  // insert 失敗 → outbox 顯示未送出，重試只重發 insert（path 已在 payload，
+  // 永不重新上傳）。上傳失敗 → 沒有任何列，重選檔會鑄新 assetId。
+  const attachmentBusy = useRef(false);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const sendAttachment = useCallback(
+    async (files: File[]) => {
+      const file = files[0];
+      if (!file || !guest) return;
+      const roomId = cloudRef.current.boundRoomId;
+      if (!roomId) {
+        // 附件路徑在上傳當下就得綁 cloud room id（storage RLS 也照它驗），
+        // 綁定完成前直接說清楚，不做會靜默失敗的事。
+        showToast("還在連上雲端，稍等一下再附檔。", { tone: "error" });
+        return;
+      }
+      if (attachmentBusy.current) return; // 上傳中不接受第二件（防雙擊）
+      attachmentBusy.current = true;
+      setAttachmentUploading(true);
+      try {
+        const messageId = crypto.randomUUID();
+        const mime = file.type || "application/octet-stream";
+        const path = attachmentPath(roomId, messageId, crypto.randomUUID(), attachmentExt(mime, file.name));
+        await uploadAttachment(getSupabase()!, path, file, mime);
+        sendDiscussion({
+          id: messageId,
+          kind: "attachment",
+          body: file.name,
+          payload: { path, mime, size: file.size, name: file.name, title: file.name },
+        });
+      } catch {
+        showToast("附件沒有上傳成功，請再試一次。", { tone: "error" });
+      } finally {
+        attachmentBusy.current = false;
+        setAttachmentUploading(false);
+      }
+    },
+    [guest, sendDiscussion, showToast],
+  );
+
+  // 連結卡：無 storage 物件；渲染端只接受 http/https（貼上端也先驗一次）。
+  const sendLink = useCallback(
+    (url: string) => {
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return false;
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+      sendDiscussion({ kind: "link", body: parsed.href, payload: { href: parsed.href, title: parsed.hostname } });
+      return true;
+    },
+    [sendDiscussion],
+  );
+
+  // 附件卡的 signed URL 解析器：RoomDiscussion 保持純呈現層，簽名集中在
+  // App，帶 50 分鐘快取（SIGNED_TTL 1 小時，留緩衝）。
+  const assetUrlCache = useRef(new Map<string, { url: string; at: number }>());
+  const resolveAssetUrl = useCallback(async (path: string) => {
+    const cached = assetUrlCache.current.get(path);
+    if (cached && Date.now() - cached.at < 50 * 60 * 1000) return cached.url;
+    const url = await signedUrl(getSupabase()!, path);
+    assetUrlCache.current.set(path, { url, at: Date.now() });
+    return url;
+  }, []);
 
   const supportDiscussion = useCallback(
     (messageId: string, add: boolean) => {
@@ -2193,6 +2263,11 @@ export function App() {
           onRetry={discussionOutbox.retry}
           onSend={sendDiscussion}
           onSupport={supportDiscussion}
+          onAttach={(files) => void sendAttachment(files)}
+          attachBusy={attachmentUploading}
+          onReject={(reason) => showToast(reason, { tone: "error" })}
+          onSendLink={sendLink}
+          resolveAssetUrl={resolveAssetUrl}
         />
       )
     : undefined;
@@ -2441,6 +2516,11 @@ export function App() {
           discussionGhosts: discussionOutbox.ghosts,
           discussionSendStates: discussionOutbox.sendStates,
           onRetryDiscussion: discussionOutbox.retry,
+          onAttachDiscussion: (files) => void sendAttachment(files),
+          attachBusy: attachmentUploading,
+          onIntakeReject: (reason) => showToast(reason, { tone: "error" }),
+          onSendDiscussionLink: sendLink,
+          resolveAssetUrl,
         }} />
         {isCloudConfigured && !branchWorkspace && <AssetAiFab project onClick={() => openAi()} />}
         {aiSheetOpen && room && <RoomAiSheet
@@ -2510,14 +2590,14 @@ export function App() {
           </p>
           {failed ? (
             <>
-              <UploadZone
+              <UniversalIntake
+                profile="video"
+                mode="zone"
                 onFiles={addVideoFile}
-                accept={VIDEO_ACCEPT}
-                multiple={false}
                 className="btn btn-primary btn-block"
               >
                 重新選一支影片
-              </UploadZone>
+              </UniversalIntake>
               <button className="btn btn-block" onClick={abandonEmptyVideoRoom}>
                 回首頁
               </button>

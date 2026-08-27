@@ -1,3 +1,4 @@
+import { INTAKE_PROFILES } from "../../components/UniversalIntake";
 import { useRef } from "react";
 import { useProposalStore, type BgImageFit, type GradientKind, type ProposalAuthor } from "./store";
 import { prepareImageFile } from "./helpers";
@@ -131,7 +132,7 @@ export function ProposalBackgroundControls({ roomId, versionId, author, showToas
           ref={fileRef}
           className="proposal-file"
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          accept={INTAKE_PROFILES.proposal.accept}
           onChange={(e) => void uploadBackground(e.target.files)}
         />
       </div>

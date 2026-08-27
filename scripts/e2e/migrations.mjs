@@ -671,8 +671,9 @@ try {
   section("既有規則沒有被動到");
   {
     ok(
-      "room-assets 的四條 policy 還在",
-      psql("select count(*) from pg_policies where tablename = 'objects' and policyname like 'room_assets_%';").out === "4",
+      // 0018 新增 room_assets_attachments_insert（成員可寫 attachments 前綴）
+      "room-assets 的五條 policy 還在",
+      psql("select count(*) from pg_policies where tablename = 'objects' and policyname like 'room_assets_%';").out === "5",
     );
     ok(
       "非成員仍讀不到 rooms",
@@ -1309,6 +1310,101 @@ try {
   const aclBefore = aclShape();
   psqlFile(join(MIGRATIONS, "0017_author_acl.sql"));
   ok("重跑 0017 後 policies / trigger 數量不變", aclBefore === aclShape(), `${aclBefore} → ${aclShape()}`);
+
+  section("0018：討論附件與 library insert 殘洞");
+  // 上面 0016→0017 的 replay 舞步把舊的 library_assets_insert 復活了；
+  // 0018 必須在它們之後重套（真實升級也一樣：任何 0016/0017 replay 之後
+  // 都要補跑 0018）。
+  psqlFile(join(MIGRATIONS, "0018_discussion_attachments.sql"));
+
+  // (a) 訊息 kind 與 payload 衛生
+  const attMsg = psql("select gen_random_uuid();").out;
+  const attPath = `rooms/${capRoom}/attachments/${attMsg}/att1.pdf`;
+  ok(
+    "owner 可發 attachment 訊息（path+mime 齊備）",
+    !as(owner, `insert into public.room_discussion_messages (id, room_id, author_name, kind, body, payload) values ('${attMsg}'::uuid, '${capRoom}'::uuid, 'Owner', 'attachment', 'brief.pdf', '{"path":"${attPath}","mime":"application/pdf","size":12345,"name":"brief.pdf"}'::jsonb);`).failed,
+  );
+  ok(
+    "沒有 path 的 attachment 被 payload 約束擋下",
+    as(owner, `insert into public.room_discussion_messages (room_id, author_name, kind, body, payload) values ('${capRoom}'::uuid, 'Owner', 'attachment', 'x', '{"mime":"application/pdf"}'::jsonb);`).failed,
+  );
+  ok(
+    "沒有 href 的 link 被 payload 約束擋下",
+    as(owner, `insert into public.room_discussion_messages (room_id, author_name, kind, body, payload) values ('${capRoom}'::uuid, 'Owner', 'link', 'x', '{}'::jsonb);`).failed,
+  );
+  ok(
+    "亂寫的 kind 仍然被 CHECK 擋下",
+    as(owner, `insert into public.room_discussion_messages (room_id, author_name, kind, body) values ('${capRoom}'::uuid, 'Owner', 'bogus', 'x');`).failed,
+  );
+  const reviewerAttMsg = psql("select gen_random_uuid();").out;
+  const reviewerAttPath = `rooms/${capRoom}/attachments/${reviewerAttMsg}/r1.pdf`;
+  ok(
+    "reviewer 也能發 attachment 與 link 訊息",
+    !as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_name, kind, body, payload) values ('${reviewerAttMsg}'::uuid, '${capRoom}'::uuid, 'Reviewer', 'attachment', 'r1.pdf', '{"path":"${reviewerAttPath}","mime":"application/pdf"}'::jsonb);`).failed
+      && !as(reviewer, `insert into public.room_discussion_messages (room_id, author_name, kind, body, payload) values ('${capRoom}'::uuid, 'Reviewer', 'link', 'https://example.com', '{"href":"https://example.com"}'::jsonb);`).failed,
+  );
+
+  // (b) storage：attachments 前綴成員可寫、add-only；其他前綴不得被 OR 放寬
+  ok(
+    "reviewer 可以上傳 attachments 前綴的物件",
+    !as(reviewer, `insert into storage.objects (bucket_id, name) values ('room-assets', '${reviewerAttPath}');`).failed,
+  );
+  ok(
+    "reviewer 仍然不能寫 versions/videos/proposals 前綴（新 policy 沒有 OR 放寬舊界線）",
+    as(reviewer, `insert into storage.objects (bucket_id, name) values ('room-assets', 'rooms/${capRoom}/videos/${capVersion}/sneak.mp4');`).failed
+      && as(reviewer, `insert into storage.objects (bucket_id, name) values ('room-assets', 'rooms/${capRoom}/versions/${capVersion}/sneak.png');`).failed,
+  );
+  ok(
+    "非成員不能寫別房的 attachments 前綴",
+    as(stranger, `insert into storage.objects (bucket_id, name) values ('room-assets', 'rooms/${capRoom}/attachments/${attMsg}/sneak.pdf');`).failed,
+  );
+  as(reviewer, `update storage.objects set name = '${reviewerAttPath}.moved' where bucket_id = 'room-assets' and name = '${reviewerAttPath}';`);
+  as(reviewer, `delete from storage.objects where bucket_id = 'room-assets' and name = '${reviewerAttPath}';`);
+  ok(
+    "附件 add-only：上傳者（reviewer）不能改名或刪除自己的附件物件",
+    psql(`select name from storage.objects where bucket_id = 'room-assets' and name = '${reviewerAttPath}';`).out === reviewerAttPath,
+  );
+  ok(
+    "editor（can_manage_media）仍可清理附件物件",
+    !as(editor, `delete from storage.objects where bucket_id = 'room-assets' and name = '${reviewerAttPath}';`).failed
+      && psql(`select count(*) from storage.objects where bucket_id = 'room-assets' and name = '${reviewerAttPath}';`).out === "0",
+  );
+  ok(
+    "room-assets bucket 仍是 private",
+    psql(`select public from storage.buckets where id = 'room-assets';`).out === "f",
+  );
+
+  // (c) 附件不進孤兒盤點（0009 只掃 versions/videos — 附件由討論 payload 參照）
+  const orphanCheckPath = `rooms/${capRoom}/attachments/${attMsg}/att1.pdf`;
+  psql(`insert into storage.objects (bucket_id, name, created_at) values ('room-assets', '${orphanCheckPath}', now() - interval '2 days') on conflict do nothing;`);
+  ok(
+    "attachments 物件不會被 orphaned_room_assets 盤成孤兒",
+    psql(`select count(*) from public.orphaned_room_assets(interval '0 seconds') where name = '${orphanCheckPath}';`).out === "0",
+  );
+
+  // (d) library_assets shared-insert 殘洞：冒名 created_by 被 policy 擋下
+  ok(
+    "shared insert 冒名 created_by 被擋、本人/留空可過",
+    as(editor, `insert into public.library_assets (scope, title, kind, created_by) values ('shared', 'spoof', 'image', '${owner}'::uuid);`).failed
+      && !as(editor, `insert into public.library_assets (scope, title, kind) values ('shared', '編輯者的共用素材', 'image');`).failed,
+  );
+  // 0017 的 editor-hijack 保護在 0018 重套後仍成立
+  const hijackAgain = as(editor, `update public.library_assets set title = 'hijack2' where id = '${libShared}'::uuid returning id;`);
+  ok("0018 之後 0017 的作者 ACL 仍成立", hijackAgain.out === "");
+
+  // (e) 冪等：重跑 0018 後 constraint / policy 形狀不變；0014 replay 不會復活舊 kind CHECK
+  const attachShape = () => psql(`select
+    (select count(*) from pg_policies where tablename = 'objects' and policyname = 'room_assets_attachments_insert') || '/' ||
+    (select count(*) from pg_policies where tablename = 'library_assets') || '/' ||
+    (select count(*) from pg_constraint where conname in ('room_discussion_messages_kind_check','room_discussion_attachment_payload'));`).out;
+  const attachBefore = attachShape();
+  psqlFile(join(MIGRATIONS, "0018_discussion_attachments.sql"));
+  ok("重跑 0018 後 policy / constraint 形狀不變", attachBefore === attachShape(), `${attachBefore} → ${attachShape()}`);
+  psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
+  ok(
+    "0014 replay 之後 attachment kind 仍可寫（create table if not exists 不會復活舊 CHECK）",
+    !as(owner, `insert into public.room_discussion_messages (room_id, author_name, kind, body, payload) values ('${capRoom}'::uuid, 'Owner', 'attachment', 'again.pdf', '{"path":"rooms/${capRoom}/attachments/${attMsg}/again.pdf","mime":"application/pdf"}'::jsonb);`).failed,
+  );
 
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {

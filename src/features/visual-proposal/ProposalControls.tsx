@@ -1,3 +1,4 @@
+import { INTAKE_PROFILES } from "../../components/UniversalIntake";
 import { useRef, useState } from "react";
 import { useProposalStore, type ProposalAuthor } from "./store";
 import { ProposalElementControls } from "./ProposalElementControls";
@@ -254,7 +255,7 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref }:
               ref={materialRef}
               className="proposal-file"
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              accept={INTAKE_PROFILES.proposal.accept}
               onChange={(e) => void uploadMaterial(e.target.files)}
             />
             <button

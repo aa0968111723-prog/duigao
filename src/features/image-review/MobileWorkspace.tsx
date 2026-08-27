@@ -8,7 +8,7 @@ import { pruneProposalVersions, useProposalStore, useRoomProposals } from "../vi
 import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
-import { UploadZone } from "../../components/UploadZone";
+import { UniversalIntake } from "../../components/UniversalIntake";
 import { Viewer } from "./Stage";
 import { ImmersiveViewer } from "./ImmersiveViewer";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
@@ -261,9 +261,9 @@ export function MobileWorkspace({ api, presence }: Props) {
             {v.label}
           </button>
         ))}
-        <UploadZone onFiles={api.addFiles} className="m-vchip m-vchip-add">
+        <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="m-vchip m-vchip-add">
           <span aria-hidden>＋</span>
-        </UploadZone>
+        </UniversalIntake>
       </div>
 
       <div className="m-stage-area">
@@ -592,9 +592,9 @@ export function MobileWorkspace({ api, presence }: Props) {
               )}
             </div>
 
-            <UploadZone onFiles={api.addFiles} className="m-row">
+            <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="m-row">
               加一個版本
-            </UploadZone>
+            </UniversalIntake>
             {room.strokes.length > 0 && (
               <button
                 type="button"

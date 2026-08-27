@@ -26,6 +26,11 @@ export function DiscussionDrawer({
   onRetry,
   onSend,
   onSupport,
+  onAttach,
+  attachBusy,
+  onReject,
+  onSendLink,
+  resolveAssetUrl,
 }: {
   room: Room;
   guest: Guest;
@@ -39,6 +44,11 @@ export function DiscussionDrawer({
   onRetry: (messageId: string) => void;
   onSend: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
   onSupport: (messageId: string, add: boolean) => void;
+  onAttach?: (files: File[]) => void;
+  attachBusy?: boolean;
+  onReject?: (reason: string) => void;
+  onSendLink?: (url: string) => boolean;
+  resolveAssetUrl?: (path: string) => Promise<string>;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -96,6 +106,11 @@ export function DiscussionDrawer({
           showDecisions: false,
           showRoomActions: false,
           showVoiceNote: false,
+          onAttach,
+          attachBusy,
+          onReject,
+          onSendLink,
+          resolveAssetUrl,
           onCreatePoll: () => undefined,
           onAddToBoard: () => undefined,
           onOpenBoardNode: () => undefined,

@@ -41,6 +41,9 @@ export const DISCUSSION_KINDS = [
   "whiteboard",
   "node",
   "decision",
+  // PR-01b Universal Intake：檔案卡（payload.path/mime）與純連結卡（payload.href）
+  "attachment",
+  "link",
 ] as const;
 export type DiscussionKind = (typeof DISCUSSION_KINDS)[number];
 
@@ -123,6 +126,16 @@ export type DiscussionPayload = {
   quotedBody?: string;
   /** 唯讀併入的 legacy（0001 messages）列：討論表沒有這個 id，互動一律關閉。 */
   legacy?: boolean;
+  /** attachment：room-assets 物件 key（永遠不是 signed URL）。 */
+  path?: string;
+  /** attachment：MIME（client 主張，顯示用；安全判斷不得信任）。 */
+  mime?: string;
+  /** attachment：位元組數（client 主張，顯示用）。 */
+  size?: number;
+  /** attachment：原始檔名（顯示用）。 */
+  name?: string;
+  /** link：目標 URL（渲染端只接受 http/https）。 */
+  href?: string;
   branchId?: string;
   versionId?: string;
   whiteboardId?: string;
