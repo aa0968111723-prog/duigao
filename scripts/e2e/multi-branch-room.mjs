@@ -22,7 +22,7 @@ import http from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { requestLog, start as startMock } from "./mock-supabase.mjs";
+import { faults, requestLog, rows, start as startMock } from "./mock-supabase.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54408;
@@ -177,7 +177,7 @@ try {
       VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_e2e_mock_key_000000",
     },
   });
-  mock = await startMock(MOCK_PORT);
+  mock = await startMock(MOCK_PORT, { cutosBridge: true });
   app = await serveStatic(dist, APP_PORT);
   browser = await chromium.launch(browserOptions());
 
@@ -345,6 +345,47 @@ try {
       check("deep-link 是一次性的：返回後快照不再推回分支", !(await deepPage.getByTestId("branch-workspace-overlay").count()));
     } finally {
       await deepContext.close();
+    }
+
+    // ---- PR-07：CUTOS 成品匯入（S2S bridge，真實 edge 源碼） ----------
+    {
+      // 前一段停在文宣 workspace overlay：先回到討論殼再收面板，fab 才在。
+      await page.locator("button.m-home").click().catch(() => undefined);
+      await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 20000 });
+      await closePushedPane(page);
+      // health gate 是 5 分鐘快取；本流程房間早已 bound，入口應已出現。
+      await page.locator(".project-fab").click();
+      await page.waitForSelector('[data-testid="create-content-sheet"]', { timeout: 15000 });
+      const optionVisible = await page.getByTestId("cutos-import-option").count();
+      check("CUTOS 匯入入口在健檢通過後出現", optionVisible === 1);
+      await page.getByTestId("cutos-import-option").click();
+      await page.getByLabel("名稱").fill("CUTOS 成品影片");
+      await page.getByTestId("cutos-project-id").fill("cutos-demo");
+      await page.getByRole("button", { name: "匯入", exact: true }).click();
+      // 成功會關 sheet；版本列落在 mock 的 versions 表（video_path 齊備）
+      await page.waitForFunction(() => !document.querySelector('[data-testid="create-content-sheet"]'), null, { timeout: 30000 });
+      const imported = rows.versions.find((row) => row.label === "CUTOS 成品影片");
+      check("CUTOS 匯入落成影片版本列（video_path＋mp4）", Boolean(imported && String(imported.video_path || "").endsWith("original.mp4")), `row=${JSON.stringify(imported ?? null).slice(0, 120)}`);
+      const importedBranch = rows.room_branches.find((row) => row.name === "CUTOS 成品影片");
+      check("匯入建立了對應的影片分支（FK 齊備）", Boolean(importedBranch) && imported?.branch_id === importedBranch?.id, `branch=${importedBranch?.id ?? "none"} version.branch_id=${imported?.branch_id ?? "none"}`);
+
+      // NO_EXPORT：還沒渲染過的專案 → 誠實文案、sheet 留著可改
+      faults.cutosOutputProjectId = null;
+      await page.locator(".project-fab").click();
+      await page.waitForSelector('[data-testid="create-content-sheet"]', { timeout: 15000 });
+      await page.getByTestId("cutos-import-option").click();
+      await page.getByLabel("名稱").fill("沒有成品的專案");
+      await page.getByTestId("cutos-project-id").fill("cutos-demo");
+      await page.getByRole("button", { name: "匯入", exact: true }).click();
+      const noExportShown = await page.waitForFunction(
+        () => document.querySelector(".project-sheet-error")?.textContent?.includes("還沒有渲染過成品") ?? false,
+        null,
+        { timeout: 30000 },
+      ).then(() => true).catch(() => false);
+      const errText = await page.locator(".project-sheet-error").innerText().catch(() => "");
+      check("沒有成品時的文案可照做（先在 CUTOS 按輸出）", noExportShown && errText.includes("先在 CUTOS 按輸出"), errText.slice(0, 60));
+      faults.cutosOutputProjectId = "cutos-demo";
+      await page.locator(".project-sheet-close").click();
     }
 
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });

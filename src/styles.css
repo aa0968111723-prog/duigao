@@ -1132,3 +1132,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 /* 對稿工作區 overlay：疊在討論殼上。此容器不可有 transform/filter/contain，
    工作區自己的 fixed 底欄才能繼續對 viewport 定位。 */
 .project-workspace-overlay { position: fixed; inset: 0; z-index: 40; background: var(--bg); }
+
+/* CUTOS 匯入表單（PR-07） */
+.project-sheet-note { color: var(--ink-soft); font-size: 13px; margin: 4px 0 8px; }
+.project-sheet-error { color: var(--danger, #c2483a); font-size: 13px; margin: 6px 0 0; }

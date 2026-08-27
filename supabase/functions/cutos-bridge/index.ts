@@ -1,0 +1,189 @@
+/**
+ * cutos-bridge — CUTOS 成品匯入的 S2S 橋（PR-07 第一階段，ADR-005 v2）。
+ *
+ * 為什麼是 edge function：CUTOS 的 editor REST 無認證、AIOS bridge 只有
+ * 一把 `CUTOS_API_KEY`。key 與 base URL 只活在這裡的環境變數 — client
+ * 永遠拿不到；任何 iframe/proxy 暴露都是 ADR-005 的紅線。
+ *
+ * 第一階段動作（刻意最小）：
+ *  - health：GET /api/aios/manifest（帶 key）→ 協定協商 → 誠實可用性。
+ *    未設定 env → CUTOS_NOT_CONFIGURED，client 以此隱藏整個入口。
+ *  - import-output：把 CUTOS 已渲染的成品 MP4 抓來、以呼叫者自己的
+ *    JWT（RLS 全程生效）上傳成房間的新影片版本。沒有成品 → NO_EXPORT
+ *    誠實回報；絕不觸發新的 export（requiresApproval=true 屬 AI 提案層，
+ *    之後的 PR）。
+ *
+ * 安全邊界：
+ *  - 呼叫者必須是房間成員且非 reviewer（與 storage 0007 can_manage_media
+ *    同一線；上傳與版本列都用呼叫者 JWT 寫入，RLS 是唯一權威，這裡的
+ *    前置檢查只是給誠實錯誤碼）。
+ *  - 大小上限 200MB（0006 bucket 上限同值）；Content-Length 先驗，
+ *    缺頭則以實際 bytes 再驗。
+ *  - 回應永不含 CUTOS base URL、key、或上游原始錯誤字串。
+ */
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+const MAX_IMPORT_BYTES = 200 * 1024 * 1024;
+
+function responseHeaders(): Record<string, string> {
+  return {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-methods": "POST, OPTIONS",
+  };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: responseHeaders() });
+}
+
+const text = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/** CUTOS 專案 id：字母數字/底線/連字號，防 path traversal 進上游 URL。 */
+const isSafeId = (value: string): boolean => /^[A-Za-z0-9_-]{1,200}$/.test(value);
+const isUuid = (value: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+type CutosEnv = { baseUrl: string; apiKey: string };
+
+function cutosEnv(): CutosEnv | null {
+  const baseUrl = (Deno.env.get("CUTOS_BASE_URL") ?? "").replace(/\/+$/, "");
+  const apiKey = Deno.env.get("CUTOS_API_KEY") ?? "";
+  if (!baseUrl || !apiKey) return null;
+  return { baseUrl, apiKey };
+}
+
+async function cutosHealth(env: CutosEnv): Promise<Record<string, unknown>> {
+  let manifest: Record<string, unknown>;
+  try {
+    const res = await fetch(`${env.baseUrl}/api/aios/manifest`, {
+      headers: { authorization: `Bearer ${env.apiKey}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return { ok: false, code: "CUTOS_UNREACHABLE" };
+    manifest = (await res.json()) as Record<string, unknown>;
+  } catch {
+    return { ok: false, code: "CUTOS_UNREACHABLE" };
+  }
+  // 協定協商（cutos.agent.v2 契約）：對不上就大聲失敗，不靜默降級。
+  const remoteVersion = text(manifest.protocolVersion);
+  const remoteSupported = Array.isArray(manifest.supportedProtocols)
+    ? manifest.supportedProtocols.map((item) => String(item))
+    : [];
+  const speaks = [remoteVersion, ...remoteSupported];
+  const negotiated = ["cutos.agent.v2", "cutos.agent.v1"].find((candidate) => speaks.includes(candidate));
+  if (!negotiated) return { ok: false, code: "PROTOCOL_VERSION_MISMATCH" };
+  return {
+    ok: true,
+    negotiated,
+    manifestVersion: Number(manifest.manifestVersion) || 0,
+    serverVersion: text(manifest.serverVersion).slice(0, 60),
+  };
+}
+
+async function handle(request: Request): Promise<Response> {
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: responseHeaders() });
+  if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: responseHeaders() });
+
+  const authHeader = request.headers.get("authorization") || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const url = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
+  if (!token || !url || !anonKey) return jsonResponse({ ok: false, code: "UNAUTHENTICATED" }, 401);
+  const supabase = createClient(url, anonKey, { global: { headers: { Authorization: `Bearer ${token}` } } });
+  const { data: authData, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !authData.user) return jsonResponse({ ok: false, code: "UNAUTHENTICATED" }, 401);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return jsonResponse({ ok: false, code: "INVALID_REQUEST" }, 400);
+  }
+
+  const env = cutosEnv();
+  const action = text(body.action);
+
+  if (action === "health") {
+    if (!env) return jsonResponse({ ok: false, code: "CUTOS_NOT_CONFIGURED" });
+    return jsonResponse(await cutosHealth(env));
+  }
+
+  if (action === "import-output") {
+    if (!env) return jsonResponse({ ok: false, code: "CUTOS_NOT_CONFIGURED" });
+    const roomId = text(body.roomId);
+    const cutosProjectId = text(body.cutosProjectId);
+    const branchId = text(body.branchId);
+    const label = text(body.label).slice(0, 80) || "CUTOS 成品";
+    if (!isUuid(roomId) || !isSafeId(cutosProjectId) || (branchId && !isUuid(branchId))) {
+      return jsonResponse({ ok: false, code: "INVALID_REQUEST" }, 400);
+    }
+
+    // 前置角色檢查（誠實錯誤碼用；RLS 才是權威 — 之後每一筆寫入都用
+    // 呼叫者 JWT，繞過這裡也繞不過 policy）。
+    const { data: roleData } = await supabase.rpc("room_role", { p_room_id: roomId });
+    const role = text(roleData);
+    if (!role) return jsonResponse({ ok: false, code: "ROOM_NOT_FOUND" }, 404);
+    if (role === "reviewer") return jsonResponse({ ok: false, code: "FORBIDDEN" }, 403);
+
+    // 抓成品。404＝還沒渲染過 — 這是使用者可行動的答案，不是錯誤堆疊。
+    let upstream: Response;
+    try {
+      upstream = await fetch(`${env.baseUrl}/api/projects/${cutosProjectId}/output`, {
+        signal: AbortSignal.timeout(120000),
+      });
+    } catch {
+      return jsonResponse({ ok: false, code: "CUTOS_UNREACHABLE" });
+    }
+    if (upstream.status === 404) return jsonResponse({ ok: false, code: "NO_EXPORT" });
+    if (!upstream.ok || !upstream.body) return jsonResponse({ ok: false, code: "CUTOS_UNREACHABLE" });
+    const declared = Number(upstream.headers.get("content-length") ?? "0");
+    if (declared > MAX_IMPORT_BYTES) return jsonResponse({ ok: false, code: "TOO_LARGE" });
+    const bytes = new Uint8Array(await upstream.arrayBuffer());
+    if (bytes.byteLength === 0) return jsonResponse({ ok: false, code: "NO_EXPORT" });
+    if (bytes.byteLength > MAX_IMPORT_BYTES) return jsonResponse({ ok: false, code: "TOO_LARGE" });
+
+    const versionId = crypto.randomUUID();
+    const videoPath = `rooms/${roomId}/videos/${versionId}/original.mp4`;
+    const upload = await supabase.storage.from("room-assets").upload(videoPath, bytes, {
+      contentType: "video/mp4",
+      upsert: false,
+    });
+    if (upload.error) return jsonResponse({ ok: false, code: "IMPORT_FAILED" });
+
+    // 列最後寫（與 videoRoom 同一原則：版本列存在 ⇒ bytes 一定在）。
+    const { data: sortRows } = await supabase
+      .from("versions")
+      .select("sort_order")
+      .eq("room_id", roomId)
+      .order("sort_order", { ascending: false })
+      .limit(1);
+    const sortOrder = (Array.isArray(sortRows) && sortRows[0] ? Number(sortRows[0].sort_order) : -1) + 1;
+    const { error: insertError } = await supabase.from("versions").insert({
+      id: versionId,
+      room_id: roomId,
+      label,
+      sort_order: sortOrder,
+      media_kind: "video",
+      image_path: null,
+      video_path: videoPath,
+      mime_type: "video/mp4",
+      file_size: bytes.byteLength,
+      duration_seconds: null,
+      width: null,
+      height: null,
+      ...(branchId ? { branch_id: branchId } : {}),
+    });
+    if (insertError) {
+      // 半成品清理：列沒落地就把 bytes 收回（同 videoRoom 的孤兒紀律）。
+      await supabase.storage.from("room-assets").remove([videoPath]).catch(() => undefined);
+      return jsonResponse({ ok: false, code: "IMPORT_FAILED" });
+    }
+    return jsonResponse({ ok: true, versionId, label, fileSize: bytes.byteLength });
+  }
+
+  return jsonResponse({ ok: false, code: "INVALID_REQUEST" }, 400);
+}
+
+Deno.serve(handle);
