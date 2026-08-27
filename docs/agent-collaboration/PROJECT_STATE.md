@@ -3,19 +3,25 @@
 > 恢復規則：任何 session 重新進入工作，先讀本檔，再讀 ROADMAP.md 與 BLOCKERS.md，
 > 然後執行 `npm run agent:context` 比對現況。不重做已驗證工作。
 
-更新：2026-08-28 02:30（Asia/Taipei）
-基準：main @ f327a70（Collaborative Intelligence Workspace 1.0 #38）
+更新：2026-08-28 08:00（Asia/Taipei）
+基準：main @ 23490c6（PR-06 #58）
 
 ## 目前 phase
 
-PR-01a（#48，feat/discussion-room-shell）— Grok round-1 MUST_FIX 已全數修復並複驗，等 CI 綠後合併。
+PR-07（#59，feat/cutos-s2s-contract，draft）— CUTOS S2S 契約＋成品匯入；
+CI＋Grok round 進行中，兩者綠即 ready→merge。
 
 ## 已合併（時序）
 
-#42 CI 紅燈修復 → #43 PR-00 計畫 → #44 AI Apply（第三 agent，＝原 PR-04 核心）→
-#45 keyed pending writes → #47 author ACL（migration 0017）→ #46 context path strip。
-**第三 agent（codex）平行開工中**：其產出經本 Lead 審核後合併；audit 記錄在
-docs/agent-collaboration/third-agent/。ROADMAP 的 PR-04 範圍需重新盤點（Apply 迴圈已上線）。
+#42 CI 紅燈修復 → #43 PR-00 計畫 → #44 AI Apply（第三 agent）→ #45 keyed
+pending writes → #47 author ACL → #46 context path strip → #48 PR-01a
+討論殼 → #49 PR-01b Universal Intake＋0018 → #50 PR-02a 模型下架 →
+#51 PR-02b stale-write 衝突 → #52 PR-02c 開板 row-patch → #53 PR-02d
+ContextAnchor 契約層 → #54 PR-04b AI 稽核 0019 → #55 round 收尾 →
+#56 PR-01c 手機上傳強化 → #57 PR-08a code-split（902KB→404KB）→
+#58 PR-06 planform artifact 契約。
+
+**PR-02 系列全數完成；PR-01 系列全數完成；PR-04 剩餘完成；PR-08 第一刀完成。**
 
 ## 已完成（有證據）
 

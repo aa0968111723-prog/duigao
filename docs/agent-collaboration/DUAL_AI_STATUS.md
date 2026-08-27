@@ -27,6 +27,9 @@
 | pr02c | rounds/pr02/grok-findings-02c.json（F1-F3 blocking） | rounds/pr02/claude-adjudication-02c.md：護盾不推進 ack、in-flight echo 護盾、heal=replaceBoardGraph；F4 記錄接受風險 |
 | pr02d | rounds/pr02/grok-findings-02d.json（MUST_FIX；F1 與 Claude 自審獨立收斂） | rounds/pr02/claude-adjudication-02d.md：branch+time video 錨已修；F2 測試全收緊 |
 | pr04-audit | rounds/pr04/grok-findings-04-audit.json（PASS，全 low） | rounds/pr04/claude-adjudication-04-audit.md：F1 探針補強；F2 以 ECMA-262 反駁 |
+| pr01c | rounds/pr01c/grok-findings.json（MUST_FIX：F1 .mov 繞上限、F2 branch id 直通洞） | rounds/pr01c/claude-adjudication.md：全修＋F2 分兩半裁決（堵洞＋誠實化） |
+| pr08a | rounds/pr08/grok-findings-08a.json（MUST_FIX F1–F4 全 blocking） | rounds/pr08/claude-adjudication-08a.md：白屏三洞全補；F4 修正版被自己斷言抓到 heal 為 0-or-1 競態 → 靜默錨點 |
+| pr06 | rounds/pr06/grok-findings.json（PASS 全 low） | rounds/pr06/claude-adjudication.md：F2/F6 記入後續收緊 |
 
 ## 紀律
 
