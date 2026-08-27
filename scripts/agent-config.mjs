@@ -201,6 +201,28 @@ export const featureDefinitions = [
     docs: [{ path: "docs/collaborative-intelligence-workspace.md", contains: ["Room Context"] }],
     minimum: { source: 2, migrations: 1, tests: 1 },
   },
+  {
+    id: "collaboration-whiteboard", name: "Discussion whiteboard", priority: 1,
+    source: [
+      { path: "src/collaboration/whiteboard.ts", contains: ["createFlow", "createMindmap", "addRoomContentReference"] },
+      { path: "src/features/collaboration/DiscussionWorkspace.tsx", contains: ["discussion-shell", "對話", "白板"] },
+      { path: "src/collaboration/discussionShell.ts", contains: ["firstScreenLabels", "語音"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0015_whiteboard.sql", contains: ["whiteboard_nodes", "whiteboard_edges", "row level security"] }],
+    tests: [{ path: "scripts/tests/collaboration.test.ts", contains: ["node+edge", "加入白板"] }],
+    docs: [{ path: "docs/collaborative-intelligence-workspace.md", contains: ["PHASE 2"] }],
+    minimum: { source: 3, migrations: 1, tests: 1 },
+  },
+  {
+    id: "intelligent-asset-library", name: "Intelligent asset library", priority: 1,
+    source: [
+      { path: "src/collaboration/library.ts", contains: ["searchLibrary", "shared"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0016_asset_library.sql", contains: ["library_assets", "row level security"] }],
+    tests: [{ path: "scripts/tests/collaboration.test.ts", contains: ["IMG_3819", "茶會"] }],
+    docs: [{ path: "docs/collaborative-intelligence-workspace.md", contains: ["PHASE 4"] }],
+    minimum: { source: 1, migrations: 1, tests: 1 },
+  },
 ];
 
 export const architectureDefinitions = [
@@ -211,6 +233,7 @@ export const architectureDefinitions = [
   { name: "Video review", paths: ["src/features/video-review"], responsibility: "Playback, temporal feedback, review brief, reactions, verdicts, and summary.", dependsOn: ["Discussion", "Cloud layer", "Storage/upload"] },
   { name: "Discussion", paths: ["src/features/discussion"], responsibility: "Shared pin comments and discussion cards.", dependsOn: ["Cloud layer"] },
   { name: "Asset intelligence", paths: ["src/ai"], responsibility: "Understand room posters, videos, plans and versions; retrieve a Room Context slice for tku-zen-agent.", dependsOn: ["Multi-branch project room", "Cloud layer"] },
+  { name: "Discussion whiteboard", paths: ["src/collaboration", "src/features/collaboration"], responsibility: "Mobile discussion shell, one node+edge whiteboard, and content-based library search.", dependsOn: ["Asset intelligence", "Multi-branch project room"] },
   { name: "Cloud layer", paths: ["src/cloud"], responsibility: "Supabase persistence, realtime, mapping, invites, and signed media access.", dependsOn: ["Authentication", "Storage/upload", "Migrations"] },
   { name: "Authentication", paths: ["src/cloud/auth.ts", "src/cloud/invite.ts"], responsibility: "Anonymous sessions and fragment-only room invite capability.", dependsOn: ["Cloud layer"] },
   { name: "Storage/upload", paths: ["src/cloud/assets.ts", "src/cloud/videoAssets.ts", "src/cloud/videoRoom.ts"], responsibility: "Private room-assets paths, signed URLs, upload, cancellation, and cleanup.", dependsOn: ["Cloud layer", "Migrations"] },

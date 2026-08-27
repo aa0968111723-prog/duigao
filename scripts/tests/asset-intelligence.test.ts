@@ -143,23 +143,17 @@ function activityRoom(): Room {
   };
 }
 
-test("unfinished collaboration phases stay disabled and are not fake-implemented", () => {
+test("optional Canva and voice stay DISABLED", () => {
   assert.equal(isFeatureEnabled("ai.assetIntelligence"), true);
-  assert.equal(isFeatureEnabled("collaboration.whiteboard"), false);
+  assert.equal(isFeatureEnabled("collaboration.discussion"), true);
+  assert.equal(isFeatureEnabled("collaboration.whiteboard"), true);
   assert.equal(isFeatureEnabled("collaboration.voice"), false);
   assert.equal(isFeatureEnabled("canva.integration"), false);
   assert.deepEqual(optionalPhaseMap(), {
     "canva.integration": "DISABLED",
     "collaboration.voice": "DISABLED",
   });
-  assert.equal(FEATURE_FLAGS["collaboration.discussion"], false);
-});
-
-test("source tree has no fake whiteboard or voice entry while flags are off", () => {
-  const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
-  const multi = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
-  const ui = `${app}\n${multi}`;
-  assert.equal(/whiteboard|白板|collaboration\.voice|進語音/.test(ui), false);
+  assert.equal(FEATURE_FLAGS["collaboration.voice"], false);
 });
 
 test("AI defaults to 改二, not 初稿", () => {

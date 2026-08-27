@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T04:43:02.000Z",
+  "generatedAt": "2026-08-27T12:30:08.000Z",
   "git": {
     "branch": "agent/collaborative-intelligence-workspace",
-    "sha": "cec65183b598d9a588a346a636a4201f20ef6370",
+    "sha": "ab46b725b4f885cdb91f8a102054ac347fc81572",
     "mainSha": "cec65183b598d9a588a346a636a4201f20ef6370",
     "dirty": true
   },
@@ -21,6 +21,7 @@
       "Video review",
       "Discussion",
       "Asset intelligence",
+      "Discussion whiteboard",
       "Cloud layer",
       "Authentication",
       "Storage/upload",
@@ -33,7 +34,16 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": []
+      "items": [
+        {
+          "baseRefName": "main",
+          "headRefName": "agent/collaborative-intelligence-workspace",
+          "isDraft": false,
+          "number": 38,
+          "title": "Collaborative Intelligence Workspace 1.0 / 智慧協作工作台 1.0",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/38"
+        }
+      ]
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -56,17 +66,40 @@
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
         ],
-        "docs": [
-          "docs/collaborative-intelligence-workspace.md"
-        ]
+        "docs": []
       },
       "relatedFiles": [
-        "docs/collaborative-intelligence-workspace.md",
         "scripts/tests/asset-intelligence.test.ts",
         "src/ai/featureFlags.ts",
         "src/ai/understanding.ts",
         "src/ai/versionAwareness.ts",
         "supabase/migrations/0014_asset_intelligence.sql"
+      ],
+      "missing": []
+    },
+    "collaboration-whiteboard": {
+      "status": "implemented",
+      "confidence": 0.94,
+      "evidence": {
+        "source": [
+          "src/collaboration/discussionShell.ts",
+          "src/collaboration/whiteboard.ts",
+          "src/features/collaboration/DiscussionWorkspace.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0015_whiteboard.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/collaboration.test.ts",
+        "src/collaboration/discussionShell.ts",
+        "src/collaboration/whiteboard.ts",
+        "src/features/collaboration/DiscussionWorkspace.tsx",
+        "supabase/migrations/0015_whiteboard.sql"
       ],
       "missing": []
     },
@@ -118,6 +151,28 @@
         "scripts/e2e/share-flow.mjs",
         "src/features/image-review/ImageWorkspace.tsx",
         "src/features/image-review/Stage.tsx"
+      ],
+      "missing": []
+    },
+    "intelligent-asset-library": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/collaboration/library.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0016_asset_library.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/collaboration.test.ts",
+        "src/collaboration/library.ts",
+        "supabase/migrations/0016_asset_library.sql"
       ],
       "missing": []
     },
@@ -616,7 +671,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0014",
+    "repoMigrationHead": "0016",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -631,16 +686,19 @@
       "supabase/migrations/0011_share_preview_customization.sql",
       "supabase/migrations/0012_video_review_feedback.sql",
       "supabase/migrations/0013_project_room_branches.sql",
-      "supabase/migrations/0014_asset_intelligence.sql"
+      "supabase/migrations/0014_asset_intelligence.sql",
+      "supabase/migrations/0015_whiteboard.sql",
+      "supabase/migrations/0016_asset_library.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0014",
+    "productionMigrationExpectation": "0016",
     "requiresLiveCheck": true
   },
   "tests": {
     "requiredCommands": [
       "npm run test:agent",
       "npm run test:asset-intelligence",
+      "npm run test:collaboration",
       "npm run test:migrations",
       "npm run test:multi-branch",
       "npm run test:multi-branch-e2e",
@@ -745,7 +803,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0014_asset_intelligence.sql."
+        "message": "Migration order is contiguous through 0016_asset_library.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",

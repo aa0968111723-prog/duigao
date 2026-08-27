@@ -83,6 +83,18 @@
       ]
     },
     {
+      "name": "Discussion whiteboard",
+      "path": [
+        "src/collaboration",
+        "src/features/collaboration"
+      ],
+      "responsibility": "Mobile discussion shell, one node+edge whiteboard, and content-based library search.",
+      "dependsOn": [
+        "Asset intelligence",
+        "Multi-branch project room"
+      ]
+    },
+    {
       "name": "Cloud layer",
       "path": [
         "src/cloud"

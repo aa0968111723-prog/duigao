@@ -1095,8 +1095,8 @@ try {
   const atForty = as(reviewer, `select body from public.search_room_knowledge('${capRoom}'::uuid, 'QR', 40, false, 8) where kind = 'video_segment';`);
   ok("00:40 檢索回傳影片片段而不是整間房", !atForty.failed && /QR|報名|茶會/.test(atForty.out), atForty.out);
   ok(
-    "沒有預建 whiteboard / voice / canva table",
-    psql(`select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('whiteboard_nodes','whiteboard_edges','voice_rooms','canva_designs');`).out === "0",
+    "沒有預建 voice / canva table",
+    psql(`select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('voice_rooms','canva_designs','canva_designs');`).out === "0",
   );
 
   section("同房多分支：0013 migration 可以重跑");
@@ -1123,6 +1123,51 @@ try {
   ok(
     "重跑 0014 後 reviewer 仍然不能寫 analysis",
     as(reviewer, `insert into public.asset_analyses (room_id, asset_id, kind, summary) values ('${capRoom}'::uuid, '${intelPoster}'::uuid, 'image', 'hacked');`).failed,
+  );
+
+  section("白板：0015 node+edge RLS");
+  const canvasId = psql("select gen_random_uuid();").out;
+  const nodeA = psql("select gen_random_uuid();").out;
+  const nodeB = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可以建立 canvas / node / edge",
+    !as(owner, `insert into public.whiteboard_canvases (id, room_id, title) values ('${canvasId}'::uuid, '${capRoom}'::uuid, '活動白板');`).failed
+      && !as(owner, `insert into public.whiteboard_nodes (id, room_id, canvas_id, node_type, text, x, y) values ('${nodeA}'::uuid, '${capRoom}'::uuid, '${canvasId}'::uuid, 'flow', '招生', 0, 0), ('${nodeB}'::uuid, '${capRoom}'::uuid, '${canvasId}'::uuid, 'flow', '擺攤', 0, 80);`).failed
+      && !as(owner, `insert into public.whiteboard_edges (room_id, canvas_id, from_node_id, to_node_id, edge_kind) values ('${capRoom}'::uuid, '${canvasId}'::uuid, '${nodeA}'::uuid, '${nodeB}'::uuid, 'flow');`).failed,
+  );
+  ok("reviewer 可以讀白板，不能寫 node", as(reviewer, `select count(*) from public.whiteboard_nodes where canvas_id = '${canvasId}'::uuid;`).out === "2" && as(reviewer, `insert into public.whiteboard_nodes (room_id, canvas_id, node_type, text) values ('${capRoom}'::uuid, '${canvasId}'::uuid, 'sticky', 'blocked');`).failed);
+  ok(
+    "node payload 不能帶原稿 bytes",
+    as(owner, `insert into public.whiteboard_nodes (room_id, canvas_id, node_type, text, payload) values ('${capRoom}'::uuid, '${canvasId}'::uuid, 'poster', 'bad', '{"imageDataUrl":"data:image/png;base64,AA=="}'::jsonb);`).failed,
+  );
+  ok("匿名讀不到白板", asAnon(`select count(*) from public.whiteboard_nodes;`).out !== "2");
+
+  section("素材庫：0016 RLS");
+  const libRoom = psql("select gen_random_uuid();").out;
+  const libShared = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可以寫房間素材與共用素材",
+    !as(owner, `insert into public.library_assets (id, scope, room_id, title, summary, topics, kind) values ('${libRoom}'::uuid, 'room', '${capRoom}'::uuid, '茶會文宣', '春季茶會主視覺', array['茶會'], 'poster');`).failed
+      && !as(owner, `insert into public.library_assets (id, scope, title, summary, topics, kind) values ('${libShared}'::uuid, 'shared', '社團 Logo', '固定標誌', array['主視覺'], 'image');`).failed,
+  );
+  ok(
+    "reviewer 可讀但不能寫 library",
+    as(reviewer, `select count(*) from public.library_assets where id = '${libRoom}'::uuid;`).out === "1"
+      && as(reviewer, `insert into public.library_assets (scope, room_id, title, kind) values ('room', '${capRoom}'::uuid, 'blocked', 'image');`).failed,
+  );
+  ok("非成員讀不到房間素材庫", as(stranger, `select count(*) from public.library_assets where id = '${libRoom}'::uuid;`).out === "0");
+
+  section("白板／素材庫 migration 可以重跑");
+  const collabShape = () => psql(`select
+    (select count(*) from information_schema.tables where table_name in ('whiteboard_canvases','whiteboard_nodes','whiteboard_edges','library_assets')) || '/' ||
+    (select count(*) from pg_policies where tablename in ('whiteboard_canvases','whiteboard_nodes','whiteboard_edges','library_assets'));`).out;
+  const collabBefore = collabShape();
+  psqlFile(join(MIGRATIONS, "0015_whiteboard.sql"));
+  psqlFile(join(MIGRATIONS, "0016_asset_library.sql"));
+  ok("重跑 0015/0016 後 tables / policies 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
+  ok(
+    "重跑後 reviewer 仍然不能寫白板",
+    as(reviewer, `insert into public.whiteboard_nodes (room_id, canvas_id, node_type, text) values ('${capRoom}'::uuid, '${canvasId}'::uuid, 'sticky', 'hacked');`).failed,
   );
 
   console.log(`\n${checks - failures}/${checks} 通過`);

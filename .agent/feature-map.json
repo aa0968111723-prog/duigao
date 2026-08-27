@@ -33,9 +33,7 @@
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
         ],
-        "docs": [
-          "docs/collaborative-intelligence-workspace.md"
-        ]
+        "docs": []
       },
       "requirements": [
         {
@@ -65,7 +63,6 @@
       ],
       "missing": [],
       "relatedFiles": [
-        "docs/collaborative-intelligence-workspace.md",
         "scripts/tests/asset-intelligence.test.ts",
         "src/ai/featureFlags.ts",
         "src/ai/understanding.ts",
@@ -73,9 +70,62 @@
         "supabase/migrations/0014_asset_intelligence.sql"
       ],
       "priority": 1,
-      "notes": [
-        "Status is based on executable evidence, not documentation or PR metadata."
-      ]
+      "notes": []
+    },
+    {
+      "id": "collaboration-whiteboard",
+      "name": "Discussion whiteboard",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/collaboration/discussionShell.ts",
+          "src/collaboration/whiteboard.ts",
+          "src/features/collaboration/DiscussionWorkspace.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0015_whiteboard.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 3,
+          "found": 3,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.94,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration.test.ts",
+        "src/collaboration/discussionShell.ts",
+        "src/collaboration/whiteboard.ts",
+        "src/features/collaboration/DiscussionWorkspace.tsx",
+        "supabase/migrations/0015_whiteboard.sql"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "custom-share-cover",
@@ -182,6 +232,57 @@
       "notes": [
         "Status is based on executable evidence, not documentation or PR metadata."
       ]
+    },
+    {
+      "id": "intelligent-asset-library",
+      "name": "Intelligent asset library",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/collaboration/library.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0016_asset_library.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration.test.ts",
+        "src/collaboration/library.ts",
+        "supabase/migrations/0016_asset_library.sql"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "line-preview",
