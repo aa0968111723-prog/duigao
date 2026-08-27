@@ -67,7 +67,11 @@ test("意見列：0006 之前的 legacy 列（無 anchor_type）從 region 推�
     y: 0.325,
   };
   const withRegion = anchorFromCommentColumns(regionRow);
-  assert.equal(withRegion.type, "image-region");
+  assert.deepEqual(withRegion, {
+    type: "image-region",
+    region: { x: 0.1, y: 0.2, width: 0.3, height: 0.25 },
+    versionId: undefined,
+  });
   // 沒圈選的 legacy 列
   const point = anchorFromCommentColumns({ region: null, x: 0.4, y: 0.6 });
   assert.deepEqual(point, { type: "image-point", x: 0.4, y: 0.6, versionId: undefined });
@@ -79,7 +83,7 @@ test("意見列：壞 region（負寬）修不回 → 落回 point，與 normali
     x: 0.1,
     y: 0.1,
   });
-  assert.equal(anchor.type, "image-point");
+  assert.deepEqual(anchor, { type: "image-point", x: 0.1, y: 0.1, versionId: undefined });
 });
 
 test("意見 pin 寫側：四種形狀的欄位輸出 = anchorColumns 歷史形狀", () => {
@@ -207,7 +211,7 @@ test("討論：純文字/附件卡沒有錨 → null → openTarget none", () =>
 
 test("討論：優先序 — 板參照勝過 branch（同時存在時）", () => {
   const anchor = anchorFromDiscussion({ whiteboardId: "b1", nodeId: "n1", branchId: "br1" });
-  assert.equal(anchor!.type, "board-node");
+  assert.deepEqual(anchor, { type: "board-node", whiteboardId: "b1", nodeId: "n1" });
 });
 
 // ---- 導航契約 -------------------------------------------------------------
@@ -277,4 +281,38 @@ test("anchorToNodeLink：video 臂同時有 branch 與 version → branch 優先
     linkedEntityId: "br1",
     content: { startTime: 3 },
   });
+});
+
+// ---- Grok 02d F2：邊界 fixture 補齊 ---------------------------------------
+
+test("意見列：time_seconds=0 是合法時刻（影片開頭），不是 falsy 壞值", () => {
+  assert.deepEqual(anchorFromCommentColumns({ anchor_type: "video-point", time_seconds: 0 }), {
+    type: "video-point",
+    time: 0,
+    versionId: undefined,
+  });
+});
+
+test("意見列：end == start 的 range 讀成 point（零長度段落不是段落）", () => {
+  assert.deepEqual(anchorFromCommentColumns({ anchor_type: "video-range", time_seconds: 5, end_time_seconds: 5 }), {
+    type: "video-point",
+    time: 5,
+    versionId: undefined,
+  });
+});
+
+test("意見列：anchor_type 大小寫敏感 — 'VIDEO-RANGE' 不是 video（與舊 codec 同義）", () => {
+  // 大寫列不可能由本程式寫出；讀到就是外來髒資料，與 anchorFromRow 一樣
+  // 不認，退回 image 語意。
+  assert.deepEqual(
+    anchorFromCommentColumns({ anchor_type: "VIDEO-RANGE", time_seconds: 3, end_time_seconds: 9, x: 0.2, y: 0.4 }),
+    { type: "image-point", x: 0.2, y: 0.4, versionId: undefined },
+  );
+});
+
+test("意見列：region 是 JSON 字串（未解析）→ normalizeRegion 不認 → point", () => {
+  assert.deepEqual(
+    anchorFromCommentColumns({ region: '{"x":0.1,"y":0.1,"width":0.2,"height":0.2}', x: 0.6, y: 0.9 }),
+    { type: "image-point", x: 0.6, y: 0.9, versionId: undefined },
+  );
 });
