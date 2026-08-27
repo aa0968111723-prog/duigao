@@ -9,8 +9,11 @@
 | PR-01c | feat/mobile-upload-hardening | 未開始 | 圖片 await/重試；HEVC 誠實提示 | — |
 | #50 PR-02a | feat/whiteboard-model-teardown | MERGED | 第二套白板模型下架；mounted-import 掛載證據（ADR-010） | rounds/pr02；agent-layer unit 16/16 |
 | #51 PR-02b | feat/stale-write-conflict | MERGED | OCC stale-write 衝突分支：drop＋板級 refetch＋誠實 toast；version-first reconcile | rounds/pr02（grok-findings-02b）；e2e 真 409 全迴圈 |
-| #52 PR-02c | feat/board-realtime-rowpatch-02c | OPEN（Grok round 修復完，CI 中） | 開板 row-patch realtime；拖曳/in-flight 護盾；heal=整板 replace | rounds/pr02（grok-findings-02c＋claude-adjudication-02c） |
-| PR-02d | feat/context-anchor-layer | 未開始 | ContextAnchor 契約層＋七 adapter＋openTarget | implementation-plan.md |
+| #52 PR-02c | feat/board-realtime-rowpatch-02c | MERGED | 開板 row-patch realtime；拖曳/in-flight 護盾；heal=整板 replace | rounds/pr02（02c round）；CI 全綠 |
+| #53 PR-02d | feat/context-anchor-layer | MERGED | ContextAnchor 契約層＋adapter 委派＋openTarget | rounds/pr02（02d round，Grok F1 獨立收斂）；unit 72/72 |
+| #54 PR-04b | feat/ai-apply-audit | MERGED | 0019 AI 套用稽核＋edge cap 對齊 | rounds/pr04；migrations 232/232 |
+| #55 | chore/pr04-round-followup | OPEN（automerge 待 CI） | #54 round 收尾（automerge 搶先）：F1 探針＋裁決文件 | — |
+| #56 PR-01c | feat/mobile-upload-hardening | OPEN（Grok round 進行中） | 首上傳沿用同房；addVersion 冪等；HEVC 警告 | video check 24 ×5；163/163 |
 | PR-03 | feat/voice-context | BLOCKED_VOICE_PROVIDER | provider adapter＋誠實 unavailable | — |
 | PR-04 | （#44 已由第三 agent 合併核心） | 部分完成 | 剩餘：audit event migration、chunk cap 對齊（Grok pr00 F8） | #44 |
 | PR-05 | feat/canva-surface | BLOCKED_CANVA_CREDENTIALS | adapter+fixture 先行 | — |
