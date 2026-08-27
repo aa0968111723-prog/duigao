@@ -58,7 +58,12 @@ import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
 import { MultiBranchRoom, type MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
+import { createSticky } from "./features/collaboration/nodes";
+import type { DiscussionMessage, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
+import { saveBoardSnapshot } from "./features/collaboration/offline";
 import "./usability.css";
+import "./features/whiteboard/whiteboard.css";
+import "./features/room-discussion/discussion.css";
 
 const EMPTY_FORM: PinForm = { body: "", suggestion: "", type: "文字", priority: "一般" };
 const COACH_FLAG = "coach.firstPin";
@@ -143,6 +148,8 @@ export function App() {
   const [room, setRoom] = useState<Room | null>(null);
   /** Project rooms stay at the room shell until a poster/video branch opens. */
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
+  const [activeWhiteboardId, setActiveWhiteboardId] = useState<string | null>(null);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(() => initialView(null));
   const [tool, setTool] = useState<Tool>("pan");
@@ -252,6 +259,10 @@ export function App() {
     setRoom(normalized);
     if (roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
       setActiveBranchId(roomLink.branchId);
+    }
+    if (roomLink.kind === "cloud" && roomLink.whiteboardId) {
+      setActiveWhiteboardId(roomLink.whiteboardId);
+      setFocusNodeId(roomLink.nodeId ?? null);
     }
     setView((v) => {
       const ids = normalized.versions.map((x) => x.id);
@@ -824,6 +835,214 @@ export function App() {
     },
     [updateRoom],
   );
+
+  const sendDiscussion = useCallback(
+    (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => {
+      if (!guest) return;
+      const body = (input?.body ?? chatInput).trim();
+      if (!body && !input?.kind) return;
+      const message: DiscussionMessage = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        authorId: cloud.userId ?? guest.id,
+        authorName: guest.name,
+        authorColor: guest.color,
+        kind: input?.kind ?? "text",
+        body: body || (input?.payload?.title ?? ""),
+        payload: input?.payload ?? {},
+        replyToId: input?.replyToId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      updateRoom((r) => ({ ...r, discussion: [...(r.discussion ?? []), message] }));
+      cloudRef.current.writes.insertDiscussion?.(message);
+      setChatInput("");
+    },
+    [chatInput, cloud.userId, guest, updateRoom],
+  );
+
+  const supportDiscussion = useCallback(
+    (messageId: string, add: boolean) => {
+      const userId = cloud.userId ?? guest?.id;
+      if (!userId) return;
+      updateRoom((r) => ({
+        ...r,
+        discussionSupports: add
+          ? [...(r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)), { messageId, roomId: r.id, userId }]
+          : (r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)),
+      }));
+      cloudRef.current.writes.setDiscussionSupport?.(messageId, add);
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
+  const createWhiteboard = useCallback(
+    (title: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能建立白板。", { tone: "error" });
+        return;
+      }
+      const board: Whiteboard = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        title,
+        description: "",
+        allowEdit: false,
+        createdBy: cloud.userId ?? guest?.id ?? "local",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        version: 1,
+      };
+      updateRoom((r) => ({ ...r, whiteboards: [board, ...(r.whiteboards ?? [])] }));
+      cloudRef.current.writes.createWhiteboard?.(board);
+      setActiveWhiteboardId(board.id);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const archiveWhiteboard = useCallback(
+    (id: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能封存整塊白板。", { tone: "error" });
+        return;
+      }
+      updateRoom((r) => ({
+        ...r,
+        whiteboards: (r.whiteboards ?? []).map((board) => board.id === id ? { ...board, archivedAt: Date.now(), updatedAt: Date.now() } : board),
+      }));
+      const board = roomRef.current?.whiteboards?.find((item) => item.id === id);
+      if (board) cloudRef.current.writes.updateWhiteboard?.({ ...board, archivedAt: Date.now() });
+      if (activeWhiteboardId === id) setActiveWhiteboardId(null);
+    },
+    [activeWhiteboardId, cloud.boundRoomId, cloud.canManageMedia, showToast, updateRoom],
+  );
+
+  const upsertNodes = useCallback(
+    (nodes: WhiteboardNode[]) => {
+      updateRoom((r) => {
+        const byId = new Map((r.whiteboardNodes ?? []).map((node) => [node.id, node]));
+        for (const node of nodes) byId.set(node.id, node);
+        return { ...r, whiteboardNodes: [...byId.values()] };
+      });
+      nodes.forEach((node) => cloudRef.current.writes.upsertNode?.(node));
+      const current = roomRef.current;
+      const board = current?.whiteboards?.find((item) => item.id === nodes[0]?.whiteboardId);
+      if (current && board) {
+        void saveBoardSnapshot({
+          whiteboardId: board.id,
+          roomId: current.id,
+          whiteboard: board,
+          nodes: [...(current.whiteboardNodes ?? []).filter((node) => node.whiteboardId !== board.id), ...nodes],
+          edges: current.whiteboardEdges ?? [],
+        });
+      }
+    },
+    [updateRoom],
+  );
+
+  const upsertNode = useCallback(
+    (node: WhiteboardNode) => upsertNodes([node]),
+    [upsertNodes],
+  );
+
+  const deleteNode = useCallback(
+    (id: string) => {
+      updateRoom((r) => ({
+        ...r,
+        whiteboardNodes: (r.whiteboardNodes ?? []).filter((node) => node.id !== id),
+        whiteboardEdges: (r.whiteboardEdges ?? []).filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id),
+      }));
+      cloudRef.current.writes.deleteNode?.(id);
+    },
+    [updateRoom],
+  );
+
+  const createEdge = useCallback(
+    (edge: WhiteboardEdge) => {
+      updateRoom((r) => ({ ...r, whiteboardEdges: [...(r.whiteboardEdges ?? []), edge] }));
+      cloudRef.current.writes.createEdge?.(edge);
+    },
+    [updateRoom],
+  );
+
+  const shareNodeToDiscussion = useCallback(
+    (node: WhiteboardNode) => {
+      const board = roomRef.current?.whiteboards?.find((item) => item.id === node.whiteboardId);
+      sendDiscussion({
+        kind: "node",
+        body: node.content.text || node.content.title || "看這個節點",
+        payload: { whiteboardId: node.whiteboardId, nodeId: node.id, title: board ? `${board.title} · ${node.content.text || node.content.title || "節點"}` : node.content.text },
+      });
+    },
+    [sendDiscussion],
+  );
+
+  const addMessageToBoard = useCallback(
+    (message: DiscussionMessage, whiteboardId: string) => {
+      const node = createSticky({
+        whiteboardId,
+        roomId: roomRef.current?.id ?? "",
+        createdBy: cloud.userId ?? guest?.id ?? "local",
+        text: message.body,
+        x: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 4) * 24,
+        y: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 5) * 24,
+      });
+      upsertNode(node);
+      setActiveWhiteboardId(whiteboardId);
+      setFocusNodeId(node.id);
+    },
+    [cloud.userId, guest, upsertNode],
+  );
+
+  const createDecision = useCallback(
+    (title: string, source?: { type: "poll"; id: string }) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能建立決策紀錄。", { tone: "error" });
+        return;
+      }
+      const decision = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        title,
+        body: "",
+        status: "pending" as const,
+        sourceType: source ? "poll" as const : "manual" as const,
+        sourceId: source?.id,
+        createdBy: cloud.userId ?? guest?.id ?? "local",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        version: 1,
+      };
+      updateRoom((r) => ({ ...r, decisions: [decision, ...(r.decisions ?? [])] }));
+      cloudRef.current.writes.createDecision?.(decision);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const finalizeDecision = useCallback(
+    (id: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能標示決策。", { tone: "error" });
+        return;
+      }
+      updateRoom((r) => ({
+        ...r,
+        decisions: (r.decisions ?? []).map((item) => item.id === id ? { ...item, status: "decided", finalizedAt: Date.now(), finalizedBy: cloud.userId ?? guest?.id, updatedAt: Date.now() } : item),
+      }));
+      const decision = roomRef.current?.decisions?.find((item) => item.id === id);
+      if (decision) cloudRef.current.writes.updateDecision?.({ ...decision, status: "decided", finalizedAt: Date.now() });
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const toggleAllowBoardEdit = useCallback(() => {
+    if (cloud.role && cloud.role !== "owner") {
+      showToast("只有房主能開放大家一起編輯。", { tone: "error" });
+      return;
+    }
+    updateRoom((r) => ({ ...r, allowBoardEdit: !r.allowBoardEdit }));
+    cloudRef.current.writes.setAllowBoardEdit?.(!(roomRef.current?.allowBoardEdit));
+  }, [cloud.role, showToast, updateRoom]);
 
   /**
    * File one piece of video feedback: same comment, same discussion, same cloud
@@ -1617,7 +1836,29 @@ export function App() {
         onVotePoll: voteProjectPoll,
         chatInput,
         setChatInput,
-        sendChat,
+        sendChat: () => sendDiscussion(),
+        onSendDiscussion: sendDiscussion,
+        onSupportDiscussion: supportDiscussion,
+        onCreateWhiteboard: createWhiteboard,
+        onArchiveWhiteboard: archiveWhiteboard,
+        onOpenWhiteboard: (id) => {
+          setActiveWhiteboardId(id);
+          if (!id) setFocusNodeId(null);
+          if (id) void cloudRef.current.loadWhiteboard?.(id);
+        },
+        onUpsertNode: upsertNode,
+        onUpsertNodes: upsertNodes,
+        onDeleteNode: deleteNode,
+        onCreateEdge: createEdge,
+        onShareNodeToDiscussion: shareNodeToDiscussion,
+        onAddMessageToBoard: addMessageToBoard,
+        onCreateDecision: createDecision,
+        onFinalizeDecision: finalizeDecision,
+        onToggleAllowBoardEdit: toggleAllowBoardEdit,
+        activeWhiteboardId,
+        focusNodeId,
+        online: cloud.online || peerCount,
+        editors: [] as PresenceEditor[],
         onShare: openShare,
         onGoHome: () => {
           clearUndo();

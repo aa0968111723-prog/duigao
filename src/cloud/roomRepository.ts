@@ -59,6 +59,7 @@ import {
   type SupportRow,
   type VersionRow,
 } from "./types";
+import { loadCollaborationSummary } from "./collaborationRepository";
 
 export type CloudProposal = {
   id: string;
@@ -503,6 +504,16 @@ async function loadRoomFull(supabase: SupabaseClient, roomId: string): Promise<C
     pollVotes: ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
     updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
   });
+  try {
+    const collab = await loadCollaborationSummary(supabase, roomId);
+    room.whiteboards = collab.whiteboards;
+    room.discussion = collab.discussion;
+    room.discussionSupports = collab.discussionSupports;
+    room.decisions = collab.decisions;
+    room.allowBoardEdit = collab.allowBoardEdit;
+  } catch {
+    /* 0014 not applied yet */
+  }
 
   const proposals: CloudProposal[] = await Promise.all(
     ((proposalsRes.data as ProposalRow[] | null) ?? []).map(async (row) => ({
@@ -592,6 +603,16 @@ async function loadRoomSummary(supabase: SupabaseClient, roomId: string, force =
     pollVotes: ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
     updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
   };
+  try {
+    const collab = await loadCollaborationSummary(supabase, roomId);
+    room.whiteboards = collab.whiteboards;
+    room.discussion = collab.discussion;
+    room.discussionSupports = collab.discussionSupports;
+    room.decisions = collab.decisions;
+    room.allowBoardEdit = collab.allowBoardEdit;
+  } catch {
+    /* 0014 not applied yet */
+  }
   return { room: normalizeRoomBranches(room), proposals: [], role: roleFromResult(roleRes) };
 }
 
