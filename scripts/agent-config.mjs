@@ -322,12 +322,13 @@ export const featureDefinitions = [
     minimum: { source: 2, migrations: 1, tests: 1 },
   },
   {
+    // 誠實狀態：schema（0016）＋作者 ACL（0017/0018）真實存在，但沒有任何
+    // mounted client 寫 library_assets — 舊證據指向從未掛載的原型檔，
+    // PR-02a 連同原型一併下架。在 client 落地前這一項就是 partial。
     id: "intelligent-asset-library", name: "Intelligent asset library", priority: 1,
-    source: [
-      { path: "src/collaboration/library.ts", contains: ["searchLibrary", "shared"] },
-    ],
+    source: [],
     migrations: [{ path: "supabase/migrations/0016_asset_library.sql", contains: ["library_assets", "row level security"] }],
-    tests: [{ path: "scripts/tests/collaboration.test.ts", contains: ["IMG_3819", "茶會"] }],
+    tests: [{ path: "scripts/e2e/migrations.mjs", contains: ["library_assets"] }],
     minimum: { source: 1, migrations: 1, tests: 1 },
   },
   {

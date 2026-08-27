@@ -174,3 +174,48 @@ export function validateAgentData(kind, value) {
   }
   return failures;
 }
+
+/**
+ * 從 entry（預設 src/main.tsx）走 import graph，回傳可達的 src/ 檔案集合。
+ *
+ * feature-map 的 source 證據若只驗「檔案存在＋字串出現」，一個從未被 mount
+ * 的原型也會把功能標成 implemented（PR-00 audit 的 scanner 誤報）。掛載證據
+ * ＝從應用入口真的走得到。純字串解析（無依賴）：static import／re-export／
+ * dynamic import 的相對 specifier，候選副檔名 .ts/.tsx/index.ts/index.tsx；
+ * type-only import 也算（型別被引用代表檔案仍在編譯圖內），.css 與資產跳過。
+ */
+export function buildImportGraph(root, entry = "src/main.tsx") {
+  // 入口不存在（例如測試 fixture root）＝沒有掛載概念可言：回 null，
+  // 呼叫端據此停用 mounted 判定，而不是把所有檔案都判成未掛載。
+  if (!existsSync(resolve(root, entry))) return null;
+  const reachable = new Set();
+  const queue = [normalizePath(entry)];
+  const specifierPattern = /(?:import|export)\s[^"']*?from\s*["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)|import\s*["']([^"']+)["']/g;
+  const resolveSpecifier = (fromFile, spec) => {
+    if (!spec.startsWith(".")) return null; // 只追蹤專案內相對匯入
+    if (/\.(css|svg|png|jpe?g|webp|webmanifest)$/i.test(spec)) return null;
+    const base = normalizePath(resolve(root, fromFile, "..", spec)).replace(normalizePath(resolve(root)) + "/", "");
+    const candidates = /\.(ts|tsx|mjs|js)$/.test(base)
+      ? [base]
+      : [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`];
+    for (const candidate of candidates) {
+      if (existsSync(resolve(root, candidate))) return normalizePath(candidate);
+    }
+    return null;
+  };
+  while (queue.length) {
+    const file = queue.pop();
+    if (reachable.has(file)) continue;
+    const absolute = resolve(root, file);
+    if (!existsSync(absolute)) continue;
+    reachable.add(file);
+    const text = readFileSync(absolute, "utf8");
+    for (const match of text.matchAll(specifierPattern)) {
+      const spec = match[1] ?? match[2] ?? match[3];
+      if (!spec) continue;
+      const resolved = resolveSpecifier(file, spec);
+      if (resolved && !reachable.has(resolved)) queue.push(resolved);
+    }
+  }
+  return reachable;
+}

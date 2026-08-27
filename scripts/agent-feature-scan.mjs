@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { architectureDefinitions, featureDefinitions } from "./agent-config.mjs";
-import { GENERATED_NOTICE, SCHEMA_VERSION, matchingPaths, normalizePath } from "./agent-lib.mjs";
+import { GENERATED_NOTICE, SCHEMA_VERSION, buildImportGraph, matchingPaths, normalizePath } from "./agent-lib.mjs";
 
 function requiredEvidence(definition, evidence) {
   const minimum = definition.minimum ?? {};
@@ -13,9 +13,19 @@ function requiredEvidence(definition, evidence) {
   }));
 }
 
-export function classifyFeature(definition, root) {
+export function classifyFeature(definition, root, importGraph = null) {
+  const graph = importGraph === undefined || importGraph === null ? buildImportGraph(root) : importGraph;
+  const allSource = matchingPaths(root, definition.source);
+  // 掛載證據：src/ 底下的 source 只有「從 src/main.tsx 走得到」才算數。
+  // 存在但未掛載的檔案（原型、孤兒）進 unmountedSource — 這正是 PR-00
+  // audit 抓到的 scanner 誤報（apply-back/library 指向從未 mount 的檔案
+  // 也標 implemented）。src/ 之外（supabase/functions、鄰倉）不受此限。
+  const unmountedSource = graph
+    ? allSource.filter((path) => path.startsWith("src/") && !graph.has(path))
+    : [];
   const evidence = {
-    source: matchingPaths(root, definition.source),
+    source: allSource.filter((path) => !unmountedSource.includes(path)),
+    unmountedSource,
     migrations: matchingPaths(root, definition.migrations),
     tests: matchingPaths(root, definition.tests),
     docs: matchingPaths(root, definition.docs),
@@ -43,6 +53,7 @@ export function classifyFeature(definition, root) {
   if (status === "spec_only") notes.push("Documentation exists, but executable source/migration/test evidence does not.");
   if (status === "partial") notes.push(`Executable evidence is incomplete: ${missing.join("; ")}.`);
   if (status === "implemented" && evidence.docs.length > 0) notes.push("Status is based on executable evidence, not documentation or PR metadata.");
+  if (evidence.unmountedSource.length > 0) notes.push(`Unmounted source (present but unreachable from src/main.tsx): ${evidence.unmountedSource.join(", ")}.`);
   return {
     id: definition.id,
     name: definition.name,
@@ -59,6 +70,7 @@ export function classifyFeature(definition, root) {
 }
 
 export function scanFeatures(root, definitions = featureDefinitions) {
+  const importGraph = buildImportGraph(root);
   return {
     schemaVersion: SCHEMA_VERSION,
     generated: GENERATED_NOTICE,
@@ -69,7 +81,7 @@ export function scanFeatures(root, definitions = featureDefinitions) {
       missing: "No source, migration, test, or documentation evidence exists.",
       precedence: ["source", "migrations", "tests", "git_diff", "deployment", "pr_metadata", "docs"],
     },
-    features: definitions.map((definition) => classifyFeature(definition, root)).sort((a, b) => a.id.localeCompare(b.id)),
+    features: definitions.map((definition) => classifyFeature(definition, root, importGraph)).sort((a, b) => a.id.localeCompare(b.id)),
   };
 }
 

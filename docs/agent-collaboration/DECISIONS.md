@@ -76,3 +76,20 @@ PR-00 是 docs-only 的計畫 checkpoint（任務規範明定第一個 PR 為計
 
 - Thread：維持單層 reply_to_id（引用式回覆）。巢狀 thread 對手機殼的 IA 成本高、audit 未顯示使用者需求證據；待真實使用回饋再開 ADR。
 - Task：不建 Task 表。決定（decision_records）＋提案卡已覆蓋「收斂結論」主流程；行動項先以 decision 附註承載。若 PR-04 之後 AI 產生行動項的需求成立，屆時以 migration 補。
+
+## ADR-010：第二套白板模型（canvasId 原型）下架；VOICE_ROOM_MVP 為唯一旗標機制
+
+日期：2026-08-28　狀態：**採納**（PR-02a 執行）
+
+- 刪除 src/collaboration/{whiteboard,discussionShell,library}.ts、
+  src/features/collaboration/DiscussionWorkspace.tsx（含其 css）與 src/ai 的
+  原型枝葉（roomContext/index/featureFlags/understanding/versionAwareness/
+  video/types）。#44 已把 AI Apply 接到 0014 真模型；原型再無任何掛載者。
+- src/ai/featureFlags.ts 隨原型刪除：語音唯一旗標為
+  src/features/collaboration/voice.ts 的 VOICE_ROOM_MVP（PR-03 于此開關）；
+  Canva/其他旗標於各自 PR 落地時在使用點就地定義，不再有集中 flag 檔。
+- 原型上的「第一屏 對話/白板/語音」契約由真殼承接（移植測試釘住：討論根
+  ＋rd-tabs＋voice-boundary 一行邊界）；Bounded Room Context 契約由
+  room-context-strip / asset-intelligence 測試持有。
+- feature-map 證據自此要求 mounted-import（src/ 檔案必須從 src/main.tsx
+  走得到）；intelligent-asset-library 誠實降為 partial（schema 真、client 零）。
