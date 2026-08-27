@@ -1472,13 +1472,22 @@ try {
   faults.versionInsertNextRoom = true;
   faults.assetDeleteFaultCount = 0;
   await uploadVideo(Q, SHORT, "metadata-fails.webm");
-  await Q.waitForSelector(".onboard-card", { timeout: 60000 });
+  // Anchor on the FAILURE copy: ".onboard-card" alone also matches the
+  // in-progress card, and starting a fixed settle wait from there was the
+  // dominant race on slow runners (Grok round ci-red-fix, F1).
+  await Q.waitForFunction(
+    () => document.querySelector(".onboard-card")?.textContent?.includes("失敗") ?? false,
+    null,
+    { timeout: 60000 },
+  );
   // Deterministic wait: poll for the observable end state (fault consumed,
   // retry landed, no orphans) instead of guessing a settle delay.
   const cleanupSettled = async () => {
     const deadline = Date.now() + 15000;
     for (;;) {
       const leaked = [...storageObjects.keys()].filter((key) => !objectsBeforeMetadataFailure.has(key));
+      // assetDeleteTargetPath clears when the injected 500 fires (not when the
+      // retry lands) — leaked.length === 0 is what proves the retry succeeded.
       if (faults.assetDeleteFaultCount === 1 && faults.assetDeleteTargetPath === null && leaked.length === 0) return leaked;
       if (Date.now() > deadline) return leaked;
       await new Promise((resolve) => setTimeout(resolve, 100));
