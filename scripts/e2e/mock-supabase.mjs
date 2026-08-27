@@ -10,7 +10,7 @@
  */
 import http from "node:http";
 import { randomUUID, createHash } from "node:crypto";
-import { loadSharePreviewHandler, serveHandler } from "./edge-function.mjs";
+import { loadEdgeHandler, loadSharePreviewHandler, serveHandler } from "./edge-function.mjs";
 
 const PORT = Number(process.env.MOCK_PORT || 54399);
 
@@ -127,6 +127,8 @@ export const faults = {
   /** 下一個 create_room 的房：branch POST 失敗一次（PR-01c 半路死亡）。 */
   branchInsertNextRoom: false,
   branchInsertRoomId: null,
+  /** 假 CUTOS：這個專案 id 有已渲染成品；null = 全部 404（PR-07）。 */
+  cutosOutputProjectId: "cutos-demo",
   /** Override createSignedUrl TTL in seconds for expiry tests. */
   signTtl: null,
   /** Fail this many room-assets deletes before allowing cleanup to succeed. */
@@ -309,6 +311,7 @@ function unwrapMultipart(raw, contentType) {
 
 /** Set by start({ appOrigin }) — mounts the real Edge Function at /functions/v1. */
 let previewHandler = null;
+let cutosBridgeHandler = null;
 let mockOrigin = `http://127.0.0.1:${PORT}`;
 
 export const server = http.createServer(async (req, res) => {
@@ -321,6 +324,33 @@ export const server = http.createServer(async (req, res) => {
   // ---- Edge Functions ----
   if (previewHandler && p.startsWith("/functions/v1/share-preview")) {
     return serveHandler(previewHandler, req, res, mockOrigin);
+  }
+  if (cutosBridgeHandler && p.startsWith("/functions/v1/cutos-bridge")) {
+    return serveHandler(cutosBridgeHandler, req, res, mockOrigin);
+  }
+
+  // ---- 假 CUTOS（bridge 的上游；key 驗證與真實 route 同語意）----
+  if (p === "/cutos/api/aios/manifest") {
+    const auth = String(req.headers.authorization || "");
+    if (auth !== "Bearer e2e-cutos-key") return json(res, 401, { message: "UNAUTHORIZED" });
+    return json(res, 200, {
+      protocolVersion: "cutos.agent.v2",
+      supportedProtocols: ["cutos.agent.v2", "cutos.agent.v1"],
+      agent: "cutos",
+      manifestVersion: 3,
+      serverVersion: "0.1.0-e2e",
+      features: ["idempotency", "approval"],
+      capabilities: [],
+    });
+  }
+  if (p.startsWith("/cutos/api/projects/") && p.endsWith("/output")) {
+    const projectId = p.slice("/cutos/api/projects/".length, -"/output".length);
+    if (faults.cutosOutputProjectId && projectId === faults.cutosOutputProjectId) {
+      const bytes = Buffer.from("e2e-mp4-bytes-".repeat(64));
+      res.writeHead(200, { "content-type": "video/mp4", "content-length": String(bytes.length) });
+      return res.end(bytes);
+    }
+    return json(res, 404, { code: "EXPORT_FAILED", message: "No export has been rendered yet." });
   }
 
   // ---- auth ----
@@ -1012,6 +1042,15 @@ export async function start(port = PORT, options = {}) {
       supabaseUrl: mockOrigin,
       anonKey: "sb_publishable_e2e_mock_key_000000",
       appOrigin: options.appOrigin.replace(/\/+$/, ""),
+    });
+  }
+  if (options.cutosBridge) {
+    // 真實的 cutos-bridge 源碼＋指向本 mock 的假 CUTOS：env 齊備。
+    cutosBridgeHandler = await loadEdgeHandler("cutos-bridge", {
+      SUPABASE_URL: mockOrigin,
+      SUPABASE_ANON_KEY: "sb_publishable_e2e_mock_key_000000",
+      CUTOS_BASE_URL: mockOrigin + "/cutos",
+      CUTOS_API_KEY: "e2e-cutos-key",
     });
   }
   return new Promise((resolve) => server.listen(port, () => resolve(server)));

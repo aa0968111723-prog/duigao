@@ -27,6 +27,7 @@ import {
   type VideoAnchor,
   type ViewState,
 } from "./lib/types";
+import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -1096,6 +1097,71 @@ export function App() {
       void addImageFiles(files);
     },
     [activeBranchId, addImageFiles, addVideoFile],
+  );
+
+  // CUTOS 成品匯入（PR-07）：健檢過了入口才存在 — 誠實不可用。
+  const [cutosReady, setCutosReady] = useState(false);
+  useEffect(() => {
+    if (!cloud.boundRoomId || !room?.projectMode || !isCloudConfigured) { setCutosReady(false); return; }
+    let cancelled = false;
+    void cutosHealth(getSupabase()!).then((health) => {
+      if (!cancelled) setCutosReady(Boolean(health.ok));
+    });
+    return () => { cancelled = true; };
+  }, [cloud.boundRoomId, room?.projectMode]);
+
+  const importFromCutos = useCallback(
+    async (cutosProjectId: string, name: string): Promise<{ ok: boolean; message: string }> => {
+      const current = roomRef.current;
+      if (!current || !guest) return { ok: false, message: "房間還沒準備好。" };
+      const roomId = cloudRef.current.boundRoomId;
+      if (!roomId) return { ok: false, message: "還在連上雲端，稍等一下再試。" };
+      if (!cloudRef.current.canManageMedia) return { ok: false, message: "檢視者不能新增內容。" };
+      // 先建影片分支（等 FK — 版本列要掛在它下面）
+      const now = Date.now();
+      const branch: RoomBranch = {
+        id: crypto.randomUUID(),
+        roomId: current.id,
+        name,
+        branchType: "video",
+        sortOrder: normalizeRoomBranches(current).branches?.length ?? 0,
+        status: "in_progress",
+        createdBy: cloudRef.current.userId ?? guest.id,
+        createdAt: now,
+        updatedAt: now,
+      };
+      try {
+        await cloudRef.current.writes.createBranch(branch);
+      } catch {
+        return { ok: false, message: "建立內容失敗，請確認連線後再試一次。" };
+      }
+      const result = await importCutosOutput(getSupabase()!, {
+        roomId,
+        cutosProjectId,
+        branchId: branch.id,
+        label: name,
+      });
+      if (!result.ok) {
+        // 分支已建立（誠實留著 — 匯入可重試，資料沒有半吊子狀態：
+        // 分支只是空的）。訊息按碼分流，不轉述上游原文。
+        const message =
+          result.code === "NO_EXPORT"
+            ? "這個 CUTOS 專案還沒有渲染過成品。先在 CUTOS 按輸出，再回來匯入。"
+            : result.code === "TOO_LARGE"
+              ? "成品超過 200MB 上限，先在 CUTOS 端壓小再試。"
+              : result.code === "FORBIDDEN"
+                ? "檢視者不能新增內容。"
+                : result.code === "CUTOS_NOT_CONFIGURED"
+                  ? "CUTOS 整合尚未設定。"
+                  : "匯入沒有成功。分支已建立，稍後可以再試一次。";
+        return { ok: false, message };
+      }
+      // 匯入成功：拉快照讓新版本進畫面
+      await cloudRef.current.loadBranch(branch.id).catch(() => false);
+      showToast(`已匯入 CUTOS 成品：${result.label}`, { tone: "success" });
+      return { ok: true, message: "已匯入。" };
+    },
+    [guest, showToast],
   );
 
   const createProjectContent = useCallback(
@@ -2606,6 +2672,7 @@ export function App() {
           if (roomRef.current) setView(initialView(roomRef.current));
         },
         onCreateContent: createProjectContent,
+        ...(cutosReady ? { cutosImport: importFromCutos } : {}),
         onAddFiles: addFilesToBranch,
         onUpdateBranch: updateProjectBranch,
         onSavePlan: saveProjectPlan,

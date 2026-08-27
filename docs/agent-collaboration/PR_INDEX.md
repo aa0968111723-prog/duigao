@@ -13,7 +13,10 @@
 | #53 PR-02d | feat/context-anchor-layer | MERGED | ContextAnchor 契約層＋adapter 委派＋openTarget | rounds/pr02（02d round，Grok F1 獨立收斂）；unit 72/72 |
 | #54 PR-04b | feat/ai-apply-audit | MERGED | 0019 AI 套用稽核＋edge cap 對齊 | rounds/pr04；migrations 232/232 |
 | #55 | chore/pr04-round-followup | OPEN（automerge 待 CI） | #54 round 收尾（automerge 搶先）：F1 探針＋裁決文件 | — |
-| #56 PR-01c | feat/mobile-upload-hardening | OPEN（Grok round 進行中） | 首上傳沿用同房；addVersion 冪等；HEVC 警告 | video check 24 ×5；163/163 |
+| #56 PR-01c | feat/mobile-upload-hardening | MERGED | 首上傳沿用同房；addVersion 冪等；HEVC 警告 | rounds/pr01c（Grok F1/F2 blocking 全修）；video check 24 ×7 |
+| #57 PR-08a | feat/bundle-code-split | MERGED | 進場 JS 902KB→404KB；殼 lazy＋chunk 失敗敘事＋peer 世代守衛 | rounds/pr08（Grok F1–F4 全修） |
+| #58 PR-06 | feat/planform-artifact | MERGED | planform artifact 契約：JSON 識別＋摘要卡＋planform-scene 錨臂 | rounds/pr06（Grok PASS）；unit 78、e2e 38 |
+| #59 PR-07 | feat/cutos-s2s-contract | DRAFT（CI＋Grok 中） | CUTOS S2S 契約＋cutos-bridge＋成品匯入 | rounds/pr07（進行中）；multi-branch e2e 25/25 |
 | PR-03 | feat/voice-context | BLOCKED_VOICE_PROVIDER | provider adapter＋誠實 unavailable | — |
 | PR-04 | （#44 已由第三 agent 合併核心） | 部分完成 | 剩餘：audit event migration、chunk cap 對齊（Grok pr00 F8） | #44 |
 | PR-05 | feat/canva-surface | BLOCKED_CANVA_CREDENTIALS | adapter+fixture 先行 | — |

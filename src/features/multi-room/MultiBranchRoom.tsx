@@ -47,6 +47,11 @@ export type MultiBranchRoomApi = {
   loadingBranchId?: string | null;
   onBackToRoom: () => void;
   onCreateContent: (type: BranchType, name: string, files: FileList | null) => void;
+  /**
+   * CUTOS 成品匯入（PR-07 第一階段）。undefined＝不可用（未設定/健檢
+   * 失敗），整個入口不渲染 — 誠實不可用，不是灰掉的按鈕。
+   */
+  cutosImport?: (cutosProjectId: string, name: string) => Promise<{ ok: boolean; message: string }>;
   onAddFiles: (branchId: string, files: FileList | null) => void;
   onUpdateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => void;
   onSavePlan: (plan: PlanDocument) => void;
@@ -389,10 +394,13 @@ function PlanEditor({
   );
 }
 
-function CreateSheet({ onClose, onCreate, initialType }: { onClose: () => void; onCreate: MultiBranchRoomApi["onCreateContent"]; initialType?: BranchType }) {
-  const [type, setType] = useState<BranchType | null>(initialType ?? null);
+function CreateSheet({ onClose, onCreate, onCutosImport, initialType }: { onClose: () => void; onCreate: MultiBranchRoomApi["onCreateContent"]; onCutosImport?: MultiBranchRoomApi["cutosImport"]; initialType?: BranchType }) {
+  const [type, setType] = useState<BranchType | "cutos" | null>(initialType ?? null);
   const [name, setName] = useState("");
   const [files, setFiles] = useState<FileList | null>(null);
+  const [cutosProjectId, setCutosProjectId] = useState("");
+  const [cutosBusy, setCutosBusy] = useState(false);
+  const [cutosMessage, setCutosMessage] = useState<string | null>(null);
   const needsFile = type === "poster" || type === "video";
   return (
     <div className="project-scrim" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
@@ -408,9 +416,36 @@ function CreateSheet({ onClose, onCreate, initialType }: { onClose: () => void; 
                   {item === "copy" ? "企劃 / 文案" : branchTypeLabel(item)}
                 </button>
               ))}
+              {onCutosImport && (
+                <button type="button" data-testid="cutos-import-option" onClick={() => setType("cutos")}>
+                  <span aria-hidden>⇩</span>
+                  CUTOS 影片成品
+                </button>
+              )}
             </div>
           </>
         ) : (
+          type === "cutos" ? (
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            if (!onCutosImport || !name.trim() || !cutosProjectId.trim() || cutosBusy) return;
+            setCutosBusy(true);
+            setCutosMessage(null);
+            void onCutosImport(cutosProjectId.trim(), name.trim()).then((outcome) => {
+              setCutosBusy(false);
+              if (outcome.ok) onClose();
+              else setCutosMessage(outcome.message); // 失敗留在原地，話說清楚
+            });
+          }}>
+            <button type="button" className="project-sheet-back" onClick={() => setType(null)}>‹ 返回</button>
+            <h2>匯入 CUTOS 成品</h2>
+            <p className="project-sheet-note">把 CUTOS 已渲染的影片成品接進來，成為這裡的新影片內容。原始素材留在 CUTOS，不會被改動。</p>
+            <label className="project-field"><span>名稱</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：招生影片 v2" /></label>
+            <label className="project-field"><span>CUTOS 專案 ID</span><input value={cutosProjectId} onChange={(event) => setCutosProjectId(event.target.value)} placeholder="在 CUTOS 專案頁複製" data-testid="cutos-project-id" /></label>
+            {cutosMessage && <p className="project-sheet-error" role="alert">{cutosMessage}</p>}
+            <button type="submit" className="project-save-button project-submit" disabled={!name.trim() || !cutosProjectId.trim() || cutosBusy}>{cutosBusy ? "匯入中…" : "匯入"}</button>
+          </form>
+          ) : (
           <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && (!needsFile || files?.length)) { onCreate(type, name.trim(), files); onClose(); } }}>
             <button type="button" className="project-sheet-back" onClick={() => setType(null)}>‹ 返回</button>
             <h2>新增{type === "copy" ? "文案" : branchTypeLabel(type)}</h2>
@@ -422,6 +457,7 @@ function CreateSheet({ onClose, onCreate, initialType }: { onClose: () => void; 
             )}
             <button type="submit" className="project-save-button project-submit" disabled={!name.trim() || (needsFile && !files?.length)}>建立</button>
           </form>
+          )
         )}
         <button type="button" className="project-sheet-close" onClick={onClose}>取消</button>
       </section>
@@ -765,7 +801,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           )}
         </>
       )}
-      {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} />}
+      {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} onCutosImport={api.cutosImport} />}
       {pollOpen && <PollSheet onClose={() => setPollOpen(false)} onCreate={createPoll} />}
       {api.workspace && (
         // 對稿工作區疊在討論殼上；殼不卸載，返回時狀態全在。此容器（與其
