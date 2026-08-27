@@ -229,6 +229,11 @@ export async function completeRoomSetup(
     .update({ room_mode: sourceRoom.projectMode ? "project" : "single" })
     .eq("id", roomId);
   const hasBranchSchema = !modeError;
+  // 分支補完只涵蓋 uuid id（project 房在本機先建的那些）。單房的合成
+  // 相容分支（branch_default_*）刻意不補：fresh 單房在雲端 branchless
+  // 是正確狀態 — 0013 assign_version_branch 會在第一筆 version INSERT
+  // 時建立真分支；client 端 normalizeRoomBranches 也會自己長回顯示用
+  // 的預設分支（Grok 01c F2 裁決）。
   const sourceBranches = sourceRoom.branches ?? [];
   if (hasBranchSchema && sourceBranches.length) {
     const rows = sourceBranches
@@ -958,7 +963,10 @@ export async function addVideoVersion(
     width: input.width,
     height: input.height,
     ...(input.contentHash ? { content_hash: input.contentHash } : {}),
-    ...(input.branchId ? { branch_id: input.branchId } : {}),
+    // 合成的相容分支 id（branch_default_*）不是 uuid，直通 uuid 欄會
+    // 22P02（Grok 01c F2）。branchless 是正確答案：0013 的
+    // assign_version_branch trigger 會在 INSERT 時補真分支。
+    ...(input.branchId && isUuid(input.branchId) ? { branch_id: input.branchId } : {}),
   };
   let { error } = await supabase.from("versions").insert(versionRow);
   if (error && /content_hash|column/i.test(error.message)) {
