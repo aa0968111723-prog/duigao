@@ -53,11 +53,49 @@ import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./
 import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
 // 兩個房間殼 lazy：Home 首屏（手機為主的入口）不再揹整套對稿/專案房
-// 機器；殼在進房那一刻載入（PR-08a code-split）。fallback 是空畫面 —
-// 進房本來就有資料載入期，多一個 spinner 只會閃。
-const RoomWorkspace = lazy(() =>
+// 機器；殼在進房那一刻載入（PR-08a code-split）。
+//
+// chunk 載入失敗（離線、或新部署撤掉舊 hash）不是白屏（Grok 08a F2）：
+// 換成會說人話的卡片＋重新整理。重新整理拿到的是新版 index，一定指向
+// 存在的 chunk。
+function ChunkLoadError() {
+  return (
+    <div className="onboard">
+      <div className="onboard-card">
+        <h1 className="onboard-title">對稿討論區</h1>
+        <p className="onboard-hint">這個畫面的程式沒載進來 — 可能是離線，或版本剛更新。</p>
+        <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>重新整理</button>
+      </div>
+    </div>
+  );
+}
+// 進房殼的 Suspense fallback：進房資料載入期本來就有這張卡，殼晚到
+// 幾百毫秒時使用者看到的是一致的載入敘事，不是白屏（Grok 08a F1）。
+function ShellLoading() {
+  return (
+    <div className="onboard">
+      <div className="onboard-card">
+        <h1 className="onboard-title">對稿討論區</h1>
+        <p className="onboard-hint">正在載入…</p>
+      </div>
+    </div>
+  );
+}
+const lazyShell = <T extends React.ComponentType<any>>(load: () => Promise<{ default: T }>) =>
+  lazy(() => load().catch(() => ({ default: ChunkLoadError as unknown as T })));
+const RoomWorkspace = lazyShell(() =>
   import("./components/RoomWorkspace").then((m) => ({ default: m.RoomWorkspace })),
 );
+
+// 掛載點就地 Suspense（Grok 08a F1）：殼晚到時顯示一致的載入卡，
+// 不是把整棵樹（含 Home）換成白屏。props 原樣透傳。
+function RoomWorkspaceShell(props: React.ComponentProps<typeof RoomWorkspace>) {
+  return (
+    <Suspense fallback={<ShellLoading />}>
+      <RoomWorkspace {...props} />
+    </Suspense>
+  );
+}
 import { Home } from "./components/Home";
 import { INTAKE_PROFILES, UniversalIntake } from "./components/UniversalIntake";
 import { ShareSheet, type ShareCard, type ShareCustomization, type ShareState } from "./components/ShareSheet";
@@ -76,9 +114,17 @@ import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
 import type { MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
-const MultiBranchRoom = lazy(() =>
+const MultiBranchRoom = lazyShell(() =>
   import("./features/multi-room/MultiBranchRoom").then((m) => ({ default: m.MultiBranchRoom })),
 );
+
+function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom>) {
+  return (
+    <Suspense fallback={<ShellLoading />}>
+      <MultiBranchRoom {...props} />
+    </Suspense>
+  );
+}
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
@@ -2623,7 +2669,7 @@ export function App() {
       ? {
           branchId: overlayBranch.id,
           node: (
-            <RoomWorkspace
+            <RoomWorkspaceShell
               api={api!}
               presence={{
                 status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
@@ -2636,7 +2682,7 @@ export function App() {
       : null;
     return (
       <>
-        <MultiBranchRoom api={{
+        <MultiBranchRoomShell api={{
           ...projectApi,
           workspace: branchWorkspace,
           discussionGhosts: discussionOutbox.ghosts,
@@ -2820,7 +2866,7 @@ export function App() {
 
   return (
     <>
-      <RoomWorkspace
+      <RoomWorkspaceShell
         api={api!}
         presence={{
           status: cloudSession ? syncToPresence(cloud.status) : collabStatus,

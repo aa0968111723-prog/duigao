@@ -43,6 +43,13 @@ export class Collab {
   private attempt = 0;
   private timer: number | null = null;
   private stopped = false;
+  /**
+   * 世代序號（Grok 08a F3）：open() 變 async 之後，載入期間 this.peer
+   * 仍是 null，visibilitychange/online 的 retryNow 會重入 dial→open。
+   * 每次 open()/teardown 遞增；舊世代的 then/catch 直接作廢，不覆寫
+   * this.peer、不亂寫 status。
+   */
+  private openSeq = 0;
 
   constructor(role: CollabRole, code: string, handlers: Handlers) {
     this.role = role;
@@ -80,12 +87,14 @@ export class Collab {
     if (this.stopped) return;
     this.clearTimer();
     this.handlers.onStatus("connecting");
+    const seq = ++this.openSeq;
     void loadPeer()
       .then((Ctor) => {
-        if (this.stopped) return;
+        if (this.stopped || seq !== this.openSeq) return; // 已被更新一趟取代
         this.openWith(Ctor);
       })
       .catch((err) => {
+        if (this.stopped || seq !== this.openSeq) return;
         // 載入失敗（斷網的首次使用）：走既有 retry 迴圈，狀態誠實。
         this.handlers.onStatus("error", String(err));
         this.scheduleRetry();
@@ -218,6 +227,7 @@ export class Collab {
   }
 
   private teardownPeer(): void {
+    this.openSeq += 1; // 讓 in-flight 的 loadPeer 世代作廢（Grok 08a F3）
     for (const conn of this.conns.values()) conn.close();
     this.conns.clear();
     this.peer?.destroy();
