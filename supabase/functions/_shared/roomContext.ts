@@ -87,7 +87,9 @@ export type AgentAnswer = {
 };
 
 const FORBIDDEN_KEYS = new Set([
-  "storage_path", "storagePath", "invite_hash", "inviteHash", "invite", "invite_token",
+  "storage_path", "storagePath", "poster_storage_path", "posterStoragePath",
+  "image_path", "imagePath", "video_path", "videoPath",
+  "invite_hash", "inviteHash", "invite", "invite_token",
   "inviteToken", "service_role", "serviceRole", "access_token", "accessToken", "signed_url",
   "signedUrl", "data_url", "dataUrl", "binary", "bytes",
 ]);
@@ -146,7 +148,10 @@ export function stripSecrets<T>(value: T): T {
   if (!value || typeof value !== "object") return value;
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (FORBIDDEN_KEYS.has(key) || /invite|service.?role|access.?token|signed.?url|data.?url|binary|bytes/i.test(key)) continue;
+    if (
+      FORBIDDEN_KEYS.has(key)
+      || /invite|service.?role|access.?token|signed.?url|data.?url|binary|bytes|(poster_)?storage.?path|image.?path|video.?path/i.test(key)
+    ) continue;
     out[key] = stripSecrets(child);
   }
   return out as T;
