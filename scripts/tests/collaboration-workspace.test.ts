@@ -4,6 +4,8 @@ import { addRoomTarget, buildInviteUrl, readInviteFromUrl } from "../../src/clou
 import {
   addFlowNextStep,
   addMindmapChild,
+  adoptPersistedNode,
+  applyNodePatch,
   createEdge,
   createRelationEdges,
   createSticky,
@@ -12,12 +14,21 @@ import {
   groupSelected,
   moveNodes,
   parseTimestamp,
+  stampPersistedNode,
+  touchWhiteboardNodeVersion,
 } from "../../src/features/collaboration/nodes.ts";
 import { arrangeBoard, arrangeFlow, arrangeGrid, arrangeMindmap } from "../../src/features/collaboration/layout.ts";
 import { buildDiscussionContext, getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "../../src/features/collaboration/links.ts";
-import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion } from "../../src/features/collaboration/permissions.ts";
-import { applyPendingNodeEdits, isBrowserOnline, reconcileNodes } from "../../src/features/collaboration/offline.ts";
+import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion, stickyTextInputProps } from "../../src/features/collaboration/permissions.ts";
+import { applyPendingCloudWrites, applyPendingNodeEdits, decideNodeWriteRetry, isBrowserOnline, isCloudWriteAcknowledged, reconcileNodes } from "../../src/features/collaboration/offline.ts";
+import {
+  collaborationSliceFromRoom,
+  collaborationSliceHasRows,
+  insertCollaborationSlice,
+  remapCollaborationSlice,
+} from "../../src/cloud/collaborationRepository.ts";
+import type { Room } from "../../src/lib/types.ts";
 import { collectBoardEditors, formatEditorLine, stampWriter } from "../../src/features/collaboration/presence.ts";
 import { VOICE_ROOM_MVP } from "../../src/features/collaboration/voice.ts";
 import { BROADCAST_THROTTLE_MS, DRAG_PERSIST_MS, fitCamera, focusCamera, marqueeHits, nodeHit, visibleNodes, zoomAt, type Camera } from "../../src/features/whiteboard/canvas.ts";
@@ -249,6 +260,185 @@ test("search, group, relation helpers", () => {
 
 test("voice stays a boundary, not a shipped MVP claim", () => {
   assert.equal(VOICE_ROOM_MVP, false);
+});
+
+test("persists send last-acked version and adopt the trigger increment", () => {
+  const store = new Map<string, number>();
+  const touch = (item: WhiteboardNode) => {
+    const current = store.get(item.id);
+    if (current == null) {
+      store.set(item.id, item.version);
+      return item.version;
+    }
+    const next = touchWhiteboardNodeVersion(item.version, current);
+    store.set(item.id, next);
+    return next;
+  };
+
+  let client = node("sticky", "text", 0, 0, "");
+  client = stampPersistedNode(client, undefined);
+  assert.equal(touch(client), 1);
+
+  const afterFirst = applyNodePatch(client, { content: { text: "招" } });
+  assert.equal(afterFirst.version, 1, "patch must not advance the lock before write");
+  const write1 = stampPersistedNode(afterFirst, client);
+  assert.equal(write1.version, 1);
+  const server2 = touch(write1);
+  assert.equal(server2, 2);
+  client = adoptPersistedNode(afterFirst, { ...write1, version: server2 });
+  assert.equal(client.version, 2);
+  assert.equal(client.content.text, "招");
+
+  const afterSecond = applyNodePatch(client, { content: { text: "招生" } });
+  assert.equal(afterSecond.version, 2);
+  const write2 = stampPersistedNode(afterSecond, client);
+  assert.equal(write2.version, 2);
+  assert.equal(touch(write2), 3);
+
+  const other = applyNodePatch(node("sticky", "text", 0, 0, "別人"), { content: { text: "覆蓋" } });
+  assert.throws(() => touch(stampPersistedNode(other, 1)), /stale-write/);
+});
+
+test("pre-incrementing both editors to version 2 would silently overwrite", () => {
+  assert.equal(touchWhiteboardNodeVersion(2, 1), 2);
+  assert.equal(touchWhiteboardNodeVersion(2, 2), 3, "equal version is accepted and overwrites");
+  assert.throws(() => touchWhiteboardNodeVersion(1, 2), /stale-write/);
+});
+
+test("move keeps last-acked version as the write precondition", () => {
+  const original = node("n1", "text", 10, 10, "招生");
+  const moved = moveNodes([original], [original.id], 8, 0)[0];
+  assert.equal(moved.version, 1);
+  const stamped = stampPersistedNode(moved, original);
+  assert.equal(stamped.version, 1);
+  assert.equal(stamped.x, 18);
+});
+
+test("failed node writes retry only via the durable queue", () => {
+  assert.deepEqual(decideNodeWriteRetry("success"), { acknowledged: true, queueDurable: false, queueMemory: false });
+  assert.deepEqual(decideNodeWriteRetry("unbound"), { acknowledged: false, queueDurable: true, queueMemory: false });
+  assert.deepEqual(decideNodeWriteRetry("failed"), { acknowledged: false, queueDurable: true, queueMemory: false });
+});
+
+test("first-share remaps local collaboration ids onto the new cloud room", () => {
+  const local: Pick<Room, "id" | "whiteboards" | "whiteboardNodes" | "whiteboardEdges" | "discussion" | "discussionSupports" | "decisions" | "allowBoardEdit"> = {
+    id: "local-room",
+    allowBoardEdit: true,
+    whiteboards: [board()],
+    whiteboardNodes: [{
+      ...node("n1", "room_content", 0, 0, ""),
+      roomId: "local-room",
+      linkedEntityType: "version",
+      linkedEntityId: "ver-old",
+    }],
+    whiteboardEdges: [{
+      id: "e1", whiteboardId: "board-1", roomId: "local-room",
+      sourceNodeId: "n1", targetNodeId: "n1", edgeType: "default", label: "", createdAt: 1,
+    }],
+    discussion: [{
+      id: "m1", roomId: "local-room", authorId: "me", authorName: "招生", authorColor: "#111",
+      kind: "text", body: "先看白板", payload: { versionId: "ver-old", pollId: "poll-old" }, createdAt: 1, updatedAt: 1,
+    }],
+    discussionSupports: [{ messageId: "m1", roomId: "local-room", userId: "guest-1" }],
+    decisions: [{
+      id: "d1", roomId: "local-room", title: "採用 B 版", body: "", status: "decided",
+      sourceType: "poll", sourceId: "poll-old", createdBy: "me", createdAt: 1, updatedAt: 1, version: 1,
+    }],
+  };
+  const slice = remapCollaborationSlice(collaborationSliceFromRoom(local), "cloud-room", {
+    versionIdMap: new Map([["ver-old", "ver-new"]]),
+    pollIdMap: new Map([["poll-old", "poll-new"]]),
+  });
+  assert.equal(slice.whiteboards[0].roomId, "cloud-room");
+  assert.equal(slice.nodes[0].roomId, "cloud-room");
+  assert.equal(slice.nodes[0].linkedEntityId, "ver-new");
+  assert.equal(slice.discussion[0].payload.versionId, "ver-new");
+  assert.equal(slice.discussion[0].payload.pollId, "poll-new");
+  assert.equal(slice.decisions[0].sourceId, "poll-new");
+  assert.equal(collaborationSliceHasRows(slice), true);
+});
+
+test("insertCollaborationSlice uploads boards, nodes, discussion and decisions before a snapshot reload", async () => {
+  const calls: Array<{ table: string; rows: unknown }> = [];
+  const supabase = {
+    from(table: string) {
+      return {
+        insert(rows: unknown) {
+          calls.push({ table, rows });
+          return Promise.resolve({ error: null });
+        },
+        update(row: unknown) {
+          calls.push({ table, rows: row });
+          return { eq() { return Promise.resolve({ error: null }); } };
+        },
+      };
+    },
+  };
+  const slice = remapCollaborationSlice({
+    allowBoardEdit: true,
+    whiteboards: [board()],
+    nodes: [node("n1", "text", 0, 0, "招生")],
+    edges: [],
+    discussion: [{
+      id: "m1", roomId: "room-1", authorId: "me", authorName: "招生", authorColor: "#111",
+      kind: "text", body: "先看白板", payload: {}, createdAt: 1, updatedAt: 1,
+    }],
+    discussionSupports: [],
+    decisions: [{
+      id: "d1", roomId: "room-1", title: "採用 B 版", body: "", status: "decided",
+      createdBy: "me", createdAt: 1, updatedAt: 1, version: 1,
+    }],
+  }, "cloud-room");
+  await insertCollaborationSlice(supabase as never, slice);
+  assert.deepEqual(calls.map((item) => item.table), [
+    "rooms",
+    "whiteboards",
+    "whiteboard_nodes",
+    "room_discussion_messages",
+    "decision_records",
+  ]);
+  const boards = calls.find((item) => item.table === "whiteboards")?.rows as Array<{ room_id: string }>;
+  const nodes = calls.find((item) => item.table === "whiteboard_nodes")?.rows as Array<{ room_id: string; content: { text?: string } }>;
+  assert.equal(boards[0].room_id, "cloud-room");
+  assert.equal(nodes[0].room_id, "cloud-room");
+  assert.equal(nodes[0].content.text, "招生");
+});
+
+test("pending node edits stay queued until the cloud write is acknowledged", async () => {
+  const pending = [{
+    id: "p1", roomId: "room-1", kind: "node" as const, op: "upsert" as const,
+    payload: node("n1", "text", 0, 0, "招生"), createdAt: 1,
+  }];
+  const skipped = await applyPendingCloudWrites(pending, {
+    upsertNode: () => undefined,
+  });
+  assert.deepEqual(skipped.acknowledged, []);
+  assert.deepEqual(skipped.retained, ["p1"]);
+
+  const queuedOnly = await applyPendingCloudWrites(pending, {
+    upsertNode: async () => false,
+  });
+  assert.deepEqual(queuedOnly.retained, ["p1"]);
+
+  const acked = await applyPendingCloudWrites(pending, {
+    upsertNode: async (item) => ({ ...item, version: 2 }),
+  });
+  assert.deepEqual(acked.acknowledged, ["p1"]);
+  assert.deepEqual(acked.retained, []);
+  assert.equal(isCloudWriteAcknowledged(undefined), false);
+  assert.equal(isCloudWriteAcknowledged(true), true);
+});
+
+test("view-only reviewers get a read-only sticky textarea and no change handler", () => {
+  let changed = "";
+  const viewer = stickyTextInputProps(false, (text) => { changed = text; });
+  assert.equal(viewer.readOnly, true);
+  assert.equal(viewer.onChange, undefined);
+  const editor = stickyTextInputProps(true, (text) => { changed = text; });
+  assert.equal(editor.readOnly, false);
+  editor.onChange?.({ target: { value: "招生" } });
+  assert.equal(changed, "招生");
+  assert.equal(canEditBoard("reviewer", false, board()), false);
 });
 
 test("invite parser never reads invite from the query string", () => {

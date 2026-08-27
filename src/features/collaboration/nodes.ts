@@ -195,6 +195,32 @@ export function formatVideoRange(start?: number, end?: number): string {
   return `${formatTimestamp(start)}–${formatTimestamp(end)}`;
 }
 
+/**
+ * Optimistic-lock precondition for touch_whiteboard_node: send the last
+ * acknowledged server version, never a client-advanced guess. The trigger
+ * increments after a successful write; adopting that increment is what
+ * prepares the next persist.
+ */
+export function stampPersistedNode(node: WhiteboardNode, lastAcked?: WhiteboardNode | number | null): WhiteboardNode {
+  const acked = typeof lastAcked === "number" ? lastAcked : lastAcked?.version;
+  return { ...node, version: acked ?? node.version ?? 1 };
+}
+
+/** Keep local content; only take a newer server version/timestamp after ack. */
+export function adoptPersistedNode(local: WhiteboardNode, persisted: WhiteboardNode): WhiteboardNode {
+  return {
+    ...local,
+    version: Math.max(local.version ?? 1, persisted.version ?? 1),
+    updatedAt: Math.max(local.updatedAt ?? 0, persisted.updatedAt ?? 0),
+  };
+}
+
+/** Mirrors 0014 touch_whiteboard_node: reject only versions lower than stored. */
+export function touchWhiteboardNodeVersion(incoming: number, stored: number): number {
+  if (incoming !== stored && incoming < stored) throw new Error("stale-write");
+  return stored + 1;
+}
+
 export function applyNodePatch(node: WhiteboardNode, patch: Partial<Pick<WhiteboardNode, "x" | "y" | "width" | "height" | "content" | "parentGroupId">>): WhiteboardNode {
   return {
     ...node,

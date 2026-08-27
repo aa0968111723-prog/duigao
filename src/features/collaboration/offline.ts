@@ -1,5 +1,76 @@
 import type { PendingEdit, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./types";
 
+export type CloudNodeWrites = {
+  upsertNode?: (node: WhiteboardNode) => unknown;
+  deleteNode?: (id: string) => unknown;
+};
+
+/** True only when the cloud write actually succeeded — not a fire-and-forget void. */
+export function isCloudWriteAcknowledged(result: unknown): result is true | WhiteboardNode {
+  if (result === true) return true;
+  return Boolean(result && typeof result === "object" && "id" in result && "version" in result);
+}
+
+export type NodeWriteRetry = {
+  acknowledged: boolean;
+  queueDurable: boolean;
+  queueMemory: boolean;
+};
+
+/**
+ * Failed / unbound node writes retry only through the durable IndexedDB queue.
+ * An in-memory closure must not also keep the old payload — a later success
+ * would clear IDB and leave the stale task to overwrite newer cloud content.
+ */
+export function decideNodeWriteRetry(outcome: "success" | "unbound" | "failed"): NodeWriteRetry {
+  if (outcome === "success") return { acknowledged: true, queueDurable: false, queueMemory: false };
+  return { acknowledged: false, queueDurable: true, queueMemory: false };
+}
+
+/**
+ * Replay durable pending node edits. Records stay queued unless the write
+ * returns an explicit ack (true or the persisted node). A skipped / queued /
+ * fire-and-forget call must not drop the IndexedDB copy.
+ */
+export async function applyPendingCloudWrites(
+  pending: PendingEdit[],
+  writes: CloudNodeWrites,
+): Promise<{ acknowledged: string[]; retained: string[] }> {
+  const acknowledged: string[] = [];
+  const retained: string[] = [];
+  for (const edit of pending) {
+    if (edit.kind !== "node") {
+      retained.push(edit.id);
+      continue;
+    }
+    try {
+      let result: unknown = false;
+      if (edit.op === "upsert") {
+        if (!writes.upsertNode) {
+          retained.push(edit.id);
+          continue;
+        }
+        result = await writes.upsertNode(edit.payload as WhiteboardNode);
+      } else if (edit.op === "delete") {
+        const id = (edit.payload as { id?: string }).id;
+        if (!id || !writes.deleteNode) {
+          retained.push(edit.id);
+          continue;
+        }
+        result = await writes.deleteNode(id);
+      } else {
+        retained.push(edit.id);
+        continue;
+      }
+      if (isCloudWriteAcknowledged(result)) acknowledged.push(edit.id);
+      else retained.push(edit.id);
+    } catch {
+      retained.push(edit.id);
+    }
+  }
+  return { acknowledged, retained };
+}
+
 const DB_NAME = "duigao-collaboration";
 const DB_VERSION = 1;
 const SNAPSHOTS = "board_snapshots";

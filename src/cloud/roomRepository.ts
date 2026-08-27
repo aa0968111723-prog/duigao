@@ -60,7 +60,12 @@ import {
   type SupportRow,
   type VersionRow,
 } from "./types";
-import { loadCollaborationSummary } from "./collaborationRepository";
+import {
+  collaborationSliceFromRoom,
+  insertCollaborationSlice,
+  loadCollaborationSummary,
+  remapCollaborationSlice,
+} from "./collaborationRepository";
 
 export type CloudProposal = {
   id: string;
@@ -248,6 +253,7 @@ export async function createRoom(
     .eq("id", roomId);
   const hasBranchSchema = !modeError;
   const branchIdMap = new Map<string, string>();
+  const pollIdMap = new Map<string, string>();
   const sourceBranches = sourceRoom.branches ?? [];
   if (hasBranchSchema && sourceBranches.length) {
     const branchRows = sourceBranches.map((branch) => {
@@ -378,7 +384,6 @@ export async function createRoom(
       if (error) throw new CloudError(error.message, "relations");
     }
 
-    const pollIdMap = new Map<string, string>();
     const pollRows = (sourceRoom.polls ?? []).map((poll) => {
       const id = uuid();
       pollIdMap.set(poll.id, id);
@@ -396,7 +401,6 @@ export async function createRoom(
     }
     // Local guest ids are intentionally not auth UUIDs. Poll definitions are
     // migrated; votes are device-local and are not fabricated as another user.
-    void pollIdMap;
   }
 
   for (const p of local.proposals) {
@@ -413,6 +417,15 @@ export async function createRoom(
     });
     if (error) throw new CloudError(error.message, "proposal");
   }
+
+  await insertCollaborationSlice(
+    supabase,
+    remapCollaborationSlice(collaborationSliceFromRoom(sourceRoom), roomId, {
+      branchIdMap,
+      versionIdMap,
+      pollIdMap,
+    }),
+  );
 
   return { roomId, token };
 }

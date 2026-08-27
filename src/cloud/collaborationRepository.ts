@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Room } from "../lib/types";
 import type {
   DecisionRecord,
   DiscussionMessage,
@@ -250,8 +251,8 @@ export async function updateWhiteboard(
   if (error) throw new CloudError(error.message, "whiteboard");
 }
 
-export async function upsertNode(supabase: SupabaseClient, node: WhiteboardNode): Promise<void> {
-  const { error } = await supabase.from("whiteboard_nodes").upsert({
+function nodeRowPayload(node: WhiteboardNode) {
+  return {
     id: node.id,
     whiteboard_id: node.whiteboardId,
     room_id: node.roomId,
@@ -266,19 +267,31 @@ export async function upsertNode(supabase: SupabaseClient, node: WhiteboardNode)
     parent_group_id: node.parentGroupId ?? null,
     created_by: isUuid(node.createdBy) ? node.createdBy : null,
     version: node.version,
-  });
-  if (error) throw new CloudError(error.message, "whiteboard-node");
+  };
 }
 
-export async function persistNodePosition(supabase: SupabaseClient, node: WhiteboardNode): Promise<void> {
-  const { error } = await supabase.from("whiteboard_nodes").update({
+function requireNodeFromRow(row: NodeRow | null, fallback: WhiteboardNode): WhiteboardNode {
+  const persisted = row ? nodeFromRow(row) : null;
+  if (persisted) return persisted;
+  return { ...fallback, version: (fallback.version ?? 1) + 1 };
+}
+
+export async function upsertNode(supabase: SupabaseClient, node: WhiteboardNode): Promise<WhiteboardNode> {
+  const { data, error } = await supabase.from("whiteboard_nodes").upsert(nodeRowPayload(node)).select("*").maybeSingle();
+  if (error) throw new CloudError(error.message, "whiteboard-node");
+  return requireNodeFromRow(data as NodeRow | null, node);
+}
+
+export async function persistNodePosition(supabase: SupabaseClient, node: WhiteboardNode): Promise<WhiteboardNode> {
+  const { data, error } = await supabase.from("whiteboard_nodes").update({
     x: node.x,
     y: node.y,
     width: node.width,
     height: node.height,
     version: node.version,
-  }).eq("id", node.id).eq("whiteboard_id", node.whiteboardId);
+  }).eq("id", node.id).eq("whiteboard_id", node.whiteboardId).select("*").maybeSingle();
   if (error) throw new CloudError(error.message, "whiteboard-node");
+  return requireNodeFromRow(data as NodeRow | null, node);
 }
 
 export async function deleteNode(supabase: SupabaseClient, roomId: string, nodeId: string): Promise<void> {
@@ -358,6 +371,161 @@ export async function updateDecision(supabase: SupabaseClient, decision: Decisio
 export async function setAllowBoardEdit(supabase: SupabaseClient, roomId: string, allow: boolean): Promise<void> {
   const { error } = await supabase.from("rooms").update({ allow_board_edit: allow }).eq("id", roomId);
   if (error) throw new CloudError(error.message, "room");
+}
+
+export type CollaborationIdMaps = {
+  branchIdMap?: Map<string, string>;
+  versionIdMap?: Map<string, string>;
+  pollIdMap?: Map<string, string>;
+};
+
+export function collaborationSliceFromRoom(room: Pick<Room, "whiteboards" | "whiteboardNodes" | "whiteboardEdges" | "discussion" | "discussionSupports" | "decisions" | "allowBoardEdit">): CollaborationSlice {
+  return {
+    whiteboards: room.whiteboards ?? [],
+    nodes: room.whiteboardNodes ?? [],
+    edges: room.whiteboardEdges ?? [],
+    discussion: room.discussion ?? [],
+    discussionSupports: room.discussionSupports ?? [],
+    decisions: room.decisions ?? [],
+    allowBoardEdit: Boolean(room.allowBoardEdit),
+  };
+}
+
+function remapId(id: string | undefined, map?: Map<string, string>): string | undefined {
+  if (!id) return id;
+  return map?.get(id) ?? id;
+}
+
+function remapLinkedId(type: WhiteboardNode["linkedEntityType"], id: string | undefined, maps: CollaborationIdMaps): string | undefined {
+  if (!id) return id;
+  if (type === "version" || type === "asset") return remapId(id, maps.versionIdMap);
+  if (type === "branch" || type === "plan") return remapId(id, maps.branchIdMap);
+  if (type === "poll") return remapId(id, maps.pollIdMap);
+  return id;
+}
+
+/** Rewrite local room / entity ids so a first-share upload lands in the new cloud room. */
+export function remapCollaborationSlice(slice: CollaborationSlice, roomId: string, maps: CollaborationIdMaps = {}): CollaborationSlice {
+  return {
+    allowBoardEdit: slice.allowBoardEdit,
+    whiteboards: slice.whiteboards.map((board) => ({ ...board, roomId })),
+    nodes: slice.nodes.map((node) => ({
+      ...node,
+      roomId,
+      linkedEntityId: remapLinkedId(node.linkedEntityType, node.linkedEntityId, maps),
+    })),
+    edges: slice.edges.map((edge) => ({ ...edge, roomId })),
+    discussion: slice.discussion.map((message) => ({
+      ...message,
+      roomId,
+      payload: {
+        ...message.payload,
+        branchId: remapId(message.payload.branchId, maps.branchIdMap),
+        versionId: remapId(message.payload.versionId, maps.versionIdMap),
+        pollId: remapId(message.payload.pollId, maps.pollIdMap),
+      },
+    })),
+    discussionSupports: slice.discussionSupports.map((support) => ({ ...support, roomId })),
+    decisions: slice.decisions.map((decision) => ({
+      ...decision,
+      roomId,
+      sourceId: decision.sourceType === "poll" ? remapId(decision.sourceId, maps.pollIdMap) : decision.sourceId,
+    })),
+  };
+}
+
+export function collaborationSliceHasRows(slice: CollaborationSlice): boolean {
+  return Boolean(
+    slice.whiteboards.length
+    || slice.nodes.length
+    || slice.edges.length
+    || slice.discussion.length
+    || slice.discussionSupports.length
+    || slice.decisions.length
+    || slice.allowBoardEdit,
+  );
+}
+
+/**
+ * Upload a local collaboration slice into an already-created cloud room.
+ * Used by first-share migration so reload does not replace boards/discussion
+ * with empty cloud results.
+ */
+export async function insertCollaborationSlice(supabase: SupabaseClient, slice: CollaborationSlice): Promise<void> {
+  if (!collaborationSliceHasRows(slice)) return;
+  const roomId = slice.whiteboards[0]?.roomId
+    ?? slice.nodes[0]?.roomId
+    ?? slice.discussion[0]?.roomId
+    ?? slice.decisions[0]?.roomId;
+  if (slice.allowBoardEdit && roomId) {
+    await setAllowBoardEdit(supabase, roomId, true);
+  }
+  if (slice.whiteboards.length) {
+    const { error } = await supabase.from("whiteboards").insert(slice.whiteboards.map((board) => ({
+      id: board.id,
+      room_id: board.roomId,
+      title: board.title,
+      description: board.description,
+      allow_edit: board.allowEdit,
+      created_by: isUuid(board.createdBy) ? board.createdBy : null,
+      archived_at: board.archivedAt ? new Date(board.archivedAt).toISOString() : null,
+    })));
+    if (error) throw new CloudError(error.message, "whiteboard");
+  }
+  if (slice.nodes.length) {
+    const { error } = await supabase.from("whiteboard_nodes").insert(slice.nodes.map(nodeRowPayload));
+    if (error) throw new CloudError(error.message, "whiteboard-node");
+  }
+  if (slice.edges.length) {
+    const { error } = await supabase.from("whiteboard_edges").insert(slice.edges.map((edge) => ({
+      id: edge.id,
+      whiteboard_id: edge.whiteboardId,
+      room_id: edge.roomId,
+      source_node_id: edge.sourceNodeId,
+      target_node_id: edge.targetNodeId,
+      edge_type: edge.edgeType,
+      label: edge.label,
+    })));
+    if (error) throw new CloudError(error.message, "whiteboard-edge");
+  }
+  if (slice.discussion.length) {
+    const { error } = await supabase.from("room_discussion_messages").insert(slice.discussion.map((message) => ({
+      id: message.id,
+      room_id: message.roomId,
+      author_user_id: isUuid(message.authorId) ? message.authorId : null,
+      author_name: message.authorName,
+      author_color: message.authorColor,
+      kind: message.kind,
+      body: message.body,
+      payload: message.payload,
+      reply_to_id: message.replyToId ?? null,
+    })));
+    if (error) throw new CloudError(error.message, "discussion");
+  }
+  const supportRows = slice.discussionSupports.filter((support) => isUuid(support.userId));
+  if (supportRows.length) {
+    const { error } = await supabase.from("room_discussion_supports").insert(supportRows.map((support) => ({
+      message_id: support.messageId,
+      room_id: support.roomId,
+      user_id: support.userId,
+    })));
+    if (error) throw new CloudError(error.message, "discussion-support");
+  }
+  if (slice.decisions.length) {
+    const { error } = await supabase.from("decision_records").insert(slice.decisions.map((decision) => ({
+      id: decision.id,
+      room_id: decision.roomId,
+      title: decision.title,
+      body: decision.body,
+      status: decision.status,
+      source_type: decision.sourceType ?? null,
+      source_id: decision.sourceId ?? null,
+      created_by: isUuid(decision.createdBy) ? decision.createdBy : null,
+      finalized_at: decision.finalizedAt ? new Date(decision.finalizedAt).toISOString() : null,
+      finalized_by: decision.finalizedBy && isUuid(decision.finalizedBy) ? decision.finalizedBy : null,
+    })));
+    if (error) throw new CloudError(error.message, "decision");
+  }
 }
 
 export async function fetchWhiteboardContext(supabase: SupabaseClient, whiteboardId: string): Promise<unknown> {

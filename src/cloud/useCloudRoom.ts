@@ -95,6 +95,7 @@ import {
   upsertNode as repoUpsertNode,
   deleteNode as repoDeleteNode,
 } from "./collaborationRepository";
+import { decideNodeWriteRetry } from "../features/collaboration/offline";
 
 export type CloudWrites = {
   setTitle: (title: string) => void;
@@ -116,8 +117,8 @@ export type CloudWrites = {
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
   createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
-  upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => void;
-  deleteNode?: (id: string) => void;
+  upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false>;
+  deleteNode?: (id: string) => Promise<boolean>;
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
@@ -449,6 +450,37 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
         pending.current.push(task);
         setStatus("offline-pending");
         throw err;
+      }
+    },
+    [supabase],
+  );
+
+  /**
+   * Awaitable node write. Failures are NOT pushed to the in-memory `pending`
+   * queue — IndexedDB is the only retry owner, so a later successful edit
+   * cannot be overwritten by a stale captured closure.
+   */
+  const writeAck = useCallback(
+    async <T>(task: () => Promise<T>): Promise<T | false> => {
+      if (!supabase || !boundRef.current) return false;
+      setStatus("syncing");
+      try {
+        const value = await task();
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+        return value;
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return false;
+        }
+        const retry = decideNodeWriteRetry("failed");
+        if (retry.queueMemory) {
+          pending.current.push(async () => {
+            await task();
+          });
+        }
+        setStatus("offline-pending");
+        return false;
       }
     },
     [supabase],
@@ -903,8 +935,11 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
     setDiscussionSupport: (messageId, add) => run(() => repoSetDiscussionSupport(supabase!, boundRef.current!, messageId, add)),
     createWhiteboard: (board) => run(() => insertWhiteboard(supabase!, board)),
     updateWhiteboard: (board) => run(() => repoUpdateWhiteboard(supabase!, board)),
-    upsertNode: (node) => run(() => repoUpsertNode(supabase!, node)),
-    deleteNode: (id) => run(() => repoDeleteNode(supabase!, boundRef.current!, id)),
+    upsertNode: (node) => writeAck(() => repoUpsertNode(supabase!, { ...node, roomId: boundRef.current! })),
+    deleteNode: (id) => writeAck(async () => {
+      await repoDeleteNode(supabase!, boundRef.current!, id);
+      return true;
+    }),
     createEdge: (edge) => run(() => insertEdge(supabase!, edge)),
     createDecision: (decision) => run(() => insertDecision(supabase!, decision)),
     updateDecision: (decision) => run(() => repoUpdateDecision(supabase!, decision)),
