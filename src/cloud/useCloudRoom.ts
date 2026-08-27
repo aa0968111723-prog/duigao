@@ -29,7 +29,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isRevisionConflict } from "./errors";
+import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -123,8 +123,8 @@ export type CloudWrites = {
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
   createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
-  upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false>;
-  deleteNode?: (id: string) => Promise<boolean>;
+  upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false | "conflict">;
+  deleteNode?: (id: string) => Promise<boolean | "conflict">;
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
@@ -466,7 +466,7 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
    * cannot be overwritten by a stale captured closure.
    */
   const writeAck = useCallback(
-    async <T>(task: () => Promise<T>): Promise<T | false> => {
+    async <T>(task: () => Promise<T>): Promise<T | false | "conflict"> => {
       if (!supabase || !boundRef.current) return false;
       setStatus("syncing");
       try {
@@ -477,6 +477,14 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
         if (isDuplicateKey(err)) {
           setStatus(pending.current.length ? "offline-pending" : "synced");
           return false;
+        }
+        if (isStaleWrite(err)) {
+          // 版本衝突：舊 payload 不可能被接受。refetch 由呼叫端負責 —
+          // 這裡不 scheduleReload：summary 路徑的 nodes 是空的（lazy），
+          // 對開著的白板是空操作（Grok pr02b F2），真正的取新是
+          // loadWhiteboard(該板)。
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return "conflict";
         }
         const retry = decideNodeWriteRetry("failed");
         // queueMemory stays false: IndexedDB is the only node retry owner.

@@ -22,8 +22,12 @@ export type NodeWriteRetry = {
  * An in-memory closure must not also keep the old payload — a later success
  * would clear IDB and leave the stale task to overwrite newer cloud content.
  */
-export function decideNodeWriteRetry(outcome: "success" | "unbound" | "failed"): NodeWriteRetry {
+export function decideNodeWriteRetry(outcome: "success" | "unbound" | "failed" | "conflict"): NodeWriteRetry {
   if (outcome === "success") return { acknowledged: true, queueDurable: false, queueMemory: false };
+  // conflict（stale-write）：舊 payload 永遠不可能被接受 — 不進任何佇列，
+  // 由呼叫端丟棄本地編輯並以 reload 取回較新內容（drop + refetch，
+  // 不做逐節點 merge — 本輪的衝突解法）。
+  if (outcome === "conflict") return { acknowledged: false, queueDurable: false, queueMemory: false };
   return { acknowledged: false, queueDurable: true, queueMemory: false };
 }
 
@@ -35,9 +39,12 @@ export function decideNodeWriteRetry(outcome: "success" | "unbound" | "failed"):
 export async function applyPendingCloudWrites(
   pending: PendingEdit[],
   writes: CloudNodeWrites,
-): Promise<{ acknowledged: string[]; retained: string[] }> {
+): Promise<{ acknowledged: string[]; retained: string[]; dropped: string[] }> {
   const acknowledged: string[] = [];
   const retained: string[] = [];
+  // stale-write：這份排隊中的舊 payload 已被更新版本蓋過 — 清出佇列
+  //（否則每次 online 都重放、每次都 409），但不算成功。
+  const dropped: string[] = [];
   for (const edit of pending) {
     if (edit.kind !== "node") {
       retained.push(edit.id);
@@ -63,12 +70,13 @@ export async function applyPendingCloudWrites(
         continue;
       }
       if (isCloudWriteAcknowledged(result)) acknowledged.push(edit.id);
+      else if (result === "conflict") dropped.push(edit.id);
       else retained.push(edit.id);
     } catch {
       retained.push(edit.id);
     }
   }
-  return { acknowledged, retained };
+  return { acknowledged, retained, dropped };
 }
 
 const DB_NAME = "duigao-collaboration";
@@ -145,6 +153,21 @@ export async function clearPendingEdit(id: string): Promise<void> {
 }
 
 /**
+ * 只在 IDB 裡的列仍是「當初列出的那一份」時才清（以 createdAt 判定）。
+ * flush 進行中使用者可能對同一節點又打了字 — queuePendingEdit 以同 key
+ * put 覆蓋，盲刪會把較新的 payload 一起殺掉（Grok pr02b F3）。
+ */
+export async function clearPendingEditIf(id: string, createdAt: number): Promise<void> {
+  await withStore(PENDING, "readwrite", (store) => {
+    const req = store.get(id);
+    req.onsuccess = () => {
+      const row = req.result as PendingEdit | undefined;
+      if (row && row.createdAt === createdAt) store.delete(id);
+    };
+  });
+}
+
+/**
  * Last-write / optimistic reconcile after a brief disconnect.
  * Cloud rows win when their updatedAt/version is newer; pending local edits
  * that the server never saw stay queued.
@@ -171,9 +194,18 @@ export function reconcileNodes(local: WhiteboardNode[], remote: WhiteboardNode[]
   const byId = new Map(remote.map((node) => [node.id, node]));
   for (const node of local) {
     const remoteNode = byId.get(node.id);
-    if (!remoteNode || node.updatedAt > remoteNode.updatedAt || node.version > remoteNode.version) {
+    if (!remoteNode) {
       byId.set(node.id, node);
+      continue;
     }
+    // version 是伺服器的 OCC 計數器 — 樂觀本地編輯不會前進它（stamp 只用
+    // acked）。version 不同時 version 說了算：本地 updatedAt 較新但 version
+    // 較舊＝這份編輯已經輸掉衝突，讓伺服器列贏，refetch 才換得動節點、
+    // lastAcked 才會前進（Grok pr02b F2 深層）。同 version 才用 updatedAt。
+    const localVersion = node.version ?? 1;
+    const remoteVersion = remoteNode.version ?? 1;
+    if (localVersion > remoteVersion) byId.set(node.id, node);
+    else if (localVersion === remoteVersion && node.updatedAt > remoteNode.updatedAt) byId.set(node.id, node);
   }
   const deleted = new Set(
     pending.filter((edit) => edit.kind === "node" && edit.op === "delete").map((edit) => {
