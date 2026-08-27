@@ -7,6 +7,11 @@ import type {
   RoomContextResponse,
 } from "../../lib/assetIntelligence";
 import { ANALYSIS_STATUS_LABEL, ASSET_TYPE_LABEL, formatSeconds } from "../../lib/assetIntelligence";
+import {
+  proposalsFromResponse,
+  type AiProposal,
+  type ApplyProposalResult,
+} from "../../ai/proposals";
 import "./asset-ai.css";
 
 type Props = {
@@ -23,6 +28,8 @@ type Props = {
   onRetryAnalysis?: (assetId: string) => void;
   onUpdatePolicy?: (assetId: string, patch: { aiReadable: boolean; externalAiAllowed: boolean }) => Promise<void>;
   onUpdateHumanMetadata?: (assetId: string, input: { title?: string; summary?: string; tags?: string[] }) => Promise<void>;
+  onApplyProposal?: (proposal: AiProposal, extraConfirmed?: boolean) => Promise<ApplyProposalResult> | ApplyProposalResult;
+  onRejectProposal?: (proposal: AiProposal) => void;
   canManage?: boolean;
 };
 
@@ -189,10 +196,19 @@ function AssetCard({
   );
 }
 
-export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [], response, loading = false, error, onAsk, onClose, onFocus, onRetryAnalysis, onUpdatePolicy, onUpdateHumanMetadata, canManage = false }: Props) {
+const ACTION_KIND: Record<AiProposal["type"], string> = {
+  add_whiteboard_node: "白板",
+  create_comment: "討論",
+  create_poll: "投票",
+  create_plan_draft: "企劃",
+};
+
+export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [], response, loading = false, error, onAsk, onClose, onFocus, onRetryAnalysis, onUpdatePolicy, onUpdateHumanMetadata, onApplyProposal, onRejectProposal, canManage = false }: Props) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>(selectedAssetIds);
   const [showAssets, setShowAssets] = useState(false);
+  const [proposalState, setProposalState] = useState<Record<string, { status: "preview" | "applied" | "rejected"; message?: string; confirm?: boolean }>>({});
+  const proposals = useMemo(() => proposalsFromResponse(response), [response]);
 
   // The sheet stays mounted while App keeps the room workspace alive. Syncing
   // this prop prevents a citation/card opened from another branch from
@@ -200,6 +216,10 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
   useEffect(() => {
     setSelected(selectedAssetIds);
   }, [selectedAssetIds.join(",")]);
+
+  useEffect(() => {
+    setProposalState({});
+  }, [response?.query, response?.answer?.text]);
 
   const selectedAssets = useMemo(() => assets.filter((asset) => selected.includes(asset.id)), [assets, selected]);
   const ask = async (value = query) => {
@@ -248,6 +268,61 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
               const citation = response.answer?.citations.find((item) => item.sourceId === source.sourceId) ?? source;
               return <button type="button" key={source.sourceId} onClick={() => onFocus(citation)}><span>{source.title}</span>{sourceLocator(citation) && <small>{sourceLocator(citation)}</small>}</button>;
             })}</div>}
+            {onApplyProposal && proposals.length > 0 && (
+              <div className="asset-ai-proposals" data-testid="ai-proposals">
+                <strong>待審核提案</strong>
+                <p className="asset-ai-proposals-hint">AI 不會自己寫入。預覽後再套用。</p>
+                {proposals.map((proposal) => {
+                  const state = proposalState[proposal.id] ?? { status: "preview" as const };
+                  return (
+                    <article className={`asset-ai-proposal is-${state.status}`} key={proposal.id} data-testid="ai-proposal" data-proposal-id={proposal.id} data-proposal-type={proposal.type}>
+                      <span className="asset-ai-proposal-kind">{ACTION_KIND[proposal.type]}</span>
+                      <strong>{proposal.label}</strong>
+                      {typeof proposal.payload.text === "string" && proposal.payload.text ? <p>{proposal.payload.text}</p> : null}
+                      {typeof proposal.payload.body === "string" && proposal.payload.body ? <p>{proposal.payload.body}</p> : null}
+                      {typeof proposal.payload.title === "string" && proposal.payload.title && proposal.payload.title !== proposal.label ? <p>{proposal.payload.title}</p> : null}
+                      {state.status === "applied" ? <small>已套用。原稿沒有被改寫。</small> : null}
+                      {state.status === "rejected" ? <small>已拒絕，沒有寫入。</small> : null}
+                      {state.message && state.status === "preview" ? <small className="asset-ai-proposal-msg">{state.message}</small> : null}
+                      {state.status === "preview" && (
+                        <div className="asset-ai-proposal-actions">
+                          <button
+                            type="button"
+                            data-testid="apply-proposal"
+                            disabled={!onApplyProposal}
+                            onClick={() => {
+                              void Promise.resolve(onApplyProposal(proposal, Boolean(state.confirm))).then((result) => {
+                                if (result.ok) {
+                                  setProposalState((current) => ({ ...current, [proposal.id]: { status: "applied", message: result.message } }));
+                                  return;
+                                }
+                                if (result.reason === "needs-confirm") {
+                                  setProposalState((current) => ({ ...current, [proposal.id]: { status: "preview", confirm: true, message: result.message } }));
+                                  return;
+                                }
+                                setProposalState((current) => ({ ...current, [proposal.id]: { status: "preview", message: result.message } }));
+                              });
+                            }}
+                          >
+                            {proposal.requiresExtraConfirm && state.confirm ? "確定建立企劃草稿" : "套用"}
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="reject-proposal"
+                            onClick={() => {
+                              onRejectProposal?.(proposal);
+                              setProposalState((current) => ({ ...current, [proposal.id]: { status: "rejected" } }));
+                            }}
+                          >
+                            拒絕
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </article>
         ) : response ? (
           <article className="asset-ai-answer"><p>目前已找到 {response.context.length} 項相關素材，但 AI provider 尚未回應。</p></article>

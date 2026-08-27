@@ -145,6 +145,56 @@
 .asset-ai-error { margin: 0; color: #f0a190; font-size: 13px; line-height: 1.5; }
 .asset-ai-citations { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .asset-ai-citations strong { color: var(--ink-faint); font-size: 12px; font-weight: 500; }
+.asset-ai-proposals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.asset-ai-proposals > strong { color: var(--ink-faint); font-size: 12px; font-weight: 500; }
+.asset-ai-proposals-hint { margin: 0; color: var(--ink-faint); font-size: 12px; line-height: 1.5; }
+.asset-ai-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--raise);
+}
+.asset-ai-proposal.is-applied { border-color: rgba(110, 190, 140, .45); }
+.asset-ai-proposal.is-rejected { opacity: .62; }
+.asset-ai-proposal-kind {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+.asset-ai-proposal > strong { font-size: 14px; }
+.asset-ai-proposal > p { margin: 0; color: var(--ink-dim); font-size: 13px; line-height: 1.5; }
+.asset-ai-proposal > small { color: var(--ink-faint); font-size: 12px; }
+.asset-ai-proposal-msg { color: #f0a190 !important; }
+.asset-ai-proposal-actions { display: flex; gap: 8px; }
+.asset-ai-proposal-actions button {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.asset-ai-proposal-actions [data-testid="apply-proposal"] {
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+}
+.asset-ai-proposal-actions [data-testid="reject-proposal"] {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-dim);
+}
 .asset-ai-citations button {
   display: flex;
   align-items: center;
@@ -218,6 +268,56 @@
 .asset-ai-human-form textarea { resize: vertical; }
 .asset-ai-save-human { justify-self: start; background: var(--accent-soft); color: var(--accent); }
 .asset-ai-action-error { color: #f0a190; font-size: 12px; }
+.asset-ai-proposals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.asset-ai-proposals > strong { color: var(--ink-faint); font-size: 12px; font-weight: 500; }
+.asset-ai-proposals-hint { margin: 0; color: var(--ink-faint); font-size: 12px; line-height: 1.5; }
+.asset-ai-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--raise);
+}
+.asset-ai-proposal.is-applied { border-color: rgba(110, 190, 140, .45); }
+.asset-ai-proposal.is-rejected { opacity: .62; }
+.asset-ai-proposal-kind {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+.asset-ai-proposal > strong { font-size: 14px; }
+.asset-ai-proposal > p { margin: 0; color: var(--ink-dim); font-size: 13px; line-height: 1.5; }
+.asset-ai-proposal > small { color: var(--ink-faint); font-size: 12px; }
+.asset-ai-proposal-msg { color: #f0a190 !important; }
+.asset-ai-proposal-actions { display: flex; gap: 8px; }
+.asset-ai-proposal-actions button {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.asset-ai-proposal-actions [data-testid="apply-proposal"] {
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+}
+.asset-ai-proposal-actions [data-testid="reject-proposal"] {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-dim);
+}
 
 @media (min-width: 721px) {
   .asset-ai-scrim { align-items: center; padding: 20px; }

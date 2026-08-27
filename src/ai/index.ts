@@ -6,6 +6,14 @@ export {
 } from "./featureFlags";
 export type { FeatureFlagId } from "./featureFlags";
 export {
+  applyGate,
+  applyReasonMessage,
+  nodeFromAddWhiteboardAction,
+  normalizeAiActions,
+  proposalsFromResponse,
+} from "./proposals";
+export type { AiProposal, ApplyProposalResult } from "./proposals";
+export {
   answerFromContext,
   applyBackToWhiteboard,
   assertNotFullRoomDump,

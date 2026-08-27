@@ -333,11 +333,15 @@ export const featureDefinitions = [
   {
     id: "whiteboard-apply-back", name: "Whiteboard context apply-back", priority: 1,
     source: [
-      { path: "src/ai/roomContext.ts", contains: ["applyBackToWhiteboard", "retrieveRoomContext"] },
-      { path: "src/collaboration/whiteboard.ts", contains: ["createFlow", "createMindmap"] },
+      { path: "src/ai/proposals.ts", contains: ["normalizeAiActions", "nodeFromAddWhiteboardAction"] },
+      { path: "src/features/asset-intelligence/RoomAiSheet.tsx", contains: ["onApplyProposal", "apply-proposal"] },
+      { path: "src/App.tsx", contains: ["applyAiProposal", "onApplyProposal"] },
     ],
-    tests: [{ path: "scripts/tests/collaboration.test.ts", contains: ["加入白板", "招生"] }],
-    minimum: { source: 2, tests: 1 },
+    tests: [
+      { path: "scripts/tests/ai-proposals.test.ts", contains: ["production node", "double apply"] },
+      { path: "scripts/e2e/asset-intelligence.mjs", contains: ["apply-proposal", "已套用 AI 提案"] },
+    ],
+    minimum: { source: 3, tests: 1 },
   },
 ];
 

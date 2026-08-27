@@ -98,6 +98,15 @@ test("one node+edge model covers sticky, room ref, poll, flow, mindmap without c
   });
 });
 
+test("prototype DiscussionWorkspace is not the production apply path", () => {
+  const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
+  const sheet = readFileSync(resolve(ROOT, "src/features/asset-intelligence/RoomAiSheet.tsx"), "utf8");
+  assert.equal(app.includes("from \"./features/collaboration/DiscussionWorkspace\""), false);
+  assert.match(app, /applyAiProposal/);
+  assert.match(sheet, /onApplyProposal/);
+  assert.match(sheet, /data-testid="apply-proposal"/);
+});
+
 test("Room Context selection is bounded and 加入白板 apply-back inserts real nodes and edges", () => {
   const branches = Array.from({ length: 14 }, (_, index) => ({
     id: `b${index}`,
