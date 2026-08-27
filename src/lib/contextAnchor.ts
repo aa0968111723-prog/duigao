@@ -39,7 +39,12 @@ export type ContextAnchor =
   // entity / board-node 臂刻意無版本：來源機制沒有版本事實，捏造 versionId
   // 是假資料（implementation-plan 裁定）。
   | { type: "entity"; entityType: LinkedEntityType; entityId: string }
-  | { type: "board-node"; whiteboardId: string; nodeId?: string };
+  | { type: "board-node"; whiteboardId: string; nodeId?: string }
+  // 3D 場佈錨（PR-06 / ADR-006）：指向 planform project 裡的某個
+  // zone/object。三套既有機制目前都沒有它的表示法（已知缺口 —
+  // adapters 回空、openTarget 回 none）；第二階段 live embed 探測完
+  // host headers 後由 planform 表面自己消費。
+  | { type: "planform-scene"; projectId: string; targetId?: string };
 
 /** 有 comment 欄位表示法的臂 — entity/board-node 寫不進意見列（已知缺口）。 */
 export type MediaAnchor = Extract<

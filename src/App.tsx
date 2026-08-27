@@ -27,6 +27,7 @@ import {
   type VideoAnchor,
   type ViewState,
 } from "./lib/types";
+import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
 import { roomCode, uid } from "./lib/id";
@@ -1314,13 +1315,32 @@ export function App() {
       try {
         const messageId = crypto.randomUUID();
         const mime = file.type || "application/octet-stream";
+        // planform 場佈 JSON（PR-06）：識別＋摘要進 payload，原始 bytes
+        // 原樣上傳 — 讀不懂就當一般附件，永不因此擋上傳。
+        let planform: import("./lib/planformArtifact").PlanformPayload | undefined;
+        const isJson = mime === "application/json" || /\.json$/i.test(file.name);
+        if (isJson && file.size <= 1024 * 1024) {
+          try {
+            const summary = readPlanformSummary(JSON.parse(await file.text()));
+            if (summary) planform = planformPayloadFromSummary(summary);
+          } catch {
+            /* 壞 JSON：一般附件 */
+          }
+        }
         const path = attachmentPath(roomId, messageId, crypto.randomUUID(), attachmentExt(mime, file.name));
         await uploadAttachment(getSupabase()!, path, file, mime);
         sendDiscussion({
           id: messageId,
           kind: "attachment",
-          body: file.name,
-          payload: { path, mime, size: file.size, name: file.name, title: file.name },
+          body: planform ? `場佈：${planform.name}` : file.name,
+          payload: {
+            path,
+            mime,
+            size: file.size,
+            name: file.name,
+            title: planform ? `場佈：${planform.name}` : file.name,
+            ...(planform ? { planform } : {}),
+          },
         });
       } catch {
         showToast("附件沒有上傳成功，請再試一次。", { tone: "error" });

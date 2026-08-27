@@ -463,6 +463,35 @@ try {
         && requestLog.some((line) => line.includes("/storage/v1/object/room-assets/rooms/") && line.includes("/attachments/")),
     );
 
+    // planform 場佈 JSON（PR-06）：識別 → 摘要 chip；原始 bytes 原樣上傳
+    {
+      const planformJson = JSON.stringify({
+        version: 8,
+        id: "proj_e2e_1",
+        name: "迎新場佈",
+        classroom: { id: "classroom", name: "教室", length: 10, width: 8, x: 0, z: 0 },
+        corridor: { id: "corridor", name: "走廊", length: 10, width: 2, x: 0, z: 8 },
+        zones: [{ id: "z1" }, { id: "z2" }, { id: "z3" }],
+        objects: [{ id: "o1" }],
+        routes: [],
+        scenarios: [],
+      });
+      await attachInput.setInputFiles({ name: "迎新場佈.planform.json", mimeType: "application/json", buffer: Buffer.from(planformJson) });
+      await page.waitForSelector('[data-testid="planform-chip"]', { timeout: 20000 });
+      const chip = await page.getByTestId("planform-chip").innerText();
+      check("planform JSON 附件出現場佈摘要 chip", chip.includes("v8") && chip.includes("3 區") && chip.includes("1 物件"), chip);
+      const feed = await page.getByTestId("discussion-feed").innerText();
+      check("場佈卡標題用場佈名稱不是檔名", feed.includes("場佈：迎新場佈"), "");
+      // 非 planform 的 JSON：一般附件卡，無 chip
+      await attachInput.setInputFiles({ name: "notes.json", mimeType: "application/json", buffer: Buffer.from('{"hello":"world"}') });
+      await page.waitForFunction(
+        () => document.body.innerText.includes("notes.json"),
+        null,
+        { timeout: 20000 },
+      );
+      check("一般 JSON 不誤認成場佈", (await page.locator('[data-testid="planform-chip"]').count()) === 1, "");
+    }
+
     // 連結卡：純 URL 送出
     await page.getByLabel("房間討論").fill("https://example.com/menu");
     await page.locator(".rd-composer").getByRole("button", { name: "送出" }).click();

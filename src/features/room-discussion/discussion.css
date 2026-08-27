@@ -38,6 +38,8 @@
 .rd-attachment { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-radius: 10px; background: var(--raise); font-size: 13px; }
 .rd-attachment-name { color: var(--ink); word-break: break-all; }
 .rd-attachment-size { color: var(--ink-faint); font-size: 11px; }
+/* 場佈摘要 chip（PR-06）：一行資訊密度，跟 size 同層級的輔助文字。 */
+.rd-attachment-planform { display: block; width: 100%; color: var(--ink-soft); font-size: 12px; }
 .rd-attachment-audio { width: 100%; }
 .rd-attachment-broken { color: #d6a04c; font-size: 12px; }
 .rd-link { display: inline-block; text-decoration: none; word-break: break-all; }

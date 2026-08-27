@@ -84,10 +84,18 @@ function AttachmentCard({ message, resolve }: { message: DiscussionMessage; reso
       setFailed(true); // 簽名失敗（物件不見／離線）：與未送出的 is-failed 視覺區分
     }
   };
+  const planform = message.payload.planform;
   return (
     <div className="rd-attachment" data-testid="attachment-card">
-      <span className="rd-attachment-name">📎 {name}</span>
+      <span className="rd-attachment-name">{planform ? "🗺️" : "📎"} {name}</span>
       {size ? <span className="rd-attachment-size">{size}</span> : null}
+      {planform ? (
+        // 場佈摘要（PR-06）：payload 的 client 主張，顯示用。原始 JSON
+        // 原樣存在 storage — 開啟＝拿原檔，可匯回 planform 繼續編。
+        <span className="rd-attachment-planform" data-testid="planform-chip">
+          場佈 v{planform.version} · {planform.zoneCount} 區 · {planform.objectCount} 物件 · {planform.routeCount} 動線
+        </span>
+      ) : null}
       {audioUrl ? (
         <audio controls src={audioUrl} className="rd-attachment-audio" />
       ) : (

@@ -20,8 +20,9 @@ export const INTAKE_PROFILES = {
   proposal: { accept: "image/png,image/jpeg,image/webp,image/svg+xml", multiple: false },
   "share-cover": { accept: "image/png,image/jpeg,image/webp", multiple: false },
   attachment: {
-    // 檔案卡：pdf／音訊／常見文件。連結卡不經檔案系統，不在此處。
-    accept: "application/pdf,audio/*,.docx,.pptx,.xlsx,.txt,.csv,.zip",
+    // 檔案卡：pdf／音訊／常見文件／planform 場佈 JSON（PR-06）。
+    // 連結卡不經檔案系統，不在此處。
+    accept: "application/pdf,audio/*,.docx,.pptx,.xlsx,.txt,.csv,.zip,.json,application/json",
     multiple: false,
     // RLS 擋不了大小；client 端先擋，數字寫進 UX 文案。
     maxBytes: 25 * 1024 * 1024,
