@@ -37,3 +37,15 @@
 ## NOTE_TKU_ZEN_AGENT_DEPLOYMENT（PR-04 驗收時需解）
 
 - 程式契約兩端已在（HMAC + 測試），但 duigao edge 需要 `TKU_ZEN_AGENT_URL` + shared secret 設定於 Supabase Functions env；目前無法從本機驗證線上是否已設。PR-04 驗收需一次 live 探測（agent-status 端點）。
+
+## NOTE_SLOW_DEVICE_FIRSTUPLOAD（PR-01c 工作項，2026-08-28 發現）
+
+- 現象：CPU 飽和時（本機 6×burner；CI 2-core 偶發）影片首次上傳在
+  ensureCloudRoom 完成 create_room_with_invite＋rooms PATCH＋room_branches
+  POST 之後、loadRoom 之前死亡，使用者看到「影片上傳失敗，請檢查網路後再
+  試一次」；失敗卡重試會**另開新 cloud room**（原房未綁成）而不是沿用，
+  留下空房殘留。request log 證據見 rounds/pr01b 調查（video-flow 檢查 23
+  的 self-heal 即為此而設）。
+- 影響：慢裝置上的真實使用者；與網路無關的錯誤被說成網路問題。
+- 歸屬：PR-01c（手機上傳強化）— 找出 ensureCloudRoom 中被 CPU 餓死的
+  環節、錯誤文案分流、重試沿用已建立的房。

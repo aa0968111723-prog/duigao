@@ -1,3 +1,4 @@
+import { INTAKE_PROFILES } from "./UniversalIntake";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ModalSheet } from "./BottomSheet";
 import type { ShowToast } from "../toast";
@@ -85,7 +86,8 @@ type Props = {
   onCustomize: (patch: ShareCustomization) => void;
 };
 
-const COVER_ACCEPT = "image/jpeg,image/png,image/webp";
+// 中央 intake registry 是 accept 白名單的單一真相（DOM 保持凍結不換元件）。
+const COVER_ACCEPT = INTAKE_PROFILES["share-cover"].accept;
 
 function Note({ children }: { children: ReactNode }) {
   return <p className="m-share-note">{children}</p>;

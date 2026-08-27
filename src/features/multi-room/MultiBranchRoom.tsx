@@ -34,7 +34,7 @@ import {
   sortBranchesByRecent,
 } from "../../lib/roomBranches";
 import type { RoomRole } from "../../cloud/roomRepository";
-import { VIDEO_ACCEPT } from "../video-review/media";
+import { UniversalIntake } from "../../components/UniversalIntake";
 
 export type MultiBranchRoomApi = {
   room: Room;
@@ -89,6 +89,12 @@ export type MultiBranchRoomApi = {
   /** 各訊息送出狀態；配合 onRetryDiscussion 呈現「未送出 · 重試」。 */
   discussionSendStates?: Record<string, "sending" | "failed">;
   onRetryDiscussion?: (messageId: string) => void;
+  /** 討論附件（PR-01b）；App 持有上傳與簽名。 */
+  onAttachDiscussion?: (files: File[]) => void;
+  attachBusy?: boolean;
+  onIntakeReject?: (reason: string) => void;
+  onSendDiscussionLink?: (url: string) => boolean;
+  resolveAssetUrl?: (path: string) => Promise<string>;
 };
 
 /** 從討論殼「推進去」的次要面板；討論本身是房間的根畫面，不再是並列分頁。 */
@@ -408,10 +414,9 @@ function CreateSheet({ onClose, onCreate, initialType }: { onClose: () => void; 
             <h2>新增{type === "copy" ? "文案" : branchTypeLabel(type)}</h2>
             <label className="project-field"><span>名稱</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={type === "poster" ? "例如：擺攤文宣" : type === "video" ? "例如：招生影片" : "例如：擺攤計畫"} /></label>
             {needsFile && (
-              <label className="project-file-picker">
+              <UniversalIntake profile={type === "poster" ? "poster" : "video"} mode="zone" className="project-file-picker" onFiles={setFiles}>
                 <span>{files?.[0]?.name ?? (type === "poster" ? "選一張圖片" : "選一支影片")}</span>
-                <input type="file" accept={type === "poster" ? "image/*" : VIDEO_ACCEPT} onChange={(event) => setFiles(event.target.files)} />
-              </label>
+              </UniversalIntake>
             )}
             <button type="submit" className="project-save-button project-submit" disabled={!name.trim() || (needsFile && !files?.length)}>建立</button>
           </form>
@@ -564,10 +569,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
             <div className="project-branch-empty-detail">
               <p>{branchVersions(normalized, inShellBranch.id).length ? "準備好進入檢視器。" : `這份${branchTypeLabel(inShellBranch.branchType)}還沒有版本。`}</p>
               {api.canManage && (
-                <label className="project-upload-button">
+                <UniversalIntake profile={inShellBranch.branchType === "poster" ? "poster" : "video"} mode="zone" className="project-upload-button" onFiles={(picked) => api.onAddFiles(inShellBranch.id, picked)}>
                   <span>＋ {branchVersions(normalized, inShellBranch.id).length ? "新增版本" : `加入${branchTypeLabel(inShellBranch.branchType)}`}</span>
-                  <input type="file" accept={inShellBranch.branchType === "poster" ? "image/*" : VIDEO_ACCEPT} onChange={(event) => api.onAddFiles(inShellBranch.id, event.target.files)} />
-                </label>
+                </UniversalIntake>
               )}
             </div>
           )}
@@ -657,6 +661,11 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     hideTabs: true,
                     sendStates: api.discussionSendStates,
                     onRetry: api.onRetryDiscussion,
+                    onAttach: api.onAttachDiscussion,
+                    attachBusy: api.attachBusy,
+                    onReject: api.onIntakeReject,
+                    onSendLink: api.onSendDiscussionLink,
+                    resolveAssetUrl: api.resolveAssetUrl,
                     pane: discussPane,
                     draft: api.chatInput,
                     setDraft: api.setChatInput,

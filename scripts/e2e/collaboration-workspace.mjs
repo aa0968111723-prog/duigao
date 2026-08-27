@@ -16,7 +16,7 @@ import http from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { faults, start as startMock } from "./mock-supabase.mjs";
+import { faults, requestLog, start as startMock } from "./mock-supabase.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54418;
@@ -334,6 +334,37 @@ try {
       const occurrences = feedText.split("這句會先失敗").length - 1;
       check("重試後訊息恢復且只出現一次", occurrences === 1, "occurrences=" + occurrences);
     }
+
+    // --- PR-01b：Universal Intake 附件 ---------------------------------
+    const attachInput = page.locator(".rd-composer input[type=file]").first();
+    await attachInput.setInputFiles({ name: "brief.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 e2e") });
+    await page.waitForSelector('[data-testid="attachment-card"]', { timeout: 20000 });
+    check(
+      "composer 附 PDF 出現附件卡",
+      (await page.getByTestId("discussion-feed").innerText()).includes("brief.pdf")
+        && requestLog.some((line) => line.includes("/storage/v1/object/room-assets/rooms/") && line.includes("/attachments/")),
+    );
+
+    // 連結卡：純 URL 送出
+    await page.getByLabel("房間討論").fill("https://example.com/menu");
+    await page.locator(".rd-composer").getByRole("button", { name: "送出" }).click();
+    await page.waitForSelector('[data-testid="link-card"]', { timeout: 15000 });
+    check("純 URL 變成連結卡（http/https 白名單）", await page.getByTestId("link-card").count() >= 1);
+
+    // 失敗重試不重新上傳：insert 失敗 → 附件卡進未送出；重試只補 insert。
+    faults.discussionInsert = true;
+    const uploadsBefore = requestLog.filter((line) => line.startsWith("POST /storage/") && line.includes("/attachments/")).length;
+    await attachInput.setInputFiles({ name: "retry.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 retry") });
+    await page.waitForSelector(".rd-msg.is-failed [data-testid='discussion-retry'], .rd-msg.is-failed", { timeout: 20000 });
+    const uploadsAfterFail = requestLog.filter((line) => line.startsWith("POST /storage/") && line.includes("/attachments/")).length;
+    await page.getByTestId("discussion-retry").click();
+    await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 });
+    const uploadsAfterRetry = requestLog.filter((line) => line.startsWith("POST /storage/") && line.includes("/attachments/")).length;
+    check(
+      "附件重試只補 insert，不重新上傳",
+      uploadsAfterFail === uploadsBefore + 1 && uploadsAfterRetry === uploadsAfterFail,
+      `uploads ${uploadsBefore}→${uploadsAfterFail}→${uploadsAfterRetry}`,
+    );
 
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
     await page.screenshot({ path: join(ROOT, "output", "playwright", "collaboration-mobile.png"), fullPage: true });

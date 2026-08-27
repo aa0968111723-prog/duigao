@@ -36,6 +36,43 @@ export function proposalAssetPath(roomId: string, proposalId: string, assetId: s
   return `rooms/${roomId}/proposals/${proposalId}/${assetId}.${extForMime(mime)}`;
 }
 
+// ---- 討論附件（PR-01b Universal Intake） ------------------------------------
+// 附件是 add-only：路徑帶 messageId 便於對帳，assetId 每次上傳重發，
+// 搭配 upsert:false，重試永遠不會覆蓋已落地的物件。
+
+const ATTACHMENT_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "audio/mpeg": "mp3",
+  "audio/mp4": "m4a",
+  "audio/x-m4a": "m4a",
+  "audio/wav": "wav",
+  "audio/ogg": "ogg",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "application/zip": "zip",
+};
+
+/** 附件副檔名：優先沿用原始檔名的副檔名，再退 MIME 對照，最後 bin。 */
+export function attachmentExt(mime: string, fileName: string): string {
+  const fromName = /\.([A-Za-z0-9]{1,8})$/.exec(fileName)?.[1]?.toLowerCase();
+  if (fromName) return fromName;
+  return ATTACHMENT_EXT[mime] ?? "bin";
+}
+
+export function attachmentPath(roomId: string, messageId: string, assetId: string, ext: string): string {
+  return `rooms/${roomId}/attachments/${messageId}/${assetId}.${ext}`;
+}
+
+/** 附件上傳：upsert:false — 物件一旦落地不可被同名覆蓋（原稿不可變）。 */
+export async function uploadAttachment(supabase: SupabaseClient, path: string, blob: Blob, mime: string): Promise<string> {
+  const { error } = await supabase.storage.from(ASSET_BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+  if (error) throw new CloudError(error.message, "storage");
+  return path;
+}
+
 export async function uploadAsset(supabase: SupabaseClient, path: string, blob: Blob, mime: string): Promise<string> {
   const { error } = await supabase.storage.from(ASSET_BUCKET).upload(path, blob, { contentType: mime, upsert: true });
   if (error) throw new CloudError(error.message, "storage");

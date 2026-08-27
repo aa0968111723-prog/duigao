@@ -1486,11 +1486,26 @@ try {
   // Anchor on the FAILURE copy: ".onboard-card" alone also matches the
   // in-progress card, and starting a fixed settle wait from there was the
   // dominant race on slow runners (Grok round ci-red-fix, F1).
-  await Q.waitForFunction(
-    () => document.querySelector(".onboard-card")?.textContent?.includes("失敗") ?? false,
-    null,
-    { timeout: 60000 },
-  );
+  //
+  // Self-heal：CPU 吃緊的 runner（CI 2-core）偶爾連 webm probe 都解不出來，
+  // 上傳在注入點之前就失敗 — 失敗卡出現但 fault 沒被消耗。這不是這個
+  // 檢查要驗的東西：用失敗卡的「重新選一支影片」重試（沿用同一間房，
+  // armed room id 不變），直到 versions POST 真的吃到注入為止。
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await Q.waitForFunction(
+      () => document.querySelector(".onboard-card")?.textContent?.includes("失敗") ?? false,
+      null,
+      { timeout: 60000 },
+    );
+    if (faults.versionInsertRoomId === null && !faults.versionInsertNextRoom) break; // 注入已觸發
+    if (attempt === 3) break; // 讓下面的斷言用真實狀態失敗，帶診斷訊息
+    // 重試可能拿到新的 cloud room（ensureCloudRoom 階段死掉時房間沒綁成）：
+    // 先重新武裝，讓「下一個 create_room」重新成為注入目標。
+    faults.versionInsertRoomId = null;
+    faults.versionInsertNextRoom = true;
+    const retryZone = Q.locator(".onboard-card input[type=file]").first();
+    await retryZone.setInputFiles({ name: "metadata-fails.webm", mimeType: "video/webm", buffer: SHORT });
+  }
   // Deterministic wait: poll for the observable end state (fault consumed,
   // retry landed, no orphans) instead of guessing a settle delay.
   const cleanupSettled = async () => {

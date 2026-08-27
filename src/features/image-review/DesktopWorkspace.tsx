@@ -4,7 +4,7 @@ import { ProposalControls } from "../visual-proposal/ProposalControls";
 import { pruneProposalVersions } from "../visual-proposal/store";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
-import { UploadZone } from "../../components/UploadZone";
+import { UniversalIntake } from "../../components/UniversalIntake";
 import { Viewer } from "./Stage";
 import { nextPinNumber, type WorkspaceApi } from "../../components/api";
 
@@ -56,10 +56,10 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
               {v.label}
             </button>
           ))}
-          <UploadZone onFiles={api.addFiles} className="upload upload-inline">
+          <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="upload upload-inline">
             <span className="upload-icon">＋</span>
             <span className="upload-text">加一版</span>
-          </UploadZone>
+          </UniversalIntake>
         </div>
 
         <div className="tool-group">

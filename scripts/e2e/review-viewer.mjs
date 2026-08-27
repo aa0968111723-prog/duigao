@@ -445,6 +445,10 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("drawer 打個招呼"), null, { timeout: 15000 });
   check("drawer 可送出房級討論", (await page.getByTestId("discussion-feed").innerText()).includes("drawer 打個招呼"));
   check("drawer 沒有把決定/投票/白板塞給對稿", await page.getByTestId("decision-area").count() === 0 && (await page.getByTestId("discussion-drawer").innerText()).includes("drawer 打個招呼"));
+  // PR-01b：drawer 也能附檔（同一條 Universal Intake 路徑）
+  await page.locator('[data-testid="discussion-drawer"] input[type=file]').first().setInputFiles({ name: "drawer.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 drawer") });
+  await page.waitForSelector('[data-testid="attachment-card"]', { timeout: 20000 });
+  check("drawer 附 PDF 出現附件卡", (await page.getByTestId("discussion-drawer").innerText()).includes("drawer.pdf"));
   await closeDiscussionToPeek(page);
   await ctx.close();
 

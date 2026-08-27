@@ -1,3 +1,4 @@
+import { INTAKE_PROFILES } from "../../components/UniversalIntake";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useProposalStore, type ProposalAuthor, type ProposalType, type TextRole } from "./store";
 import { ProposalQuickElement } from "./ProposalQuickElement";
@@ -232,7 +233,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
         ref={materialRef}
         className="proposal-file"
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        accept={INTAKE_PROFILES.proposal.accept}
         onChange={(e) => void uploadMaterial(e.target.files)}
       />
       <p className="proposal-local-note">提案只是覆蓋層，原稿永遠不會被改到。</p>

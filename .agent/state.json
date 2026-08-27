@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T18:21:45.000Z",
+  "generatedAt": "2026-08-27T18:40:29.000Z",
   "git": {
-    "branch": "feat/discussion-room-shell",
-    "sha": "1587985a5287e96e5bb33be98eb7dc58f253d2c8",
-    "mainSha": "77f6f9d59c20d9418a6cc705a4ab4a8ac15aee44",
+    "branch": "feat/universal-intake",
+    "sha": "0075b9c3877b7ee1341d7486268a99f3ac2f4019",
+    "mainSha": "0075b9c3877b7ee1341d7486268a99f3ac2f4019",
     "dirty": true
   },
   "project": {
@@ -943,7 +943,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0017",
+    "repoMigrationHead": "0018",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -961,10 +961,11 @@
       "supabase/migrations/0014_collaboration_workspace.sql",
       "supabase/migrations/0015_asset_intelligence.sql",
       "supabase/migrations/0016_asset_library.sql",
-      "supabase/migrations/0017_author_acl.sql"
+      "supabase/migrations/0017_author_acl.sql",
+      "supabase/migrations/0018_discussion_attachments.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0017",
+    "productionMigrationExpectation": "0018",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1113,7 +1114,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0017_author_acl.sql."
+        "message": "Migration order is contiguous through 0018_discussion_attachments.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",

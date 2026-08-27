@@ -33,3 +33,13 @@
 /* drawer 掛在對稿工作區時，右下角有 AI FAB 疊在上面；composer 讓出那塊，
    送出鈕不會被蓋住。 */
 .discussion-drawer .rd-composer { padding-right: 68px; }
+
+/* 附件與連結卡（PR-01b） */
+.rd-attachment { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-radius: 10px; background: var(--raise); font-size: 13px; }
+.rd-attachment-name { color: var(--ink); word-break: break-all; }
+.rd-attachment-size { color: var(--ink-faint); font-size: 11px; }
+.rd-attachment-audio { width: 100%; }
+.rd-attachment-broken { color: #d6a04c; font-size: 12px; }
+.rd-link { display: inline-block; text-decoration: none; word-break: break-all; }
+.rd-attach-button { min-width: 40px; min-height: 40px; border: 0; border-radius: 10px; background: var(--raise); color: var(--ink-dim); font-size: 17px; }
+.rd-attach-button:disabled { opacity: .5; }
