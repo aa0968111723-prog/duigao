@@ -1465,20 +1465,48 @@ try {
   // Metadata failure happens after both Storage objects have landed. The mock
   // fails the first cleanup request once; videoRoom.ts must retry and leave no
   // object whose version row never existed.
+  // Room-scoped injection: the failure chain is keyed to the room this upload
+  // creates, so cleanup DELETEs still in flight from the cancel/failure
+  // scenarios above cannot consume the fault (that race was CI-red flaky).
   const objectsBeforeMetadataFailure = new Set(storageObjects.keys());
-  faults.versionInsert = true;
-  faults.assetDelete = 1;
+  faults.versionInsertNextRoom = true;
+  faults.assetDeleteFaultCount = 0;
   await uploadVideo(Q, SHORT, "metadata-fails.webm");
-  await Q.waitForSelector(".onboard-card", { timeout: 60000 });
-  await Q.waitForTimeout(500);
-  const leakedAfterMetadataFailure = [...storageObjects.keys()].filter((key) => !objectsBeforeMetadataFailure.has(key));
+  // Anchor on the FAILURE copy: ".onboard-card" alone also matches the
+  // in-progress card, and starting a fixed settle wait from there was the
+  // dominant race on slow runners (Grok round ci-red-fix, F1).
+  await Q.waitForFunction(
+    () => document.querySelector(".onboard-card")?.textContent?.includes("失敗") ?? false,
+    null,
+    { timeout: 60000 },
+  );
+  // Deterministic wait: poll for the observable end state (fault consumed,
+  // retry landed, no orphans) instead of guessing a settle delay.
+  const cleanupSettled = async () => {
+    const deadline = Date.now() + 15000;
+    for (;;) {
+      const leaked = [...storageObjects.keys()].filter((key) => !objectsBeforeMetadataFailure.has(key));
+      // assetDeleteTargetPath clears when the injected 500 fires (not when the
+      // retry lands) — leaked.length === 0 is what proves the retry succeeded.
+      if (faults.assetDeleteFaultCount === 1 && faults.assetDeleteTargetPath === null && leaked.length === 0) return leaked;
+      if (Date.now() > deadline) return leaked;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+  const leakedAfterMetadataFailure = await cleanupSettled();
   check(
     "23. metadata 寫入失敗後 video/poster object 皆清乾淨",
-    leakedAfterMetadataFailure.length === 0 && faults.assetDelete === 0,
-    leakedAfterMetadataFailure.join(" / ") || "no orphan objects; cleanup retry succeeded",
+    leakedAfterMetadataFailure.length === 0 &&
+      faults.versionInsertRoomId === null &&
+      faults.assetDeleteFaultCount === 1 &&
+      faults.assetDeleteTargetPath === null,
+    leakedAfterMetadataFailure.join(" / ") ||
+      `no orphan objects; injected insert consumed=${faults.versionInsertRoomId === null}, delete faulted ${faults.assetDeleteFaultCount}x, retry cleared=${faults.assetDeleteTargetPath === null}`,
   );
-  faults.versionInsert = false;
-  faults.assetDelete = 0;
+  faults.versionInsertNextRoom = false;
+  faults.versionInsertRoomId = null;
+  faults.assetDeleteTargetPath = null;
+  faults.assetDeleteFaultCount = 0;
   await ctxQ.close();
 
   console.log(`\n${results.filter((r) => r.pass).length}/${results.length} checks passed`);

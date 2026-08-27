@@ -1,0 +1,28 @@
+{
+  "text": "GROK_DUAL_COLLAB_READY",
+  "stopReason": "end_turn",
+  "sessionId": "01a043c9-59cd-70c0-9241-b31b7bfe38c5",
+  "requestId": "cf629b40-4354-4f57-a493-0cc3fb5a2880",
+  "thought": "The user wants me to reply exactly with \"GROK_DUAL_COLLAB_READY\". This is a simple request - they want an exact reply, nothing else.\n",
+  "usage": {
+    "input_tokens": 14594,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "output_tokens": 298,
+    "reasoning_tokens": 284,
+    "total_tokens": 14892
+  },
+  "num_turns": 1,
+  "total_cost_usd": 0.00526592,
+  "total_cost_usd_ticks": 52659200,
+  "modelUsage": {
+    "grok-4.6-build": {
+      "inputTokens": 14594,
+      "outputTokens": 298,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "modelCalls": 1,
+      "costUSD": 0.00526592
+    }
+  }
+}
