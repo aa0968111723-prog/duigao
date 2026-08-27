@@ -67,7 +67,7 @@ export type VideoMeta = {
 };
 
 export type VideoRejection = { ok: false; reason: string };
-export type VideoAcceptance = { ok: true; file: File; mime: string };
+export type VideoAcceptance = { ok: true; file: File; mime: string; warning?: string };
 
 export function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
@@ -97,6 +97,7 @@ export function extForVideoMime(mime: string): string {
  * Gate a picked file. Type first (a wrong file is the common mistake), then
  * size — every message says what to do next, not just what went wrong.
  */
+// VideoAcceptance 的 warning：可上傳但值得先講的事（如 .mov/HEVC 相容性）。
 export function acceptVideoFile(file: File): VideoAcceptance | VideoRejection {
   const mime = (file.type || "").toLowerCase();
   if (!mime.startsWith("video/")) {
@@ -104,6 +105,17 @@ export function acceptVideoFile(file: File): VideoAcceptance | VideoRejection {
   }
   if (!ACCEPTED_VIDEO_MIME.includes(mime as (typeof ACCEPTED_VIDEO_MIME)[number])) {
     return { ok: false, reason: "這種影片格式可能播不出來，建議先轉成 MP4（H.264）。" };
+  }
+  // .mov 收，但在「選檔當下」把話說清楚（PR-01c）：iPhone 預設 HEVC，
+  // 房主自己播得動不代表 Windows/Android 的對稿對象播得動。瀏覽器拿不到
+  // codec 事實，所以是警告不是拒絕 — 上傳照走。
+  if (mime === "video/quicktime") {
+    return {
+      ok: true,
+      file,
+      mime,
+      warning: "iPhone 的 .mov 若是 HEVC 編碼，部分對稿對象的瀏覽器會播不出來；保險做法是轉成 MP4（H.264）再上傳。",
+    };
   }
   if (file.size > MAX_VIDEO_BYTES) {
     return {

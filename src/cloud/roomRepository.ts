@@ -205,11 +205,56 @@ async function uploadVersion(supabase: SupabaseClient, roomId: string, versionId
  * and version references are rewritten. Returns the new room id + raw invite
  * token; callers should then loadRoom() to adopt the canonical cloud state.
  */
+/**
+ * 補完一間「列已存在、設定未確認」的 fresh room（PR-01c）。
+ *
+ * 只涵蓋沒有版本/意見可搬的房 — 也就是影片首次上傳那種在同一手勢裡
+ * 現建的房。每一步都冪等：PATCH 重跑同值、branch upsert 撞既有 id 就
+ * 略過。有版本要搬的房（文宣分享遷移）不走這條 — 那條路維持
+ * 「全部成功才記映射」的舊語意。
+ */
+export async function completeRoomSetup(
+  supabase: SupabaseClient,
+  local: Room,
+  roomId: string,
+): Promise<void> {
+  const sourceRoom = normalizeRoomBranches(local);
+  const mediaType = roomMediaType(local);
+  if (mediaType === "video") {
+    const { error } = await supabase.from("rooms").update({ media_type: "video" }).eq("id", roomId);
+    if (error) throw new CloudError(error.message, "setup");
+  }
+  const { error: modeError } = await supabase
+    .from("rooms")
+    .update({ room_mode: sourceRoom.projectMode ? "project" : "single" })
+    .eq("id", roomId);
+  const hasBranchSchema = !modeError;
+  const sourceBranches = sourceRoom.branches ?? [];
+  if (hasBranchSchema && sourceBranches.length) {
+    const rows = sourceBranches
+      .filter((branch) => isUuid(branch.id))
+      .map((branch) => ({
+        id: branch.id,
+        room_id: roomId,
+        name: branch.name,
+        branch_type: branch.branchType,
+        sort_order: branch.sortOrder,
+        status: branch.status,
+        created_by: isUuid(branch.createdBy) ? branch.createdBy : null,
+      }));
+    if (rows.length) {
+      const { error } = await supabase.from("room_branches").upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+      if (error) throw new CloudError(error.message, "setup");
+    }
+  }
+}
+
 export async function createRoom(
   supabase: SupabaseClient,
   local: { room: Room; proposals: CloudProposal[] },
   guest: Guest,
   token: string,
+  onRoomRowCreated?: (roomId: string) => void,
 ): Promise<{ roomId: string; token: string }> {
   await ensureSession(supabase);
   const roomId = uuid();
@@ -223,6 +268,10 @@ export async function createRoom(
     p_color: guest.color,
   });
   if (rpcErr) throw new CloudError(rpcErr.message, "create");
+  // 房間列已存在。呼叫端可以在這裡先記下映射（帶 pendingSetup），這樣
+  // 後續任何一步死在半路，重試都會沿用這間房而不是再開一間空房
+  // （NOTE_SLOW_DEVICE_FIRSTUPLOAD）。
+  onRoomRowCreated?.(roomId);
 
   // The RPC predates media types and only ever creates image rooms, so a video
   // room states what it is right after. Failing here would leave a room that
@@ -230,7 +279,7 @@ export async function createRoom(
   const mediaType = roomMediaType(local.room);
   if (mediaType === "video") {
     const { error } = await supabase.from("rooms").update({ media_type: "video" }).eq("id", roomId);
-    if (error) throw new CloudError(error.message, "create");
+    if (error) throw new CloudError(error.message, "setup");
   }
 
   // 0013 is additive. Keep the migration path usable while an older project is
@@ -263,7 +312,7 @@ export async function createRoom(
       };
     });
     const { error } = await supabase.from("room_branches").insert(branchRows);
-    if (error) throw new CloudError(error.message, "branches");
+    if (error) throw new CloudError(error.message, "setup");
   }
 
   const versionIdMap = new Map<string, string>();
@@ -836,8 +885,12 @@ export async function addVersion(
   sortOrder: number,
   imageDataUrl: string,
   branchId?: string,
+  stableId?: string,
 ): Promise<Version> {
-  const id = uuid();
+  // id 由呼叫端在排隊當下鑄一次（PR-01c）：離線佇列 replay 同一個 id，
+  // 「上次其實已寫入、只是回應沒到」會撞 duplicate-key 而被視為成功，
+  // 不再重複上傳＋重複列。
+  const id = stableId ?? uuid();
   const { blob, mime } = await dataUrlToBlob(imageDataUrl);
   const path = versionPath(roomId, id, mime);
   await uploadAsset(supabase, path, blob, mime);

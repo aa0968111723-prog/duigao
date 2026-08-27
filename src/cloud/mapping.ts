@@ -3,7 +3,16 @@
  * room, so re-opening it reconnects instead of creating a duplicate. Also keeps
  * the raw invite token for the owner so re-sharing yields the same link.
  */
-export type CloudMapping = { roomId: string; token: string };
+export type CloudMapping = {
+  roomId: string;
+  token: string;
+  /**
+   * 房間列已建立（RPC 成功）但後續設定（media_type/room_mode/branches）
+   * 還沒確認完成 — 慢裝置上 create 流程可能死在半路（PR-01c，
+   * NOTE_SLOW_DEVICE_FIRSTUPLOAD）。重綁時要先補完設定再用。
+   */
+  pendingSetup?: boolean;
+};
 
 const PREFIX = "duigao.cloudmap.";
 

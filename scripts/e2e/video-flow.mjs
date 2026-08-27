@@ -1533,6 +1533,46 @@ try {
   faults.versionInsertRoomId = null;
   faults.assetDeleteTargetPath = null;
   faults.assetDeleteFaultCount = 0;
+
+  // ---- 24. 首次上傳半路死亡：重試沿用同一間房（PR-01c） -------------------
+  // 慢裝置的典型死法：create_room RPC 成功、room_branches POST 死掉。
+  // 修復前：映射沒存 → 重試另開新房、文案說是網路問題。修復後：RPC 成功
+  // 即存 pendingSetup 映射 → 誠實文案 → 重試補完設定並沿用同房。
+  {
+    await Q.click(".onboard-card .btn:has-text('回首頁')").catch(() => undefined);
+    await Q.waitForSelector(".home-picks", { timeout: 30000 });
+    const roomsBefore = cloudRooms.size;
+    faults.branchInsertNextRoom = true;
+    await uploadVideo(Q, SHORT, "setup-dies.webm");
+    await Q.waitForFunction(
+      () => document.querySelector(".onboard-card")?.textContent?.includes("初始化沒完成") ?? false,
+      null,
+      { timeout: 60000 },
+    ).catch(() => undefined);
+    const failCopy = await Q.innerText(".onboard-card").catch(() => "");
+    check(
+      "24. 半路死亡的文案說真話（不是「檢查網路」，且說會沿用同房）",
+      failCopy.includes("初始化沒完成") && failCopy.includes("沿用") && !failCopy.includes("檢查網路"),
+      failCopy.replace(/[\r\n]+/g, " ").slice(0, 80),
+    );
+    check("24. 死亡當下只多了一間房（RPC 已成功）", cloudRooms.size === roomsBefore + 1, `rooms ${roomsBefore}→${cloudRooms.size}`);
+    // 重試：從失敗卡重新選同一支檔
+    const retryZone = Q.locator(".onboard-card input[type=file]").first();
+    await retryZone.setInputFiles({ name: "setup-dies.webm", mimeType: "video/webm", buffer: SHORT });
+    await playerReady(Q);
+    check("24. 重試成功進到播放器", true);
+    check(
+      "24. 重試沿用同一間房，沒有另開空房",
+      cloudRooms.size === roomsBefore + 1,
+      `rooms ${roomsBefore}→${cloudRooms.size}`,
+    );
+    const newRoomIds = [...cloudRooms.keys()].slice(-1);
+    const landed = rows.versions.filter((row) => row.room_id === newRoomIds[0]).length;
+    check("24. 影片版本落在同一間房", landed >= 1, `versions in room = ${landed}`);
+    faults.branchInsertNextRoom = false;
+    faults.branchInsertRoomId = null;
+  }
+
   await ctxQ.close();
 
   console.log(`\n${results.filter((r) => r.pass).length}/${results.length} checks passed`);

@@ -124,6 +124,9 @@ export const faults = {
   videoUpload: false,
   /** Next createSignedUrl fails, for the "row landed, signing did not" case. */
   sign: false,
+  /** 下一個 create_room 的房：branch POST 失敗一次（PR-01c 半路死亡）。 */
+  branchInsertNextRoom: false,
+  branchInsertRoomId: null,
   /** Override createSignedUrl TTL in seconds for expiry tests. */
   signTtl: null,
   /** Fail this many room-assets deletes before allowing cleanup to succeed. */
@@ -423,6 +426,10 @@ export const server = http.createServer(async (req, res) => {
         faults.versionInsertNextRoom = false;
         faults.versionInsertRoomId = body.p_room_id;
       }
+      if (faults.branchInsertNextRoom) {
+        faults.branchInsertNextRoom = false;
+        faults.branchInsertRoomId = body.p_room_id;
+      }
       return json(res, 200, body.p_room_id);
     }
     if (fn === "join_room_by_invite") {
@@ -494,6 +501,13 @@ export const server = http.createServer(async (req, res) => {
       if (table === "room_discussion_messages" && faults.discussionInsert) {
         faults.discussionInsert = false;
         return json(res, 500, { message: "injected discussion insert failure" });
+      }
+      if (table === "room_branches" && faults.branchInsertRoomId) {
+        const hit = rows.find((row) => row.room_id === faults.branchInsertRoomId);
+        if (hit) {
+          faults.branchInsertRoomId = null;
+          return json(res, 500, { message: "injected branch insert failure" });
+        }
       }
       if (table === "versions" && faults.versionInsert) {
         faults.versionInsert = false;

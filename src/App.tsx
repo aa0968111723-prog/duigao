@@ -33,6 +33,7 @@ import { roomCode, uid } from "./lib/id";
 import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
+import { CloudError } from "./cloud/errors";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -128,6 +129,11 @@ class CancelledUpload extends Error {}
  */
 function userFacingMessage(err: unknown): string {
   const fallback = "影片上傳失敗，請檢查網路後再試一次。";
+  // 房間列已建立、後續設定沒完成（慢裝置首上傳的典型死法）：這不是
+  // 網路問題，而且重試會沿用同一間房 — 文案要說真話（PR-01c）。
+  if (err instanceof CloudError && err.code === "setup") {
+    return "房間已建立，但初始化沒完成。再試一次會沿用同一個房間，不會多開新房。";
+  }
   const raw = err instanceof Error ? err.message : "";
   if (!raw || raw === "cloud-room-failed") return fallback;
   if (!/[一-鿿]/.test(raw)) {
@@ -876,6 +882,8 @@ export function App() {
         showToast(check.reason, { tone: "error" });
         return;
       }
+      // 選檔當下的相容性警告（.mov/HEVC）：上傳照走，話先說清楚。
+      if (check.warning) showToast(check.warning, { tone: "info" });
       if (!isCloudConfigured) {
         showToast("影片對稿需要雲端設定，這台裝置目前是本機模式。", { tone: "error" });
         return;
