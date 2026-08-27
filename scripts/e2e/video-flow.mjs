@@ -1499,6 +1499,10 @@ try {
     );
     if (faults.versionInsertRoomId === null && !faults.versionInsertNextRoom) break; // 注入已觸發
     if (attempt === 3) break; // 讓下面的斷言用真實狀態失敗，帶診斷訊息
+    // 重試可能拿到新的 cloud room（ensureCloudRoom 階段死掉時房間沒綁成）：
+    // 先重新武裝，讓「下一個 create_room」重新成為注入目標。
+    faults.versionInsertRoomId = null;
+    faults.versionInsertNextRoom = true;
     const retryZone = Q.locator(".onboard-card input[type=file]").first();
     await retryZone.setInputFiles({ name: "metadata-fails.webm", mimeType: "video/webm", buffer: SHORT });
   }
