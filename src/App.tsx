@@ -33,6 +33,17 @@ import { roomCode, uid } from "./lib/id";
 import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
+import { getSupabase } from "./cloud/client";
+import {
+  askRoomContext,
+  enqueueAssetAnalysis,
+  listIntelligentAssets,
+  retryAssetAnalysis,
+  setAssetAiPolicy,
+  setHumanAssetMetadata,
+  subscribeAssetAnalysis,
+  type AssetIntelligenceSnapshot,
+} from "./cloud/assetIntelligence";
 import { addRoomTarget, readRoomLink } from "./cloud/invite";
 import { type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
@@ -58,6 +69,8 @@ import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
 import { MultiBranchRoom, type MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
+import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
+import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { collectBoardEditors, stampWriter } from "./features/collaboration/presence";
@@ -176,6 +189,13 @@ export function App() {
   const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
   const [undoCount, setUndoCount] = useState(0);
   const [videoUpload, setVideoUpload] = useState<VideoUploadState>({ state: "idle" });
+  const [assetIntelligence, setAssetIntelligence] = useState<AssetIntelligenceSnapshot | null>(null);
+  const [aiSheetOpen, setAiSheetOpen] = useState(false);
+  const [aiSelectedAssetIds, setAiSelectedAssetIds] = useState<string[]>([]);
+  const [aiResponse, setAiResponse] = useState<RoomContextResponse | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiFocus, setAiFocus] = useState<RoomContextFocus | null>(null);
   /** Cancels an upload in flight. Held in a ref so leaving the room can call it. */
   const videoCancelRef = useRef<(() => void) | null>(null);
 
@@ -314,6 +334,171 @@ export function App() {
   const cloud = useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSnapshot: applyRemoteRoom, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
+
+  // Intelligence is a separate, bounded slice. It never gates the existing
+  // room/review load, and a branch workspace only asks for that branch's
+  // metadata. Binary media continues to come from the existing review paths.
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!room || !cloud.boundRoomId || !supabase) {
+      setAssetIntelligence(null);
+      return;
+    }
+    let cancelled = false;
+    const branchId = activeBranchId ?? undefined;
+    void listIntelligentAssets(supabase, room.id, {
+      branchId,
+      branches: room.branches,
+      versions: room.versions,
+      limit: branchId ? 80 : 160,
+    })
+      .then((snapshot) => {
+        if (cancelled) return;
+        setAssetIntelligence(snapshot);
+        // The database trigger is the durable queue; this small kick starts
+        // only a few bounded jobs when a room/branch is opened. It never
+        // downloads media into the room page and repeated kicks are idempotent
+        // because the edge function reuses the queued job.
+        void Promise.allSettled(
+          snapshot.jobs
+            .filter((job) => job.status === "queued")
+            .slice(0, 3)
+            .map((job) => enqueueAssetAnalysis(supabase, job.assetId, job.tier)),
+        );
+      })
+      .catch((error) => {
+        // A mixed-version deployment may not have migration 0014 yet. The
+        // review room remains fully usable; only the optional AI surface stays
+        // empty until the migration/functions are deployed.
+        if (!cancelled) {
+          setAssetIntelligence({ assets: [], jobs: [], relations: [] });
+          console.warn("[asset-intelligence] unavailable:", error instanceof Error ? error.message : error);
+        }
+      });
+    const unsubscribe = subscribeAssetAnalysis(supabase, room.id, ({ assetId, status, progress }) => {
+      setAssetIntelligence((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          assets: current.assets.map((asset) => asset.id === assetId ? { ...asset, status } : asset),
+          jobs: current.jobs.map((job) => {
+            if (job.assetId !== assetId) return job;
+            const jobStatus = status === "processing" ? "processing" : status === "failed" ? "failed" : status === "ready" || status === "partial" ? "completed" : job.status;
+            return { ...job, status: jobStatus, progress: progress ?? (jobStatus === "completed" ? 100 : job.progress) };
+          }),
+        };
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [activeBranchId, cloud.boundRoomId, room?.branches, room?.id, room?.versions]);
+
+  const openAi = useCallback((assetId?: string) => {
+    setAiSelectedAssetIds(assetId ? [assetId] : []);
+    setAiResponse(null);
+    setAiError(null);
+    setAiSheetOpen(true);
+  }, []);
+
+  const focusAi = useCallback((focus: RoomContextFocus) => {
+    const current = roomRef.current;
+    if (!current) return;
+    setAiFocus(focus);
+    setAiSheetOpen(false);
+    const branch = focus.branchId ? branchForId(current, focus.branchId) : undefined;
+    if (branch) setActiveBranchId(branch.id);
+    const applyVersion = () => {
+      if (!focus.versionId) return;
+      setView((previous) => ({ ...previous, versionId: focus.versionId!, compareMode: "single" }));
+    };
+    if (branch && (branch.branchType === "poster" || branch.branchType === "video") && cloudRef.current.boundRoomId) {
+      setLoadingBranchId(branch.id);
+      void cloudRef.current.loadBranch(branch.id).finally(() => {
+        setLoadingBranchId((value) => (value === branch.id ? null : value));
+        applyVersion();
+      });
+    } else {
+      applyVersion();
+    }
+  }, []);
+
+  const askAi = useCallback(async (request: RoomContextRequest): Promise<RoomContextResponse> => {
+    const current = roomRef.current;
+    const supabase = getSupabase();
+    if (!current || !supabase || !cloudRef.current.boundRoomId) {
+      const error = new Error("房間 AI 尚未連線，請先完成雲端房間設定。");
+      setAiError(error.message);
+      throw error;
+    }
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const response = await askRoomContext(
+        supabase,
+        current.id,
+        request,
+        // Policy and updatedAt are part of the cache identity too. A cached
+        // answer must not survive an owner turning an asset's AI readability
+        // off, even when the analysis model/version itself did not change.
+        (assetIntelligence?.assets ?? []).map((asset) => `${asset.id}:${asset.analysisVersion}:${asset.updatedAt}:${asset.aiReadable}:${asset.externalAiAllowed}`),
+      );
+      setAiResponse(response);
+      return response;
+    } catch (error) {
+      const message = error instanceof Error && /外部|permission|blocked/i.test(error.message)
+        ? "這次提問包含禁止送到外部 AI 的素材。"
+        : "房間 AI 暫時沒有回應，請稍後再試。";
+      setAiError(message);
+      throw error;
+    } finally {
+      setAiLoading(false);
+    }
+  }, [assetIntelligence?.assets]);
+
+  const retryAi = useCallback((assetId: string) => {
+    const supabase = getSupabase();
+    if (!supabase || !cloudRef.current.canManageMedia) return;
+    void retryAssetAnalysis(supabase, assetId).then(() => showToast("已重新排入素材理解", { tone: "success" })).catch(() => showToast("目前無法重新分析，請稍後再試", { tone: "error" }));
+  }, [showToast]);
+
+  const updateAiPolicy = useCallback(async (assetId: string, patch: { aiReadable: boolean; externalAiAllowed: boolean }) => {
+    const supabase = getSupabase();
+    if (!supabase || !cloudRef.current.canManageMedia) throw new Error("沒有修改素材 AI 權限的權限");
+    await setAssetAiPolicy(supabase, { assetId, ...patch });
+    const updatedAt = new Date().toISOString();
+    setAssetIntelligence((current) => current ? {
+      ...current,
+      assets: current.assets.map((asset) => asset.id === assetId
+        ? { ...asset, updatedAt, aiReadable: patch.aiReadable, externalAiAllowed: patch.aiReadable ? patch.externalAiAllowed : false }
+        : asset),
+    } : current);
+    showToast(patch.aiReadable ? "已開啟素材 AI 理解" : "已關閉素材 AI 理解", { tone: "success" });
+  }, [showToast]);
+
+  const updateHumanMetadata = useCallback(async (assetId: string, input: { title?: string; summary?: string; tags?: string[] }) => {
+    const supabase = getSupabase();
+    const current = assetIntelligence?.assets.find((asset) => asset.id === assetId);
+    if (!supabase || !cloudRef.current.canManageMedia || !current) throw new Error("沒有修改素材標記的權限");
+    await setHumanAssetMetadata(supabase, { assetId, roomId: current.roomId, ...input });
+    const updatedAt = new Date().toISOString();
+    setAssetIntelligence((snapshot) => snapshot ? {
+      ...snapshot,
+      assets: snapshot.assets.map((asset) => asset.id === assetId ? {
+        ...asset,
+        human: {
+          assetId,
+          title: input.title?.trim() || undefined,
+          summary: input.summary?.trim() || undefined,
+          tags: (input.tags ?? []).map((tag) => tag.trim()).filter(Boolean).slice(0, 30),
+          structuredData: asset.human?.structuredData ?? {},
+          updatedAt,
+        },
+      } : asset),
+    } : snapshot);
+    showToast("已保存人工素材標記", { tone: "success" });
+  }, [assetIntelligence?.assets, showToast]);
 
   // A branch/version deep-link can select the branch while the first cloud
   // snapshot is still being reduced to a summary. Hydrate that target just as
@@ -477,7 +662,16 @@ export function App() {
     setRoom(next);
     setView(initialView(next));
     trackSave(next);
-  }, [clearUndo, trackSave]);
+    // A project room is a cloud collaboration surface from the moment it is
+    // created.  This also lets the Asset Intelligence slice start its bounded
+    // metadata load before the first branch is added; binary media still stays
+    // lazy in the existing review workspaces.
+    if (isCloudConfigured) {
+      void cloudRef.current.ensureCloudRoom(next).catch(() => {
+        showToast("活動房雲端建立失敗，請確認連線後再試一次。", { tone: "error" });
+      });
+    }
+  }, [clearUndo, showToast, trackSave]);
 
   const addImageFiles = useCallback(
     async (files: FileList | null, forcedBranchId?: string, roomOverride?: Room) => {
@@ -722,6 +916,15 @@ export function App() {
     async (type: BranchType, name: string, files: FileList | null) => {
       const current = roomRef.current;
       if (!current || !guest) return;
+      if (isCloudConfigured && !cloudRef.current.boundRoomId) {
+        try {
+          const cloudRoom = await cloudRef.current.ensureCloudRoom(current);
+          if (!cloudRoom) throw new Error("cloud-room-failed");
+        } catch {
+          showToast("活動房尚未連線，內容暫時沒有送出。請稍後再試。", { tone: "error" });
+          return;
+        }
+      }
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者可以查看、留言與投票，但不能新增內容。", { tone: "error" });
         return;
@@ -1837,6 +2040,11 @@ export function App() {
         markCoachSeen,
         showToast,
         openShare,
+        ai: {
+          assets: assetIntelligence?.assets ?? [],
+          open: openAi,
+          focusTarget: aiFocus,
+        },
         openAtSeconds,
         ...(video ? { video } : {}),
         goHome: () => {
@@ -1981,6 +2189,7 @@ export function App() {
         online: cloud.online || peerCount,
         editors: boardEditors,
         onShare: openShare,
+        onOpenAi: openAi,
         onGoHome: () => {
           clearUndo();
           setActiveBranchId(null);
@@ -2003,6 +2212,23 @@ export function App() {
     return (
       <>
         <MultiBranchRoom api={projectApi!} />
+        {isCloudConfigured && <AssetAiFab project onClick={() => openAi()} />}
+        {aiSheetOpen && room && <RoomAiSheet
+          roomTitle={room.title}
+          assets={assetIntelligence?.assets ?? []}
+          jobs={assetIntelligence?.jobs ?? []}
+          selectedAssetIds={aiSelectedAssetIds}
+          response={aiResponse}
+          loading={aiLoading}
+          error={aiError}
+          onAsk={askAi}
+          onClose={() => setAiSheetOpen(false)}
+          onFocus={(citation) => citation.assetId && focusAi({ assetId: citation.assetId, branchId: citation.branchId, versionId: citation.versionId, locator: citation.locator })}
+          onRetryAnalysis={retryAi}
+          onUpdatePolicy={updateAiPolicy}
+          onUpdateHumanMetadata={updateHumanMetadata}
+          canManage={cloud.canManageMedia}
+        />}
         <ToastStack toasts={toasts} onDismiss={dismiss} />
       </>
     );
@@ -2150,6 +2376,24 @@ export function App() {
         }}
         cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
       />
+
+      {isCloudConfigured && <AssetAiFab onClick={() => openAi()} />}
+      {aiSheetOpen && room && <RoomAiSheet
+        roomTitle={room.title}
+        assets={assetIntelligence?.assets ?? []}
+        jobs={assetIntelligence?.jobs ?? []}
+        selectedAssetIds={aiSelectedAssetIds}
+        response={aiResponse}
+        loading={aiLoading}
+        error={aiError}
+        onAsk={askAi}
+        onClose={() => setAiSheetOpen(false)}
+        onFocus={(citation) => citation.assetId && focusAi({ assetId: citation.assetId, branchId: citation.branchId, versionId: citation.versionId, locator: citation.locator })}
+        onRetryAnalysis={retryAi}
+        onUpdatePolicy={updateAiPolicy}
+        onUpdateHumanMetadata={updateHumanMetadata}
+        canManage={cloud.canManageMedia}
+      />}
 
       {shareOpen && room && (
         <ShareSheet

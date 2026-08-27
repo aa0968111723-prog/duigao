@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T12:39:16.000Z",
+  "generatedAt": "2026-08-27T13:40:05.000Z",
   "git": {
-    "branch": "cursor/collaboration-workspace-1-431a",
-    "sha": "3af3937dd272a752c6e1fbfbd4a53d3eeb60c6ea",
-    "mainSha": "cec65183b598d9a588a346a636a4201f20ef6370",
-    "dirty": true
+    "branch": "codex/multi-branch-room-1",
+    "sha": "60d313a20ab275bb72b21e131153de58b38dba92",
+    "mainSha": "f1124a71731ab6ac07f373f559b1a1e5a45fce27",
+    "dirty": false
   },
   "project": {
     "name": "duigao",
@@ -33,7 +33,32 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": []
+      "items": [
+        {
+          "baseRefName": "main",
+          "headRefName": "codex/multi-branch-room-1",
+          "isDraft": false,
+          "number": 41,
+          "title": "Asset Intelligence Layer 1.0：多模態素材理解、Room Context 與 AI Adapter",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/41"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "cursor/collaboration-review-fixes-431a",
+          "isDraft": false,
+          "number": 40,
+          "title": "fix: Codex review findings from Collaboration Workspace #39",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/40"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "agent/collaborative-intelligence-workspace",
+          "isDraft": true,
+          "number": 38,
+          "title": "Collaborative Intelligence Workspace 1.0 / 智慧協作工作台 1.0",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/38"
+        }
+      ]
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -41,6 +66,54 @@
     }
   },
   "features": {
+    "asset-intelligence": {
+      "status": "implemented",
+      "confidence": 0.94,
+      "evidence": {
+        "source": [
+          "src/cloud/assetIntelligence.ts",
+          "src/lib/assetIntelligence.ts",
+          "supabase/functions/room-ai-context/index.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0015_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/cloud/assetIntelligence.ts",
+        "src/lib/assetIntelligence.ts",
+        "supabase/functions/room-ai-context/index.ts",
+        "supabase/migrations/0015_asset_intelligence.sql"
+      ],
+      "missing": []
+    },
+    "asset-relations": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/cloud/assetIntelligence.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0015_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/cloud/assetIntelligence.ts",
+        "supabase/migrations/0015_asset_intelligence.sql"
+      ],
+      "missing": []
+    },
     "collaboration-workspace": {
       "status": "implemented",
       "confidence": 0.92,
@@ -116,6 +189,27 @@
       ],
       "missing": []
     },
+    "document-understanding": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "../tku-zen-agent/app/services/asset_providers.py",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "../tku-zen-agent/app/services/asset_providers.py",
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/asset-analysis/index.ts"
+      ],
+      "missing": []
+    },
     "flowchart": {
       "status": "implemented",
       "confidence": 0.9,
@@ -158,6 +252,27 @@
         "scripts/e2e/share-flow.mjs",
         "src/features/image-review/ImageWorkspace.tsx",
         "src/features/image-review/Stage.tsx"
+      ],
+      "missing": []
+    },
+    "image-understanding": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/features/image-review/Stage.tsx",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/features/image-review/Stage.tsx",
+        "supabase/functions/asset-analysis/index.ts"
       ],
       "missing": []
     },
@@ -353,6 +468,28 @@
       ],
       "missing": []
     },
+    "room-context-api": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "supabase/functions/room-ai-context/index.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0015_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/room-ai-context/index.ts",
+        "supabase/migrations/0015_asset_intelligence.sql"
+      ],
+      "missing": []
+    },
     "room-discussion": {
       "status": "implemented",
       "confidence": 0.92,
@@ -401,6 +538,31 @@
         "src/cloud/sharePreview.ts",
         "supabase/functions/share-preview/index.ts",
         "supabase/migrations/0005_share_previews.sql"
+      ],
+      "missing": []
+    },
+    "tku-zen-agent-integration": {
+      "status": "implemented",
+      "confidence": 0.94,
+      "evidence": {
+        "source": [
+          "../ai_os/server/services/duigaoRoomContext.ts",
+          "../tku-zen-agent/app/services/duigao_integration.py"
+        ],
+        "migrations": [],
+        "tests": [
+          "../ai_os/server/services/duigaoRoomContext.test.ts",
+          "../tku-zen-agent/tests/test_duigao_integration.py",
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "../ai_os/server/services/duigaoRoomContext.test.ts",
+        "../ai_os/server/services/duigaoRoomContext.ts",
+        "../tku-zen-agent/app/services/duigao_integration.py",
+        "../tku-zen-agent/tests/test_duigao_integration.py",
+        "scripts/tests/asset-intelligence.test.ts"
       ],
       "missing": []
     },
@@ -645,6 +807,27 @@
         "tests: need 1, found 0"
       ]
     },
+    "video-understanding": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "../tku-zen-agent/app/services/asset_providers.py",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "../tku-zen-agent/app/services/asset_providers.py",
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/asset-analysis/index.ts"
+      ],
+      "missing": []
+    },
     "video-upload": {
       "status": "implemented",
       "confidence": 0.92,
@@ -746,7 +929,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0014",
+    "repoMigrationHead": "0015",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -761,15 +944,18 @@
       "supabase/migrations/0011_share_preview_customization.sql",
       "supabase/migrations/0012_video_review_feedback.sql",
       "supabase/migrations/0013_project_room_branches.sql",
-      "supabase/migrations/0014_collaboration_workspace.sql"
+      "supabase/migrations/0014_collaboration_workspace.sql",
+      "supabase/migrations/0015_asset_intelligence.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0014",
+    "productionMigrationExpectation": "0015",
     "requiresLiveCheck": true
   },
   "tests": {
     "requiredCommands": [
       "npm run test:agent",
+      "npm run test:asset-intelligence",
+      "npm run test:asset-intelligence-e2e",
       "npm run test:collaboration",
       "npm run test:collaboration-e2e",
       "npm run test:migrations",
@@ -876,7 +1062,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0014_collaboration_workspace.sql."
+        "message": "Migration order is contiguous through 0015_asset_intelligence.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",

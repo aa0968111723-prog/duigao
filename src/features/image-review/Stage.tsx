@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { Point, Version } from "../../lib/types";
+import type { RoomContextFocus } from "../../lib/assetIntelligence";
 import { regionFromPoints } from "../../lib/region";
 import { VisualProposalOverlay } from "../visual-proposal/VisualProposalOverlay";
 import { nextPinNumber, pinNumber, type WorkspaceApi } from "../../components/api";
@@ -43,6 +44,8 @@ type ViewerProps = {
   onMetricsChange?: (metrics: ViewerMetrics) => void;
   zoomRequest?: ZoomRequest | null;
   focusPinId?: string | null;
+  /** AI region focus uses the same normalized poster coordinate system as pins. */
+  focusTarget?: RoomContextFocus | null;
   showAnnotations?: boolean;
   onOpenImmersive?: () => void;
   onTap?: () => void;
@@ -57,6 +60,7 @@ export function Viewer({
   onMetricsChange,
   zoomRequest,
   focusPinId,
+  focusTarget,
   showAnnotations = true,
   onOpenImmersive,
   onTap,
@@ -84,6 +88,7 @@ export function Viewer({
           onMetricsChange={onMetricsChange}
           zoomRequest={zoomRequest}
           focusPinId={focusPinId}
+          focusTarget={focusTarget}
           showAnnotations={showAnnotations}
           onOpenImmersive={onOpenImmersive}
           onTap={onTap}
@@ -108,6 +113,7 @@ export function Viewer({
           onMetricsChange={onMetricsChange}
           zoomRequest={zoomRequest}
           focusPinId={focusPinId}
+          focusTarget={focusTarget}
           showAnnotations={showAnnotations}
           onOpenImmersive={onOpenImmersive}
           onTap={onTap}
@@ -129,6 +135,7 @@ export function Viewer({
         onMetricsChange={onMetricsChange}
         zoomRequest={zoomRequest}
         focusPinId={focusPinId}
+        focusTarget={focusTarget}
         showAnnotations={showAnnotations}
         onOpenImmersive={onOpenImmersive}
         onTap={onTap}
@@ -149,6 +156,7 @@ type StageProps = {
   onMetricsChange?: (metrics: ViewerMetrics) => void;
   zoomRequest?: ZoomRequest | null;
   focusPinId?: string | null;
+  focusTarget?: RoomContextFocus | null;
   showAnnotations?: boolean;
   onOpenImmersive?: () => void;
   onTap?: () => void;
@@ -184,6 +192,7 @@ export function Stage({
   onMetricsChange,
   zoomRequest,
   focusPinId,
+  focusTarget,
   showAnnotations = true,
   onOpenImmersive,
   onTap,
@@ -318,6 +327,19 @@ export function Stage({
       : { x: pin.x, y: pin.y };
     publishTransform(focusTransform(point, box, frame, liveTransform.current, 2), true);
   }, [allPins, box, focusPinId, frame, publishTransform, ready, version.id, zoomable]);
+
+  useEffect(() => {
+    if (!focusTarget?.locator || focusTarget.locator.kind !== "image-region") return;
+    if (!zoomable || !ready || (focusTarget.versionId && focusTarget.versionId !== version.id)) return;
+    const region = focusTarget.locator.region;
+    const focusKey = `${version.id}:ai:${focusTarget.assetId}:${region.x}:${region.y}:${region.width}:${region.height}`;
+    if (lastFocusKey.current === focusKey) return;
+    lastFocusKey.current = focusKey;
+    publishTransform(
+      focusTransform({ x: region.x + region.width / 2, y: region.y + region.height / 2 }, box, frame, liveTransform.current, 2),
+      true,
+    );
+  }, [box, focusTarget, frame, publishTransform, ready, version.id, zoomable]);
 
   useEffect(
     () => () => {

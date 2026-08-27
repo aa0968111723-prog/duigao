@@ -17,6 +17,7 @@ import type {
 } from "../lib/types";
 import type { BriefInput } from "../cloud/videoReview";
 import type { ReviewData } from "../cloud/useCloudRoom";
+import type { IntelligentAsset, RoomContextFocus } from "../lib/assetIntelligence";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -121,6 +122,12 @@ export type WorkspaceApi = {
   openAtSeconds?: number;
   /** Only on video rooms. Absent means "this is a poster room". */
   video?: VideoApi;
+  /** Optional mobile-first AI entry point; omitted when cloud AI is unavailable. */
+  ai?: {
+    assets: IntelligentAsset[];
+    open: (assetId?: string) => void;
+    focusTarget?: RoomContextFocus | null;
+  };
 };
 
 /** Number review items within their own poster version, not across all versions. */

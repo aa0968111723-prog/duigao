@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Version } from "../lib/types";
-import { uploadAsset, versionPath } from "./assets";
+import { sha256Blob, uploadAsset, versionPath } from "./assets";
 import { CloudError } from "./errors";
 import { addVideoVersion } from "./roomRepository";
 import { isUploadCancelled, signedVideoUrl, uploadVideoWithProgress, videoPath } from "./videoAssets";
@@ -102,6 +102,12 @@ export function uploadVideoVersion(
       // Last chance to honour a cancel: after this the row exists, and deleting
       // a landed version to satisfy a cancel would be worse than keeping it.
       if (cancelled) throw new CloudError("upload-cancelled", "storage");
+      // Hash only small browser files. Large video hashing would duplicate a
+      // 100 MB buffer on a phone; those imports can still provide a hash from
+      // the server/importer and the intelligence layer remains optional.
+      const contentHash = input.file.size <= 32 * 1024 * 1024
+        ? await sha256Blob(input.file).catch(() => undefined)
+        : undefined;
       await addVideoVersion(supabase, input.roomId, {
         id: input.versionId,
         branchId: input.branchId,
@@ -116,6 +122,7 @@ export function uploadVideoVersion(
         fileSize: input.file.size,
         width: meta.width || null,
         height: meta.height || null,
+        contentHash,
       });
 
       rowLanded = true;

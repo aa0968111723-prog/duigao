@@ -371,7 +371,10 @@ try {
 
   const roomJson = await A.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {
-      const r = indexedDB.open("duigao", 1);
+      // The store now has a versioned AI-context cache. Opening without an
+      // explicit lower version keeps this regression probe compatible with
+      // both the legacy room store and the current schema.
+      const r = indexedDB.open("duigao");
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
     });

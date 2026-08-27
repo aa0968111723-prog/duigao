@@ -76,6 +76,8 @@ export type VersionRow = {
   video_path?: string | null;
   duration_seconds?: number | null;
   file_size?: number | null;
+  /** Optional content hash added by the Asset Intelligence migration. */
+  content_hash?: string | null;
   /** PR #25. Absent when reading a database that has not run 0008 yet. */
   archived_at?: string | null;
   created_at: string;

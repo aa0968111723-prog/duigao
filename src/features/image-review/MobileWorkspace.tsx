@@ -33,6 +33,7 @@ type Props = {
 
 export function MobileWorkspace({ api, presence }: Props) {
   const { room, view, draftPin, selectedPinId, tool } = api;
+  const aiFocusTarget = api.ai?.focusTarget;
   const viewportHeight = useViewport();
   const [snap, setSnap] = useState<SheetSnap>("peek");
   const [tab, setTab] = useState<"items" | "chat">("items");
@@ -196,6 +197,14 @@ export function MobileWorkspace({ api, presence }: Props) {
     }, 220);
     return () => window.clearTimeout(id);
   }, [selectedPinId]);
+
+  // A citation tapped in the room AI sheet can first hydrate a branch/version.
+  // Once that version is on screen, open the same immersive viewer used by a
+  // normal poster tap; Stage then applies the normalized AI region focus.
+  useEffect(() => {
+    if (!aiFocusTarget?.versionId || aiFocusTarget.versionId !== view.versionId) return;
+    setImmersiveOpen(true);
+  }, [aiFocusTarget, view.versionId]);
 
   useEffect(() => {
     if (draftPin) setSnap("peek");

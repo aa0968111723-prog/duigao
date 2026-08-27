@@ -26,6 +26,7 @@ import { VideoCommentComposer } from "./VideoCommentComposer";
 import { VideoVersionSelector } from "./VideoVersionSelector";
 import { anchorEnd, anchorStart, makePoint, makeRange, MIN_RANGE_SECONDS } from "./anchors";
 import { formatTime } from "./media";
+import type { RoomContextFocus } from "../../lib/assetIntelligence";
 import "./video.css";
 
 /**
@@ -48,6 +49,7 @@ type RangePick = { start: number; end: number | null };
 
 export function VideoWorkspace({ api, presence }: Props) {
   const { room, view, guest } = api;
+  const aiFocusTarget: RoomContextFocus | null | undefined = api.ai?.focusTarget;
   const isMobile = useIsMobile();
   const viewportHeight = useViewport();
   const playerRef = useRef<PlayerHandle>(null);
@@ -60,6 +62,7 @@ export function VideoWorkspace({ api, presence }: Props) {
   const [rangePick, setRangePick] = useState<RangePick | null>(null);
   const [liveTime, setLiveTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const aiFocusKeyRef = useRef<string | null>(null);
   /**
    * Where the NEW cut should pick up after a version switch (spec §20).
    *
@@ -239,6 +242,19 @@ export function VideoWorkspace({ api, presence }: Props) {
     },
     [publishFrame],
   );
+
+  // A room-AI citation can point at a precise temporal segment. The normal
+  // player remains the source of truth; this only seeks it and opens the
+  // existing discussion sheet so the reviewer stays in the video workspace.
+  useEffect(() => {
+    const locator = aiFocusTarget?.locator;
+    if (!version || aiFocusTarget?.versionId !== version.id || locator?.kind !== "video-segment") return;
+    const focusKey = `${version.id}:ai:${aiFocusTarget.assetId}:${locator.startSeconds}:${locator.endSeconds}`;
+    if (aiFocusKeyRef.current === focusKey) return;
+    aiFocusKeyRef.current = focusKey;
+    seekTo(locator.startSeconds, false);
+    setSnap((current) => (current === "peek" ? "half" : current));
+  }, [aiFocusTarget, seekTo, version?.id]);
 
   /** Tapping a card or a marker: go to that moment and select it. */
   const focusComment = useCallback(
@@ -655,6 +671,19 @@ export function VideoWorkspace({ api, presence }: Props) {
             }}
           >
             {myVerdict ? "改變我的看法" : "看完了，給個看法"}
+          </button>
+        )}
+        {api.ai && (
+          <button
+            type="button"
+            className="m-row"
+            onClick={() => {
+              setMore(false);
+              const asset = api.ai?.assets.find((item) => item.versionId === version.id);
+              api.ai?.open(asset?.id);
+            }}
+          >
+            ✦ 問房間 AI
           </button>
         )}
         <button type="button" className="m-row" onClick={api.undo} disabled={!api.canUndo}>

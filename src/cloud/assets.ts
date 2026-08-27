@@ -22,6 +22,12 @@ export async function dataUrlToBlob(dataUrl: string): Promise<{ blob: Blob; mime
   return { blob, mime: blob.type || "image/png" };
 }
 
+/** Hash small upload metadata without ever sending the bytes to an AI model. */
+export async function sha256Blob(blob: Blob): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function versionPath(roomId: string, versionId: string, mime: string): string {
   return `rooms/${roomId}/versions/${versionId}/poster.${extForMime(mime)}`;
 }

@@ -18,6 +18,112 @@
   },
   "features": [
     {
+      "id": "asset-intelligence",
+      "name": "Asset Intelligence Layer",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/assetIntelligence.ts",
+          "src/lib/assetIntelligence.ts",
+          "supabase/functions/room-ai-context/index.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0015_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 3,
+          "found": 3,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.94,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/cloud/assetIntelligence.ts",
+        "src/lib/assetIntelligence.ts",
+        "supabase/functions/room-ai-context/index.ts",
+        "supabase/migrations/0015_asset_intelligence.sql"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
+      "id": "asset-relations",
+      "name": "Asset relations and version awareness",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/assetIntelligence.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0015_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/cloud/assetIntelligence.ts",
+        "supabase/migrations/0015_asset_intelligence.sql"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
       "id": "collaboration-workspace",
       "name": "Collaboration workspace",
       "status": "implemented",
@@ -182,6 +288,49 @@
       "notes": []
     },
     {
+      "id": "document-understanding",
+      "name": "Document extraction and chunks",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "../tku-zen-agent/app/services/asset_providers.py",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "../tku-zen-agent/app/services/asset_providers.py",
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/asset-analysis/index.ts"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
       "id": "flowchart",
       "name": "Flowchart nodes",
       "status": "implemented",
@@ -271,6 +420,49 @@
       "notes": [
         "Status is based on executable evidence, not documentation or PR metadata."
       ]
+    },
+    {
+      "id": "image-understanding",
+      "name": "Image and poster understanding",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/image-review/Stage.tsx",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/features/image-review/Stage.tsx",
+        "supabase/functions/asset-analysis/index.ts"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "line-preview",
@@ -686,6 +878,57 @@
       ]
     },
     {
+      "id": "room-context-api",
+      "name": "Permission-filtered Room Context API",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "supabase/functions/room-ai-context/index.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0015_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/room-ai-context/index.ts",
+        "supabase/migrations/0015_asset_intelligence.sql"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
       "id": "room-discussion",
       "name": "Room-layer discussion",
       "status": "implemented",
@@ -795,6 +1038,53 @@
       "notes": [
         "Status is based on executable evidence, not documentation or PR metadata."
       ]
+    },
+    {
+      "id": "tku-zen-agent-integration",
+      "name": "tku-zen-agent / ai_os context adapters",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "../ai_os/server/services/duigaoRoomContext.ts",
+          "../tku-zen-agent/app/services/duigao_integration.py"
+        ],
+        "migrations": [],
+        "tests": [
+          "../ai_os/server/services/duigaoRoomContext.test.ts",
+          "../tku-zen-agent/tests/test_duigao_integration.py",
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 3,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.94,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "../ai_os/server/services/duigaoRoomContext.test.ts",
+        "../ai_os/server/services/duigaoRoomContext.ts",
+        "../tku-zen-agent/app/services/duigao_integration.py",
+        "../tku-zen-agent/tests/test_duigao_integration.py",
+        "scripts/tests/asset-intelligence.test.ts"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "tus-resumable-upload",
@@ -1314,6 +1604,49 @@
       "notes": [
         "Documentation exists, but executable source/migration/test evidence does not."
       ]
+    },
+    {
+      "id": "video-understanding",
+      "name": "Video temporal understanding",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "../tku-zen-agent/app/services/asset_providers.py",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "../tku-zen-agent/app/services/asset_providers.py",
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/asset-analysis/index.ts"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "video-upload",
