@@ -12,6 +12,7 @@ import {
   groupSelected,
   moveNodes,
   nodeSearchText,
+  parseTimestamp,
 } from "../collaboration/nodes";
 import { arrangeBoard } from "../collaboration/layout";
 import { canEditBoard } from "../collaboration/permissions";
@@ -43,13 +44,13 @@ export type WhiteboardApi = {
   onShareNode: (node: WhiteboardNode) => void;
   onOpenContent: (branchId: string, opts?: { startTime?: number; endTime?: number }) => void;
   onCreatePoll: (question: string, options: string[]) => string | void;
-  onCreateDecision: (title: string, source?: { type: "poll"; id: string }) => void;
+  onCreateDecision: (title: string, source?: { type: "poll"; id: string }, status?: "pending" | "decided") => void;
   onToggleAllowEdit: () => void;
   allowBoardEdit: boolean;
   canToggleOpenEdit: boolean;
 };
 
-type Sheet = "add" | "search" | "content" | "more" | "create-board" | "poll" | null;
+type Sheet = "add" | "search" | "content" | "more" | "create-board" | "poll" | "video-range" | null;
 
 const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
@@ -90,6 +91,7 @@ const NodeView = memo(function NodeView({
           value={content.text ?? ""}
           placeholder={node.nodeType === "text" ? "直接打字…" : "步驟"}
           onChange={(event) => onChangeText(event.target.value)}
+          onPointerDown={(event) => event.stopPropagation()}
           autoFocus={editing}
         />
       </div>
@@ -136,9 +138,17 @@ const NodeView = memo(function NodeView({
   );
 });
 
-function RoomContentPicker({ room, onPick }: { room: Room; onPick: (branch: RoomBranch) => void }) {
+function RoomContentPicker({
+  room,
+  onPick,
+  initialKind = "all",
+}: {
+  room: Room;
+  onPick: (branch: RoomBranch) => void;
+  initialKind?: "all" | "poster" | "video" | "plan";
+}) {
   const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"all" | "poster" | "video" | "plan">("all");
+  const [kind, setKind] = useState<"all" | "poster" | "video" | "plan">(initialKind);
   const branches = (room.branches ?? []).filter((branch) => branch.status !== "archived");
   const filtered = branches.filter((branch) => {
     if (kind !== "all" && branch.branchType !== kind && !(kind === "plan" && branch.branchType === "copy")) return false;
@@ -229,6 +239,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [search, setSearch] = useState("");
   const [viewport, setViewport] = useState({ width: 360, height: 520 });
   const [marquee, setMarquee] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
+  const [videoStart, setVideoStart] = useState("00:40");
+  const [videoEnd, setVideoEnd] = useState("");
+  const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan">("all");
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; zoom: number } | null>(null);
   const drag = useRef<{ ids: string[]; origin: { x: number; y: number }; last: { x: number; y: number } } | null>(null);
@@ -265,6 +280,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   }, [api]);
 
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("textarea, input, button, a")) return;
     const point = { x: event.clientX, y: event.clientY };
     pointers.current.set(event.pointerId, point);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -278,11 +295,17 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
     const hit = nodeHit(nodes, world.x, world.y);
     if (hit) {
-      const nextSelected = event.shiftKey || selected.includes(hit.id) ? Array.from(new Set([...selected, hit.id])) : [hit.id];
+      if (multiSelect || event.shiftKey) {
+        setSelected((current) => current.includes(hit.id) ? current.filter((id) => id !== hit.id) : [...current, hit.id]);
+        setEditingId(null);
+        return;
+      }
+      const nextSelected = selected.includes(hit.id) ? selected : [hit.id];
       setSelected(nextSelected);
       setEditingId(null);
       drag.current = { ids: nextSelected, origin: world, last: world };
       longPress.current = window.setTimeout(() => {
+        setMultiSelect(true);
         setSelected((current) => Array.from(new Set([...current, hit.id])));
       }, LONG_PRESS_MS);
       return;
@@ -385,9 +408,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     setSelected([node.id]);
     setEditingId(node.id);
     setSheet(null);
+    return node;
   };
 
-  const pickBranch = (branch: RoomBranch) => {
+  const placeBranch = (branch: RoomBranch, range?: { startTime?: number; endTime?: number }) => {
     if (!board) return;
     const version = latestBranchVersion(api.room, branch.id);
     const summary = branchSummary(api.room, branch.id);
@@ -396,16 +420,26 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     addAtView("room_content", {
       title: branch.name,
       mediaKind: branch.branchType === "copy" ? "plan" : branch.branchType,
-      versionLabel: isVideo ? version?.label ?? summary.latestLabel : version?.label ?? summary.latestLabel,
+      versionLabel: version?.label ?? summary.latestLabel,
       openCommentCount: summary.openCommentCount,
-      thumbnailUrl: version?.imageDataUrl && version.imageDataUrl.startsWith("data:") === false && version.kind !== "video"
-        ? version.imageDataUrl
-        : version?.kind === "image"
-          ? version.imageDataUrl
-          : undefined,
+      thumbnailUrl: version?.kind === "image" ? version.imageDataUrl : undefined,
       subtitle: plan ? `更新於 ${relative(plan.updatedAt)}` : undefined,
       duration: version?.duration,
+      startTime: range?.startTime,
+      endTime: range?.endTime,
     }, { linkedEntityType: "branch", linkedEntityId: branch.id });
+    setPendingVideo(null);
+  };
+
+  const pickBranch = (branch: RoomBranch) => {
+    if (branch.branchType === "video") {
+      setPendingVideo(branch);
+      setVideoStart("00:40");
+      setVideoEnd("");
+      setSheet("video-range");
+      return;
+    }
+    placeBranch(branch);
   };
 
   const selectedNode = nodes.find((node) => node.id === selected[0]);
@@ -423,6 +457,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         ref={wrapRef}
         className="wb-canvas-wrap"
         data-testid="wb-canvas"
+        data-multi-select={multiSelect ? "true" : "false"}
         onPointerDown={onCanvasPointerDown}
         onPointerMove={onCanvasPointerMove}
         onPointerUp={onCanvasPointerUp}
@@ -467,24 +502,32 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             />
           )}
         </div>
+        {multiSelect && (
+          <div className="wb-multiselect" data-testid="wb-multiselect">
+            <span>已選 {selected.length} 個</span>
+            <button type="button" onClick={() => setMultiSelect(false)}>完成</button>
+          </div>
+        )}
         {selectedNode && canEdit && (
           <div className="wb-node-actions" data-testid="wb-node-actions">
-            {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text") && (
-              <button type="button" onClick={() => {
-                const next = addFlowNextStep(selectedNode.nodeType === "flow" ? selectedNode : { ...selectedNode, nodeType: "flow" }, "下一步", "local", nodes);
+            {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
+              <button type="button" data-testid="wb-next-step" onClick={() => {
+                const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
                 api.onUpsertNode(next.node, "now");
                 api.onCreateEdge(next.edge);
                 setSelected([next.node.id]);
                 setEditingId(next.node.id);
+                setMultiSelect(false);
               }}>+ 下一步</button>
             )}
             {(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
-              <button type="button" onClick={() => {
+              <button type="button" data-testid="wb-add-child" onClick={() => {
                 const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
                 api.onUpsertNode(next.node, "now");
                 api.onCreateEdge(next.edge);
                 setSelected([next.node.id]);
                 setEditingId(next.node.id);
+                setMultiSelect(false);
               }}>+ 子項目</button>
             )}
             {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
@@ -506,10 +549,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           </div>
         )}
         <nav className="wb-bottom" aria-label="白板工具">
-          <button type="button" onClick={() => setSheet("add")} disabled={!canEdit}><span>＋</span>+</button>
-          <button type="button" onClick={() => setSheet("search")}><span>⌕</span>搜尋</button>
-          <button type="button" onClick={() => api.onUpsertNodes(arrangeBoard(nodes, edges))} disabled={!canEdit}><span>⊞</span>整理</button>
-          <button type="button" onClick={() => setSheet("more")}><span>⋯</span>更多</button>
+          <button type="button" data-testid="whiteboard-add" onClick={() => setSheet("add")} disabled={!canEdit}><span>＋</span>+</button>
+          <button type="button" data-testid="whiteboard-search" onClick={() => setSheet("search")}><span>⌕</span>搜尋</button>
+          <button type="button" data-testid="whiteboard-arrange" onClick={() => api.onUpsertNodes(arrangeBoard(nodes, edges))} disabled={!canEdit}><span>⊞</span>整理</button>
+          <button type="button" data-testid="whiteboard-more" onClick={() => setSheet("more")}><span>⋯</span>更多</button>
         </nav>
       </div>
 
@@ -521,7 +564,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               <h3>加到白板上</h3>
               <div className="wb-options">
                 {ADD_OPTIONS.map((item) => (
-                  <button type="button" key={item.label} onClick={() => item.type === "content" ? setSheet("content") : addAtView(item.type)}>
+                  <button type="button" key={item.label} onClick={() => {
+                    if (item.type === "content" || item.type === "image") {
+                      setContentKind(item.type === "image" ? "poster" : "all");
+                      setSheet("content");
+                      return;
+                    }
+                    addAtView(item.type);
+                  }}>
                     {item.label}
                   </button>
                 ))}
@@ -535,7 +585,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
           <section className="project-sheet" role="dialog" aria-label="房間內容">
             <div className="project-sheet-grip" />
-            <RoomContentPicker room={api.room} onPick={pickBranch} />
+            <RoomContentPicker room={api.room} onPick={pickBranch} initialKind={contentKind} />
             <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
           </section>
         </div>
@@ -570,13 +620,57 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 </button>
               )}
               <button type="button" className="wb-card" onClick={() => setSheet("poll")}>放入既有投票</button>
-              {api.canManageBoards && <button type="button" className="wb-card" onClick={() => { const id = api.onCreatePoll("主視覺要不要換？", ["要，換成 B 版", "先維持 A 版"]); if (id) addAtView("poll", { pollQuestion: "主視覺要不要換？", voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) }); }}>＋投票</button>}
-              {api.canManageBoards && <button type="button" className="wb-card" onClick={() => { api.onCreateDecision("已決定：採用 B 版"); addAtView("decision", { text: "已決定：採用 B 版", sourceLabel: "決策區" }); setSheet(null); }}>寫下決策</button>}
+              {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-create-poll" onClick={() => { const id = api.onCreatePoll("主視覺要不要換？", ["要，換成 B 版", "先維持 A 版"]); if (id) addAtView("poll", { pollQuestion: "主視覺要不要換？", voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) }); }}>＋投票</button>}
+              {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-write-decision" onClick={() => { api.onCreateDecision("已決定：採用 B 版", undefined, "decided"); addAtView("decision", { text: "已決定：採用 B 版", sourceLabel: "決策區" }); setSheet(null); }}>寫下決策</button>}
               {polls.map((poll) => (
                 <button type="button" className="wb-card" key={poll.id} onClick={() => { addAtView("poll", { pollQuestion: poll.question, voteCount: (api.room.pollVotes ?? []).filter((vote) => vote.pollId === poll.id).length }, { linkedEntityType: "poll", linkedEntityId: poll.id }); }}>
                   {poll.question}
                 </button>
               ))}
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+          </section>
+        </div>
+      )}
+      {sheet === "poll" && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="放入投票">
+            <div className="wb-sheet" data-testid="wb-poll-picker">
+              <h3>放入既有投票</h3>
+              <div className="wb-options">
+                {polls.map((poll) => (
+                  <button type="button" className="wb-card" key={poll.id} onClick={() => { addAtView("poll", { pollQuestion: poll.question, voteCount: (api.room.pollVotes ?? []).filter((vote) => vote.pollId === poll.id).length }, { linkedEntityType: "poll", linkedEntityId: poll.id }); }}>
+                    {poll.question} · {(api.room.pollVotes ?? []).filter((vote) => vote.pollId === poll.id).length} 人已投
+                  </button>
+                ))}
+                {!polls.length && <p className="project-muted">這個房間還沒有投票。可用「＋投票」建立一則。</p>}
+              </div>
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+          </section>
+        </div>
+      )}
+      {sheet === "video-range" && pendingVideo && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="影片時間">
+            <div className="wb-sheet" data-testid="wb-video-range">
+              <h3>{pendingVideo.name}</h3>
+              <p className="project-muted">整段放上白板，或指定時間點／片段。卡片只記時間，不會預載整支影片。</p>
+              <button type="button" className="wb-card" data-testid="wb-video-whole" onClick={() => placeBranch(pendingVideo)}>整段</button>
+              <button type="button" className="wb-card" data-testid="wb-video-0040" onClick={() => placeBranch(pendingVideo, { startTime: 40 })}>從 00:40</button>
+              <label className="project-field">
+                <span>開始</span>
+                <input className="text-input" value={videoStart} onChange={(event) => setVideoStart(event.target.value)} aria-label="影片開始時間" placeholder="00:40" />
+              </label>
+              <label className="project-field">
+                <span>結束（可空）</span>
+                <input className="text-input" value={videoEnd} onChange={(event) => setVideoEnd(event.target.value)} aria-label="影片結束時間" placeholder="00:45" />
+              </label>
+              <button type="button" className="project-save-button project-submit" onClick={() => {
+                const startTime = parseTimestamp(videoStart);
+                const endTime = parseTimestamp(videoEnd);
+                placeBranch(pendingVideo, { startTime, endTime });
+              }}>放入白板</button>
             </div>
             <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
           </section>

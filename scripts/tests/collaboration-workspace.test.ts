@@ -11,6 +11,7 @@ import {
   formatVideoRange,
   groupSelected,
   moveNodes,
+  parseTimestamp,
 } from "../../src/features/collaboration/nodes.ts";
 import { arrangeBoard, arrangeFlow, arrangeGrid, arrangeMindmap } from "../../src/features/collaboration/layout.ts";
 import { getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
@@ -87,6 +88,8 @@ test("11-15 room content / video range / plan cards only reference entities", ()
   plan.content = { title: "擺攤計畫", subtitle: "更新於剛剛", mediaKind: "plan" };
   assert.equal(poster.content.thumbnailUrl?.includes("http"), true);
   assert.equal(formatVideoRange(40, 45), "00:40–00:45");
+  assert.equal(parseTimestamp("00:40"), 40);
+  assert.equal(parseTimestamp("40"), 40);
   assert.ok(!("imageBytes" in poster.content));
 });
 

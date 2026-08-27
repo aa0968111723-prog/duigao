@@ -339,6 +339,8 @@ export async function insertDecision(supabase: SupabaseClient, decision: Decisio
     source_type: decision.sourceType ?? null,
     source_id: decision.sourceId ?? null,
     created_by: isUuid(decision.createdBy) ? decision.createdBy : null,
+    finalized_at: decision.finalizedAt ? new Date(decision.finalizedAt).toISOString() : null,
+    finalized_by: decision.finalizedBy && isUuid(decision.finalizedBy) ? decision.finalizedBy : null,
   });
   if (error) throw new CloudError(error.message, "decision");
 }

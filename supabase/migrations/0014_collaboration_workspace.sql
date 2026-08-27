@@ -417,29 +417,69 @@ $$;
 revoke all on function public.get_selected_board_context(uuid, uuid[]) from public;
 grant execute on function public.get_selected_board_context(uuid, uuid[]) to authenticated;
 
--- Optimistic concurrency: bump version; reject stale writes.
-create or replace function public.touch_collaboration_row()
+-- Optimistic concurrency. Each table gets its own function so NEW never
+-- references a column the table does not have (a shared trigger cannot).
+create or replace function public.touch_whiteboard()
 returns trigger
 language plpgsql
 security invoker
 set search_path = ''
 as $$
 begin
-  if tg_op = 'UPDATE' then
-    if tg_table_name in ('whiteboards', 'whiteboard_nodes', 'decision_records') then
-      if new.version is distinct from old.version and new.version < old.version then
-        raise exception 'stale-write'
-          using hint = '這則內容剛被別人改過，請重新載入。';
-      end if;
-      new.version := old.version + 1;
-    end if;
-    if tg_table_name = 'whiteboards' and new.archived_at is not null and old.archived_at is null then
-      new.archived_at := coalesce(new.archived_at, now());
-    end if;
-    if tg_table_name = 'decision_records' and new.status = 'decided' and old.status is distinct from 'decided' then
-      new.finalized_at := coalesce(new.finalized_at, now());
-      new.finalized_by := coalesce(new.finalized_by, auth.uid());
-    end if;
+  if new.version is distinct from old.version and new.version < old.version then
+    raise exception 'stale-write' using hint = '這則內容剛被別人改過，請重新載入。';
+  end if;
+  new.version := old.version + 1;
+  if new.archived_at is not null and old.archived_at is null then
+    new.archived_at := coalesce(new.archived_at, now());
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+create or replace function public.touch_whiteboard_node()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.version is distinct from old.version and new.version < old.version then
+    raise exception 'stale-write' using hint = '這則內容剛被別人改過，請重新載入。';
+  end if;
+  new.version := old.version + 1;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+create or replace function public.touch_discussion_message()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+create or replace function public.touch_decision_record()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.version is distinct from old.version and new.version < old.version then
+    raise exception 'stale-write' using hint = '這則內容剛被別人改過，請重新載入。';
+  end if;
+  new.version := old.version + 1;
+  if new.status = 'decided' and old.status is distinct from 'decided' then
+    new.finalized_at := coalesce(new.finalized_at, now());
+    new.finalized_by := coalesce(new.finalized_by, auth.uid());
   end if;
   new.updated_at := now();
   return new;
@@ -449,19 +489,19 @@ $$;
 drop trigger if exists whiteboards_touch on public.whiteboards;
 create trigger whiteboards_touch
   before update on public.whiteboards
-  for each row execute function public.touch_collaboration_row();
+  for each row execute function public.touch_whiteboard();
 drop trigger if exists whiteboard_nodes_touch on public.whiteboard_nodes;
 create trigger whiteboard_nodes_touch
   before update on public.whiteboard_nodes
-  for each row execute function public.touch_collaboration_row();
+  for each row execute function public.touch_whiteboard_node();
 drop trigger if exists room_discussion_touch on public.room_discussion_messages;
 create trigger room_discussion_touch
   before update on public.room_discussion_messages
-  for each row execute function public.touch_collaboration_row();
+  for each row execute function public.touch_discussion_message();
 drop trigger if exists decision_records_touch on public.decision_records;
 create trigger decision_records_touch
   before update on public.decision_records
-  for each row execute function public.touch_collaboration_row();
+  for each row execute function public.touch_decision_record();
 
 create or replace function public.prevent_whiteboard_hard_delete()
 returns trigger
@@ -655,6 +695,7 @@ drop policy if exists presentation_state_select on public.presentation_state;
 create policy presentation_state_select on public.presentation_state
   for select to authenticated using (public.is_room_member(room_id));
 drop policy if exists presentation_state_upsert on public.presentation_state;
+drop policy if exists presentation_state_insert on public.presentation_state;
 create policy presentation_state_insert on public.presentation_state
   for insert to authenticated with check (public.can_manage_media(room_id));
 drop policy if exists presentation_state_update on public.presentation_state;
@@ -667,11 +708,44 @@ drop policy if exists collaboration_audit_select on public.collaboration_audit_e
 create policy collaboration_audit_select on public.collaboration_audit_events
   for select to authenticated using (public.is_room_member(room_id));
 
--- Owner may flip the room-level board-edit flag. Reviewer cannot.
-drop policy if exists rooms_update_allow_board_edit on public.rooms;
--- rooms already has an update policy from earlier migrations; keep that.
--- allow_board_edit is just another column on rooms and rides the existing
--- owner/editor room update path.
+-- Owner may flip 「允許大家一起編輯」. Reviewer cannot promote themselves.
+create or replace function public.guard_room_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+
+  if new.id is distinct from old.id
+     or new.owner_user_id is distinct from old.owner_user_id
+     or new.invite_hash is distinct from old.invite_hash
+     or new.archived_at is distinct from old.archived_at
+     or new.default_member_role is distinct from old.default_member_role
+     or new.allow_board_edit is distinct from old.allow_board_edit then
+    if not public.is_room_owner(old.id) then
+      raise exception 'not room owner';
+    end if;
+  end if;
+
+  if new.title is distinct from old.title
+     or new.media_type is distinct from old.media_type then
+    if not public.can_manage_media(old.id) then
+      raise exception 'not allowed';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists rooms_guard_update on public.rooms;
+create trigger rooms_guard_update
+  before update on public.rooms
+  for each row execute function public.guard_room_update();
 
 revoke all on public.whiteboards, public.whiteboard_nodes, public.whiteboard_edges,
   public.room_discussion_messages, public.room_discussion_supports,

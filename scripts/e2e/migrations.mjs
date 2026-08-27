@@ -1101,29 +1101,39 @@ try {
     as(reviewer, `insert into public.whiteboards (room_id, title) values ('${capRoom}'::uuid, 'blocked');`).failed
       && as(reviewer, `delete from public.whiteboards where id = '${collabBoard}'::uuid;`).failed,
   );
+  as(reviewer, `update public.whiteboard_nodes set content = '{"text":"hack"}'::jsonb where id = '${collabNode}'::uuid;`);
   ok(
     "reviewer 預設不能改節點，直到房主開放協作",
-    as(reviewer, `update public.whiteboard_nodes set content = '{"text":"hack"}'::jsonb where id = '${collabNode}'::uuid;`).failed,
+    as(owner, `select content->>'text' from public.whiteboard_nodes where id = '${collabNode}'::uuid;`).out === "招生",
   );
+  const openEdit = as(owner, `update public.rooms set allow_board_edit = true where id = '${capRoom}'::uuid;`);
+  as(reviewer, `update public.whiteboard_nodes set content = '{"text":"一起改"}'::jsonb where id = '${collabNode}'::uuid;`);
   ok(
     "開放 allow_board_edit 後 reviewer 可以編節點",
-    !as(owner, `update public.rooms set allow_board_edit = true where id = '${capRoom}'::uuid;`).failed
-      && !as(reviewer, `update public.whiteboard_nodes set content = '{"text":"一起改"}'::jsonb where id = '${collabNode}'::uuid;`).failed,
+    !openEdit.failed && as(owner, `select content->>'text' from public.whiteboard_nodes where id = '${collabNode}'::uuid;`).out === "一起改",
+    openEdit.err,
   );
+  as(reviewer, `update public.whiteboards set archived_at = now() where id = '${collabBoard}'::uuid;`);
   ok(
     "reviewer 仍然不能封存整塊白板",
-    as(reviewer, `update public.whiteboards set archived_at = now() where id = '${collabBoard}'::uuid;`).failed,
+    as(owner, `select archived_at is null from public.whiteboards where id = '${collabBoard}'::uuid;`).out === "t",
   );
+  const decisionInsert = as(owner, `insert into public.decision_records (id, room_id, title, status) values ('${collabDecision}'::uuid, '${capRoom}'::uuid, '已決定：採用 B 版', 'pending');`);
+  as(reviewer, `update public.decision_records set status = 'decided' where id = '${collabDecision}'::uuid;`);
+  const afterReviewer = as(owner, `select status from public.decision_records where id = '${collabDecision}'::uuid;`).out;
+  const ownerFinalize = as(owner, `update public.decision_records set status = 'decided' where id = '${collabDecision}'::uuid;`);
   ok(
     "owner 可以寫決策，reviewer 不能 finalize",
-    !as(owner, `insert into public.decision_records (id, room_id, title, status) values ('${collabDecision}'::uuid, '${capRoom}'::uuid, '已決定：採用 B 版', 'pending');`).failed
-      && as(reviewer, `update public.decision_records set status = 'decided' where id = '${collabDecision}'::uuid;`).failed
-      && !as(owner, `update public.decision_records set status = 'decided' where id = '${collabDecision}'::uuid;`).failed,
+    !decisionInsert.failed && afterReviewer === "pending" && !ownerFinalize.failed
+      && as(owner, `select status from public.decision_records where id = '${collabDecision}'::uuid;`).out === "decided",
+    [decisionInsert.err, ownerFinalize.err, afterReviewer].filter(Boolean).join(" | "),
   );
+  const boardDelete = as(owner, `delete from public.whiteboards where id = '${collabBoard}'::uuid;`);
+  const boardArchive = as(owner, `update public.whiteboards set archived_at = now() where id = '${collabBoard}'::uuid;`);
   ok(
     "白板 hard delete 被擋住，只能封存",
-    as(owner, `delete from public.whiteboards where id = '${collabBoard}'::uuid;`).failed
-      && !as(owner, `update public.whiteboards set archived_at = now() where id = '${collabBoard}'::uuid;`).failed,
+    boardDelete.failed && !boardArchive.failed && as(owner, `select archived_at is not null from public.whiteboards where id = '${collabBoard}'::uuid;`).out === "t",
+    [boardDelete.err, boardArchive.err].filter(Boolean).join(" | "),
   );
   psql(`set request.jwt.claim.sub = '${owner}';
     select create_room_with_invite('${otherRoom}'::uuid, '另一間房', 'other-collab-token-0001', 'Owner', '#111111');

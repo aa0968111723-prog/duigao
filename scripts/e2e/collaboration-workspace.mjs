@@ -13,7 +13,7 @@
  */
 import { execFileSync } from "node:child_process";
 import http from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { start as startMock } from "./mock-supabase.mjs";
@@ -79,6 +79,64 @@ async function chooseCreate(page, name, type, file) {
   await current.locator("button.project-submit").click();
 }
 
+async function recordWebm(page, seconds = 1.1) {
+  return Buffer.from(await page.evaluate(async (secs) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 180;
+    const context = canvas.getContext("2d");
+    const stream = canvas.captureStream(20);
+    const preferred = "video/webm;codecs=vp8";
+    const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported(preferred) ? preferred : "video/webm" });
+    const chunks = [];
+    recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
+    const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+    recorder.start();
+    const start = performance.now();
+    await new Promise((resolve) => {
+      const frame = () => {
+        const elapsed = (performance.now() - start) / 1000;
+        context.fillStyle = `hsl(${Math.round(elapsed * 90) % 360} 70% 45%)`;
+        context.fillRect(0, 0, 320, 180);
+        context.fillStyle = "#fff";
+        context.font = "bold 42px sans-serif";
+        context.fillText(`${elapsed.toFixed(1)}s`, 35, 110);
+        if (elapsed >= secs) return resolve();
+        requestAnimationFrame(frame);
+      };
+      frame();
+    });
+    recorder.stop();
+    await stopped;
+    const bytes = new Uint8Array(await new Blob(chunks, { type: "video/webm" }).arrayBuffer());
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }, seconds), "base64");
+}
+
+async function backToRoom(page) {
+  if (await page.locator("button.m-home").count()) {
+    await page.locator("button.m-home").click();
+  } else if (await page.locator(".project-back-button").count()) {
+    await page.locator(".project-back-button").click();
+  }
+  await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 15000 });
+  await page.waitForSelector(".project-tabs", { timeout: 10000 });
+}
+
+async function fillEditing(page, text) {
+  const box = page.locator("textarea.wb-node-text");
+  await box.waitFor({ timeout: 5000 });
+  await box.fill(text);
+}
+
+async function searchNode(page, name) {
+  await page.getByTestId("whiteboard-search").click();
+  await page.getByLabel("搜尋節點").fill(name);
+  await page.getByRole("button", { name, exact: true }).first().click();
+}
+
 const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
@@ -125,16 +183,18 @@ try {
 
     await chooseCreate(page, "擺攤計畫", "plan");
     await page.waitForSelector('[data-testid="plan-editor"]', { timeout: 10000 });
-    await page.locator(".project-back-button").click();
+    await backToRoom(page);
+
     await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
-    await page.getByRole("button", { name: /新增文宣/ }).click();
-    const posterSheet = page.getByTestId("create-content-sheet");
-    await posterSheet.locator('input:not([type="file"])').first().fill("擺攤文宣");
-    await posterSheet.locator('input[type="file"]').setInputFiles({ name: "poster.png", mimeType: "image/png", buffer: TINY_PNG });
-    await posterSheet.locator("button.project-submit").click();
-    await page.waitForSelector(".m-stage-area .stage, [data-testid='multi-branch-room']", { timeout: 20000 });
-    if (await page.locator("button.m-home").count()) await page.locator("button.m-home").click();
-    await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 15000 });
+    await chooseCreate(page, "擺攤文宣", "poster", { name: "booth.png", mimeType: "image/png", buffer: TINY_PNG });
+    await page.waitForSelector(".m-stage-area .stage, img.stage-img, [data-testid='multi-branch-room']", { timeout: 20000 });
+    await backToRoom(page);
+
+    const videoBytes = await recordWebm(page);
+    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
+    await chooseCreate(page, "招生影片", "video", { name: "admission.webm", mimeType: "video/webm", buffer: videoBytes });
+    await page.waitForSelector("video.v-video, [data-testid='multi-branch-room']", { timeout: 90000 });
+    await backToRoom(page);
 
     await page.locator('.project-tabs button').filter({ hasText: "討論" }).click();
     await page.getByRole("button", { name: "對話" }).click();
@@ -148,16 +208,45 @@ try {
     await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 10000 });
     check("可建立並打開白板", await page.getByTestId("wb-canvas").count() === 1);
 
-    await page.getByRole("button", { name: "+" }).click();
+    await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "心智圖" }).click();
-    await page.locator("textarea.wb-node-text").fill("招生");
+    await fillEditing(page, "招生");
     check("便利貼／心智圖可直接打字", (await page.locator("textarea.wb-node-text").inputValue()) === "招生");
 
-    await page.getByRole("button", { name: "+ 子項目" }).click();
-    await page.locator("textarea.wb-node-text").fill("擺攤");
-    await page.getByRole("button", { name: "+ 子項目" }).click();
-    await page.locator("textarea.wb-node-text").fill("茶會");
-    check("心智圖可加子節點", await page.locator("[data-node-type='mindmap'], [data-node-type='text']").count() >= 2);
+    for (const child of ["擺攤", "茶會", "演講"]) {
+      if (child !== "擺攤") await searchNode(page, "招生");
+      await page.getByTestId("wb-add-child").click();
+      await fillEditing(page, child);
+    }
+    check("心智圖可加子節點 擺攤/茶會/演講", (await page.locator("[data-node-type='mindmap']").count()) >= 3);
+
+    await searchNode(page, "擺攤");
+    for (const step of ["吸引注意", "互動", "介紹活動", "QR", "加入茶會"]) {
+      await page.getByTestId("wb-next-step").click();
+      await fillEditing(page, step);
+    }
+    check("擺攤可自動長出流程下一步", (await page.locator("[data-node-type='flow']").count()) >= 5);
+    check("流程邊線會一起建立", (await page.locator("[data-testid^='wb-edge-']").count()) >= 5);
+
+    await page.getByTestId("whiteboard-add").click();
+    await page.getByRole("button", { name: "放入房間內容" }).click();
+    await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤文宣/ }).click();
+    await page.getByTestId("whiteboard-add").click();
+    await page.getByRole("button", { name: "放入房間內容" }).click();
+    await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤計畫/ }).click();
+    await page.getByTestId("whiteboard-add").click();
+    await page.getByRole("button", { name: "放入房間內容" }).click();
+    await page.getByTestId("wb-content-picker").getByRole("button", { name: /招生影片/ }).click();
+    await page.getByTestId("wb-video-0040").click();
+    check("可把文宣／企劃／影片時間卡放上白板", await page.locator("[data-node-type='room_content']").count() >= 3);
+    check("影片卡帶 00:40 時間點", (await page.locator("[data-node-type='room_content']").allTextContents()).some((text) => text.includes("00:40")));
+
+    await page.getByTestId("whiteboard-more").click();
+    await page.getByTestId("wb-create-poll").click();
+    check("可引用投票節點", await page.locator("[data-node-type='poll']").count() >= 1);
+    await page.getByTestId("whiteboard-more").click();
+    await page.getByTestId("wb-write-decision").click();
+    check("可寫決策節點", await page.locator("[data-node-type='decision']").count() >= 1);
 
     const canvas = page.getByTestId("wb-canvas");
     const box = await canvas.boundingBox();
@@ -174,26 +263,42 @@ try {
     await canvas.dispatchEvent("pointerup", { pointerId: 12 });
     check("雙指可 pinch zoom", true);
 
-    await page.getByRole("button", { name: "+" }).click();
-    await page.getByRole("button", { name: "放入房間內容" }).click();
-    await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤文宣|擺攤計畫/ }).first().click();
-    check("可把房間內容放上白板", await page.locator("[data-node-type='room_content']").count() >= 1);
+    const target = page.locator("[data-node-type='mindmap'], [data-node-type='flow']").first();
+    const hit = await target.boundingBox();
+    if (hit) {
+      await canvas.dispatchEvent("pointerdown", { clientX: hit.x + 12, clientY: hit.y + 12, pointerId: 31 });
+      await page.waitForTimeout(500);
+      check("長按進入多選", await page.getByTestId("wb-multiselect").count() === 1);
+      if (await page.getByTestId("wb-multiselect").count()) await page.getByRole("button", { name: "完成" }).click();
+      await canvas.dispatchEvent("pointerup", { pointerId: 31 });
+    } else {
+      check("長按進入多選", false, "找不到節點可長按");
+    }
 
-    await page.getByRole("button", { name: "更多" }).click();
-    await page.getByRole("button", { name: "寫下決策" }).click();
-    check("可寫決策節點", await page.locator("[data-node-type='decision']").count() >= 1);
+    await page.getByTestId("whiteboard-arrange").click();
+    check("整理按鈕可按", true);
 
     await page.getByRole("button", { name: "分享至討論", exact: false }).first().click().catch(() => undefined);
     await page.getByRole("button", { name: "對話" }).click();
     check("討論與白板互相連得起來", (await page.getByTestId("discussion-feed").innerText()).length > 0);
+    check("決策區看得到已決定", (await page.getByTestId("decision-area").innerText()).includes("採用 B 版"));
 
     await page.getByRole("button", { name: "語音" }).click();
     check("語音是架構邊界而不是半成品 MVP", (await page.getByTestId("voice-boundary").innerText()).includes("語音"));
 
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
     await page.screenshot({ path: join(ROOT, "output", "playwright", "collaboration-mobile.png"), fullPage: true });
+    const shot = join("/opt/cursor/artifacts", "collaboration-mobile.png");
+    try {
+      mkdirSync("/opt/cursor/artifacts", { recursive: true });
+      writeFileSync(shot, await page.screenshot({ fullPage: true }));
+    } catch {
+      /* artifacts dir may be missing in local CI */
+    }
     check("390 寬沒有水平溢出", await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
   } catch (error) {
+    mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
+    await page.screenshot({ path: join(ROOT, "output", "playwright", "collaboration-mobile-fail.png"), fullPage: true }).catch(() => undefined);
     check("協作工作台手機 acceptance journey", false, error instanceof Error ? error.message : String(error));
   } finally {
     await context.close();

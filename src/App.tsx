@@ -150,6 +150,7 @@ export function App() {
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const [activeWhiteboardId, setActiveWhiteboardId] = useState<string | null>(null);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(() => initialView(null));
   const [tool, setTool] = useState<Tool>("pan");
@@ -995,7 +996,7 @@ export function App() {
   );
 
   const createDecision = useCallback(
-    (title: string, source?: { type: "poll"; id: string }) => {
+    (title: string, source?: { type: "poll"; id: string }, status: "pending" | "decided" = "pending") => {
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者不能建立決策紀錄。", { tone: "error" });
         return;
@@ -1005,10 +1006,12 @@ export function App() {
         roomId: roomRef.current?.id ?? "",
         title,
         body: "",
-        status: "pending" as const,
+        status,
         sourceType: source ? "poll" as const : "manual" as const,
         sourceId: source?.id,
         createdBy: cloud.userId ?? guest?.id ?? "local",
+        finalizedAt: status === "decided" ? Date.now() : undefined,
+        finalizedBy: status === "decided" ? cloud.userId ?? guest?.id : undefined,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         version: 1,
@@ -1495,7 +1498,9 @@ export function App() {
             res.url,
             activeBranchId
               ? { branchId: activeBranchId, versionId: viewRef.current.versionId || undefined }
-              : undefined,
+              : activeWhiteboardId
+                ? { whiteboardId: activeWhiteboardId, nodeId: focusNodeId || undefined }
+                : undefined,
           );
           setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "building" }, card: null });
           withPreviewTimeout(cloudRef.current.preview.ensure({ versionId: viewRef.current.versionId }))
@@ -1518,14 +1523,16 @@ export function App() {
           `${location.origin}${location.pathname}#room=${current.id}`,
           activeBranchId
             ? { branchId: activeBranchId, versionId: viewRef.current.versionId || undefined }
-            : undefined,
+            : activeWhiteboardId
+              ? { whiteboardId: activeWhiteboardId, nodeId: focusNodeId || undefined }
+              : undefined,
         ),
       });
       return;
     }
     // Deployed without VITE_SUPABASE_* — there is no permanent link to give.
     setShareState({ kind: "unavailable" });
-  }, [activeBranchId, isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
+  }, [activeBranchId, activeWhiteboardId, focusNodeId, isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
 
   /** 顯示文宣縮圖 / 顯示影片封面 toggle in the share sheet's 連結預覽 block. */
   const setPreviewThumbnail = useCallback(
@@ -1752,6 +1759,7 @@ export function App() {
         markCoachSeen,
         showToast,
         openShare,
+        openAtSeconds,
         ...(video ? { video } : {}),
         goHome: () => {
           videoCancelRef.current?.();
@@ -1761,6 +1769,7 @@ export function App() {
           if (activeBranchId && roomRef.current) {
             setActiveBranchId(null);
             setLoadingBranchId(null);
+            setOpenAtSeconds(undefined);
             setView(initialView(roomRef.current));
           } else {
             clearUndo();
@@ -1807,10 +1816,11 @@ export function App() {
         canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
         activeBranchId,
         loadingBranchId,
-        onOpenBranch: (branchId) => {
+        onOpenBranch: (branchId, opts) => {
           const target = roomRef.current ? branchForId(roomRef.current, branchId) : undefined;
           if (!target) return;
           setActiveBranchId(branchId);
+          setOpenAtSeconds(opts?.startTime);
           if (target.branchType === "poster" || target.branchType === "video") {
             setView(initialView(roomForBranch(roomRef.current!, branchId)));
           }
@@ -1824,6 +1834,7 @@ export function App() {
         onBackToRoom: () => {
           setActiveBranchId(null);
           setLoadingBranchId(null);
+          setOpenAtSeconds(undefined);
           if (roomRef.current) setView(initialView(roomRef.current));
         },
         onCreateContent: createProjectContent,
@@ -1846,6 +1857,7 @@ export function App() {
           if (!id) setFocusNodeId(null);
           if (id) void cloudRef.current.loadWhiteboard?.(id);
         },
+        onFocusNode: setFocusNodeId,
         onUpsertNode: upsertNode,
         onUpsertNodes: upsertNodes,
         onDeleteNode: deleteNode,

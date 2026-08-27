@@ -39,4 +39,6 @@
 .wb-node-actions { position: absolute; left: 10px; right: 10px; bottom: 72px; display: flex; gap: 8px; overflow-x: auto; }
 .wb-node-actions button { flex: 0 0 auto; min-height: 40px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-soft); background: rgba(20,18,16,.94); color: inherit; font-size: 13px; }
 .wb-marquee { position: absolute; border: 1px dashed var(--accent); background: rgba(196,92,74,.12); pointer-events: none; }
+.wb-multiselect { position: absolute; top: 44px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 999px; background: rgba(20,18,16,.9); border: 1px solid var(--line-soft); font-size: 13px; }
+.wb-multiselect button { border: 0; background: transparent; color: var(--accent); font-size: 13px; }
 .wb-more { display: grid; gap: 8px; }

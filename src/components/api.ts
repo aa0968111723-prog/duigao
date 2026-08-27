@@ -117,6 +117,8 @@ export type WorkspaceApi = {
   showToast: ShowToast;
   openShare: () => void;
   goHome: () => void;
+  /** Seek a video cut when opening from a board card. Poster rooms ignore it. */
+  openAtSeconds?: number;
   /** Only on video rooms. Absent means "this is a poster room". */
   video?: VideoApi;
 };

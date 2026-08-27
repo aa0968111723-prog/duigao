@@ -176,6 +176,19 @@ export function formatTimestamp(seconds?: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/** Accepts `40`, `00:40`, or `1:05`. */
+export function parseTimestamp(value: string): number | undefined {
+  const raw = value.trim();
+  if (!raw) return undefined;
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const seconds = Number(raw);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+  }
+  const match = /^(\d+):([0-5]?\d)$/.exec(raw);
+  if (!match) return undefined;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
 export function formatVideoRange(start?: number, end?: number): string {
   if (start == null) return "";
   if (end == null || end <= start) return formatTimestamp(start);

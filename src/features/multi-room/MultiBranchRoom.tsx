@@ -42,7 +42,7 @@ export type MultiBranchRoomApi = {
   userId?: string | null;
   canManage: boolean;
   activeBranchId: string | null;
-  onOpenBranch: (branchId: string) => void;
+  onOpenBranch: (branchId: string, opts?: { startTime?: number }) => void;
   loadingBranchId?: string | null;
   onBackToRoom: () => void;
   onCreateContent: (type: BranchType, name: string, files: FileList | null) => void;
@@ -67,7 +67,8 @@ export type MultiBranchRoomApi = {
   onCreateEdge: (edge: WhiteboardEdge) => void;
   onShareNodeToDiscussion: (node: WhiteboardNode) => void;
   onAddMessageToBoard: (message: DiscussionMessage, whiteboardId: string) => void;
-  onCreateDecision: (title: string, source?: { type: "poll"; id: string }) => void;
+  onCreateDecision: (title: string, source?: { type: "poll"; id: string }, status?: "pending" | "decided") => void;
+  onFocusNode?: (nodeId: string | null) => void;
   onFinalizeDecision: (id: string) => void;
   onToggleAllowBoardEdit: () => void;
   activeWhiteboardId: string | null;
@@ -562,8 +563,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onCreateEdge: api.onCreateEdge,
                     onShareNode: api.onShareNodeToDiscussion,
                     onOpenContent: (branchId, opts) => {
-                      api.onOpenBranch(branchId);
-                      void opts;
+                      api.onOpenBranch(branchId, opts);
                     },
                     onCreatePoll: (question, options) => {
                       const id = crypto.randomUUID();
@@ -608,7 +608,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onOpenBoardNode: (whiteboardId, nodeId) => {
                       setDiscussPane("board");
                       api.onOpenWhiteboard(whiteboardId);
-                      void nodeId;
+                      api.onFocusNode?.(nodeId ?? null);
                     },
                     onCreateDecision: api.onCreateDecision,
                     onFinalizeDecision: api.onFinalizeDecision,
