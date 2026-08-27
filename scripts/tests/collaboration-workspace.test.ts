@@ -322,6 +322,8 @@ test("failed node writes retry only via the durable queue", () => {
   assert.deepEqual(decideNodeWriteRetry("success"), { acknowledged: true, queueDurable: false, queueMemory: false });
   assert.deepEqual(decideNodeWriteRetry("unbound"), { acknowledged: false, queueDurable: true, queueMemory: false });
   assert.deepEqual(decideNodeWriteRetry("failed"), { acknowledged: false, queueDurable: true, queueMemory: false });
+  // stale-write：舊 payload 不進任何佇列（drop + refetch，audit F10）
+  assert.deepEqual(decideNodeWriteRetry("conflict"), { acknowledged: false, queueDurable: false, queueMemory: false });
 });
 
 test("first-share remaps local collaboration ids onto the new cloud room", () => {
@@ -484,4 +486,17 @@ test("第一屏契約如今綁在真殼上：討論根＋對話/白板 tabs＋�
   assert.match(shell, />白板</);
   const discussion = readFileSync(resolve(ROOT, "src/features/room-discussion/RoomDiscussion.tsx"), "utf8");
   assert.match(discussion, /voice-boundary/);
+test("stale-write 的排隊編輯在重放時被清出佇列而不是永遠重試", async () => {
+  const pending = [
+    { id: "node:a", roomId: "r", kind: "node", op: "upsert", payload: { id: "a", version: 1 }, createdAt: 1 },
+    { id: "node:b", roomId: "r", kind: "node", op: "upsert", payload: { id: "b", version: 1 }, createdAt: 1 },
+    { id: "node:c", roomId: "r", kind: "node", op: "upsert", payload: { id: "c", version: 1 }, createdAt: 1 },
+  ] as never[];
+  const result = await applyPendingCloudWrites(pending, {
+    upsertNode: async (node: { id: string }) =>
+      node.id === "a" ? { id: "a", version: 2 } : node.id === "b" ? "conflict" : false,
+  } as never);
+  assert.deepEqual(result.acknowledged, ["node:a"]);
+  assert.deepEqual(result.dropped, ["node:b"]);
+  assert.deepEqual(result.retained, ["node:c"]);
 });

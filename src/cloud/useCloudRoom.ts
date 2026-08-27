@@ -29,7 +29,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isRevisionConflict } from "./errors";
+import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -123,8 +123,8 @@ export type CloudWrites = {
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
   createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
-  upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false>;
-  deleteNode?: (id: string) => Promise<boolean>;
+  upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false | "conflict">;
+  deleteNode?: (id: string) => Promise<boolean | "conflict">;
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
@@ -466,7 +466,7 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
    * cannot be overwritten by a stale captured closure.
    */
   const writeAck = useCallback(
-    async <T>(task: () => Promise<T>): Promise<T | false> => {
+    async <T>(task: () => Promise<T>): Promise<T | false | "conflict"> => {
       if (!supabase || !boundRef.current) return false;
       setStatus("syncing");
       try {
@@ -478,6 +478,13 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
           setStatus(pending.current.length ? "offline-pending" : "synced");
           return false;
         }
+        if (isStaleWrite(err)) {
+          // 版本衝突：舊 payload 不可能被接受 — 不進佇列、立刻拉一份
+          // 最新快照（drop + refetch），呼叫端據 "conflict" 清 IDB 佇列。
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          scheduleReload();
+          return "conflict";
+        }
         const retry = decideNodeWriteRetry("failed");
         // queueMemory stays false: IndexedDB is the only node retry owner.
         void retry;
@@ -485,7 +492,7 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
         return false;
       }
     },
-    [supabase],
+    [supabase, scheduleReload],
   );
 
   // Bind: join (guest with invite) or reconnect (owner via mapping), then load + subscribe.

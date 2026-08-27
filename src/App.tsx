@@ -1332,6 +1332,13 @@ export function App() {
             await clearPendingEdit(`node:${node.id}`);
             return;
           }
+          if (result === "conflict") {
+            // stale-write：別人已存了較新版本。舊 payload 不進佇列（重放
+            // 永遠 409），清掉殘鍵、說一聲，最新內容由 reload 取回。
+            await clearPendingEdit(`node:${node.id}`);
+            showToast("這個節點剛被別人更新，已改用最新內容。", { tone: "error" });
+            return;
+          }
           const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
           if (retry.queueDurable && cloudRef.current.active) {
             await queuePendingEdit({
@@ -1391,6 +1398,10 @@ export function App() {
       const persistDelete = async () => {
         const result = await cloudRef.current.writes.deleteNode?.(id);
         if (isCloudWriteAcknowledged(result)) {
+          await clearPendingEdit(`node-del:${id}`);
+          return;
+        }
+        if (result === "conflict") {
           await clearPendingEdit(`node-del:${id}`);
           return;
         }
@@ -1571,11 +1582,14 @@ export function App() {
       const current = roomRef.current;
       if (!current || !isBrowserOnline()) return;
       void listPendingEdits(current.id).then(async (pending) => {
-        const { acknowledged } = await applyPendingCloudWrites(pending, {
+        const { acknowledged, dropped } = await applyPendingCloudWrites(pending, {
           upsertNode: cloudRef.current.writes.upsertNode,
           deleteNode: cloudRef.current.writes.deleteNode,
         });
         for (const id of acknowledged) await clearPendingEdit(id);
+        // stale-write：排隊中的舊編輯已被更新版本蓋過 — 清出佇列並說一聲。
+        for (const id of dropped) await clearPendingEdit(id);
+        if (dropped.length) showToast("離線期間的部分白板編輯已被較新版本取代。", { tone: "error" });
       });
     };
     window.addEventListener("online", flushPendingBoardEdits);

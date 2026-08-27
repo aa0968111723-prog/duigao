@@ -93,3 +93,13 @@ PR-00 是 docs-only 的計畫 checkpoint（任務規範明定第一個 PR 為計
   room-context-strip / asset-intelligence 測試持有。
 - feature-map 證據自此要求 mounted-import（src/ 檔案必須從 src/main.tsx
   走得到）；intelligent-asset-library 誠實降為 partial（schema 真、client 零）。
+## ADR-011：stale-write 以 drop+refetch 解；離線重放維持 upsert 語意
+
+日期：2026-08-28　狀態：**採納**（PR-02b）
+
+- 版本衝突（0014 touch_whiteboard_node 的 'stale-write'）不是可重試失敗：
+  舊 payload 不進任何佇列，清掉 IDB 殘鍵、toast 告知、scheduleReload 取回
+  較新內容。本輪不做逐節點 merge/rebase UI。
+- 離線重放**維持 upsert**：離線期間新建的節點必須能重放建立；改成
+  update-only 會把離線創作整批丟掉。代價是「已刪節點被離線重放復活」的
+  已知窗口 — 接受並記錄，未來以 tombstone 檢查（PR-08 或 02c 後續）關窗。

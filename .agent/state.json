@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T19:46:41.000Z",
+  "generatedAt": "2026-08-27T20:09:52.000Z",
   "git": {
-    "branch": "feat/whiteboard-canonical-02a",
-    "sha": "7ec5379673a662f8d7e50516c8684cabb88fc54b",
-    "mainSha": "df8c499be31557af3dd1faddba17ad1aca5415b5",
+    "branch": "detached",
+    "sha": "0eeb39ca46df5419a9ce787af49a89795fee14c2",
+    "mainSha": "0eeb39ca46df5419a9ce787af49a89795fee14c2",
     "dirty": true
   },
   "project": {

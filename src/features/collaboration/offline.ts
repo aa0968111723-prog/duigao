@@ -22,8 +22,12 @@ export type NodeWriteRetry = {
  * An in-memory closure must not also keep the old payload — a later success
  * would clear IDB and leave the stale task to overwrite newer cloud content.
  */
-export function decideNodeWriteRetry(outcome: "success" | "unbound" | "failed"): NodeWriteRetry {
+export function decideNodeWriteRetry(outcome: "success" | "unbound" | "failed" | "conflict"): NodeWriteRetry {
   if (outcome === "success") return { acknowledged: true, queueDurable: false, queueMemory: false };
+  // conflict（stale-write）：舊 payload 永遠不可能被接受 — 不進任何佇列，
+  // 由呼叫端丟棄本地編輯並以 reload 取回較新內容（drop + refetch，
+  // 不做逐節點 merge — 本輪的衝突解法）。
+  if (outcome === "conflict") return { acknowledged: false, queueDurable: false, queueMemory: false };
   return { acknowledged: false, queueDurable: true, queueMemory: false };
 }
 
@@ -35,9 +39,12 @@ export function decideNodeWriteRetry(outcome: "success" | "unbound" | "failed"):
 export async function applyPendingCloudWrites(
   pending: PendingEdit[],
   writes: CloudNodeWrites,
-): Promise<{ acknowledged: string[]; retained: string[] }> {
+): Promise<{ acknowledged: string[]; retained: string[]; dropped: string[] }> {
   const acknowledged: string[] = [];
   const retained: string[] = [];
+  // stale-write：這份排隊中的舊 payload 已被更新版本蓋過 — 清出佇列
+  //（否則每次 online 都重放、每次都 409），但不算成功。
+  const dropped: string[] = [];
   for (const edit of pending) {
     if (edit.kind !== "node") {
       retained.push(edit.id);
@@ -63,12 +70,13 @@ export async function applyPendingCloudWrites(
         continue;
       }
       if (isCloudWriteAcknowledged(result)) acknowledged.push(edit.id);
+      else if (result === "conflict") dropped.push(edit.id);
       else retained.push(edit.id);
     } catch {
       retained.push(edit.id);
     }
   }
-  return { acknowledged, retained };
+  return { acknowledged, retained, dropped };
 }
 
 const DB_NAME = "duigao-collaboration";
