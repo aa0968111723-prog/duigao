@@ -1070,6 +1070,84 @@ try {
   const replayDelete = as(owner, `delete from public.room_branches where id = '${projectPoster}'::uuid;`);
   ok("重跑 0013 後 branch 封存規則仍在", !replayArchive.failed && replayDelete.failed, [replayArchive.err, replayDelete.err].filter(Boolean).join(" | "));
 
+  section("協作工作台：0014 whiteboard / discussion / decision RLS");
+  const collabBoard = psql("select gen_random_uuid();").out;
+  const collabNode = psql("select gen_random_uuid();").out;
+  const collabEdge = psql("select gen_random_uuid();").out;
+  const collabMsg = psql("select gen_random_uuid();").out;
+  const collabDecision = psql("select gen_random_uuid();").out;
+  const otherRoom = psql("select gen_random_uuid();").out;
+  const otherBoard = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}';
+    insert into public.whiteboards (id, room_id, title, description)
+      values ('${collabBoard}'::uuid, '${capRoom}'::uuid, '招生規劃', '活動討論');
+    insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, x, y, content)
+      values ('${collabNode}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'text', 20, 20, '{"text":"招生"}'::jsonb);`);
+  const selfEdge = as(owner, `insert into public.whiteboard_edges (id, whiteboard_id, room_id, source_node_id, target_node_id, edge_type) values ('${collabEdge}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, '${collabNode}'::uuid, '${collabNode}'::uuid, 'default');`);
+  ok("edge 不能連到自己", selfEdge.failed);
+  const secondNode = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可以建立白板與節點",
+    !as(owner, `insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${secondNode}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'flow', '{"text":"擺攤"}'::jsonb);`).failed
+      && as(owner, `select count(*) from public.whiteboards where id = '${collabBoard}'::uuid;`).out === "1",
+  );
+  ok(
+    "reviewer 可以讀白板與參加討論",
+    as(reviewer, `select count(*) from public.whiteboards where id = '${collabBoard}'::uuid;`).out === "1"
+      && !as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_name, body) values ('${collabMsg}'::uuid, '${capRoom}'::uuid, 'Reviewer', '先看招生流程');`).failed,
+  );
+  ok(
+    "reviewer 預設不能建整塊白板或刪除白板",
+    as(reviewer, `insert into public.whiteboards (room_id, title) values ('${capRoom}'::uuid, 'blocked');`).failed
+      && as(reviewer, `delete from public.whiteboards where id = '${collabBoard}'::uuid;`).failed,
+  );
+  ok(
+    "reviewer 預設不能改節點，直到房主開放協作",
+    as(reviewer, `update public.whiteboard_nodes set content = '{"text":"hack"}'::jsonb where id = '${collabNode}'::uuid;`).failed,
+  );
+  ok(
+    "開放 allow_board_edit 後 reviewer 可以編節點",
+    !as(owner, `update public.rooms set allow_board_edit = true where id = '${capRoom}'::uuid;`).failed
+      && !as(reviewer, `update public.whiteboard_nodes set content = '{"text":"一起改"}'::jsonb where id = '${collabNode}'::uuid;`).failed,
+  );
+  ok(
+    "reviewer 仍然不能封存整塊白板",
+    as(reviewer, `update public.whiteboards set archived_at = now() where id = '${collabBoard}'::uuid;`).failed,
+  );
+  ok(
+    "owner 可以寫決策，reviewer 不能 finalize",
+    !as(owner, `insert into public.decision_records (id, room_id, title, status) values ('${collabDecision}'::uuid, '${capRoom}'::uuid, '已決定：採用 B 版', 'pending');`).failed
+      && as(reviewer, `update public.decision_records set status = 'decided' where id = '${collabDecision}'::uuid;`).failed
+      && !as(owner, `update public.decision_records set status = 'decided' where id = '${collabDecision}'::uuid;`).failed,
+  );
+  ok(
+    "白板 hard delete 被擋住，只能封存",
+    as(owner, `delete from public.whiteboards where id = '${collabBoard}'::uuid;`).failed
+      && !as(owner, `update public.whiteboards set archived_at = now() where id = '${collabBoard}'::uuid;`).failed,
+  );
+  psql(`set request.jwt.claim.sub = '${owner}';
+    select create_room_with_invite('${otherRoom}'::uuid, '另一間房', 'other-collab-token-0001', 'Owner', '#111111');
+    insert into public.whiteboards (id, room_id, title) values ('${otherBoard}'::uuid, '${otherRoom}'::uuid, '不該看到');`);
+  ok(
+    "跨房隔離：reviewer 讀不到另一間房的白板",
+    as(reviewer, `select count(*) from public.whiteboards where id = '${otherBoard}'::uuid;`).out === "0",
+  );
+  ok(
+    "get_whiteboard_context 只回結構不回原始媒體",
+    as(owner, `select (get_whiteboard_context('${collabBoard}'::uuid)->>'whiteboard') is not null;`).out === "t"
+      && !as(owner, `select get_whiteboard_context('${collabBoard}'::uuid)::text;`).out.includes("room-assets"),
+  );
+  ok("匿名讀不到白板 / 討論 / 決策", asAnon(`select count(*) from public.whiteboards;`).out !== "1" && asAnon(`select count(*) from public.room_discussion_messages;`).out !== "1");
+
+  section("協作工作台：0014 可以重跑");
+  const collabShape = () => psql(`select
+    (select count(*) from information_schema.tables where table_name in ('whiteboards','whiteboard_nodes','whiteboard_edges','room_discussion_messages','decision_records','voice_sessions')) || '/' ||
+    (select count(*) from pg_policies where tablename in ('whiteboards','whiteboard_nodes','whiteboard_edges','room_discussion_messages','decision_records')) || '/' ||
+    (select count(*) from pg_trigger where tgname in ('whiteboards_no_delete','whiteboards_touch'));`).out;
+  const collabBefore = collabShape();
+  psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
+  ok("重跑 0014 之後 tables / policies / triggers 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

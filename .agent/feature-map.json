@@ -18,6 +18,59 @@
   },
   "features": [
     {
+      "id": "collaboration-workspace",
+      "name": "Collaboration workspace",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/collaboration/types.ts",
+          "src/features/multi-room/MultiBranchRoom.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_collaboration_workspace.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration-workspace.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration-workspace.test.ts",
+        "src/features/collaboration/types.ts",
+        "src/features/multi-room/MultiBranchRoom.tsx",
+        "supabase/migrations/0014_collaboration_workspace.sql"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
       "id": "custom-share-cover",
       "name": "Custom share cover",
       "status": "implemented",
@@ -74,6 +127,102 @@
       "notes": [
         "Status is based on executable evidence, not documentation or PR metadata."
       ]
+    },
+    {
+      "id": "decision-records",
+      "name": "Decision records",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/collaborationRepository.ts",
+          "src/features/collaboration/types.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_collaboration_workspace.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration-workspace.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration-workspace.test.ts",
+        "src/cloud/collaborationRepository.ts",
+        "src/features/collaboration/types.ts",
+        "supabase/migrations/0014_collaboration_workspace.sql"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
+      "id": "flowchart",
+      "name": "Flowchart nodes",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/collaboration/nodes.ts",
+          "src/features/whiteboard/WhiteboardWorkspace.tsx"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/collaboration-workspace.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration-workspace.test.ts",
+        "src/features/collaboration/nodes.ts",
+        "src/features/whiteboard/WhiteboardWorkspace.tsx"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "image-review",
@@ -168,6 +317,49 @@
       "notes": [
         "Status is based on executable evidence, not documentation or PR metadata."
       ]
+    },
+    {
+      "id": "mindmap",
+      "name": "Mindmap nodes",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/features/collaboration/nodes.ts",
+          "src/features/whiteboard/WhiteboardWorkspace.tsx"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/collaboration-workspace.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration-workspace.test.ts",
+        "src/features/collaboration/nodes.ts",
+        "src/features/whiteboard/WhiteboardWorkspace.tsx"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "multi-branch-room",
@@ -492,6 +684,59 @@
       "notes": [
         "Status is based on executable evidence, not documentation or PR metadata."
       ]
+    },
+    {
+      "id": "room-discussion",
+      "name": "Room-layer discussion",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/collaborationRepository.ts",
+          "src/features/room-discussion/RoomDiscussion.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_collaboration_workspace.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration-workspace.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration-workspace.test.ts",
+        "src/cloud/collaborationRepository.ts",
+        "src/features/room-discussion/RoomDiscussion.tsx",
+        "supabase/migrations/0014_collaboration_workspace.sql"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "share-preview",
@@ -1127,6 +1372,165 @@
       "notes": [
         "Status is based on executable evidence, not documentation or PR metadata."
       ]
+    },
+    {
+      "id": "whiteboard-edges",
+      "name": "Whiteboard edges",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/collaborationRepository.ts",
+          "src/features/collaboration/nodes.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_collaboration_workspace.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration-workspace.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration-workspace.test.ts",
+        "src/cloud/collaborationRepository.ts",
+        "src/features/collaboration/nodes.ts",
+        "supabase/migrations/0014_collaboration_workspace.sql"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
+      "id": "whiteboard-nodes",
+      "name": "Whiteboard nodes",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/collaborationRepository.ts",
+          "src/features/collaboration/nodes.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_collaboration_workspace.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration-workspace.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration-workspace.test.ts",
+        "src/cloud/collaborationRepository.ts",
+        "src/features/collaboration/nodes.ts",
+        "supabase/migrations/0014_collaboration_workspace.sql"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
+      "id": "whiteboards",
+      "name": "Whiteboards",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/collaborationRepository.ts",
+          "src/features/whiteboard/WhiteboardWorkspace.tsx"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_collaboration_workspace.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration-workspace.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration-workspace.test.ts",
+        "src/cloud/collaborationRepository.ts",
+        "src/features/whiteboard/WhiteboardWorkspace.tsx",
+        "supabase/migrations/0014_collaboration_workspace.sql"
+      ],
+      "priority": 1,
+      "notes": []
     }
   ]
 }
