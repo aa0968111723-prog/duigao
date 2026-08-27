@@ -128,6 +128,19 @@ export const faults = {
   signTtl: null,
   /** Fail this many room-assets deletes before allowing cleanup to succeed. */
   assetDelete: 0,
+  // Room-scoped metadata-failure injection. The old boolean/counter faults are
+  // global, so a straggling cleanup DELETE (or versions POST) from an earlier
+  // scenario that is still in flight can consume them and the assertion turns
+  // into a race (CI-red, locally heisenbuggy). Arm versionInsertNextRoom and
+  // the mock scopes the whole failure chain to the NEXT room created:
+  //   create_room_with_invite  -> remembers that room id
+  //   first versions POST for it -> 500 once, remembers row.video_path
+  //   first room-assets DELETE containing that path -> 500 once (counted)
+  // Requests belonging to other rooms can never consume the injection.
+  versionInsertNextRoom: false,
+  versionInsertRoomId: null,
+  assetDeleteTargetPath: null,
+  assetDeleteFaultCount: 0,
   /** Fail the next versions insert after Storage has accepted the bytes. */
   versionInsert: false,
   /**
@@ -404,6 +417,10 @@ export const server = http.createServer(async (req, res) => {
       });
       members.set(body.p_room_id, new Set([uid]));
       memberRoles.set(roleKey(body.p_room_id, uid), "owner");
+      if (faults.versionInsertNextRoom) {
+        faults.versionInsertNextRoom = false;
+        faults.versionInsertRoomId = body.p_room_id;
+      }
       return json(res, 200, body.p_room_id);
     }
     if (fn === "join_room_by_invite") {
@@ -475,6 +492,14 @@ export const server = http.createServer(async (req, res) => {
       if (table === "versions" && faults.versionInsert) {
         faults.versionInsert = false;
         return json(res, 500, { message: "injected version metadata failure" });
+      }
+      if (table === "versions" && faults.versionInsertRoomId) {
+        const hit = rows.find((row) => row.room_id === faults.versionInsertRoomId);
+        if (hit) {
+          faults.versionInsertRoomId = null;
+          faults.assetDeleteTargetPath = hit.video_path || null;
+          return json(res, 500, { message: "injected version metadata failure" });
+        }
       }
       const prefer = String(req.headers.prefer || "");
       const upsert = prefer.includes("resolution=merge-duplicates");
@@ -653,6 +678,15 @@ export const server = http.createServer(async (req, res) => {
       }
       if (bucket === "room-assets" && faults.assetDelete > 0) {
         faults.assetDelete -= 1;
+        return json(res, 500, { message: "injected room-assets delete failure" });
+      }
+      if (
+        bucket === "room-assets" &&
+        faults.assetDeleteTargetPath &&
+        (body.prefixes ?? []).includes(faults.assetDeleteTargetPath)
+      ) {
+        faults.assetDeleteTargetPath = null;
+        faults.assetDeleteFaultCount += 1;
         return json(res, 500, { message: "injected room-assets delete failure" });
       }
       const gone = [];
