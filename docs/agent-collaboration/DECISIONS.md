@@ -103,3 +103,10 @@ PR-00 是 docs-only 的計畫 checkpoint（任務規範明定第一個 PR 為計
 - 離線重放**維持 upsert**：離線期間新建的節點必須能重放建立；改成
   update-only 會把離線創作整批丟掉。代價是「已刪節點被離線重放復活」的
   已知窗口 — 接受並記錄，未來以 tombstone 檢查（PR-08 或 02c 後續）關窗。
+
+### ADR-011 補記（Grok pr02b F5）
+
+- 相等 version 不觸發 stale-write：0014 trigger 條件是 incoming < stored，
+  相等會被接受並 +1 — 同版本並發是 LWW 覆寫，屬既有語意。
+- 離線 delete 無 OCC：重放的 delete 會刪掉別人已更新的列（與復活窗口對偶）。
+  兩者都留給 tombstone 設計一併處理；delete 路徑不裝假的 conflict 分支。

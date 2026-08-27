@@ -479,10 +479,11 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
           return false;
         }
         if (isStaleWrite(err)) {
-          // 版本衝突：舊 payload 不可能被接受 — 不進佇列、立刻拉一份
-          // 最新快照（drop + refetch），呼叫端據 "conflict" 清 IDB 佇列。
+          // 版本衝突：舊 payload 不可能被接受。refetch 由呼叫端負責 —
+          // 這裡不 scheduleReload：summary 路徑的 nodes 是空的（lazy），
+          // 對開著的白板是空操作（Grok pr02b F2），真正的取新是
+          // loadWhiteboard(該板)。
           setStatus(pending.current.length ? "offline-pending" : "synced");
-          scheduleReload();
           return "conflict";
         }
         const retry = decideNodeWriteRetry("failed");
@@ -492,7 +493,7 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
         return false;
       }
     },
-    [supabase, scheduleReload],
+    [supabase],
   );
 
   // Bind: join (guest with invite) or reconnect (owner via mapping), then load + subscribe.

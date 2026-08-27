@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { addRoomTarget, buildInviteUrl, readInviteFromUrl } from "../../src/cloud/invite.ts";
+import { isStaleWrite } from "../../src/cloud/errors.ts";
+import { CloudError } from "../../src/cloud/errors.ts";
 import {
   addFlowNextStep,
   addMindmapChild,
@@ -501,4 +503,11 @@ test("stale-write 的排隊編輯在重放時被清出佇列而不是永遠重�
   assert.deepEqual(result.acknowledged, ["node:a"]);
   assert.deepEqual(result.dropped, ["node:b"]);
   assert.deepEqual(result.retained, ["node:c"]);
+});
+
+test("isStaleWrite 對 CloudError 傳遞鏈成立（Grok pr02b F1）", () => {
+  assert.equal(isStaleWrite(new CloudError("stale-write", "storage")), true);
+  assert.equal(isStaleWrite(new Error("stale-write")), true);
+  assert.equal(isStaleWrite(new Error("revision conflict")), false);
+  assert.equal(isStaleWrite({ message: "stale-write", hint: "重新載入" }), true);
 });

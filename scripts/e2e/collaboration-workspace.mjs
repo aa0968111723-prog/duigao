@@ -16,7 +16,7 @@ import http from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { faults, requestLog, start as startMock } from "./mock-supabase.mjs";
+import { faults, requestLog, rows, start as startMock } from "./mock-supabase.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54418;
@@ -326,6 +326,55 @@ try {
     await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("這句會成功並觸發快照"), null, { timeout: 15000 });
     await page.waitForTimeout(600);
     check("失敗的 ghost 活過整包快照替換", await page.locator(".rd-msg.is-failed").count() === 1, "failed rows=" + await page.locator(".rd-msg.is-failed").count());
+
+    // --- PR-02b：stale-write conflict → drop + 該板 refetch（真 409） -----
+    {
+      const stickyInput = page.locator("textarea.wb-node-text").first();
+      // 先確保白板 pane 開著且有一個可編輯節點（前面流程已建）
+      await page.getByRole("button", { name: "白板", exact: true }).click();
+      // 板可能回到列表狀態：沒有 canvas 就點板卡打開
+      if (!(await page.locator('[data-testid="wb-canvas"]').count())) {
+        await page.locator('.wb-card').first().click({ force: true }).catch(() => undefined);
+      }
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      // 開著的板未必有可編輯便利貼：先建一張，等它落雲（有 server version）
+      if (!(await page.locator("textarea.wb-node-text").count())) {
+        await page.getByTestId("whiteboard-add").click();
+        await page.getByRole("button", { name: "便利貼" }).click();
+        await page.waitForSelector("textarea.wb-node-text", { timeout: 15000 });
+      }
+      await page.waitForTimeout(600); // 等新便利貼的雲端 ack（version 進 mock）
+      check("02b 前置：mock 有節點列", rows.whiteboard_nodes.length > 0, "nodes=" + rows.whiteboard_nodes.length);
+      {
+        // 模擬「別人已存了更新版本」：所有節點的 server 版本直接跳高
+        // （編輯到哪一顆都會 409）
+        const bumped = rows.whiteboard_nodes.map((row) => { row.version = Number(row.version ?? 1) + 7; return row.version; });
+        const maxBumped = Math.max(...bumped);
+        requestLog.length = 0;
+        // 觸發一次本地編輯 → blur 讓 persist("end") 送出舊 version → 409
+        await stickyInput.click({ force: true }).catch(() => undefined);
+        await stickyInput.fill("衝突觸發").catch(() => undefined);
+        await page.keyboard.press("Tab");
+        await page.waitForFunction(
+          () => [...document.querySelectorAll(".toast, [role=status], .t-msg")].some((el) => el.textContent?.includes("被別人改過")),
+          null,
+          { timeout: 20000 },
+        ).catch(() => undefined);
+        const toastSeen = await page.evaluate(() => [...document.querySelectorAll("*")].some((el) => el.childElementCount === 0 && el.textContent?.includes("被別人改過")));
+        const boardRefetched = requestLog.some((line) => line.includes("GET /rest/v1/whiteboard_nodes"));
+        check("stale-write 衝突：誠實 toast＋該板 refetch（非空 reload）", toastSeen && boardRefetched, `toast=${toastSeen} refetch=${boardRefetched}`);
+        // 同步後繼續編輯要能成功（版本已前進，不再 409 空轉）
+        await page.waitForTimeout(400);
+        await stickyInput.click({ force: true }).catch(() => undefined);
+        await stickyInput.fill("同步後再編輯").catch(() => undefined);
+        await page.keyboard.press("Tab");
+        await page.waitForTimeout(800);
+        void maxBumped;
+        const landed = rows.whiteboard_nodes.some((row) => JSON.stringify(row.content ?? row).includes("同步後再編輯"));
+        check("同步後編輯恢復（衝突後的寫真的落地，不再空轉）", landed, "landed=" + landed);
+      }
+      await page.getByRole("button", { name: "對話", exact: true }).click();
+    }
     await page.getByTestId("discussion-retry").click();
     await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 });
     await page.waitForTimeout(400);

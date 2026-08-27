@@ -91,6 +91,7 @@ import { collectBoardEditors, stampWriter } from "./features/collaboration/prese
 import {
   applyPendingCloudWrites,
   clearPendingEdit,
+  clearPendingEditIf,
   decideNodeWriteRetry,
   isBrowserOnline,
   isCloudWriteAcknowledged,
@@ -1334,9 +1335,17 @@ export function App() {
           }
           if (result === "conflict") {
             // stale-write：別人已存了較新版本。舊 payload 不進佇列（重放
-            // 永遠 409），清掉殘鍵、說一聲，最新內容由 reload 取回。
+            // 永遠 409）。取新必須是 loadWhiteboard(該板) — 整房 summary
+            // 的 nodes 是空的、換不到節點（Grok pr02b F2）。toast 等圖真的
+            // 換完才說，而且說實話。
             await clearPendingEdit(`node:${node.id}`);
-            showToast("這個節點剛被別人更新，已改用最新內容。", { tone: "error" });
+            const refreshed = await cloudRef.current.loadWhiteboard?.(node.whiteboardId).catch(() => false);
+            showToast(
+              refreshed
+                ? "這個節點被別人改過，白板已同步成最新版本。"
+                : "這個節點被別人改過；重新打開白板可取得最新版本。",
+              { tone: "error" },
+            );
             return;
           }
           const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
@@ -1401,10 +1410,9 @@ export function App() {
           await clearPendingEdit(`node-del:${id}`);
           return;
         }
-        if (result === "conflict") {
-          await clearPendingEdit(`node-del:${id}`);
-          return;
-        }
+        // delete 沒有版本檢查（touch trigger 只掛 BEFORE UPDATE），SQL 上
+        // 到不了 stale-write — 不裝死碼假裝有 OCC；離線 delete 蓋掉線上
+        // 編輯的語意缺口記在 ADR-011，tombstone 時一併處理。
         const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
         if (retry.queueDurable && cloudRef.current.active) {
           await queuePendingEdit({
@@ -1582,13 +1590,15 @@ export function App() {
       const current = roomRef.current;
       if (!current || !isBrowserOnline()) return;
       void listPendingEdits(current.id).then(async (pending) => {
+        const listedAt = new Map(pending.map((edit) => [edit.id, edit.createdAt]));
         const { acknowledged, dropped } = await applyPendingCloudWrites(pending, {
           upsertNode: cloudRef.current.writes.upsertNode,
           deleteNode: cloudRef.current.writes.deleteNode,
         });
-        for (const id of acknowledged) await clearPendingEdit(id);
-        // stale-write：排隊中的舊編輯已被更新版本蓋過 — 清出佇列並說一聲。
-        for (const id of dropped) await clearPendingEdit(id);
+        // 清鍵一律以「列出當下那一份」為準：flush 期間使用者可能又打了字，
+        // 同 key 的較新 payload 不能被盲刪（Grok pr02b F3）。
+        for (const id of acknowledged) await clearPendingEditIf(id, listedAt.get(id) ?? -1);
+        for (const id of dropped) await clearPendingEditIf(id, listedAt.get(id) ?? -1);
         if (dropped.length) showToast("離線期間的部分白板編輯已被較新版本取代。", { tone: "error" });
       });
     };

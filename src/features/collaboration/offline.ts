@@ -153,6 +153,21 @@ export async function clearPendingEdit(id: string): Promise<void> {
 }
 
 /**
+ * 只在 IDB 裡的列仍是「當初列出的那一份」時才清（以 createdAt 判定）。
+ * flush 進行中使用者可能對同一節點又打了字 — queuePendingEdit 以同 key
+ * put 覆蓋，盲刪會把較新的 payload 一起殺掉（Grok pr02b F3）。
+ */
+export async function clearPendingEditIf(id: string, createdAt: number): Promise<void> {
+  await withStore(PENDING, "readwrite", (store) => {
+    const req = store.get(id);
+    req.onsuccess = () => {
+      const row = req.result as PendingEdit | undefined;
+      if (row && row.createdAt === createdAt) store.delete(id);
+    };
+  });
+}
+
+/**
  * Last-write / optimistic reconcile after a brief disconnect.
  * Cloud rows win when their updatedAt/version is newer; pending local edits
  * that the server never saw stay queued.
@@ -179,9 +194,18 @@ export function reconcileNodes(local: WhiteboardNode[], remote: WhiteboardNode[]
   const byId = new Map(remote.map((node) => [node.id, node]));
   for (const node of local) {
     const remoteNode = byId.get(node.id);
-    if (!remoteNode || node.updatedAt > remoteNode.updatedAt || node.version > remoteNode.version) {
+    if (!remoteNode) {
       byId.set(node.id, node);
+      continue;
     }
+    // version 是伺服器的 OCC 計數器 — 樂觀本地編輯不會前進它（stamp 只用
+    // acked）。version 不同時 version 說了算：本地 updatedAt 較新但 version
+    // 較舊＝這份編輯已經輸掉衝突，讓伺服器列贏，refetch 才換得動節點、
+    // lastAcked 才會前進（Grok pr02b F2 深層）。同 version 才用 updatedAt。
+    const localVersion = node.version ?? 1;
+    const remoteVersion = remoteNode.version ?? 1;
+    if (localVersion > remoteVersion) byId.set(node.id, node);
+    else if (localVersion === remoteVersion && node.updatedAt > remoteNode.updatedAt) byId.set(node.id, node);
   }
   const deleted = new Set(
     pending.filter((edit) => edit.kind === "node" && edit.op === "delete").map((edit) => {
