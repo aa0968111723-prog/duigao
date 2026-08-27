@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T21:59:02.000Z",
+  "generatedAt": "2026-08-27T22:50:36.000Z",
   "git": {
     "branch": "feat/mobile-upload-hardening",
-    "sha": "725ead54a94d53182fd71b51e2ef1420c900845e",
-    "mainSha": "725ead54a94d53182fd71b51e2ef1420c900845e",
-    "dirty": true
+    "sha": "1d594c02c632c4c084ff1a309c12548827f2fafc",
+    "mainSha": "932d0d0e4ecef206eb6f1c5e9d167076f6198f52",
+    "dirty": false
   },
   "project": {
     "name": "duigao",
@@ -34,7 +34,16 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": []
+      "items": [
+        {
+          "baseRefName": "main",
+          "headRefName": "feat/mobile-upload-hardening",
+          "isDraft": false,
+          "number": 56,
+          "title": "PR-01c: 手機上傳強化 — 首上傳半路死亡沿用同房、版本重送冪等、HEVC 誠實提示",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/56"
+        }
+      ]
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -980,7 +989,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0018",
+    "repoMigrationHead": "0019",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -999,10 +1008,11 @@
       "supabase/migrations/0015_asset_intelligence.sql",
       "supabase/migrations/0016_asset_library.sql",
       "supabase/migrations/0017_author_acl.sql",
-      "supabase/migrations/0018_discussion_attachments.sql"
+      "supabase/migrations/0018_discussion_attachments.sql",
+      "supabase/migrations/0019_ai_apply_audit.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0018",
+    "productionMigrationExpectation": "0019",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1163,7 +1173,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0018_discussion_attachments.sql."
+        "message": "Migration order is contiguous through 0019_ai_apply_audit.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",
