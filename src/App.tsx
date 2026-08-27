@@ -92,6 +92,7 @@ import {
   applyPendingCloudWrites,
   clearPendingEdit,
   clearPendingEditIf,
+  applyBoardPatches,
   decideNodeWriteRetry,
   isBrowserOnline,
   isCloudWriteAcknowledged,
@@ -386,7 +387,38 @@ export function App() {
 
   // Cloud persistence (only active when VITE_SUPABASE_* are set). Inert in
   // local-only mode, so the IndexedDB + PeerJS path below is unchanged.
-  const cloud = useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSnapshot: applyRemoteRoom, showToast });
+  // ---- 白板即時增量（PR-02c） ------------------------------------------
+  // 收到的 row-patch 進佇列，一個 animation frame 內合併成單次 setRoom：
+  // arrange 之類的爆量寫入不會變成 N 次 render + N 次 IDB trackSave。
+  const boardPatchQueue = useRef<import("./cloud/useCloudRoom").BoardPatch[]>([]);
+  const boardPatchScheduled = useRef(false);
+  const draggingNodeIds = useRef<ReadonlySet<string> | null>(null);
+  const flushBoardPatches = useCallback(() => {
+    boardPatchScheduled.current = false;
+    const batch = boardPatchQueue.current;
+    boardPatchQueue.current = [];
+    if (!batch.length) return;
+    setRoom((current) => {
+      if (!current) return current;
+      const result = applyBoardPatches(
+        current.whiteboardNodes ?? [],
+        current.whiteboardEdges ?? [],
+        lastAckedNodeVersion.current,
+        batch,
+        draggingNodeIds.current,
+      );
+      if (!result.changed) return current;
+      return { ...current, whiteboardNodes: result.nodes, whiteboardEdges: result.edges };
+    });
+  }, []);
+  const onBoardPatch = useCallback((patch: import("./cloud/useCloudRoom").BoardPatch) => {
+    boardPatchQueue.current.push(patch);
+    if (boardPatchScheduled.current) return;
+    boardPatchScheduled.current = true;
+    requestAnimationFrame(flushBoardPatches);
+  }, [flushBoardPatches]);
+
+  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
 
@@ -2546,6 +2578,7 @@ export function App() {
           discussionGhosts: discussionOutbox.ghosts,
           discussionSendStates: discussionOutbox.sendStates,
           onRetryDiscussion: discussionOutbox.retry,
+          onBoardDragState: (ids) => { draggingNodeIds.current = ids ? new Set(ids) : null; },
           onAttachDiscussion: (files) => void sendAttachment(files),
           attachBusy: attachmentUploading,
           onIntakeReject: (reason) => showToast(reason, { tone: "error" }),

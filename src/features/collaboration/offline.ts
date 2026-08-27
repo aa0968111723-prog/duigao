@@ -79,6 +79,62 @@ export async function applyPendingCloudWrites(
   return { acknowledged, retained, dropped };
 }
 
+export type BoardPatchInput =
+  | { type: "node-upsert"; node: WhiteboardNode }
+  | { type: "node-delete"; id: string }
+  | { type: "edge-insert"; edge: WhiteboardEdge }
+  | { type: "edge-delete"; id: string };
+
+/**
+ * 白板即時增量的合併規則（PR-02c，純函式）：
+ * - node-upsert 只接受「嚴格更新的 version」（> max(acked, local)）—
+ *   自己的 echo（version == 剛 ack 的值）與亂序舊事件都被擋下；
+ *   ack 水位無條件推到最高，本地下一筆寫才不會 409。
+ * - 拖曳中的節點讓路（拖曳結束的 persist 走 OCC；輸了由 02b 衝突路徑收）。
+ * - edge 無版本欄位：insert 以 id 去重、delete 以 id 移除。
+ */
+export function applyBoardPatches(
+  nodes: WhiteboardNode[],
+  edges: WhiteboardEdge[],
+  acked: Map<string, number>,
+  patches: BoardPatchInput[],
+  draggingIds: ReadonlySet<string> | null,
+): { nodes: WhiteboardNode[]; edges: WhiteboardEdge[]; changed: boolean } {
+  let nextNodes = nodes;
+  let nextEdges = edges;
+  for (const patch of patches) {
+    if (patch.type === "node-upsert") {
+      const incoming = patch.node;
+      const shieldedAcked = acked.get(incoming.id) ?? 0;
+      if (draggingIds?.has(incoming.id)) {
+        // 讓路但 ack 水位仍推進：拖曳結束的 persist 會以「等版本 LWW」
+        // 勝出（最後的實體動作贏 — ADR-011 補記），而不是 409 後整個輸掉。
+        if ((incoming.version ?? 1) > shieldedAcked) acked.set(incoming.id, incoming.version ?? 1);
+        continue;
+      }
+      const ackedVersion = acked.get(incoming.id) ?? 0;
+      const local = nextNodes.find((item) => item.id === incoming.id);
+      const localVersion = local?.version ?? 0;
+      const incomingVersion = incoming.version ?? 1;
+      if (incomingVersion > Math.max(ackedVersion, localVersion)) {
+        nextNodes = local
+          ? nextNodes.map((item) => (item.id === incoming.id ? incoming : item))
+          : [...nextNodes, incoming];
+      }
+      if (incomingVersion > ackedVersion) acked.set(incoming.id, incomingVersion);
+    } else if (patch.type === "node-delete") {
+      if (nextNodes.some((item) => item.id === patch.id)) {
+        nextNodes = nextNodes.filter((item) => item.id !== patch.id);
+      }
+    } else if (patch.type === "edge-insert") {
+      if (!nextEdges.some((item) => item.id === patch.edge.id)) nextEdges = [...nextEdges, patch.edge];
+    } else if (nextEdges.some((item) => item.id === patch.id)) {
+      nextEdges = nextEdges.filter((item) => item.id !== patch.id);
+    }
+  }
+  return { nodes: nextNodes, edges: nextEdges, changed: nextNodes !== nodes || nextEdges !== edges };
+}
+
 const DB_NAME = "duigao-collaboration";
 const DB_VERSION = 1;
 const SNAPSHOTS = "board_snapshots";

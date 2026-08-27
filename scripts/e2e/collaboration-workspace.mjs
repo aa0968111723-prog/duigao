@@ -373,6 +373,53 @@ try {
         const landed = rows.whiteboard_nodes.some((row) => JSON.stringify(row.content ?? row).includes("同步後再編輯"));
         check("同步後編輯恢復（衝突後的寫真的落地，不再空轉）", landed, "landed=" + landed);
       }
+      // --- PR-02c：兩分頁即時增量（無整房 reload） --------------------
+      {
+        // A 拿分享連結（殼 header 的分享 — PR-01a 抬升後兩路徑都渲染）
+        await page.locator(".project-share-button").click();
+        await page.waitForSelector("input.m-share-url", { timeout: 30000 });
+        const shareUrl = await page.locator("input.m-share-url").inputValue();
+        await page.locator(".m-modal").getByRole("button", { name: "關閉", exact: true }).click().catch(() => undefined);
+
+        const ctxB = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, userAgent: "Mozilla/5.0 (Linux; Android 14) e2e" });
+        const B = await ctxB.newPage();
+        try {
+          await B.goto(`${APP}${new URL(shareUrl).hash}`, { waitUntil: "domcontentloaded" });
+          await B.fill("input.text-input", "第二分頁");
+          await B.click("button.btn-primary");
+          // 分享連結可能帶白板深連結：B 直接落在板上；否則自己走過去。
+          await B.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
+          if (!(await B.locator('[data-testid="wb-canvas"]').count())) {
+            await B.getByRole("button", { name: "白板", exact: true }).click().catch(() => undefined);
+            if (!(await B.locator('[data-testid="wb-canvas"]').count())) {
+              await B.locator(".wb-card").first().click({ force: true }).catch(() => undefined);
+            }
+          }
+          await B.waitForSelector('[data-testid="wb-canvas"]', { timeout: 20000 });
+
+          requestLog.length = 0;
+          // A 新增一張便利貼並打字（INSERT + UPDATE 都走 row-patch）
+          await page.getByTestId("whiteboard-add").click();
+          await page.getByRole("button", { name: "便利貼" }).click();
+          await page.waitForSelector("textarea.wb-node-text", { timeout: 15000 });
+          await page.locator("textarea.wb-node-text").last().fill("跨分頁增量");
+          await page.keyboard.press("Tab");
+
+          // B 不做任何重開動作，節點與文字要自己出現
+          await B.waitForFunction(
+            () => [...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("跨分頁增量")),
+            null,
+            { timeout: 20000 },
+          );
+          check("兩分頁：B 不重開就看到 A 的新節點與文字", true);
+
+          // reload 風暴不見了：這段期間不得出現任何整房快照 GET
+          const fullReloads = requestLog.filter((line) => line.startsWith("GET /rest/v1/rooms?select=*")).length;
+          check("row-patch 取代整房 reload（rooms 快照 GET = 0）", fullReloads === 0, "fullReloads=" + fullReloads);
+        } finally {
+          await ctxB.close();
+        }
+      }
       await page.getByRole("button", { name: "對話", exact: true }).click();
     }
     await page.getByTestId("discussion-retry").click();

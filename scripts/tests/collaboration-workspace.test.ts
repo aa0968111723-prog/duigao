@@ -27,7 +27,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 import { buildDiscussionContext, getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "../../src/features/collaboration/links.ts";
 import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion, stickyTextInputProps } from "../../src/features/collaboration/permissions.ts";
-import { applyPendingCloudWrites, applyPendingNodeEdits, decideNodeWriteRetry, isBrowserOnline, isCloudWriteAcknowledged, reconcileNodes } from "../../src/features/collaboration/offline.ts";
+import { applyBoardPatches, applyPendingCloudWrites, applyPendingNodeEdits, decideNodeWriteRetry, isBrowserOnline, isCloudWriteAcknowledged, reconcileNodes } from "../../src/features/collaboration/offline.ts";
 import {
   collaborationSliceFromRoom,
   collaborationSliceHasRows,
@@ -510,4 +510,46 @@ test("isStaleWrite 對 CloudError 傳遞鏈成立（Grok pr02b F1）", () => {
   assert.equal(isStaleWrite(new Error("stale-write")), true);
   assert.equal(isStaleWrite(new Error("revision conflict")), false);
   assert.equal(isStaleWrite({ message: "stale-write", hint: "重新載入" }), true);
+});
+
+// ---- PR-02c：白板即時增量合併規則 -----------------------------------------
+
+test("applyBoardPatches：version gate 擋 echo 與亂序、ack 水位無條件推進", () => {
+  const node = (id: string, version: number, text = "") => ({
+    id, whiteboardId: "b", roomId: "r", nodeType: "text", x: 0, y: 0, width: 100, height: 80,
+    content: { text }, version, createdAt: 1, updatedAt: 1,
+  }) as never;
+  const acked = new Map([["n1", 3]]);
+  // echo（version == acked）不覆蓋；更舊的也不覆蓋
+  let out = applyBoardPatches([node("n1", 3, "本地")], [], acked, [
+    { type: "node-upsert", node: node("n1", 3, "echo") },
+    { type: "node-upsert", node: node("n1", 2, "舊事件") },
+  ], null);
+  assert.equal(out.changed, false);
+  assert.equal((out.nodes[0] as { content: { text: string } }).content.text, "本地");
+  // 嚴格更新才接受；ack 推到最高
+  out = applyBoardPatches(out.nodes, [], acked, [{ type: "node-upsert", node: node("n1", 5, "別人的新版") }], null);
+  assert.equal((out.nodes[0] as { content: { text: string } }).content.text, "別人的新版");
+  assert.equal(acked.get("n1"), 5);
+  // 新節點直接加入
+  out = applyBoardPatches(out.nodes, [], acked, [{ type: "node-upsert", node: node("n2", 1, "新增") }], null);
+  assert.equal(out.nodes.length, 2);
+});
+
+test("applyBoardPatches：拖曳護盾讓路但 ack 仍推進；edge 以 id 去重/移除", () => {
+  const node = (id: string, version: number) => ({
+    id, whiteboardId: "b", roomId: "r", nodeType: "text", x: 0, y: 0, width: 100, height: 80,
+    content: { text: "拖曳中" }, version, createdAt: 1, updatedAt: 1,
+  }) as never;
+  const edge = (id: string) => ({ id, whiteboardId: "b", roomId: "r", sourceNodeId: "a", targetNodeId: "c", edgeType: "flow", createdAt: 1 }) as never;
+  const acked = new Map([["n1", 1]]);
+  const out = applyBoardPatches([node("n1", 1)], [edge("e1")], acked, [
+    { type: "node-upsert", node: node("n1", 9) }, // 拖曳中：不覆蓋
+    { type: "edge-insert", edge: edge("e1") },     // 重複：不重加
+    { type: "edge-insert", edge: edge("e2") },
+    { type: "edge-delete", id: "e1" },
+  ], new Set(["n1"]));
+  assert.equal((out.nodes[0] as { version: number }).version, 1);
+  assert.equal(acked.get("n1"), 9); // 護盾讓路但水位推進，拖完 persist 用舊版會走 02b 衝突
+  assert.deepEqual(out.edges.map((item) => (item as { id: string }).id), ["e2"]);
 });

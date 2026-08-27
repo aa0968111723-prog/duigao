@@ -24,7 +24,7 @@ type WhiteboardRow = {
   version: number;
 };
 
-type NodeRow = {
+export type NodeRow = {
   id: string;
   whiteboard_id: string;
   room_id: string;
@@ -43,7 +43,7 @@ type NodeRow = {
   version: number;
 };
 
-type EdgeRow = {
+export type EdgeRow = {
   id: string;
   whiteboard_id: string;
   room_id: string;

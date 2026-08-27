@@ -83,9 +83,11 @@ import { subscribeRoom, type Unsubscribe } from "./roomSync";
 import type { SyncStatus } from "./types";
 import { mergeRoomBranch } from "../lib/roomBranches";
 import {
+  edgeFromRow,
   insertDecision,
   insertDiscussion,
   insertEdge,
+  nodeFromRow,
   insertWhiteboard,
   loadWhiteboardGraph,
   setAllowBoardEdit as repoSetAllowBoardEdit,
@@ -193,12 +195,22 @@ export type PreviewOpts = {
   patch?: SharePreviewPatch;
 };
 
+export type BoardPatch =
+  | { type: "node-upsert"; node: import("../features/collaboration/types").WhiteboardNode }
+  | { type: "node-delete"; id: string }
+  | { type: "edge-insert"; edge: import("../features/collaboration/types").WhiteboardEdge }
+  | { type: "edge-delete"; id: string };
+
 type Params = {
   guest: Guest | null;
   room: Room | null;
   activeBranchId?: string | null;
+  /** 開著的白板 id：channel 重連/revive 時對它做 loadWhiteboard 自癒。 */
+  activeWhiteboardId?: string | null;
   isGuestSession: boolean;
   onSnapshot: (room: Room) => void;
+  /** 白板增量（PR-02c）：走專屬回呼，不經 applyRemoteRoom（deep-link 消耗不得重跑）。 */
+  onBoardPatch?: (patch: BoardPatch) => void;
   showToast: ShowToast;
 };
 
@@ -259,7 +271,7 @@ function rememberCloudRoom(localRoomId: string, roomId: string, token: string): 
  * Binds the active room to the cloud when configured. Inert (returns
  * local-only) otherwise, so the local IndexedDB + PeerJS path is untouched.
  */
-export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSnapshot, showToast }: Params) {
+export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, showToast }: Params) {
   const [status, setStatus] = useState<SyncStatus>(isCloudConfigured ? "connecting" : "local-only");
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
@@ -289,6 +301,10 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
   const reloadTimer = useRef<number | null>(null);
   const roomRef = useRef<Room | null>(room);
   const activeBranchRef = useRef<string | null>(activeBranchId ?? null);
+  const activeWhiteboardRef = useRef<string | null>(activeWhiteboardId ?? null);
+  activeWhiteboardRef.current = activeWhiteboardId ?? null;
+  const onBoardPatchRef = useRef(onBoardPatch);
+  onBoardPatchRef.current = onBoardPatch;
   roomRef.current = room;
   activeBranchRef.current = activeBranchId ?? null;
   const supabase = getSupabase();
@@ -584,9 +600,25 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
           },
           onFeedbackChange: scheduleReload,
           onProjectChange: scheduleReload,
+          // 白板增量：row → domain，直接 patch（不整房 reload — PR-02c）
+          onBoardNodeUpsert: (row) => {
+            const node = nodeFromRow(row);
+            if (node) onBoardPatchRef.current?.({ type: "node-upsert", node });
+          },
+          onBoardNodeDelete: (id) => onBoardPatchRef.current?.({ type: "node-delete", id }),
+          onBoardEdgeInsert: (row) => {
+            const edge = edgeFromRow(row);
+            if (edge) onBoardPatchRef.current?.({ type: "edge-insert", edge });
+          },
+          onBoardEdgeDelete: (id) => onBoardPatchRef.current?.({ type: "edge-delete", id }),
           onPresence: setOnline,
           onStatus: (connected) => {
-            if (connected) void flushPending();
+            if (connected) {
+              void flushPending();
+              // row-patch 拿掉了 nudge 的意外自癒：重連時對開著的板
+              // 刻意 loadWhiteboard 補齊斷線期間漏掉的增量。
+              if (activeWhiteboardRef.current) void loadWhiteboard(activeWhiteboardRef.current);
+            }
             setStatus((s) => (connected ? (pending.current.length ? "offline-pending" : "synced") : "connecting"));
           },
         });
@@ -620,6 +652,8 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
       void (async () => {
         await flushPending();
         if (boundRef.current) await reload();
+        // 開著的板另外補一次增量（整房 reload 的 summary 不含 nodes）。
+        if (boundRef.current && activeWhiteboardRef.current) await loadWhiteboard(activeWhiteboardRef.current);
       })();
     };
     const onVisible = () => {
