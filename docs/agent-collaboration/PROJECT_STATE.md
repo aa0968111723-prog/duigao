@@ -3,12 +3,19 @@
 > 恢復規則：任何 session 重新進入工作，先讀本檔，再讀 ROADMAP.md 與 BLOCKERS.md，
 > 然後執行 `npm run agent:context` 比對現況。不重做已驗證工作。
 
-更新：2026-08-28（Asia/Taipei）
+更新：2026-08-28 02:30（Asia/Taipei）
 基準：main @ f327a70（Collaborative Intelligence Workspace 1.0 #38）
 
 ## 目前 phase
 
-PR-00（本計畫 PR）＋ 已完成的前置 hotfix PR #42。
+PR-01a（#48，feat/discussion-room-shell）— Grok round-1 MUST_FIX 已全數修復並複驗，等 CI 綠後合併。
+
+## 已合併（時序）
+
+#42 CI 紅燈修復 → #43 PR-00 計畫 → #44 AI Apply（第三 agent，＝原 PR-04 核心）→
+#45 keyed pending writes → #47 author ACL（migration 0017）→ #46 context path strip。
+**第三 agent（codex）平行開工中**：其產出經本 Lead 審核後合併；audit 記錄在
+docs/agent-collaboration/third-agent/。ROADMAP 的 PR-04 範圍需重新盤點（Apply 迴圈已上線）。
 
 ## 已完成（有證據）
 

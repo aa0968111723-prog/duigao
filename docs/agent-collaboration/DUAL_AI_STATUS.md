@@ -18,7 +18,8 @@
 | Round | Grok 輸出 | 裁決 |
 |---|---|---|
 | ci-red-fix（PR #42） | rounds/ci-red-fix/grok-findings.json（3 findings：F1 medium 根因表述、F2 low TOCTOU、F3 契約變嚴確認） | rounds/ci-red-fix/claude-adjudication.md：F1 落實（等待錨定失敗文案）、F2 記錄殘餘（假紅非假綠）、F3 註解修正。修後 157/157 |
-| pr00（本計畫） | rounds/pr00/grok-findings.json | rounds/pr00/claude-adjudication.md |
+| pr00（計畫） | rounds/pr00/grok-findings.json（PLAN_MUST_REVISE，14 findings） | rounds/pr00/claude-adjudication.md（全數落實） |
+| pr01a r1（實作 diff） | rounds/pr01a/grok-findings-round1.json（MUST_FIX，10 findings） | rounds/pr01a/claude-adjudication.md（F1-F10 全修，殘餘記錄） |
 
 ## 紀律
 
