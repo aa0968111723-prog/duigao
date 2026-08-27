@@ -503,6 +503,14 @@ export const server = http.createServer(async (req, res) => {
         const keys = CONFLICT_KEYS[table];
         const existing = keys ? tables[table].find((r) => keys.every((k) => r[k] === filled[k])) : null;
         if (existing && upsert) {
+          if (table === "whiteboard_nodes") {
+            const incoming = Number(filled.version ?? existing.version ?? 1);
+            const current = Number(existing.version ?? 1);
+            if (incoming !== current && incoming < current) {
+              return json(res, 409, { message: "stale-write", hint: "這則內容剛被別人改過，請重新載入。" });
+            }
+            filled.version = current + 1;
+          }
           const before = { ...existing };
           Object.assign(existing, filled, { updated_at: now() });
           // The progress trigger: a rewind must never lower the high-water mark.
@@ -549,6 +557,14 @@ export const server = http.createServer(async (req, res) => {
       // `updated_at` moves on every write, exactly like the SQL trigger — the
       // client derives its cache-busting `?v=` from it.
       for (const row of rows) {
+        if (table === "whiteboard_nodes" && patch.version != null) {
+          const incoming = Number(patch.version);
+          const current = Number(row.version ?? 1);
+          if (incoming !== current && incoming < current) {
+            return json(res, 409, { message: "stale-write", hint: "這則內容剛被別人改過，請重新載入。" });
+          }
+          patch.version = current + 1;
+        }
         const before = { ...row };
         Object.assign(row, patch, { updated_at: now() });
         if (table === "comments") applyCommentStatus(row, before);

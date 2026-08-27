@@ -60,10 +60,13 @@ import { isUploadCancelled } from "./cloud/videoRoom";
 import { MultiBranchRoom, type MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
+import { adoptPersistedNode, stampPersistedNode } from "./features/collaboration/nodes";
 import { collectBoardEditors, stampWriter } from "./features/collaboration/presence";
 import {
+  applyPendingCloudWrites,
   clearPendingEdit,
   isBrowserOnline,
+  isCloudWriteAcknowledged,
   listPendingEdits,
   loadBoardSnapshot,
   queuePendingEdit,
@@ -952,7 +955,8 @@ export function App() {
   const upsertNodes = useCallback(
     (nodes: WhiteboardNode[], persist: "now" | "end" = "now") => {
       const writer = { id: cloud.userId ?? guest?.id ?? "local", name: guest?.name ?? "我" };
-      const stamped = nodes.map((node) => stampWriter(node, writer));
+      const existingById = new Map((roomRef.current?.whiteboardNodes ?? []).map((node) => [node.id, node]));
+      const stamped = nodes.map((node) => stampPersistedNode(stampWriter(node, writer), existingById.get(node.id)));
       updateRoom((r) => {
         const byId = new Map((r.whiteboardNodes ?? []).map((node) => [node.id, node]));
         for (const node of stamped) byId.set(node.id, node);
@@ -960,8 +964,31 @@ export function App() {
       });
       void persist;
       const roomId = roomRef.current?.id ?? stamped[0]?.roomId ?? "";
+      const persistCloud = async (node: WhiteboardNode) => {
+        const result = await cloudRef.current.writes.upsertNode?.(node);
+        if (isCloudWriteAcknowledged(result)) {
+          if (result && typeof result === "object") {
+            updateRoom((r) => ({
+              ...r,
+              whiteboardNodes: (r.whiteboardNodes ?? []).map((item) => item.id === result.id ? adoptPersistedNode(item, result) : item),
+            }));
+          }
+          await clearPendingEdit(`node:${node.id}`);
+          return;
+        }
+        if (cloudRef.current.active) {
+          await queuePendingEdit({
+            id: `node:${node.id}`,
+            roomId,
+            kind: "node",
+            op: "upsert",
+            payload: node,
+            createdAt: Date.now(),
+          });
+        }
+      };
       if (isBrowserOnline()) {
-        stamped.forEach((node) => cloudRef.current.writes.upsertNode?.(node));
+        stamped.forEach((node) => void persistCloud(node));
       } else {
         stamped.forEach((node) => {
           void queuePendingEdit({
@@ -1001,8 +1028,25 @@ export function App() {
         whiteboardNodes: (r.whiteboardNodes ?? []).filter((node) => node.id !== id),
         whiteboardEdges: (r.whiteboardEdges ?? []).filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id),
       }));
+      const persistDelete = async () => {
+        const result = await cloudRef.current.writes.deleteNode?.(id);
+        if (isCloudWriteAcknowledged(result)) {
+          await clearPendingEdit(`node-del:${id}`);
+          return;
+        }
+        if (cloudRef.current.active) {
+          await queuePendingEdit({
+            id: `node-del:${id}`,
+            roomId: roomRef.current?.id ?? "",
+            kind: "node",
+            op: "delete",
+            payload: { id },
+            createdAt: Date.now(),
+          });
+        }
+      };
       if (isBrowserOnline()) {
-        cloudRef.current.writes.deleteNode?.(id);
+        void persistDelete();
         return;
       }
       void queuePendingEdit({
@@ -1107,17 +1151,11 @@ export function App() {
       const current = roomRef.current;
       if (!current || !isBrowserOnline()) return;
       void listPendingEdits(current.id).then(async (pending) => {
-        for (const edit of pending) {
-          if (edit.kind !== "node") continue;
-          if (edit.op === "upsert") {
-            cloudRef.current.writes.upsertNode?.(edit.payload as WhiteboardNode);
-          }
-          if (edit.op === "delete") {
-            const payload = edit.payload as { id?: string };
-            if (payload.id) cloudRef.current.writes.deleteNode?.(payload.id);
-          }
-          await clearPendingEdit(edit.id);
-        }
+        const { acknowledged } = await applyPendingCloudWrites(pending, {
+          upsertNode: cloudRef.current.writes.upsertNode,
+          deleteNode: cloudRef.current.writes.deleteNode,
+        });
+        for (const id of acknowledged) await clearPendingEdit(id);
       });
     };
     window.addEventListener("online", flushPendingBoardEdits);

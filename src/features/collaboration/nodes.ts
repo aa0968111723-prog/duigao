@@ -195,12 +195,37 @@ export function formatVideoRange(start?: number, end?: number): string {
   return `${formatTimestamp(start)}–${formatTimestamp(end)}`;
 }
 
+/**
+ * Advance the client version for an existing node so the next persist is not
+ * compared against a stale expected version. New nodes stay at version 1
+ * (inserts do not run touch_whiteboard_node).
+ */
+export function stampPersistedNode(node: WhiteboardNode, previous?: WhiteboardNode | null): WhiteboardNode {
+  if (!previous) return { ...node, version: node.version || 1 };
+  const previousVersion = previous.version ?? 1;
+  const incoming = node.version ?? 1;
+  return {
+    ...node,
+    version: incoming > previousVersion ? incoming : previousVersion + 1,
+  };
+}
+
+/** Keep local content; only take a newer server version/timestamp after ack. */
+export function adoptPersistedNode(local: WhiteboardNode, persisted: WhiteboardNode): WhiteboardNode {
+  return {
+    ...local,
+    version: Math.max(local.version ?? 1, persisted.version ?? 1),
+    updatedAt: Math.max(local.updatedAt ?? 0, persisted.updatedAt ?? 0),
+  };
+}
+
 export function applyNodePatch(node: WhiteboardNode, patch: Partial<Pick<WhiteboardNode, "x" | "y" | "width" | "height" | "content" | "parentGroupId">>): WhiteboardNode {
   return {
     ...node,
     ...patch,
     content: patch.content ? { ...node.content, ...patch.content } : node.content,
     updatedAt: Date.now(),
+    version: (node.version ?? 1) + 1,
   };
 }
 
@@ -230,7 +255,9 @@ export function groupSelected(nodes: WhiteboardNode[], selectedIds: string[], cr
 
 export function moveNodes(nodes: WhiteboardNode[], ids: string[], dx: number, dy: number): WhiteboardNode[] {
   const moving = new Set(ids);
-  return nodes.map((node) => (moving.has(node.id) ? { ...node, x: node.x + dx, y: node.y + dy, updatedAt: Date.now() } : node));
+  return nodes.map((node) => (moving.has(node.id)
+    ? { ...node, x: node.x + dx, y: node.y + dy, updatedAt: Date.now(), version: (node.version ?? 1) + 1 }
+    : node));
 }
 
 export function createRelationEdges(
