@@ -25,6 +25,8 @@ import {
 } from "../../lib/roomBranches";
 import type { RoomRole } from "../../cloud/roomRepository";
 import { VIDEO_ACCEPT } from "../video-review/media";
+import { isFeatureEnabled } from "../../ai/featureFlags";
+import { DiscussionWorkspace } from "../collaboration/DiscussionWorkspace";
 
 export type MultiBranchRoomApi = {
   room: Room;
@@ -402,6 +404,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
   const [sortRecent, setSortRecent] = useState(true);
+  const [discussionOpen, setDiscussionOpen] = useState(false);
 
   const activeBranch = normalized.branches?.find((branch) => branch.id === api.activeBranchId) ?? null;
   const branches = useMemo(() => {
@@ -447,6 +450,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="回到房間列表">●</button>
         {api.activeBranchId ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
         <div className="project-room-heading"><span className="project-kicker">活動房</span><h1>{api.room.title}</h1></div>
+        {isFeatureEnabled("collaboration.discussion") && (
+          <button type="button" className="project-share-button" data-testid="open-discussion" onClick={() => setDiscussionOpen(true)}>討論</button>
+        )}
         <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>
       </header>
 
@@ -533,6 +539,12 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       )}
       {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} />}
       {pollOpen && <PollSheet onClose={() => setPollOpen(false)} onCreate={createPoll} />}
+      {discussionOpen && isFeatureEnabled("collaboration.discussion") && (
+        <div className="project-discussion-overlay" data-testid="discussion-overlay">
+          <button type="button" className="project-back-button" onClick={() => setDiscussionOpen(false)}>‹ 房間</button>
+          <DiscussionWorkspace room={normalized} />
+        </div>
+      )}
     </div>
   );
 }

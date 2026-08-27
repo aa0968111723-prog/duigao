@@ -7,8 +7,8 @@
  */
 export const FEATURE_FLAGS = {
   "ai.assetIntelligence": true,
-  "collaboration.discussion": false,
-  "collaboration.whiteboard": false,
+  "collaboration.discussion": true,
+  "collaboration.whiteboard": true,
   "collaboration.voice": false,
   "canva.integration": false,
 } as const;
