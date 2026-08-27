@@ -7,11 +7,13 @@ export {
 export type { FeatureFlagId } from "./featureFlags";
 export {
   answerFromContext,
+  applyBackToWhiteboard,
   assertNotFullRoomDump,
   buildZenAgentRequest,
   classifyQuery,
   indexRoomKnowledge,
   retrieveRoomContext,
+  suggestedBoardActions,
 } from "./roomContext";
 export {
   extractPlanDocument,

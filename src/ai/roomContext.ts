@@ -15,6 +15,12 @@ import type {
 import { extractPlanDocument, rankPhotosForUse, understandImage } from "./understanding";
 import { currentVersion, isCurrentVersionId, requestedCompareLabels, versionsForQuery } from "./versionAwareness";
 import { describeMoment, parseTimestamp, segmentsFromComments } from "./video";
+import {
+  applyWhiteboardActions,
+  selectedSlice,
+  type WhiteboardApplyAction,
+  type WhiteboardGraph,
+} from "../collaboration/whiteboard";
 
 const DEFAULT_LIMIT = 12;
 
@@ -28,6 +34,7 @@ export function classifyQuery(query: string): { intent: RoomContextIntent; timeS
   if (compareLabels.length) return { intent: "version_compare", compareLabels };
   if (/還缺什麼|缺了什麼|計畫.*缺/.test(query)) return { intent: "plan_gaps", compareLabels };
   if (/文宣在講什麼|這張.*講|海報.*講/.test(query)) return { intent: "poster_summary", compareLabels };
+  if (/整理目前方向|白板|流程缺少/.test(query)) return { intent: "board_summary", compareLabels };
   if (/找|搜尋|有哪些/.test(query)) return { intent: "asset_search", compareLabels };
   return { intent: "general", timeSeconds, compareLabels };
 }
@@ -144,6 +151,7 @@ function scoreEntry(entry: KnowledgeEntry, query: string, intent: RoomContextInt
   if (intent === "video_at_time" && entry.kind === "video_segment") score += 5;
   if (intent === "plan_gaps" && entry.kind === "document") score += 6;
   if (intent === "photo_fit" && entry.kind === "image_analysis") score += 4;
+  if (intent === "board_summary" && (entry.kind === "whiteboard_node" || entry.kind === "whiteboard_edge")) score += 6;
   if (intent === "version_compare") score += entry.isCurrentVersion ? 1 : 2;
   if (entry.isCurrentVersion && intent !== "version_compare") score += 2;
   if (timeSeconds != null && entry.kind === "video_segment") score += 3;
@@ -156,6 +164,8 @@ export function retrieveRoomContext(input: {
   assets?: AssetRecord[];
   analyses?: AssetAnalysis[];
   segments?: AssetVideoSegment[];
+  whiteboard?: WhiteboardGraph;
+  selectedNodeIds?: string[];
 }): RoomContext {
   const room = normalizeRoomBranches(input.room);
   const raw = typeof input.query === "string" ? { text: input.query, roomId: room.id } : input.query;
@@ -225,6 +235,38 @@ export function retrieveRoomContext(input: {
     }
   }
 
+  const selectedIds = raw.selectedNodeIds ?? input.selectedNodeIds;
+  if (input.whiteboard && (selectedIds?.length || intent === "board_summary")) {
+    const slice = selectedIds?.length ? selectedSlice(input.whiteboard, selectedIds) : input.whiteboard;
+    for (const node of slice.nodes) {
+      items.push({
+        kind: "whiteboard_node",
+        title: node.text,
+        body: `${node.type}${node.linkedVersionId ? ` version:${node.linkedVersionId}` : ""}${node.linkedAssetId ? ` asset:${node.linkedAssetId}` : ""}`,
+        topics: [node.type],
+        assetId: node.linkedAssetId,
+        versionId: node.linkedVersionId,
+        branchId: node.linkedBranchId,
+        startSeconds: node.videoTimestamp,
+        score: 8,
+        isCurrentVersion: true,
+      });
+    }
+    for (const edge of slice.edges) {
+      const from = slice.nodes.find((node) => node.id === edge.fromNodeId);
+      const to = slice.nodes.find((node) => node.id === edge.toNodeId);
+      items.push({
+        kind: "whiteboard_edge",
+        title: `${from?.text ?? edge.fromNodeId} → ${to?.text ?? edge.toNodeId}`,
+        body: edge.kind,
+        topics: [edge.kind],
+        score: 7,
+        isCurrentVersion: true,
+      });
+    }
+  }
+
+  const bounded = items.slice(0, limit);
   return {
     roomId: room.id,
     query: raw.text,
@@ -233,7 +275,7 @@ export function retrieveRoomContext(input: {
     truncated: true,
     fullRoomDumped: false,
     currentVersionOnly: !compare,
-    items,
+    items: bounded,
   };
 }
 
@@ -258,6 +300,12 @@ export function answerFromContext(query: string, context: RoomContext, room?: Ro
   if (context.intent === "plan_gaps") {
     const plan = context.items.find((item) => item.kind === "document");
     return plan?.body ?? "這份企劃還沒有可讀的內容。";
+  }
+  if (context.intent === "board_summary") {
+    const flow = context.items.filter((item) => item.kind === "whiteboard_edge").map((item) => item.title);
+    const missingFollowup = !context.items.some((item) => /追蹤|後續|聯絡/.test(item.title + item.body));
+    const direction = flow.length ? `目前流程：${flow.join("；")}。` : context.items.map((item) => item.title).join("、");
+    return missingFollowup ? `${direction} 這個流程缺少報名後的追蹤。` : direction;
   }
   if (context.intent === "version_compare" && room) {
     return context.items.map((item) => `${item.versionLabel ?? item.title}：${item.body}`).join("\n");
@@ -323,6 +371,24 @@ export function assertNotFullRoomDump(context: RoomContext, room: Room): void {
 export function latestLabels(versions: Version[]): string[] {
   const current = currentVersion(versions);
   return current ? [current.label] : [];
+}
+
+export function suggestedBoardActions(query: string): WhiteboardApplyAction[] {
+  if (/建立流程|加入白板/.test(query) || /吸引注意/.test(query)) {
+    return [{
+      type: "create_flow",
+      label: "加入白板",
+      payload: { steps: ["吸引注意", "互動", "介紹活動", "QR", "後續聯絡"] },
+    }];
+  }
+  if (/心智圖/.test(query)) {
+    return [{ type: "create_mindmap", label: "建立心智圖", payload: { center: "招生", children: ["擺攤", "茶會", "演講"] } }];
+  }
+  return [{ type: "add_whiteboard_node", label: "加入白板", payload: { text: query } }];
+}
+
+export function applyBackToWhiteboard(graph: WhiteboardGraph, query: string): WhiteboardGraph {
+  return applyWhiteboardActions(graph, suggestedBoardActions(query));
 }
 
 export { isCurrentVersionId, versionsForQuery };

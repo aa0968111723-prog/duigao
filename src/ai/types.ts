@@ -14,7 +14,9 @@ export type KnowledgeKind =
   | "document"
   | "video_segment"
   | "relation"
-  | "comment";
+  | "comment"
+  | "whiteboard_node"
+  | "whiteboard_edge";
 
 export type RoomContextIntent =
   | "poster_summary"
@@ -23,6 +25,7 @@ export type RoomContextIntent =
   | "plan_gaps"
   | "version_compare"
   | "asset_search"
+  | "board_summary"
   | "general";
 
 export type AssetRecord = {
@@ -106,6 +109,7 @@ export type RoomContextQuery = {
   compareVersionIds?: string[];
   compareLabels?: string[];
   selectedAssetIds?: string[];
+  selectedNodeIds?: string[];
   limit?: number;
 };
 
