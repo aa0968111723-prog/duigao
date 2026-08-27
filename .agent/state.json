@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T12:30:08.000Z",
+  "generatedAt": "2026-08-27T13:18:11.000Z",
   "git": {
     "branch": "agent/collaborative-intelligence-workspace",
-    "sha": "ab46b725b4f885cdb91f8a102054ac347fc81572",
+    "sha": "5e6a2c455ea583a29b5644c2df85b20320764c0e",
     "mainSha": "cec65183b598d9a588a346a636a4201f20ef6370",
     "dirty": true
   },
@@ -37,8 +37,16 @@
       "items": [
         {
           "baseRefName": "main",
-          "headRefName": "agent/collaborative-intelligence-workspace",
+          "headRefName": "cursor/collaboration-review-fixes-431a",
           "isDraft": false,
+          "number": 40,
+          "title": "fix: Codex review findings from Collaboration Workspace #39",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/40"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "agent/collaborative-intelligence-workspace",
+          "isDraft": true,
           "number": 38,
           "title": "Collaborative Intelligence Workspace 1.0 / 智慧協作工作台 1.0",
           "url": "https://github.com/aa0968111723-prog/duigao/pull/38"

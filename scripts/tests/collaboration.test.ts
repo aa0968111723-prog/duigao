@@ -98,7 +98,7 @@ test("one node+edge model covers sticky, room ref, poll, flow, mindmap without c
   });
 });
 
-test("Room Context selection is bounded and apply-back inserts real nodes and edges", () => {
+test("Room Context selection is bounded and 加入白板 apply-back inserts real nodes and edges", () => {
   const branches = Array.from({ length: 14 }, (_, index) => ({
     id: `b${index}`,
     roomId: "room-activity",
@@ -139,6 +139,8 @@ test("Room Context selection is bounded and apply-back inserts real nodes and ed
   assert.ok(boardEdges.some((item) => item.title.includes("招生") && item.title.includes("擺攤")));
   const reply = answerFromContext("幫我整理目前方向。", context, crowded);
   assert.match(reply, /缺少報名後的追蹤|目前流程/);
+  const ui = readFileSync(resolve(ROOT, "src/features/collaboration/DiscussionWorkspace.tsx"), "utf8");
+  assert.match(ui, /加入白板/);
   const applied = applyBackToWhiteboard(emptyGraph(crowded.id), context);
   assert.ok(applied.nodes.some((node) => node.text === "招生"));
   assert.ok(applied.nodes.some((node) => node.text === "擺攤"));
