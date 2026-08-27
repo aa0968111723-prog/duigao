@@ -91,6 +91,12 @@ export function subscribeRoom(
       void (p.new as PollVoteRow | undefined);
       handlers.onProjectChange?.();
     })
+    .on("postgres_changes", { event: "*", schema: "public", table: "whiteboards", filter }, () => handlers.onProjectChange?.())
+    .on("postgres_changes", { event: "*", schema: "public", table: "whiteboard_nodes", filter }, () => handlers.onProjectChange?.())
+    .on("postgres_changes", { event: "*", schema: "public", table: "whiteboard_edges", filter }, () => handlers.onProjectChange?.())
+    .on("postgres_changes", { event: "*", schema: "public", table: "room_discussion_messages", filter }, () => handlers.onProjectChange?.())
+    .on("postgres_changes", { event: "*", schema: "public", table: "room_discussion_supports", filter }, () => handlers.onProjectChange?.())
+    .on("postgres_changes", { event: "*", schema: "public", table: "decision_records", filter }, () => handlers.onProjectChange?.())
     .on("presence", { event: "sync" }, () => {
       handlers.onPresence?.(Object.keys(channel.presenceState()).length);
     })

@@ -69,7 +69,7 @@ export function VideoWorkspace({ api, presence }: Props) {
    * Held in state, not applied imperatively: at the moment 改一 is tapped the
    * outgoing <video> is still mounted, so a seek would land on the wrong file.
    */
-  const [startAt, setStartAt] = useState<number | undefined>(undefined);
+  const [startAt, setStartAt] = useState<number | undefined>(api.openAtSeconds);
   /* -------------------------------------------- 影片對稿 2.0 state (#32) -- */
   /** Optional bucket for the draft. Null means "did not say", which is fine. */
   const [draftCategory, setDraftCategory] = useState<VideoCategory | null>(null);

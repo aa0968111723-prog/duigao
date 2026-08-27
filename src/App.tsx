@@ -71,7 +71,21 @@ import { isUploadCancelled } from "./cloud/videoRoom";
 import { MultiBranchRoom, type MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
+import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
+import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
+import { collectBoardEditors, stampWriter } from "./features/collaboration/presence";
+import {
+  clearPendingEdit,
+  isBrowserOnline,
+  listPendingEdits,
+  loadBoardSnapshot,
+  queuePendingEdit,
+  reconcileNodes,
+  saveBoardSnapshot,
+} from "./features/collaboration/offline";
 import "./usability.css";
+import "./features/whiteboard/whiteboard.css";
+import "./features/room-discussion/discussion.css";
 
 const EMPTY_FORM: PinForm = { body: "", suggestion: "", type: "文字", priority: "一般" };
 const COACH_FLAG = "coach.firstPin";
@@ -156,6 +170,9 @@ export function App() {
   const [room, setRoom] = useState<Room | null>(null);
   /** Project rooms stay at the room shell until a poster/video branch opens. */
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
+  const [activeWhiteboardId, setActiveWhiteboardId] = useState<string | null>(null);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(() => initialView(null));
   const [tool, setTool] = useState<Tool>("pan");
@@ -269,9 +286,35 @@ export function App() {
 
   const applyRemoteRoom = useCallback((next: Room) => {
     const normalized = normalizeRoomBranches(next);
-    setRoom(normalized);
+    setRoom((current) => {
+      const incomingNodes = normalized.whiteboardNodes ?? [];
+      const currentNodes = current?.whiteboardNodes ?? [];
+      const incomingEdges = normalized.whiteboardEdges ?? [];
+      const currentEdges = current?.whiteboardEdges ?? [];
+      const whiteboardNodes = incomingNodes.length === 0 && currentNodes.length
+        ? currentNodes
+        : incomingNodes.length && currentNodes.length
+          ? reconcileNodes(currentNodes, incomingNodes, [])
+          : incomingNodes.length
+            ? incomingNodes
+            : currentNodes;
+      const whiteboardEdges = incomingEdges.length === 0 && currentEdges.length
+        ? currentEdges
+        : incomingEdges.length
+          ? incomingEdges
+          : currentEdges;
+      return {
+        ...normalized,
+        whiteboardNodes,
+        whiteboardEdges,
+      };
+    });
     if (roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
       setActiveBranchId(roomLink.branchId);
+    }
+    if (roomLink.kind === "cloud" && roomLink.whiteboardId) {
+      setActiveWhiteboardId(roomLink.whiteboardId);
+      setFocusNodeId(roomLink.nodeId ?? null);
     }
     setView((v) => {
       const ids = normalized.versions.map((x) => x.id);
@@ -1028,6 +1071,263 @@ export function App() {
     [updateRoom],
   );
 
+  const sendDiscussion = useCallback(
+    (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => {
+      if (!guest) return;
+      const body = (input?.body ?? chatInput).trim();
+      if (!body && !input?.kind) return;
+      const message: DiscussionMessage = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        authorId: cloud.userId ?? guest.id,
+        authorName: guest.name,
+        authorColor: guest.color,
+        kind: input?.kind ?? "text",
+        body: body || (input?.payload?.title ?? ""),
+        payload: input?.payload ?? {},
+        replyToId: input?.replyToId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      updateRoom((r) => ({ ...r, discussion: [...(r.discussion ?? []), message] }));
+      cloudRef.current.writes.insertDiscussion?.(message);
+      setChatInput("");
+    },
+    [chatInput, cloud.userId, guest, updateRoom],
+  );
+
+  const supportDiscussion = useCallback(
+    (messageId: string, add: boolean) => {
+      const userId = cloud.userId ?? guest?.id;
+      if (!userId) return;
+      updateRoom((r) => ({
+        ...r,
+        discussionSupports: add
+          ? [...(r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)), { messageId, roomId: r.id, userId }]
+          : (r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)),
+      }));
+      cloudRef.current.writes.setDiscussionSupport?.(messageId, add);
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
+  const createWhiteboard = useCallback(
+    (title: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能建立白板。", { tone: "error" });
+        return;
+      }
+      const board: Whiteboard = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        title,
+        description: "",
+        allowEdit: false,
+        createdBy: cloud.userId ?? guest?.id ?? "local",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        version: 1,
+      };
+      updateRoom((r) => ({ ...r, whiteboards: [board, ...(r.whiteboards ?? [])] }));
+      cloudRef.current.writes.createWhiteboard?.(board);
+      setActiveWhiteboardId(board.id);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const archiveWhiteboard = useCallback(
+    (id: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能封存整塊白板。", { tone: "error" });
+        return;
+      }
+      updateRoom((r) => ({
+        ...r,
+        whiteboards: (r.whiteboards ?? []).map((board) => board.id === id ? { ...board, archivedAt: Date.now(), updatedAt: Date.now() } : board),
+      }));
+      const board = roomRef.current?.whiteboards?.find((item) => item.id === id);
+      if (board) cloudRef.current.writes.updateWhiteboard?.({ ...board, archivedAt: Date.now() });
+      if (activeWhiteboardId === id) setActiveWhiteboardId(null);
+    },
+    [activeWhiteboardId, cloud.boundRoomId, cloud.canManageMedia, showToast, updateRoom],
+  );
+
+  const upsertNodes = useCallback(
+    (nodes: WhiteboardNode[], persist: "now" | "end" = "now") => {
+      const writer = { id: cloud.userId ?? guest?.id ?? "local", name: guest?.name ?? "我" };
+      const stamped = nodes.map((node) => stampWriter(node, writer));
+      updateRoom((r) => {
+        const byId = new Map((r.whiteboardNodes ?? []).map((node) => [node.id, node]));
+        for (const node of stamped) byId.set(node.id, node);
+        return { ...r, whiteboardNodes: [...byId.values()] };
+      });
+      void persist;
+      const roomId = roomRef.current?.id ?? stamped[0]?.roomId ?? "";
+      if (isBrowserOnline()) {
+        stamped.forEach((node) => cloudRef.current.writes.upsertNode?.(node));
+      } else {
+        stamped.forEach((node) => {
+          void queuePendingEdit({
+            id: `node:${node.id}`,
+            roomId,
+            kind: "node",
+            op: "upsert",
+            payload: node,
+            createdAt: Date.now(),
+          });
+        });
+      }
+      const current = roomRef.current;
+      const board = current?.whiteboards?.find((item) => item.id === stamped[0]?.whiteboardId);
+      if (current && board) {
+        void saveBoardSnapshot({
+          whiteboardId: board.id,
+          roomId: current.id,
+          whiteboard: board,
+          nodes: [...(current.whiteboardNodes ?? []).filter((node) => node.whiteboardId !== board.id), ...stamped],
+          edges: current.whiteboardEdges ?? [],
+        });
+      }
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
+  const upsertNode = useCallback(
+    (node: WhiteboardNode) => upsertNodes([node]),
+    [upsertNodes],
+  );
+
+  const deleteNode = useCallback(
+    (id: string) => {
+      updateRoom((r) => ({
+        ...r,
+        whiteboardNodes: (r.whiteboardNodes ?? []).filter((node) => node.id !== id),
+        whiteboardEdges: (r.whiteboardEdges ?? []).filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id),
+      }));
+      if (isBrowserOnline()) {
+        cloudRef.current.writes.deleteNode?.(id);
+        return;
+      }
+      void queuePendingEdit({
+        id: `node-del:${id}`,
+        roomId: roomRef.current?.id ?? "",
+        kind: "node",
+        op: "delete",
+        payload: { id },
+        createdAt: Date.now(),
+      });
+    },
+    [updateRoom],
+  );
+
+  const createEdge = useCallback(
+    (edge: WhiteboardEdge) => {
+      updateRoom((r) => ({ ...r, whiteboardEdges: [...(r.whiteboardEdges ?? []), edge] }));
+      cloudRef.current.writes.createEdge?.(edge);
+    },
+    [updateRoom],
+  );
+
+  const shareNodeToDiscussion = useCallback(
+    (node: WhiteboardNode) => {
+      const board = roomRef.current?.whiteboards?.find((item) => item.id === node.whiteboardId);
+      sendDiscussion({
+        kind: "node",
+        body: node.content.text || node.content.title || "看這個節點",
+        payload: discussionPayloadFromNode(node, board?.title),
+      });
+    },
+    [sendDiscussion],
+  );
+
+  const addMessageToBoard = useCallback(
+    (message: DiscussionMessage, whiteboardId: string) => {
+      const node = stickyFromDiscussion(message, whiteboardId, cloud.userId ?? guest?.id ?? "local", {
+        x: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 4) * 24,
+        y: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 5) * 24,
+      });
+      upsertNode(node);
+      setActiveWhiteboardId(whiteboardId);
+      setFocusNodeId(node.id);
+    },
+    [cloud.userId, guest, upsertNode],
+  );
+
+  const createDecision = useCallback(
+    (title: string, source?: { type: "poll"; id: string }, status: "pending" | "decided" = "pending") => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能建立決策紀錄。", { tone: "error" });
+        return;
+      }
+      const decision = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        title,
+        body: "",
+        status,
+        sourceType: source ? "poll" as const : "manual" as const,
+        sourceId: source?.id,
+        createdBy: cloud.userId ?? guest?.id ?? "local",
+        finalizedAt: status === "decided" ? Date.now() : undefined,
+        finalizedBy: status === "decided" ? cloud.userId ?? guest?.id : undefined,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        version: 1,
+      };
+      updateRoom((r) => ({ ...r, decisions: [decision, ...(r.decisions ?? [])] }));
+      cloudRef.current.writes.createDecision?.(decision);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const finalizeDecision = useCallback(
+    (id: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能標示決策。", { tone: "error" });
+        return;
+      }
+      updateRoom((r) => ({
+        ...r,
+        decisions: (r.decisions ?? []).map((item) => item.id === id ? { ...item, status: "decided", finalizedAt: Date.now(), finalizedBy: cloud.userId ?? guest?.id, updatedAt: Date.now() } : item),
+      }));
+      const decision = roomRef.current?.decisions?.find((item) => item.id === id);
+      if (decision) cloudRef.current.writes.updateDecision?.({ ...decision, status: "decided", finalizedAt: Date.now() });
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const toggleAllowBoardEdit = useCallback(() => {
+    if (cloud.role && cloud.role !== "owner") {
+      showToast("只有房主能開放大家一起編輯。", { tone: "error" });
+      return;
+    }
+    updateRoom((r) => ({ ...r, allowBoardEdit: !r.allowBoardEdit }));
+    cloudRef.current.writes.setAllowBoardEdit?.(!(roomRef.current?.allowBoardEdit));
+  }, [cloud.role, showToast, updateRoom]);
+
+  useEffect(() => {
+    const flushPendingBoardEdits = () => {
+      const current = roomRef.current;
+      if (!current || !isBrowserOnline()) return;
+      void listPendingEdits(current.id).then(async (pending) => {
+        for (const edit of pending) {
+          if (edit.kind !== "node") continue;
+          if (edit.op === "upsert") {
+            cloudRef.current.writes.upsertNode?.(edit.payload as WhiteboardNode);
+          }
+          if (edit.op === "delete") {
+            const payload = edit.payload as { id?: string };
+            if (payload.id) cloudRef.current.writes.deleteNode?.(payload.id);
+          }
+          await clearPendingEdit(edit.id);
+        }
+      });
+    };
+    window.addEventListener("online", flushPendingBoardEdits);
+    flushPendingBoardEdits();
+    return () => window.removeEventListener("online", flushPendingBoardEdits);
+  }, [room?.id]);
+
   /**
    * File one piece of video feedback: same comment, same discussion, same cloud
    * write as a poster pin — only the coordinates are a time.
@@ -1479,7 +1779,9 @@ export function App() {
             res.url,
             activeBranchId
               ? { branchId: activeBranchId, versionId: viewRef.current.versionId || undefined }
-              : undefined,
+              : activeWhiteboardId
+                ? { whiteboardId: activeWhiteboardId, nodeId: focusNodeId || undefined }
+                : undefined,
           );
           setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "building" }, card: null });
           withPreviewTimeout(cloudRef.current.preview.ensure({ versionId: viewRef.current.versionId }))
@@ -1502,14 +1804,16 @@ export function App() {
           `${location.origin}${location.pathname}#room=${current.id}`,
           activeBranchId
             ? { branchId: activeBranchId, versionId: viewRef.current.versionId || undefined }
-            : undefined,
+            : activeWhiteboardId
+              ? { whiteboardId: activeWhiteboardId, nodeId: focusNodeId || undefined }
+              : undefined,
         ),
       });
       return;
     }
     // Deployed without VITE_SUPABASE_* — there is no permanent link to give.
     setShareState({ kind: "unavailable" });
-  }, [activeBranchId, isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
+  }, [activeBranchId, activeWhiteboardId, focusNodeId, isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
 
   /** 顯示文宣縮圖 / 顯示影片封面 toggle in the share sheet's 連結預覽 block. */
   const setPreviewThumbnail = useCallback(
@@ -1741,6 +2045,7 @@ export function App() {
           open: openAi,
           focusTarget: aiFocus,
         },
+        openAtSeconds,
         ...(video ? { video } : {}),
         goHome: () => {
           videoCancelRef.current?.();
@@ -1750,6 +2055,7 @@ export function App() {
           if (activeBranchId && roomRef.current) {
             setActiveBranchId(null);
             setLoadingBranchId(null);
+            setOpenAtSeconds(undefined);
             setView(initialView(roomRef.current));
           } else {
             clearUndo();
@@ -1787,6 +2093,15 @@ export function App() {
     );
   }
 
+  const boardEditors = collectBoardEditors(
+    room?.whiteboardNodes ?? [],
+    { id: cloud.userId ?? guest?.id ?? "local", name: guest?.name ?? "我" },
+    { whiteboardId: activeWhiteboardId ?? undefined },
+  ).map((editor) => ({
+    ...editor,
+    whiteboardTitle: room?.whiteboards?.find((board) => board.id === (editor.whiteboardId ?? activeWhiteboardId))?.title,
+  }));
+
   const projectApi: MultiBranchRoomApi | null = room?.projectMode
     ? {
         room: normalizedRoom ?? room,
@@ -1796,10 +2111,11 @@ export function App() {
         canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
         activeBranchId,
         loadingBranchId,
-        onOpenBranch: (branchId) => {
+        onOpenBranch: (branchId, opts) => {
           const target = roomRef.current ? branchForId(roomRef.current, branchId) : undefined;
           if (!target) return;
           setActiveBranchId(branchId);
+          setOpenAtSeconds(opts?.startTime);
           if (target.branchType === "poster" || target.branchType === "video") {
             setView(initialView(roomForBranch(roomRef.current!, branchId)));
           }
@@ -1813,6 +2129,7 @@ export function App() {
         onBackToRoom: () => {
           setActiveBranchId(null);
           setLoadingBranchId(null);
+          setOpenAtSeconds(undefined);
           if (roomRef.current) setView(initialView(roomRef.current));
         },
         onCreateContent: createProjectContent,
@@ -1825,7 +2142,52 @@ export function App() {
         onVotePoll: voteProjectPoll,
         chatInput,
         setChatInput,
-        sendChat,
+        sendChat: () => sendDiscussion(),
+        onSendDiscussion: sendDiscussion,
+        onSupportDiscussion: supportDiscussion,
+        onCreateWhiteboard: createWhiteboard,
+        onArchiveWhiteboard: archiveWhiteboard,
+        onOpenWhiteboard: (id) => {
+          setActiveWhiteboardId(id);
+          if (!id) setFocusNodeId(null);
+          if (!id) return;
+          void cloudRef.current.loadWhiteboard?.(id);
+          void loadBoardSnapshot(id).then((snap) => {
+            if (!snap) return;
+            setRoom((current) => {
+              if (!current) return current;
+              const existing = (current.whiteboardNodes ?? []).filter((node) => node.whiteboardId === id);
+              if (existing.length) {
+                return {
+                  ...current,
+                  whiteboardNodes: reconcileNodes(existing, snap.nodes, []),
+                };
+              }
+              return {
+                ...current,
+                whiteboardNodes: [...(current.whiteboardNodes ?? []), ...snap.nodes],
+                whiteboardEdges: [
+                  ...(current.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId !== id),
+                  ...snap.edges,
+                ],
+              };
+            });
+          });
+        },
+        onFocusNode: setFocusNodeId,
+        onUpsertNode: upsertNode,
+        onUpsertNodes: upsertNodes,
+        onDeleteNode: deleteNode,
+        onCreateEdge: createEdge,
+        onShareNodeToDiscussion: shareNodeToDiscussion,
+        onAddMessageToBoard: addMessageToBoard,
+        onCreateDecision: createDecision,
+        onFinalizeDecision: finalizeDecision,
+        onToggleAllowBoardEdit: toggleAllowBoardEdit,
+        activeWhiteboardId,
+        focusNodeId,
+        online: cloud.online || peerCount,
+        editors: boardEditors,
         onShare: openShare,
         onOpenAi: openAi,
         onGoHome: () => {

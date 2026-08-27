@@ -243,6 +243,84 @@ export const featureDefinitions = [
     ],
     minimum: { source: 2, tests: 1 },
   },
+  {
+    id: "collaboration-workspace", name: "Collaboration workspace", priority: 1,
+    source: [
+      { path: "src/features/collaboration/types.ts", contains: ["Whiteboard", "DiscussionMessage"] },
+      { path: "src/features/multi-room/MultiBranchRoom.tsx", contains: ["discuss", "WhiteboardWorkspace"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_collaboration_workspace.sql", contains: ["whiteboards", "room_discussion_messages", "row level security"] }],
+    tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["createSticky", "getWhiteboardContext"] }],
+    minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "whiteboards", name: "Whiteboards", priority: 1,
+    source: [
+      { path: "src/features/whiteboard/WhiteboardWorkspace.tsx", contains: ["wb-canvas", "建立白板"] },
+      { path: "src/cloud/collaborationRepository.ts", contains: ["whiteboards", "insertWhiteboard"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_collaboration_workspace.sql", contains: ["create table if not exists public.whiteboards"] }],
+    tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["multiple boards"] }],
+    minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "whiteboard-nodes", name: "Whiteboard nodes", priority: 1,
+    source: [
+      { path: "src/features/collaboration/nodes.ts", contains: ["createSticky", "createNode"] },
+      { path: "src/cloud/collaborationRepository.ts", contains: ["whiteboard_nodes", "upsertNode"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_collaboration_workspace.sql", contains: ["whiteboard_nodes", "ai_result"] }],
+    tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["create, edit and move"] }],
+    minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "whiteboard-edges", name: "Whiteboard edges", priority: 1,
+    source: [
+      { path: "src/features/collaboration/nodes.ts", contains: ["createEdge"] },
+      { path: "src/cloud/collaborationRepository.ts", contains: ["whiteboard_edges", "insertEdge"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_collaboration_workspace.sql", contains: ["whiteboard_edges", "edge_type"] }],
+    tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["edges"] }],
+    minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "flowchart", name: "Flowchart nodes", priority: 1,
+    source: [
+      { path: "src/features/collaboration/nodes.ts", contains: ["addFlowNextStep"] },
+      { path: "src/features/whiteboard/WhiteboardWorkspace.tsx", contains: ["下一步"] },
+    ],
+    tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["flow next-step"] }],
+    minimum: { source: 2, tests: 1 },
+  },
+  {
+    id: "mindmap", name: "Mindmap nodes", priority: 1,
+    source: [
+      { path: "src/features/collaboration/nodes.ts", contains: ["addMindmapChild"] },
+      { path: "src/features/whiteboard/WhiteboardWorkspace.tsx", contains: ["子項目"] },
+    ],
+    tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["mindmap child"] }],
+    minimum: { source: 2, tests: 1 },
+  },
+  {
+    id: "room-discussion", name: "Room-layer discussion", priority: 1,
+    source: [
+      { path: "src/features/room-discussion/RoomDiscussion.tsx", contains: ["加入白板", "discussion-feed"] },
+      { path: "src/cloud/collaborationRepository.ts", contains: ["room_discussion_messages"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_collaboration_workspace.sql", contains: ["room_discussion_messages"] }],
+    tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["discussion and board"] }],
+    minimum: { source: 2, migrations: 1, tests: 1 },
+  },
+  {
+    id: "decision-records", name: "Decision records", priority: 1,
+    source: [
+      { path: "src/features/collaboration/types.ts", contains: ["DecisionRecord"] },
+      { path: "src/cloud/collaborationRepository.ts", contains: ["decision_records", "insertDecision"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_collaboration_workspace.sql", contains: ["decision_records"] }],
+    tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["decision nodes"] }],
+    minimum: { source: 2, migrations: 1, tests: 1 },
+  },
 ];
 
 export const architectureDefinitions = [
@@ -251,6 +329,7 @@ export const architectureDefinitions = [
   { name: "Multi-branch project room", paths: ["src/features/multi-room", "src/lib/roomBranches.ts"], responsibility: "Mobile-first room overview, content-family branches, lightweight plans, relations, and decisions.", dependsOn: ["Workspace router", "Discussion", "Cloud layer"] },
   { name: "Image review", paths: ["src/features/image-review"], responsibility: "Immutable image annotation and comparison workspace.", dependsOn: ["Discussion", "Cloud layer"] },
   { name: "Video review", paths: ["src/features/video-review"], responsibility: "Playback, temporal feedback, review brief, reactions, verdicts, and summary.", dependsOn: ["Discussion", "Cloud layer", "Storage/upload"] },
+  { name: "Collaboration workspace", paths: ["src/features/collaboration", "src/features/whiteboard", "src/features/room-discussion"], responsibility: "Room-layer discussion, multi-whiteboard nodes/edges, decisions, and mobile board UX.", dependsOn: ["Multi-branch project room", "Discussion", "Cloud layer"] },
   { name: "Discussion", paths: ["src/features/discussion"], responsibility: "Shared pin comments and discussion cards.", dependsOn: ["Cloud layer"] },
   { name: "Cloud layer", paths: ["src/cloud"], responsibility: "Supabase persistence, realtime, mapping, invites, and signed media access.", dependsOn: ["Authentication", "Storage/upload", "Migrations"] },
   { name: "Authentication", paths: ["src/cloud/auth.ts", "src/cloud/invite.ts"], responsibility: "Anonymous sessions and fragment-only room invite capability.", dependsOn: ["Cloud layer"] },
