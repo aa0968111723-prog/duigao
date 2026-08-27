@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -65,17 +65,18 @@ test("add_whiteboard_node apply writes the 0014 production node, never the unuse
   }));
 });
 
-test("RoomAiSheet and App are the production apply path; unused DiscussionWorkspace is not evidence", () => {
+test("RoomAiSheet and App are the production apply path; the prototype is deleted", () => {
   const sheet = readFileSync(resolve(ROOT, "src/features/asset-intelligence/RoomAiSheet.tsx"), "utf8");
   const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
-  const prototype = readFileSync(resolve(ROOT, "src/features/collaboration/DiscussionWorkspace.tsx"), "utf8");
   assert.match(sheet, /onApplyProposal/);
   assert.match(sheet, /data-testid="ai-proposal"/);
   assert.match(sheet, /套用/);
   assert.match(app, /applyAiProposal/);
   assert.match(app, /onApplyProposal=\{applyAiProposal\}/);
   assert.equal(app.includes("DiscussionWorkspace"), false);
-  assert.match(prototype, /加入白板/);
+  // PR-02a：第二套白板模型（canvasId 原型）已下架；復活這些檔案要大聲失敗。
+  assert.equal(existsSync(resolve(ROOT, "src/features/collaboration/DiscussionWorkspace.tsx")), false);
+  assert.equal(existsSync(resolve(ROOT, "src/collaboration/whiteboard.ts")), false);
 });
 
 test("proposalsFromResponse reads answer.actions and does not auto-apply", () => {

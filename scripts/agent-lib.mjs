@@ -185,6 +185,9 @@ export function validateAgentData(kind, value) {
  * type-only import 也算（型別被引用代表檔案仍在編譯圖內），.css 與資產跳過。
  */
 export function buildImportGraph(root, entry = "src/main.tsx") {
+  // 入口不存在（例如測試 fixture root）＝沒有掛載概念可言：回 null，
+  // 呼叫端據此停用 mounted 判定，而不是把所有檔案都判成未掛載。
+  if (!existsSync(resolve(root, entry))) return null;
   const reachable = new Set();
   const queue = [normalizePath(entry)];
   const specifierPattern = /(?:import|export)\s[^"']*?from\s*["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)|import\s*["']([^"']+)["']/g;

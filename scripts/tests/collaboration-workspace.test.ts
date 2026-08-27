@@ -465,3 +465,23 @@ test("discussion shell publishes --kb itself (keyboard contract is real)", () =>
   const hook = readFileSync(resolve(ROOT, "src/hooks/useViewport.ts"), "utf8");
   assert.match(hook, /kbConsumers/);
 });
+
+// ---- PR-02a：自 collaboration.test.ts 移植的存續契約 ----------------------
+
+test("canva 不入庫、語音由 VOICE_ROOM_MVP 單一旗標把關（原型契約移植）", () => {
+  const migrations = ["0014_collaboration_workspace.sql", "0016_asset_library.sql", "0018_discussion_attachments.sql"]
+    .map((name) => readFileSync(resolve(ROOT, "supabase/migrations", name), "utf8"))
+    .join("\n");
+  assert.equal(migrations.includes("canva_designs"), false);
+  const voice = readFileSync(resolve(ROOT, "src/features/collaboration/voice.ts"), "utf8");
+  assert.match(voice, /VOICE_ROOM_MVP = false/);
+});
+
+test("第一屏契約如今綁在真殼上：討論根＋對話/白板 tabs＋語音一行邊界", () => {
+  const shell = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
+  assert.match(shell, /discuss-workspace/);
+  assert.match(shell, />對話</);
+  assert.match(shell, />白板</);
+  const discussion = readFileSync(resolve(ROOT, "src/features/room-discussion/RoomDiscussion.tsx"), "utf8");
+  assert.match(discussion, /voice-boundary/);
+});

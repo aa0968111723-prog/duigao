@@ -14,13 +14,15 @@ function requiredEvidence(definition, evidence) {
 }
 
 export function classifyFeature(definition, root, importGraph = null) {
-  const graph = importGraph ?? buildImportGraph(root);
+  const graph = importGraph === undefined || importGraph === null ? buildImportGraph(root) : importGraph;
   const allSource = matchingPaths(root, definition.source);
   // 掛載證據：src/ 底下的 source 只有「從 src/main.tsx 走得到」才算數。
   // 存在但未掛載的檔案（原型、孤兒）進 unmountedSource — 這正是 PR-00
   // audit 抓到的 scanner 誤報（apply-back/library 指向從未 mount 的檔案
   // 也標 implemented）。src/ 之外（supabase/functions、鄰倉）不受此限。
-  const unmountedSource = allSource.filter((path) => path.startsWith("src/") && !graph.has(path));
+  const unmountedSource = graph
+    ? allSource.filter((path) => path.startsWith("src/") && !graph.has(path))
+    : [];
   const evidence = {
     source: allSource.filter((path) => !unmountedSource.includes(path)),
     unmountedSource,

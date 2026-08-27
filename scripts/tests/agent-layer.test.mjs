@@ -183,3 +183,24 @@ test("secret scan rejects materialized token values", () => {
   assert.equal(check.ok, false);
   assert.match(check.details.join(" "), /GitHub token/);
 });
+
+test("unmounted src evidence downgrades to partial when an entry exists", () => {
+  const root = fixture();
+  put(root, "src/main.tsx", 'import "./mounted";');
+  put(root, "src/mounted.ts", "export const live = true;");
+  put(root, "src/orphan.ts", "export const dead = true;");
+  put(root, "tests/demo.test.mjs", "assert(true);");
+  const mounted = classifyFeature({
+    id: "m", name: "m", source: [{ path: "src/mounted.ts", contains: ["live"] }],
+    tests: [{ path: "tests/demo.test.mjs", contains: ["assert"] }],
+    minimum: { source: 1, tests: 1 },
+  }, root);
+  assert.equal(mounted.status, "implemented");
+  const orphan = classifyFeature({
+    id: "o", name: "o", source: [{ path: "src/orphan.ts", contains: ["dead"] }],
+    tests: [{ path: "tests/demo.test.mjs", contains: ["assert"] }],
+    minimum: { source: 1, tests: 1 },
+  }, root);
+  assert.equal(orphan.status, "partial");
+  assert.deepEqual(orphan.evidence.unmountedSource, ["src/orphan.ts"]);
+});

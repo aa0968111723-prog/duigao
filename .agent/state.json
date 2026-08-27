@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T18:40:29.000Z",
+  "generatedAt": "2026-08-27T19:46:41.000Z",
   "git": {
-    "branch": "feat/universal-intake",
-    "sha": "0075b9c3877b7ee1341d7486268a99f3ac2f4019",
-    "mainSha": "0075b9c3877b7ee1341d7486268a99f3ac2f4019",
+    "branch": "feat/whiteboard-canonical-02a",
+    "sha": "7ec5379673a662f8d7e50516c8684cabb88fc54b",
+    "mainSha": "df8c499be31557af3dd1faddba17ad1aca5415b5",
     "dirty": true
   },
   "project": {
@@ -51,6 +51,7 @@
           "src/lib/assetIntelligence.ts",
           "supabase/functions/room-ai-context/index.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0015_asset_intelligence.sql"
         ],
@@ -75,6 +76,7 @@
         "source": [
           "src/cloud/assetIntelligence.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0015_asset_intelligence.sql"
         ],
@@ -98,6 +100,7 @@
           "src/features/collaboration/types.ts",
           "src/features/multi-room/MultiBranchRoom.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0014_collaboration_workspace.sql"
         ],
@@ -122,6 +125,7 @@
           "src/cloud/shareThumbnail.ts",
           "src/components/ShareSheet.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0011_share_preview_customization.sql"
         ],
@@ -149,6 +153,7 @@
           "src/cloud/collaborationRepository.ts",
           "src/features/collaboration/types.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0014_collaboration_workspace.sql"
         ],
@@ -172,6 +177,7 @@
         "source": [
           "supabase/functions/asset-analysis/index.ts"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -194,6 +200,7 @@
           "src/features/collaboration/nodes.ts",
           "src/features/whiteboard/WhiteboardWorkspace.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/tests/collaboration-workspace.test.ts"
@@ -215,6 +222,7 @@
           "src/features/image-review/ImageWorkspace.tsx",
           "src/features/image-review/Stage.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/e2e/share-flow.mjs"
@@ -239,6 +247,7 @@
           "src/features/image-review/Stage.tsx",
           "supabase/functions/asset-analysis/index.ts"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -253,26 +262,26 @@
       "missing": []
     },
     "intelligent-asset-library": {
-      "status": "implemented",
-      "confidence": 0.9,
+      "status": "partial",
+      "confidence": 0.67,
       "evidence": {
-        "source": [
-          "src/collaboration/library.ts"
-        ],
+        "source": [],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0016_asset_library.sql"
         ],
         "tests": [
-          "scripts/tests/collaboration.test.ts"
+          "scripts/e2e/migrations.mjs"
         ],
         "docs": []
       },
       "relatedFiles": [
-        "scripts/tests/collaboration.test.ts",
-        "src/collaboration/library.ts",
+        "scripts/e2e/migrations.mjs",
         "supabase/migrations/0016_asset_library.sql"
       ],
-      "missing": []
+      "missing": [
+        "source: need 1, found 0"
+      ]
     },
     "line-preview": {
       "status": "implemented",
@@ -281,6 +290,7 @@
         "source": [
           "supabase/functions/share-preview/index.ts"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/e2e/share-preview.mjs"
@@ -304,6 +314,7 @@
           "src/features/collaboration/nodes.ts",
           "src/features/whiteboard/WhiteboardWorkspace.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/tests/collaboration-workspace.test.ts"
@@ -326,6 +337,7 @@
           "src/features/multi-room/MultiBranchRoom.tsx",
           "src/lib/roomBranches.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0013_project_room_branches.sql"
         ],
@@ -350,6 +362,7 @@
         "source": [
           "src/cloud/videoRoom.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0009_asset_orphans.sql"
         ],
@@ -373,6 +386,7 @@
           "src/cloud/videoReview.ts",
           "src/features/video-review/QuickReactions.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0012_video_review_feedback.sql"
         ],
@@ -399,6 +413,7 @@
         "source": [
           "src/cloud/videoReview.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0012_video_review_feedback.sql"
         ],
@@ -425,6 +440,7 @@
           "src/features/video-review/ReviewSummary.tsx",
           "src/features/video-review/summary.ts"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/e2e/video-flow.mjs"
@@ -448,6 +464,7 @@
         "source": [
           "src/cloud/roomRepository.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0007_room_capabilities.sql"
         ],
@@ -473,6 +490,7 @@
         "source": [
           "supabase/functions/room-ai-context/index.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0015_asset_intelligence.sql"
         ],
@@ -496,6 +514,7 @@
           "src/cloud/collaborationRepository.ts",
           "src/features/room-discussion/RoomDiscussion.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0014_collaboration_workspace.sql"
         ],
@@ -520,6 +539,7 @@
           "src/cloud/sharePreview.ts",
           "supabase/functions/share-preview/index.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0005_share_previews.sql"
         ],
@@ -544,6 +564,7 @@
       "confidence": 0.35,
       "evidence": {
         "source": [],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -562,6 +583,7 @@
       "confidence": 0.95,
       "evidence": {
         "source": [],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [],
         "docs": [
@@ -584,6 +606,7 @@
           "src/cloud/videoReview.ts",
           "src/features/video-review/VerdictSheet.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0012_video_review_feedback.sql"
         ],
@@ -608,6 +631,7 @@
       "confidence": 0.67,
       "evidence": {
         "source": [],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0008_version_archive.sql"
         ],
@@ -632,6 +656,7 @@
       "confidence": 0.95,
       "evidence": {
         "source": [],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [],
         "docs": [
@@ -653,6 +678,7 @@
         "source": [
           "src/features/video-review/VideoPlayer.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/e2e/video-flow.mjs"
@@ -676,6 +702,7 @@
           "src/features/video-review/VideoCommentComposer.tsx",
           "src/features/video-review/anchors.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0006_video_rooms.sql"
         ],
@@ -703,6 +730,7 @@
           "src/features/video-review/VideoWorkspace.tsx",
           "src/features/video-review/anchors.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0006_video_rooms.sql"
         ],
@@ -730,6 +758,7 @@
           "src/cloud/videoReview.ts",
           "src/features/video-review/VideoWorkspace.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0012_video_review_feedback.sql"
         ],
@@ -759,6 +788,7 @@
           "src/cloud/videoReview.ts",
           "src/features/video-review/ReviewBrief.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0012_video_review_feedback.sql"
         ],
@@ -783,6 +813,7 @@
       "confidence": 0.95,
       "evidence": {
         "source": [],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [],
         "docs": [
@@ -805,6 +836,7 @@
         "source": [
           "supabase/functions/asset-analysis/index.ts"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -827,6 +859,7 @@
           "src/App.tsx",
           "src/cloud/videoAssets.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0006_video_rooms.sql"
         ],
@@ -855,6 +888,7 @@
           "src/ai/proposals.ts",
           "src/features/asset-intelligence/RoomAiSheet.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [],
         "tests": [
           "scripts/tests/ai-proposals.test.ts"
@@ -877,6 +911,7 @@
           "src/cloud/collaborationRepository.ts",
           "src/features/collaboration/nodes.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0014_collaboration_workspace.sql"
         ],
@@ -901,6 +936,7 @@
           "src/cloud/collaborationRepository.ts",
           "src/features/collaboration/nodes.ts"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0014_collaboration_workspace.sql"
         ],
@@ -925,6 +961,7 @@
           "src/cloud/collaborationRepository.ts",
           "src/features/whiteboard/WhiteboardWorkspace.tsx"
         ],
+        "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0014_collaboration_workspace.sql"
         ],
@@ -1003,6 +1040,18 @@
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
         "supabase/functions/asset-analysis/index.ts"
+      ]
+    },
+    {
+      "id": "intelligent-asset-library",
+      "status": "partial",
+      "priority": 1,
+      "missing": [
+        "source: need 1, found 0"
+      ],
+      "relatedFiles": [
+        "scripts/e2e/migrations.mjs",
+        "supabase/migrations/0016_asset_library.sql"
       ]
     },
     {
@@ -1163,27 +1212,27 @@
     },
     {
       "rank": 2,
+      "feature": "intelligent-asset-library",
+      "status": "partial",
+      "reason": "source: need 1, found 0"
+    },
+    {
+      "rank": 3,
       "feature": "tku-zen-agent-integration",
       "status": "partial",
       "reason": "source: need 2, found 0"
     },
     {
-      "rank": 3,
+      "rank": 4,
       "feature": "tus-resumable-upload",
       "status": "spec_only",
       "reason": "source: need 1, found 0; tests: need 1, found 0"
     },
     {
-      "rank": 4,
+      "rank": 5,
       "feature": "version-comparison",
       "status": "spec_only",
       "reason": "source: need 1, found 0; tests: need 1, found 0"
-    },
-    {
-      "rank": 5,
-      "feature": "video-transcode",
-      "status": "spec_only",
-      "reason": "source: need 1, found 0; migrations: need 1, found 0; tests: need 1, found 0"
     }
   ],
   "forbiddenActions": [
