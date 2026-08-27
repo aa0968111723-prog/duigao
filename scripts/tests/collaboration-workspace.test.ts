@@ -18,7 +18,7 @@ import { getSelectedBoardContext, getWhiteboardContext } from "../../src/feature
 import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion } from "../../src/features/collaboration/permissions.ts";
 import { reconcileNodes } from "../../src/features/collaboration/offline.ts";
 import { VOICE_ROOM_MVP } from "../../src/features/collaboration/voice.ts";
-import { focusCamera, marqueeHits, nodeHit, visibleNodes, zoomAt, type Camera } from "../../src/features/whiteboard/canvas.ts";
+import { fitCamera, focusCamera, marqueeHits, nodeHit, visibleNodes, zoomAt, type Camera } from "../../src/features/whiteboard/canvas.ts";
 import type { Whiteboard, WhiteboardEdge, WhiteboardNode } from "../../src/features/collaboration/types.ts";
 
 function board(id = "board-1"): Whiteboard {
@@ -157,6 +157,8 @@ test("27-30 camera pinch/pan, long-press multi-select and marquee", () => {
   assert.deepEqual(marqueeHits([a, b], { x: -10, y: -10 }, { x: 400, y: 80 }).sort(), ["a", "b"]);
   const focused = focusCamera(a, { width: 390, height: 700 });
   assert.ok(Number.isFinite(focused.x));
+  const fitted = fitCamera([a, b], { width: 390, height: 700 });
+  assert.ok(fitted.zoom > 0 && fitted.zoom <= 1.15);
 });
 
 test("31 deterministic arrange: mindmap tree, flow vertical, stickies grid", () => {

@@ -17,7 +17,7 @@ import {
 import { arrangeBoard } from "../collaboration/layout";
 import { canEditBoard } from "../collaboration/permissions";
 import type { NodeType, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardNode } from "../collaboration/types";
-import { BROADCAST_THROTTLE_MS, DRAG_PERSIST_MS, LONG_PRESS_MS, focusCamera, marqueeHits, nodeHit, screenToWorld, visibleNodes, zoomAt, type Camera } from "./canvas";
+import { BROADCAST_THROTTLE_MS, DRAG_PERSIST_MS, LONG_PRESS_MS, fitCamera, focusCamera, marqueeHits, nodeHit, screenToWorld, visibleNodes, zoomAt, type Camera } from "./canvas";
 import "./whiteboard.css";
 
 export type WhiteboardApi = {
@@ -558,7 +558,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         <nav className="wb-bottom" aria-label="白板工具">
           <button type="button" data-testid="whiteboard-add" onClick={() => setSheet("add")} disabled={!canEdit}><span>＋</span>+</button>
           <button type="button" data-testid="whiteboard-search" onClick={() => setSheet("search")}><span>⌕</span>搜尋</button>
-          <button type="button" data-testid="whiteboard-arrange" onClick={() => api.onUpsertNodes(arrangeBoard(nodes, edges))} disabled={!canEdit}><span>⊞</span>整理</button>
+          <button type="button" data-testid="whiteboard-arrange" onClick={() => {
+            const next = arrangeBoard(nodes, edges);
+            api.onUpsertNodes(next);
+            setCamera(fitCamera(next, viewport));
+          }} disabled={!canEdit}><span>⊞</span>整理</button>
           <button type="button" data-testid="whiteboard-more" onClick={() => setSheet("more")}><span>⋯</span>更多</button>
         </nav>
       </div>

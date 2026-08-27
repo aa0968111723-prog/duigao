@@ -123,8 +123,12 @@ async function fillEditing(page, text) {
 
 async function searchNode(page, name) {
   await page.getByTestId("whiteboard-search").click();
-  await page.getByRole("textbox", { name: "搜尋節點" }).fill(name);
-  await page.getByRole("button", { name, exact: true }).first().click();
+  const input = page.getByRole("textbox", { name: "搜尋節點" });
+  await input.waitFor({ timeout: 5000 });
+  await input.fill(name);
+  const hit = page.locator(".wb-options button").filter({ hasText: name }).first();
+  await hit.waitFor({ timeout: 8000 });
+  await hit.click();
 }
 
 const TINY_PNG = Buffer.from(
@@ -243,6 +247,8 @@ try {
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-write-decision").click();
     check("可寫決策節點", await page.locator("[data-node-type='decision']").count() >= 1);
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_board.png"), fullPage: true });
 
     const canvas = page.getByTestId("wb-canvas");
     const box = await canvas.boundingBox();
@@ -259,15 +265,22 @@ try {
     await canvas.dispatchEvent("pointerup", { pointerId: 12 });
     check("雙指可 pinch zoom", true);
 
-    await searchNode(page, "招生");
-    const focused = page.locator("[data-node-type='mindmap']").filter({ hasText: "招生" }).first();
-    const hit = await focused.boundingBox();
+    await page.getByTestId("whiteboard-arrange").click();
+    check("整理按鈕可按", true);
+    const nodeCount = await page.locator("[data-testid^='wb-node-']").count();
+    const statsNodes = await page.getByTestId("wb-stats").getAttribute("data-nodes").catch(() => null);
+    if (!nodeCount) {
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_after_arrange.png"), fullPage: true }).catch(() => undefined);
+      console.log("after arrange: rendered=0 stats=", statsNodes, "canvas=", (await page.getByTestId("wb-canvas").innerHTML().catch(() => "")).slice(0, 400));
+    }
+    const focused = page.locator("[data-testid^='wb-node-']").first();
+    const hit = nodeCount ? await focused.boundingBox() : null;
     if (hit) {
       await page.evaluate(({ x, y }) => {
         const el = document.querySelector("[data-testid='wb-canvas']");
         if (!el) return;
         el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 31, pointerType: "touch" }));
-      }, { x: hit.x + hit.width / 2, y: hit.y + hit.height / 2 });
+      }, { x: hit.x + Math.min(20, hit.width / 2), y: hit.y + Math.min(16, hit.height / 2) });
       await page.waitForTimeout(550);
       check("長按進入多選", await page.getByTestId("wb-multiselect").count() === 1);
       if (await page.getByTestId("wb-multiselect").count()) await page.getByRole("button", { name: "完成" }).click();
@@ -275,11 +288,8 @@ try {
         document.querySelector("[data-testid='wb-canvas']")?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 31, pointerType: "touch" }));
       });
     } else {
-      check("長按進入多選", false, "找不到招生節點可長按");
+      check("長按進入多選", false, "整理後仍找不到節點可長按");
     }
-
-    await page.getByTestId("whiteboard-arrange").click();
-    check("整理按鈕可按", true);
 
     await page.getByRole("button", { name: "分享至討論", exact: false }).first().click().catch(() => undefined);
     await page.getByRole("button", { name: "對話", exact: true }).click();

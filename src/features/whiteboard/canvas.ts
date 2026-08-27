@@ -23,6 +23,7 @@ export function visibleNodes(
   viewport: { width: number; height: number },
   pad = 80,
 ): WhiteboardNode[] {
+  if (nodes.length <= 80) return nodes;
   const left = -camera.x / camera.zoom - pad;
   const top = -camera.y / camera.zoom - pad;
   const right = left + viewport.width / camera.zoom + pad * 2;
@@ -33,6 +34,26 @@ export function visibleNodes(
     node.y + node.height >= top &&
     node.y <= bottom,
   );
+}
+
+export function fitCamera(
+  nodes: WhiteboardNode[],
+  viewport: { width: number; height: number },
+  pad = 28,
+): Camera {
+  if (!nodes.length) return { x: 24, y: 24, zoom: 1 };
+  const minX = Math.min(...nodes.map((node) => node.x));
+  const minY = Math.min(...nodes.map((node) => node.y));
+  const maxX = Math.max(...nodes.map((node) => node.x + node.width));
+  const maxY = Math.max(...nodes.map((node) => node.y + node.height));
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const zoom = clampZoom(Math.min((viewport.width - pad * 2) / width, (viewport.height - pad * 2) / height, 1.15));
+  return {
+    zoom,
+    x: (viewport.width - width * zoom) / 2 - minX * zoom,
+    y: (viewport.height - height * zoom) / 2 - minY * zoom,
+  };
 }
 
 export function focusCamera(node: WhiteboardNode, viewport: { width: number; height: number }, zoom = 1.15): Camera {

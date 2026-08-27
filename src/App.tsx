@@ -257,7 +257,15 @@ export function App() {
 
   const applyRemoteRoom = useCallback((next: Room) => {
     const normalized = normalizeRoomBranches(next);
-    setRoom(normalized);
+    setRoom((current) => {
+      const keepNodes = current?.whiteboardNodes?.length && !normalized.whiteboardNodes?.length;
+      const keepEdges = current?.whiteboardEdges?.length && !normalized.whiteboardEdges?.length;
+      return {
+        ...normalized,
+        whiteboardNodes: keepNodes ? current.whiteboardNodes : normalized.whiteboardNodes,
+        whiteboardEdges: keepEdges ? current.whiteboardEdges : normalized.whiteboardEdges,
+      };
+    });
     if (roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
       setActiveBranchId(roomLink.branchId);
     }

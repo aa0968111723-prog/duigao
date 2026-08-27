@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T04:43:02.000Z",
+  "generatedAt": "2026-08-27T12:39:16.000Z",
   "git": {
     "branch": "cursor/collaboration-workspace-1-431a",
-    "sha": "cec65183b598d9a588a346a636a4201f20ef6370",
+    "sha": "3af3937dd272a752c6e1fbfbd4a53d3eeb60c6ea",
     "mainSha": "cec65183b598d9a588a346a636a4201f20ef6370",
     "dirty": true
   },
