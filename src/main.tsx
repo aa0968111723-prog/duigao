@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { upgradeLegacyShareUrl } from "./cloud/legacy";
@@ -12,7 +12,10 @@ upgradeLegacyShareUrl();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    {/* 單一 Suspense 邊界：lazy 的房間殼在進房那一刻載入（PR-08a）。 */}
+    <Suspense fallback={null}>
+      <App />
+    </Suspense>
   </StrictMode>,
 );
 

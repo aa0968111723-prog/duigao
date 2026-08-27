@@ -1,5 +1,14 @@
-import Peer, { type DataConnection } from "peerjs";
+import type Peer from "peerjs";
+import type { DataConnection } from "peerjs";
 import type { PeerMsg } from "./types";
+
+// PeerJS 是 legacy 本機 P2P 路徑才需要的重依賴（~80KB min）。動態載入：
+// 雲端房與純本機單人流程完全不付這筆（PR-08a code-split）。
+let PeerCtor: typeof Peer | null = null;
+async function loadPeer(): Promise<typeof Peer> {
+  if (!PeerCtor) PeerCtor = (await import("peerjs")).default;
+  return PeerCtor;
+}
 
 const PEER_PREFIX = "duigao-";
 /** Backoff between reconnection attempts; the last value repeats forever. */
@@ -70,8 +79,22 @@ export class Collab {
   private open(): void {
     if (this.stopped) return;
     this.clearTimer();
+    this.handlers.onStatus("connecting");
+    void loadPeer()
+      .then((Ctor) => {
+        if (this.stopped) return;
+        this.openWith(Ctor);
+      })
+      .catch((err) => {
+        // 載入失敗（斷網的首次使用）：走既有 retry 迴圈，狀態誠實。
+        this.handlers.onStatus("error", String(err));
+        this.scheduleRetry();
+      });
+  }
+
+  private openWith(Ctor: typeof Peer): void {
     try {
-      this.peer = this.role === "host" ? new Peer(PEER_PREFIX + this.code) : new Peer();
+      this.peer = this.role === "host" ? new Ctor(PEER_PREFIX + this.code) : new Ctor();
     } catch (err) {
       this.handlers.onStatus("error", String(err));
       this.scheduleRetry();

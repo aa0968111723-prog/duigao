@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   COLORS,
   VERSION_LABELS,
@@ -52,7 +52,12 @@ import { useCloudRoom } from "./cloud/useCloudRoom";
 import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
 import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
-import { RoomWorkspace } from "./components/RoomWorkspace";
+// 兩個房間殼 lazy：Home 首屏（手機為主的入口）不再揹整套對稿/專案房
+// 機器；殼在進房那一刻載入（PR-08a code-split）。fallback 是空畫面 —
+// 進房本來就有資料載入期，多一個 spinner 只會閃。
+const RoomWorkspace = lazy(() =>
+  import("./components/RoomWorkspace").then((m) => ({ default: m.RoomWorkspace })),
+);
 import { Home } from "./components/Home";
 import { INTAKE_PROFILES, UniversalIntake } from "./components/UniversalIntake";
 import { ShareSheet, type ShareCard, type ShareCustomization, type ShareState } from "./components/ShareSheet";
@@ -70,7 +75,10 @@ import {
 import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
-import { MultiBranchRoom, type MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
+import type { MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
+const MultiBranchRoom = lazy(() =>
+  import("./features/multi-room/MultiBranchRoom").then((m) => ({ default: m.MultiBranchRoom })),
+);
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";

@@ -396,6 +396,18 @@ try {
             }
           }
           await B.waitForSelector('[data-testid="wb-canvas"]', { timeout: 20000 });
+          // 量測窗前先等 B 的 subscribe→heal（02c 的一次性板級 GET）落地：
+          // code-split 之後殼是 lazy 的，subscribe 時序後移，heal 可能壓進
+          // 量測窗造成假紅。等「已出現過板 GET」是 deterministic 錨點 —
+          // heal 每次 subscribe 恰好一次。
+          {
+            const healDeadline = Date.now() + 8000;
+            while (Date.now() < healDeadline) {
+              if (requestLog.some((line) => line.includes("GET /rest/v1/whiteboard_nodes"))) break;
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            await B.waitForTimeout(300);
+          }
 
           requestLog.length = 0;
           // A 新增一張便利貼並打字（INSERT + UPDATE 都走 row-patch）
