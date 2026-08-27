@@ -1077,8 +1077,8 @@ try {
     (select count(*) from pg_indexes where indexname in ('idx_intelligent_assets_room_type_updated','idx_asset_video_segments_asset_time','idx_asset_document_chunks_asset','idx_asset_relations_source','idx_asset_analysis_jobs_asset')) || '/' ||
     (select count(*) from pg_trigger where tgname in ('versions_sync_intelligent_asset','intelligent_assets_enqueue','asset_relations_room_guard'));`).out;
   const intelligenceBefore = intelligenceShape();
-  psqlFile(join(MIGRATIONS, "0014_asset_intelligence.sql"));
-  ok("0014 可以重複套用，tables / policies / indexes / triggers 數量不變", intelligenceBefore === intelligenceShape(), `${intelligenceBefore} → ${intelligenceShape()}`);
+  psqlFile(join(MIGRATIONS, "0015_asset_intelligence.sql"));
+  ok("0015 可以重複套用，tables / policies / indexes / triggers 數量不變", intelligenceBefore === intelligenceShape(), `${intelligenceBefore} → ${intelligenceShape()}`);
   const posterAsset = as(owner, `select id from public.intelligent_assets where version_id = '${projectPosterVersion}'::uuid;`).out;
   const videoAsset = as(owner, `select id from public.intelligent_assets where version_id = '${projectVideoVersion}'::uuid;`).out;
   const planAsset = as(owner, `select id from public.intelligent_assets where branch_id = '${projectPlan}'::uuid and asset_type = 'plan';`).out;

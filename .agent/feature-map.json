@@ -28,7 +28,7 @@
           "supabase/functions/room-ai-context/index.ts"
         ],
         "migrations": [
-          "supabase/migrations/0014_asset_intelligence.sql"
+          "supabase/migrations/0015_asset_intelligence.sql"
         ],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -67,7 +67,7 @@
         "src/cloud/assetIntelligence.ts",
         "src/lib/assetIntelligence.ts",
         "supabase/functions/room-ai-context/index.ts",
-        "supabase/migrations/0014_asset_intelligence.sql"
+        "supabase/migrations/0015_asset_intelligence.sql"
       ],
       "priority": 1,
       "notes": []
@@ -81,7 +81,7 @@
           "src/cloud/assetIntelligence.ts"
         ],
         "migrations": [
-          "supabase/migrations/0014_asset_intelligence.sql"
+          "supabase/migrations/0015_asset_intelligence.sql"
         ],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -118,7 +118,7 @@
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
         "src/cloud/assetIntelligence.ts",
-        "supabase/migrations/0014_asset_intelligence.sql"
+        "supabase/migrations/0015_asset_intelligence.sql"
       ],
       "priority": 1,
       "notes": []
@@ -886,7 +886,7 @@
           "supabase/functions/room-ai-context/index.ts"
         ],
         "migrations": [
-          "supabase/migrations/0014_asset_intelligence.sql"
+          "supabase/migrations/0015_asset_intelligence.sql"
         ],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -923,7 +923,7 @@
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
         "supabase/functions/room-ai-context/index.ts",
-        "supabase/migrations/0014_asset_intelligence.sql"
+        "supabase/migrations/0015_asset_intelligence.sql"
       ],
       "priority": 1,
       "notes": []

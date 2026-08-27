@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T13:34:00.000Z",
+  "generatedAt": "2026-08-27T13:34:13.000Z",
   "git": {
     "branch": "codex/multi-branch-room-1",
-    "sha": "525282206a26f8c896bb4a9d7110073d2c661c99",
+    "sha": "44e1e1f1b1daef549d856021a134364d4d7aff4b",
     "mainSha": "f1124a71731ab6ac07f373f559b1a1e5a45fce27",
-    "dirty": false
+    "dirty": true
   },
   "project": {
     "name": "duigao",
@@ -76,7 +76,7 @@
           "supabase/functions/room-ai-context/index.ts"
         ],
         "migrations": [
-          "supabase/migrations/0014_asset_intelligence.sql"
+          "supabase/migrations/0015_asset_intelligence.sql"
         ],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -88,7 +88,7 @@
         "src/cloud/assetIntelligence.ts",
         "src/lib/assetIntelligence.ts",
         "supabase/functions/room-ai-context/index.ts",
-        "supabase/migrations/0014_asset_intelligence.sql"
+        "supabase/migrations/0015_asset_intelligence.sql"
       ],
       "missing": []
     },
@@ -100,7 +100,7 @@
           "src/cloud/assetIntelligence.ts"
         ],
         "migrations": [
-          "supabase/migrations/0014_asset_intelligence.sql"
+          "supabase/migrations/0015_asset_intelligence.sql"
         ],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -110,7 +110,7 @@
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
         "src/cloud/assetIntelligence.ts",
-        "supabase/migrations/0014_asset_intelligence.sql"
+        "supabase/migrations/0015_asset_intelligence.sql"
       ],
       "missing": []
     },
@@ -476,7 +476,7 @@
           "supabase/functions/room-ai-context/index.ts"
         ],
         "migrations": [
-          "supabase/migrations/0014_asset_intelligence.sql"
+          "supabase/migrations/0015_asset_intelligence.sql"
         ],
         "tests": [
           "scripts/tests/asset-intelligence.test.ts"
@@ -486,7 +486,7 @@
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
         "supabase/functions/room-ai-context/index.ts",
-        "supabase/migrations/0014_asset_intelligence.sql"
+        "supabase/migrations/0015_asset_intelligence.sql"
       ],
       "missing": []
     },
@@ -929,7 +929,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0014",
+    "repoMigrationHead": "0015",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -944,11 +944,11 @@
       "supabase/migrations/0011_share_preview_customization.sql",
       "supabase/migrations/0012_video_review_feedback.sql",
       "supabase/migrations/0013_project_room_branches.sql",
-      "supabase/migrations/0014_asset_intelligence.sql",
-      "supabase/migrations/0014_collaboration_workspace.sql"
+      "supabase/migrations/0014_collaboration_workspace.sql",
+      "supabase/migrations/0015_asset_intelligence.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0014",
+    "productionMigrationExpectation": "0015",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1045,7 +1045,7 @@
     }
   ],
   "releaseReadiness": {
-    "status": "blocked",
+    "status": "structurally_ready_tests_not_run",
     "automergeAllowed": false,
     "rule": "AUTOMERGE REQUIRES AGENT_GATE_PASS",
     "structuralChecks": [
@@ -1061,8 +1061,8 @@
       },
       {
         "code": "MIGRATION_ORDER",
-        "ok": false,
-        "message": "Migration naming/order is invalid."
+        "ok": true,
+        "message": "Migration order is contiguous through 0015_asset_intelligence.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",
