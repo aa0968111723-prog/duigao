@@ -15,7 +15,7 @@ import { loadSharePreviewHandler, serveHandler } from "./edge-function.mjs";
 const PORT = Number(process.env.MOCK_PORT || 54399);
 
 const users = new Map(); // token -> userId
-const rooms = new Map(); // roomId -> { id, owner_user_id, title, invite_hash, created_at, updated_at }
+const rooms = new Map(); // roomId -> { id, owner_user_id, title, room_mode, invite_hash, created_at, updated_at }
 const members = new Map(); // roomId -> Set(userId)
 /**
  * `${roomId}:${userId}` -> 'owner' | 'editor' | 'reviewer'.
@@ -43,6 +43,8 @@ const tables = {
   versions: [], comments: [], strokes: [], messages: [], visual_proposals: [],
   comment_supports: [], comment_replies: [], proposal_preferences: [],
   share_previews: [],
+  // 同房多分支 1.0
+  room_branches: [], plan_documents: [], content_relations: [], room_polls: [], room_poll_votes: [],
   // 影片對稿 2.0 (PR #32)
   version_review_briefs: [], video_reactions: [], version_verdicts: [],
   version_review_progress: [],
@@ -54,6 +56,8 @@ const tables = {
  * "one verdict per person per cut" would quietly stop being true.
  */
 const CONFLICT_KEYS = {
+  plan_documents: ["branch_id"],
+  room_poll_votes: ["poll_id", "user_id"],
   version_review_briefs: ["version_id"],
   version_verdicts: ["version_id", "user_id"],
   version_review_progress: ["version_id", "user_id"],
@@ -255,6 +259,10 @@ function filterRows(rows, params) {
       const want = v.slice(3);
       out = out.filter((r) => String(r[k]) === want);
     }
+    if (typeof v === "string" && v.startsWith("in.(")) {
+      const values = v.slice(4, -1).split(",").map((item) => item.replace(/^\"|\"$/g, ""));
+      out = out.filter((r) => values.includes(String(r[k])));
+    }
   }
   return out;
 }
@@ -337,6 +345,29 @@ export const server = http.createServer(async (req, res) => {
           }]
         : []);
     }
+    if (fn === "get_room_branch_summaries") {
+      const uid = userOf(req);
+      if (!uid || !isMember(body.p_room_id, uid)) return json(res, 200, []);
+      const summaries = tables.room_branches
+        .filter((branch) => branch.room_id === body.p_room_id)
+        .map((branch) => {
+          const versions = tables.versions
+            .filter((version) => version.room_id === body.p_room_id && version.branch_id === branch.id && !version.archived_at)
+            .sort((a, b) => Number(b.sort_order ?? 0) - Number(a.sort_order ?? 0) || String(b.created_at).localeCompare(String(a.created_at)));
+          const versionIds = new Set(versions.map((version) => version.id));
+          const comments = tables.comments.filter((comment) => versionIds.has(comment.version_id));
+          return {
+            branch_id: branch.id,
+            version_count: versions.length,
+            latest_version_id: versions[0]?.id ?? null,
+            latest_label: versions[0]?.label ?? null,
+            latest_updated_at: versions[0]?.created_at ?? null,
+            open_comment_count: comments.filter((comment) => !comment.resolved).length,
+            feedback_count: comments.length,
+          };
+        });
+      return json(res, 200, summaries);
+    }
 
     const uid = userOf(req);
     if (!uid) return json(res, 401, { message: "auth required" });
@@ -345,6 +376,7 @@ export const server = http.createServer(async (req, res) => {
       if (!body.p_invite_token || body.p_invite_token.length < 16) return json(res, 400, { message: "invalid invite" });
       rooms.set(body.p_room_id, {
         id: body.p_room_id, owner_user_id: uid, title: body.p_title || "未命名文宣",
+        room_mode: "single",
         invite_hash: sha(body.p_invite_token), created_at: now(), updated_at: now(),
       });
       members.set(body.p_room_id, new Set([uid]));

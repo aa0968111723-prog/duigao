@@ -12,6 +12,7 @@ type Props = {
   /** Video rooms need the cloud; without it the entry says so instead of failing. */
   videoAvailable: boolean;
   onOpen: (room: Room) => void;
+  onCreateProject: () => void;
 };
 
 /**
@@ -22,7 +23,7 @@ type Props = {
  * cut lead to different screens, and the person choosing already knows which
  * they have.
  */
-export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvailable, onOpen }: Props) {
+export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvailable, onOpen, onCreateProject }: Props) {
   return (
     <main className="home">
       <div className="home-hero">
@@ -31,6 +32,13 @@ export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvail
       </div>
 
       <div className="home-picks">
+        <button type="button" className="home-pick home-pick-project" onClick={onCreateProject}>
+          <span className="home-pick-icon" aria-hidden>＋</span>
+          <span className="home-pick-copy">
+            <b>建立活動房</b>
+            <small>把文宣、影片、企劃放在同一間</small>
+          </span>
+        </button>
         <UploadZone onFiles={onFiles} className="home-pick">
           <span className="home-pick-icon" aria-hidden>
             🖼

@@ -26,6 +26,19 @@
       ]
     },
     {
+      "name": "Multi-branch project room",
+      "path": [
+        "src/features/multi-room",
+        "src/lib/roomBranches.ts"
+      ],
+      "responsibility": "Mobile-first room overview, content-family branches, lightweight plans, relations, and decisions.",
+      "dependsOn": [
+        "Workspace router",
+        "Discussion",
+        "Cloud layer"
+      ]
+    },
+    {
       "name": "Image review",
       "path": [
         "src/features/image-review"

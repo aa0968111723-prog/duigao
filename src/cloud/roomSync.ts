@@ -1,5 +1,5 @@
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
-import type { CommentRow, MessageRow, ProposalRow, RoomRow, StrokeRow, VersionRow } from "./types";
+import type { BranchRow, CommentRow, MessageRow, PlanRow, PollRow, PollVoteRow, ProposalRow, RelationRow, RoomRow, StrokeRow, VersionRow } from "./types";
 
 export type SyncHandlers = {
   onRoom?: (row: RoomRow) => void;
@@ -10,6 +10,7 @@ export type SyncHandlers = {
   onVersionInsert?: (row: VersionRow) => void;
   onProposalUpsert?: (row: ProposalRow) => void;
   onFeedbackChange?: () => void;
+  onProjectChange?: () => void;
   onPresence?: (count: number) => void;
   onStatus?: (connected: boolean) => void;
 };
@@ -70,6 +71,26 @@ export function subscribeRoom(
     .on("postgres_changes", { event: "*", schema: "public", table: "proposal_preferences", filter }, () =>
       handlers.onFeedbackChange?.(),
     )
+    .on("postgres_changes", { event: "*", schema: "public", table: "room_branches", filter }, (p) => {
+      void (p.new as BranchRow | undefined);
+      handlers.onProjectChange?.();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "plan_documents", filter }, (p) => {
+      void (p.new as PlanRow | undefined);
+      handlers.onProjectChange?.();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "content_relations", filter }, (p) => {
+      void (p.new as RelationRow | undefined);
+      handlers.onProjectChange?.();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "room_polls", filter }, (p) => {
+      void (p.new as PollRow | undefined);
+      handlers.onProjectChange?.();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "room_poll_votes", filter }, (p) => {
+      void (p.new as PollVoteRow | undefined);
+      handlers.onProjectChange?.();
+    })
     .on("presence", { event: "sync" }, () => {
       handlers.onPresence?.(Object.keys(channel.presenceState()).length);
     })

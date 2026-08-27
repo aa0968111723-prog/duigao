@@ -1,0 +1,129 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { addRoomTarget } from "../../src/cloud/invite.ts";
+import {
+  branchOpenCommentCount,
+  branchSummary,
+  branchVersions,
+  latestBranchVersion,
+  mergeRoomBranch,
+  normalizeRoomBranches,
+  roomForBranch,
+  sortBranchesByRecent,
+} from "../../src/lib/roomBranches.ts";
+import type { Room, RoomBranch } from "../../src/lib/types.ts";
+
+const version = (id: string, kind: "image" | "video" = "image", branchId?: string) => ({
+  id,
+  label: id,
+  kind,
+  imageDataUrl: "data:image/png;base64,AA==",
+  ...(branchId ? { branchId } : {}),
+});
+
+function room(overrides: Partial<Room> = {}): Room {
+  return {
+    id: "room-1",
+    title: "淡江招生企劃房",
+    versions: [version("poster-1")],
+    comments: [],
+    strokes: [],
+    messages: [],
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+function branch(id: string, branchType: RoomBranch["branchType"], updatedAt: number): RoomBranch {
+  return {
+    id,
+    roomId: "room-1",
+    name: id,
+    branchType,
+    sortOrder: updatedAt,
+    status: "in_progress",
+    createdBy: "owner",
+    createdAt: updatedAt,
+    updatedAt,
+  };
+}
+
+test("old image rooms receive one compatible poster branch", () => {
+  const normalized = normalizeRoomBranches(room({ mediaType: "image", versions: [version("v1"), version("v2")] }));
+  assert.equal(normalized.branches?.length, 1);
+  assert.equal(normalized.branches?.[0].branchType, "poster");
+  assert.deepEqual(normalized.versions.map((item) => item.branchId), [normalized.branches?.[0].id, normalized.branches?.[0].id]);
+  assert.equal(normalized.projectMode, undefined);
+});
+
+test("old video rooms receive one compatible video branch", () => {
+  const normalized = normalizeRoomBranches(room({ mediaType: "video", versions: [version("cut-1", "video")] }));
+  assert.equal(normalized.branches?.[0].branchType, "video");
+  assert.equal(normalized.versions[0].branchId, normalized.branches?.[0].id);
+});
+
+test("project room keeps poster, video and plan versions separated", () => {
+  const poster = branch("poster", "poster", 1);
+  const video = branch("video", "video", 2);
+  const plan = branch("plan", "plan", 3);
+  const normalized = normalizeRoomBranches(room({
+    projectMode: true,
+    branches: [poster, video, plan],
+    versions: [version("p1", "image", poster.id), version("v1", "video", video.id)],
+    comments: [
+      { id: "c1", versionId: "p1", authorId: "a", authorName: "A", authorColor: "#000", x: 0.2, y: 0.3, body: "poster", resolved: false, createdAt: 1 },
+      { id: "c2", versionId: "v1", authorId: "a", authorName: "A", authorColor: "#000", x: 0.4, y: 0.5, body: "video", resolved: false, createdAt: 2 },
+    ],
+  }));
+
+  assert.deepEqual(branchVersions(normalized, poster.id).map((item) => item.id), ["p1"]);
+  assert.deepEqual(branchVersions(normalized, video.id).map((item) => item.id), ["v1"]);
+  assert.equal(branchVersions(normalized, plan.id).length, 0);
+  assert.equal(branchOpenCommentCount(normalized, poster.id), 1);
+  assert.deepEqual(roomForBranch(normalized, poster.id).versions.map((item) => item.id), ["p1"]);
+  assert.deepEqual(roomForBranch(normalized, poster.id).comments.map((item) => item.id), ["c1"]);
+  assert.equal(latestBranchVersion(normalized, poster.id)?.id, "p1");
+});
+
+test("branch list can be sorted by recent update without changing stored order", () => {
+  const input = [branch("old", "poster", 1), branch("new", "plan", 9), branch("middle", "video", 4)];
+  assert.deepEqual(sortBranchesByRecent(input).map((item) => item.id), ["new", "middle", "old"]);
+  assert.deepEqual(input.map((item) => item.id), ["old", "new", "middle"]);
+});
+
+test("branch deep-link stays in the fragment and preserves the invite", () => {
+  const url = addRoomTarget("https://example.test/#room=r&invite=secret", { branchId: "b1", versionId: "v1" });
+  const parsed = new URL(url);
+  assert.equal(parsed.search, "");
+  assert.equal(parsed.hash, "#room=r&invite=secret&branch=b1&item=v1");
+});
+
+test("summary-first project room preserves lightweight card data", () => {
+  const poster = branch("poster", "poster", 1);
+  const video = branch("video", "video", 2);
+  const summaryRoom = room({
+    projectMode: true,
+    branches: [poster, video],
+    versions: [],
+    branchSummaries: [{ branchId: poster.id, versionCount: 2, latestLabel: "改二", openCommentCount: 3, feedbackCount: 4 }],
+  });
+  assert.equal(branchSummary(summaryRoom, poster.id).latestLabel, "改二");
+  assert.equal(branchSummary(summaryRoom, poster.id).openCommentCount, 3);
+  assert.equal(branchVersions(summaryRoom, video.id).length, 0);
+});
+
+test("hydrating one branch does not mix another branch's review data", () => {
+  const poster = branch("poster", "poster", 1);
+  const video = branch("video", "video", 2);
+  const base = room({ projectMode: true, branches: [poster, video], versions: [], branchSummaries: [{ branchId: poster.id, versionCount: 1, latestLabel: "初稿", openCommentCount: 1, feedbackCount: 1 }] });
+  const hydrated = room({
+    projectMode: true,
+    branches: [poster],
+    versions: [version("p1", "image", poster.id)],
+    comments: [{ id: "c1", versionId: "p1", authorId: "a", authorName: "A", authorColor: "#000", x: 0.5, y: 0.5, body: "只屬於文宣", resolved: false, createdAt: 2 }],
+  });
+  const merged = mergeRoomBranch(base, hydrated, poster.id);
+  assert.deepEqual(merged.versions.map((item) => item.branchId), [poster.id]);
+  assert.deepEqual(merged.comments.map((item) => item.versionId), ["p1"]);
+  assert.deepEqual(merged.branches?.map((item) => item.id), [poster.id, video.id]);
+});

@@ -34,6 +34,7 @@ export type VideoUploadPhase = "preparing" | "uploading" | "processing";
 export type VideoUploadInput = {
   roomId: string;
   versionId: string;
+  branchId?: string;
   label: string;
   sortOrder: number;
   file: File;
@@ -103,6 +104,7 @@ export function uploadVideoVersion(
       if (cancelled) throw new CloudError("upload-cancelled", "storage");
       await addVideoVersion(supabase, input.roomId, {
         id: input.versionId,
+        branchId: input.branchId,
         label: input.label,
         sortOrder: input.sortOrder,
         videoPath: path,

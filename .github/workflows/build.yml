@@ -84,6 +84,8 @@ jobs:
       - name: Install Playwright
         run: |
           npx playwright install --with-deps chromium
+      - run: npm run test:multi-branch
+      - run: npm run test:multi-branch-e2e
       - run: npm run test:review-viewer
       - run: npm run test:video
       - run: npm run test:share-e2e
