@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { PlanDocument, Room, RoomBranch, RoomPoll } from "../../lib/types";
+import { anchorFromNode, openTarget } from "../../lib/contextAnchor";
 import { branchSummary, branchTypeLabel, latestBranchVersion } from "../../lib/roomBranches";
 import {
   addFlowNextStep,
@@ -584,7 +585,17 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               }}>+ 子項目</button>
             )}
             {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
-              <button type="button" onClick={() => api.onOpenContent(selectedNode.linkedEntityId!, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime })}>打開內容</button>
+              <button type="button" onClick={() => {
+                // 導航走 ContextAnchor 契約（PR-02d）。version link 的 asset
+                // 卡沒有 content 導航面（契約誠實回 none）— 保留舊呼叫，
+                // 行為中立；收斂這條屬於後續的行為決策，不屬於本 PR。
+                const target = openTarget(anchorFromNode(selectedNode));
+                if (target.surface === "content") {
+                  api.onOpenContent(target.branchId, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime });
+                } else {
+                  api.onOpenContent(selectedNode.linkedEntityId!, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime });
+                }
+              }}>打開內容</button>
             )}
             <button type="button" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
             {selected.length > 1 && (

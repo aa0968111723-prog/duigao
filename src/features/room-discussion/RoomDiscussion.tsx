@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { UniversalIntake, type IntakeHandle } from "../../components/UniversalIntake";
+import { anchorFromDiscussion, openTarget } from "../../lib/contextAnchor";
 import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { VOICE_ROOM_MVP, voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
@@ -198,12 +199,29 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               <p>{message.body}</p>
               {message.payload.quotedBody ? <div className="rd-quote">{message.payload.quotedBody}</div> : null}
               {(message.kind === "whiteboard" || message.kind === "node") && (
-                <button type="button" className="rd-ref" onClick={() => api.onOpenBoardNode(message.payload.whiteboardId ?? "", message.payload.nodeId)}>
+                <button
+                  type="button"
+                  className="rd-ref"
+                  onClick={() => {
+                    // 導航走 ContextAnchor 契約（PR-02d）；壞列（缺
+                    // whiteboardId）維持舊行為送空字串，讓 App 端 no-op。
+                    const target = openTarget(anchorFromDiscussion(message.payload));
+                    if (target.surface === "board") api.onOpenBoardNode(target.whiteboardId, target.nodeId);
+                    else api.onOpenBoardNode(message.payload.whiteboardId ?? "", message.payload.nodeId);
+                  }}
+                >
                   {message.payload.title ?? "打開白板"}
                 </button>
               )}
               {(message.kind === "poster" || message.kind === "video" || message.kind === "plan") && message.payload.branchId && (
-                <button type="button" className="rd-ref" onClick={() => api.onOpenContent?.(message.payload.branchId!)}>
+                <button
+                  type="button"
+                  className="rd-ref"
+                  onClick={() => {
+                    const target = openTarget(anchorFromDiscussion(message.payload));
+                    api.onOpenContent?.(target.surface === "content" ? target.branchId : message.payload.branchId!);
+                  }}
+                >
                   {message.payload.title ?? "房間內容"}
                 </button>
               )}

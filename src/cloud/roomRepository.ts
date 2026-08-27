@@ -17,6 +17,7 @@ import type {
   Stroke,
   Version,
 } from "../lib/types";
+import { anchorFromComment, anchorToCommentColumns } from "../lib/contextAnchor";
 import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
@@ -105,21 +106,9 @@ const isUuid = (value: string): boolean =>
  * comment path changes shape.
  */
 function anchorColumns(pin: CommentPin): Record<string, unknown> {
-  if (pin.anchor?.kind === "range") {
-    return {
-      anchor_type: "video-range",
-      time_seconds: pin.anchor.startTime,
-      end_time_seconds: pin.anchor.endTime,
-    };
-  }
-  if (pin.anchor?.kind === "point") {
-    return { anchor_type: "video-point", time_seconds: pin.anchor.time, end_time_seconds: null };
-  }
-  return {
-    anchor_type: pin.region ? "image-region" : "image-point",
-    time_seconds: null,
-    end_time_seconds: null,
-  };
+  // 委派 ContextAnchor 契約層（PR-02d）：欄位形狀逐欄不變（round-trip
+  // unit 以本函式的舊輸出為 fixture 驗證）。
+  return anchorToCommentColumns(anchorFromComment(pin));
 }
 
 /**

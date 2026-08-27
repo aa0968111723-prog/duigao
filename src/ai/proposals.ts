@@ -1,11 +1,6 @@
-import {
-  LINKED_ENTITY_TYPES,
-  NODE_TYPES,
-  type LinkedEntityType,
-  type NodeType,
-  type WhiteboardNode,
-} from "../features/collaboration/types";
+import { NODE_TYPES, type NodeType, type WhiteboardNode } from "../features/collaboration/types";
 import { createNode } from "../features/collaboration/nodes";
+import { anchorToNodeLink, entityAnchor } from "../lib/contextAnchor";
 import type { RoomContextAnswer, RoomContextResponse } from "../lib/assetIntelligence";
 
 export const AI_ACTION_TYPES = [
@@ -157,10 +152,11 @@ export function nodeFromAddWhiteboardAction(input: {
         ? text(input.payload.mediaKind) as "poster" | "video" | "plan" | "asset"
         : undefined,
     },
-    linkedEntityType: (LINKED_ENTITY_TYPES as readonly string[]).includes(text(input.payload.linkedEntityType))
-      ? text(input.payload.linkedEntityType) as LinkedEntityType
-      : undefined,
-    linkedEntityId: text(input.payload.linkedEntityId) || undefined,
+    // link 正規化走 ContextAnchor 契約層（PR-02d）：type＋id 缺一即不產
+    // link（半截 link 讀側本來就讀不出東西 — anchorFromNode 同一條規則）。
+    ...anchorToNodeLink(
+      entityAnchor(text(input.payload.linkedEntityType), text(input.payload.linkedEntityId)) ?? { type: "board-node", whiteboardId: input.whiteboardId },
+    ),
   });
 }
 
