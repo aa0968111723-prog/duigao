@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T22:50:36.000Z",
+  "generatedAt": "2026-08-27T23:03:01.000Z",
   "git": {
-    "branch": "feat/mobile-upload-hardening",
-    "sha": "1d594c02c632c4c084ff1a309c12548827f2fafc",
-    "mainSha": "932d0d0e4ecef206eb6f1c5e9d167076f6198f52",
+    "branch": "feat/bundle-code-split",
+    "sha": "b1403833d7612cbf8ca5ec570d61d3d4aec3fb8a",
+    "mainSha": "d4be5135b1976d4c1c6ce60c910490c78baff771",
     "dirty": false
   },
   "project": {
@@ -34,16 +34,7 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": [
-        {
-          "baseRefName": "main",
-          "headRefName": "feat/mobile-upload-hardening",
-          "isDraft": false,
-          "number": 56,
-          "title": "PR-01c: 手機上傳強化 — 首上傳半路死亡沿用同房、版本重送冪等、HEVC 誠實提示",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/56"
-        }
-      ]
+      "items": []
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",

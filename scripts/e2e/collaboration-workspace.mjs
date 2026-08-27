@@ -396,7 +396,25 @@ try {
             }
           }
           await B.waitForSelector('[data-testid="wb-canvas"]', { timeout: 20000 });
-
+          // 量測窗前的靜默期（Grok 08a F4 修正版）：B 的 subscribe→heal
+          // 板級 GET 是 0-or-1 的合法競態 — subscribe 若在開板前完成就沒有
+          // heal GET，之後完成就有一次。斷言「必發生」或「必不發生」都是
+          // 錯的；正確的 deterministic 錨點是「板 GET 計數穩定 1.5 秒」，
+          // 保證量測窗開始時所有 straggler 已落地。逾時（10 秒仍不穩定）
+          // 即紅 — 那代表有 GET 迴圈，本身就是 bug。
+          {
+            const boardGets = () => requestLog.filter((line) => line.includes("GET /rest/v1/whiteboard_nodes")).length;
+            const quietDeadline = Date.now() + 10000;
+            let stableSince = Date.now();
+            let last = boardGets();
+            while (Date.now() - stableSince < 1500) {
+              if (Date.now() > quietDeadline) break;
+              await new Promise((resolve) => setTimeout(resolve, 150));
+              const now = boardGets();
+              if (now !== last) { last = now; stableSince = Date.now(); }
+            }
+            check("兩分頁：量測窗前板 GET 已靜默（無 GET 迴圈）", Date.now() <= quietDeadline, `boardGets=${last}`);
+          }
           requestLog.length = 0;
           // A 新增一張便利貼並打字（INSERT + UPDATE 都走 row-patch）
           await page.getByTestId("whiteboard-add").click();
