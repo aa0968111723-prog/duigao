@@ -1,8 +1,8 @@
 .rd-shell { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-.rd-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px; margin: 8px 0 12px; border-radius: 14px; background: var(--panel); }
+.rd-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 4px; margin: 8px 0 12px; border-radius: 14px; background: var(--panel); }
 .rd-tabs button { min-height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-faint); }
 .rd-tabs button.is-active { background: var(--raise); color: var(--ink); font-weight: 600; }
-.rd-feed { display: flex; flex-direction: column; gap: 10px; padding-bottom: 88px; }
+.rd-feed { display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(88px + var(--kb, 0px)); }
 .rd-msg { border: 1px solid var(--line-soft); background: var(--panel); border-radius: 16px; padding: 12px 14px; }
 .rd-msg header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .rd-dot { width: 8px; height: 8px; border-radius: 99px; }
@@ -13,9 +13,23 @@
 .rd-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .rd-actions button { min-height: 32px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--raise); color: var(--ink-dim); font-size: 12px; }
 .rd-composer { position: sticky; bottom: 0; display: flex; gap: 8px; padding: 10px 0 calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 30%); }
+/* 討論殼根畫面的 composer 是固定底欄：鍵盤升起（--kb > 0）時騎在鍵盤上。
+   single 房 drawer（DragSheet／側欄內）維持 sticky，不對 viewport 定位。 */
+.is-discussion-root .rd-composer { position: fixed; z-index: 30; left: max(12px, calc((100vw - 680px) / 2 + 12px)); right: max(12px, calc((100vw - 680px) / 2 + 12px)); bottom: calc(var(--kb, 0px) + var(--rd-dock, 0px)); }
 .rd-composer input { flex: 1; }
 .rd-decisions { display: grid; gap: 16px; }
 .rd-decision { border: 1px solid var(--line-soft); border-radius: 14px; padding: 12px; background: var(--panel); }
 .rd-decision.is-done { border-color: rgba(111,175,116,.4); }
 .rd-voice { padding: 28px 8px; text-align: center; color: var(--ink-dim); }
 .rd-voice strong { display: block; color: var(--ink); margin-bottom: 8px; }
+
+/* 送出狀態（outbox） */
+.rd-msg.is-sending { opacity: .6; }
+.rd-msg.is-failed { border-color: rgba(214, 89, 76, .55); }
+.rd-retry { margin-top: 8px; min-height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(214, 89, 76, .16); color: #d6594c; font-size: 12px; }
+/* 語音在 provider 落地前是一行說明，不佔 pane */
+.rd-voice-note { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; background: var(--panel); color: var(--ink-faint); font-size: 12px; }
+
+/* drawer 掛在對稿工作區時，右下角有 AI FAB 疊在上面；composer 讓出那塊，
+   送出鈕不會被蓋住。 */
+.discussion-drawer .rd-composer { padding-right: 68px; }

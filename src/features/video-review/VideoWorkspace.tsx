@@ -568,7 +568,7 @@ export function VideoWorkspace({ api, presence }: Props) {
 
   // Memoized on what it actually shows: a playing video must not re-render
   // every card, and the clock deliberately is not one of these inputs (§16).
-  const discussion = useMemo(
+  const feedbackList = useMemo(
     () => (
       <VideoDiscussion
         api={api}
@@ -579,6 +579,20 @@ export function VideoWorkspace({ api, presence }: Props) {
       />
     ),
     [api, version.id, focusComment, isMobile],
+  );
+  // 房級討論 drawer（雲端 single 房才有）；有的話討論位變成
+  // 「回饋｜房間討論」兩段，回饋維持既有的逐格意見流程。
+  const [discussTab, setDiscussTab] = useState<"feedback" | "room">("feedback");
+  const discussion = api.discussionDrawer ? (
+    <>
+      <div className="m-sheet-tabs v-discuss-tabs">
+        <button type="button" className={discussTab === "feedback" ? "is-on" : ""} onClick={() => setDiscussTab("feedback")}>回饋</button>
+        <button type="button" className={discussTab === "room" ? "is-on" : ""} onClick={() => setDiscussTab("room")}>房間討論</button>
+      </div>
+      {discussTab === "feedback" ? feedbackList : api.discussionDrawer}
+    </>
+  ) : (
+    feedbackList
   );
 
   const briefCard = version && (

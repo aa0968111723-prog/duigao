@@ -25,7 +25,15 @@ export type RoomDiscussionApi = {
   onFinalizeDecision: (id: string) => void;
   onOpenContent?: (branchId: string) => void;
   hideTabs?: boolean;
-  pane?: "chat" | "board" | "voice";
+  pane?: "chat" | "board";
+  /** 每則訊息的送出狀態（sending/failed）；來自 App 的 outbox。 */
+  sendStates?: Record<string, "sending" | "failed">;
+  /** 失敗訊息的重試（id 冪等，duplicate-key 視為成功）。 */
+  onRetry?: (messageId: string) => void;
+  /** 決定條預設顯示；single 房 drawer 對 reviewer 關閉。 */
+  showDecisions?: boolean;
+  /** 白板/投票等房間層動作；single 房 drawer 對 reviewer 關閉。 */
+  showRoomActions?: boolean;
 };
 
 function timeLabel(ts: number): string {
@@ -38,11 +46,13 @@ function PollMini({ poll, room }: { poll: RoomPoll; room: Room }) {
 }
 
 export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
-  const [pane, setPane] = useState<"chat" | "board" | "voice">(api.pane ?? "chat");
+  const [pane, setPane] = useState<"chat" | "board">(api.pane ?? "chat");
   const [menuId, setMenuId] = useState<string | null>(null);
   const [boardPick, setBoardPick] = useState<DiscussionMessage | null>(null);
   const [reply, setReply] = useState<DiscussionMessage | null>(null);
 
+  const showDecisions = api.showDecisions ?? true;
+  const showRoomActions = api.showRoomActions ?? true;
   const decided = api.decisions.filter((item) => item.status === "decided");
   const pending = api.decisions.filter((item) => item.status === "pending");
   const openPolls = (api.room.polls ?? []).filter((poll) => !poll.closedAt);
@@ -52,25 +62,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     [api.messages],
   );
 
-  if ((api.pane ?? pane) === "voice") {
-    return (
-      <div className="rd-shell" data-testid="room-discussion">
-        {!api.hideTabs && (
-        <div className="rd-tabs">
-          <button type="button" onClick={() => setPane("chat")}>對話</button>
-          <button type="button" onClick={() => setPane("board")}>白板</button>
-          <button type="button" className="is-active">語音</button>
-        </div>
-        )}
-        <div className="rd-voice" data-testid="voice-boundary">
-          <strong>語音房間</strong>
-          <p>{VOICE_ROOM_MVP ? "語音已開啟" : voiceUnavailableReason()}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (pane === "board") {
+  if ((api.pane ?? pane) === "board") {
     return null;
   }
 
@@ -80,10 +72,15 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       <div className="rd-tabs" role="tablist" aria-label="討論">
         <button type="button" className={pane === "chat" ? "is-active" : ""} onClick={() => setPane("chat")}>對話</button>
         <button type="button" onClick={() => setPane("board")}>白板</button>
-        <button type="button" onClick={() => setPane("voice")}>語音</button>
       </div>
       )}
 
+      {/* 語音在 provider 落地前是一行不可互動的說明，不佔 pane（Grok pr00 F1）。 */}
+      <div className="rd-voice-note" data-testid="voice-boundary">
+        {VOICE_ROOM_MVP ? "語音已開啟" : voiceUnavailableReason()}
+      </div>
+
+      {showDecisions && (
       <section className="rd-decisions" data-testid="decision-area">
         <div>
           <div className="project-section-title-row"><h3>已決定</h3><span>{decided.length}</span></div>
@@ -110,14 +107,16 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           {!pending.length && !openPolls.length && <p className="project-muted">目前沒有待決定</p>}
         </div>
       </section>
+      )}
 
       <div className="rd-feed" data-testid="discussion-feed">
         {messages.map((message) => {
           const supportCount = api.supports.filter((item) => item.messageId === message.id).length;
           const supported = api.supports.some((item) => item.messageId === message.id && item.userId === api.userId);
+          const sendState = api.sendStates?.[message.id];
           return (
             <article
-              className="rd-msg"
+              className={`rd-msg${sendState === "sending" ? " is-sending" : ""}${sendState === "failed" ? " is-failed" : ""}`}
               key={message.id}
               data-testid={`discussion-${message.id}`}
               onContextMenu={(event) => { event.preventDefault(); setMenuId(message.id); }}
@@ -139,13 +138,18 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   {message.payload.title ?? "房間內容"}
                 </button>
               )}
+              {sendState === "failed" && api.onRetry && (
+                <button type="button" className="rd-retry" data-testid="discussion-retry" onClick={() => api.onRetry?.(message.id)}>
+                  未送出 · 重試
+                </button>
+              )}
               <div className="rd-actions">
                 <button type="button" onClick={() => setReply(message)}>回覆</button>
                 <button type="button" onClick={() => api.onSupport(message.id, !supported)}>支持{supportCount ? ` ${supportCount}` : ""}</button>
-                {api.canManage && <button type="button" onClick={() => api.onCreatePoll(message.body || "要不要這樣做？", ["贊成", "再想想"])}>建立投票</button>}
-                <button type="button" onClick={() => setBoardPick(message)}>加入白板</button>
+                {showRoomActions && api.canManage && <button type="button" onClick={() => api.onCreatePoll(message.body || "要不要這樣做？", ["贊成", "再想想"])}>建立投票</button>}
+                {showRoomActions && <button type="button" onClick={() => setBoardPick(message)}>加入白板</button>}
               </div>
-              {menuId === message.id && (
+              {menuId === message.id && showRoomActions && (
                 <div className="rd-actions">
                   <button type="button" onClick={() => { setBoardPick(message); setMenuId(null); }}>加入白板</button>
                 </div>

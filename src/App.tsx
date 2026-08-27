@@ -73,6 +73,8 @@ import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiShe
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
+import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
+import { DiscussionDrawer } from "./features/room-discussion/DiscussionDrawer";
 import { adoptPersistedNode, stampPersistedNode } from "./features/collaboration/nodes";
 import { collectBoardEditors, stampWriter } from "./features/collaboration/presence";
 import {
@@ -290,8 +292,13 @@ export function App() {
     listRooms().then(setRecent).catch(() => setRecent([]));
   }, [room]);
 
+  const roomLinkAppliedRef = useRef(false);
+  // outbox 對帳只能看「伺服器快照裡有哪些討論訊息」。room.discussion 混著
+  // 樂觀 append 的列，拿它當 serverIds 會在送出瞬間把 entry 誤判為已落地。
+  const [serverDiscussionIds, setServerDiscussionIds] = useState<ReadonlySet<string>>(() => new Set());
   const applyRemoteRoom = useCallback((next: Room) => {
     const normalized = normalizeRoomBranches(next);
+    setServerDiscussionIds(new Set((normalized.discussion ?? []).map((message) => message.id)));
     setRoom((current) => {
       const incomingNodes = normalized.whiteboardNodes ?? [];
       const currentNodes = current?.whiteboardNodes ?? [];
@@ -314,22 +321,40 @@ export function App() {
         const known = lastAckedNodeVersion.current.get(node.id) ?? 0;
         if (incoming > known) lastAckedNodeVersion.current.set(node.id, incoming);
       }
+      // Summary 路徑的 plan_documents 刻意不帶 blocks（lazy）；那種「空殼
+      // plan」不可以蓋掉本地已經有內容的版本，否則編輯中的段落會被
+      // realtime 快照吃掉。只有帶著內容、或者確實比較新的完整版本才接受。
+      const plans = (normalized.plans ?? []).map((incoming) => {
+        const existing = current?.plans?.find((plan) => plan.branchId === incoming.branchId);
+        if (!existing) return incoming;
+        if (!incoming.blocks.length && existing.blocks.length) return existing;
+        return incoming.updatedAt >= existing.updatedAt ? incoming : existing;
+      });
       return {
         ...normalized,
+        plans,
         whiteboardNodes,
         whiteboardEdges,
+        // 專案房不可被快照「降級」：loadRoomFull 的 projectMode 推斷在
+        // room_mode PATCH 還沒落地、又只有一個分支時會誤判 single，
+        // 那會讓房間殼整個掉出去換成單房對稿樹。
+        projectMode: normalized.projectMode || current?.projectMode,
       };
     });
-    if (roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
+    // 深連結只在第一份快照套用一次。每次 realtime snapshot 都重套的話，
+    // 使用者按返回離開分支/白板後，下一個別人觸發的 reload 又會把他推回去。
+    const applyLink = !roomLinkAppliedRef.current;
+    if (applyLink) roomLinkAppliedRef.current = true;
+    if (applyLink && roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
       setActiveBranchId(roomLink.branchId);
     }
-    if (roomLink.kind === "cloud" && roomLink.whiteboardId) {
+    if (applyLink && roomLink.kind === "cloud" && roomLink.whiteboardId) {
       setActiveWhiteboardId(roomLink.whiteboardId);
       setFocusNodeId(roomLink.nodeId ?? null);
     }
     setView((v) => {
       const ids = normalized.versions.map((x) => x.id);
-      const requestedVersionId = roomLink.kind === "cloud" ? roomLink.versionId : undefined;
+      const requestedVersionId = applyLink && roomLink.kind === "cloud" ? roomLink.versionId : undefined;
       const versionId = requestedVersionId && ids.includes(requestedVersionId)
         ? requestedVersionId
         : ids.includes(v.versionId)
@@ -345,6 +370,16 @@ export function App() {
   const cloud = useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSnapshot: applyRemoteRoom, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
+
+  // 討論送出狀態機：失敗可見可重試、快照替換後樂觀列不消失、綁定前先扣住。
+  const discussionOutbox = useDiscussionOutbox({
+    insert: cloud.writes.insertDiscussion,
+    bound: Boolean(cloud.boundRoomId),
+    boundRoomId: cloud.boundRoomId ?? null,
+    serverIds: serverDiscussionIds,
+  });
+  const discussionOutboxRef = useRef(discussionOutbox);
+  discussionOutboxRef.current = discussionOutbox;
 
   // Intelligence is a separate, bounded slice. It never gates the existing
   // room/review load, and a branch workspace only asks for that branch's
@@ -1100,11 +1135,14 @@ export function App() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
+      // 純文字訊息加 300ms 去抖（比照 sendChat 的 claim）；帶 payload 的
+      // 結構卡各有唯一內容，不需要。
+      if ((input?.kind ?? "text") === "text" && !claim(`discussion:${body}`, 300)) return;
       updateRoom((r) => ({ ...r, discussion: [...(r.discussion ?? []), message] }));
-      cloudRef.current.writes.insertDiscussion?.(message);
+      discussionOutboxRef.current.send(message);
       setChatInput("");
     },
-    [chatInput, cloud.userId, guest, updateRoom],
+    [chatInput, claim, cloud.userId, guest, updateRoom],
   );
 
   const supportDiscussion = useCallback(
@@ -2055,6 +2093,27 @@ export function App() {
         }
       : null;
 
+  // single 雲端房的房級討論面：掛進工作區自己的聊天位（sheet 的聊天 tab／
+  // 桌機側欄／影片討論的第二段），不是 tab 殼。本機/PeerJS 房維持 legacy 聊天。
+  const discussionDrawer = room && !room.projectMode && cloud.boundRoomId && guest
+    ? (
+        <DiscussionDrawer
+          room={normalizedRoom ?? room}
+          guest={guest}
+          userId={cloud.userId ?? guest.id}
+          canManage={cloud.canManageMedia}
+          messages={room.discussion ?? []}
+          legacyMessages={room.messages}
+          ghosts={discussionOutbox.ghosts}
+          supports={room.discussionSupports ?? []}
+          sendStates={discussionOutbox.sendStates}
+          onRetry={discussionOutbox.retry}
+          onSend={sendDiscussion}
+          onSupport={supportDiscussion}
+        />
+      )
+    : undefined;
+
   const api: WorkspaceApi | null = reviewRoom
     ? {
         room: reviewRoom,
@@ -2066,6 +2125,7 @@ export function App() {
         selectedPinId,
         previewStrokeId,
         chatInput,
+        discussionDrawer,
         saveState,
         coachSeen,
         canUndo: undoCount > 0,
@@ -2117,6 +2177,9 @@ export function App() {
             setLoadingBranchId(null);
             setOpenAtSeconds(undefined);
             setView(initialView(roomRef.current));
+          } else if (roomRef.current?.projectMode) {
+            // 專案房裡 goHome 只能是「收合對稿 overlay」；離開房間唯一的
+            // 出口是殼 header 的 onGoHome，避免同一顆按鈕雙重語意。
           } else {
             clearUndo();
             setRoom(null);
@@ -2261,18 +2324,42 @@ export function App() {
     : null;
 
   const activeProjectBranch = normalizedRoom && activeBranchId ? branchForId(normalizedRoom, activeBranchId) : undefined;
-  const showProjectShell = Boolean(
-    projectApi &&
-      (!activeProjectBranch ||
-        activeProjectBranch.branchType === "plan" ||
-        activeProjectBranch.branchType === "copy" ||
-        branchVersions(normalizedRoom!, activeProjectBranch.id).length === 0),
-  );
-  if (showProjectShell) {
+  if (projectApi) {
+    // poster/video 且已有版本 → 對稿工作區以 overlay 疊在討論殼上；
+    // 殼永遠掛著（不再整棵樹替換），返回時殼內狀態原封不動。
+    const overlayBranch =
+      activeProjectBranch &&
+      activeProjectBranch.branchType !== "plan" &&
+      activeProjectBranch.branchType !== "copy" &&
+      branchVersions(normalizedRoom!, activeProjectBranch.id).length > 0 &&
+      api
+        ? activeProjectBranch
+        : undefined;
+    const branchWorkspace = overlayBranch
+      ? {
+          branchId: overlayBranch.id,
+          node: (
+            <RoomWorkspace
+              api={api!}
+              presence={{
+                status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
+                peers: cloudSession ? cloud.online : peerCount,
+              }}
+              cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
+            />
+          ),
+        }
+      : null;
     return (
       <>
-        <MultiBranchRoom api={projectApi!} />
-        {isCloudConfigured && <AssetAiFab project onClick={() => openAi()} />}
+        <MultiBranchRoom api={{
+          ...projectApi,
+          workspace: branchWorkspace,
+          discussionGhosts: discussionOutbox.ghosts,
+          discussionSendStates: discussionOutbox.sendStates,
+          onRetryDiscussion: discussionOutbox.retry,
+        }} />
+        {isCloudConfigured && !branchWorkspace && <AssetAiFab project onClick={() => openAi()} />}
         {aiSheetOpen && room && <RoomAiSheet
           roomTitle={room.title}
           assets={assetIntelligence?.assets ?? []}
@@ -2289,6 +2376,20 @@ export function App() {
           onUpdateHumanMetadata={updateHumanMetadata}
           canManage={cloud.canManageMedia}
         />}
+        {/* 分享單以前只掛在對稿樹上；殼的「分享」按鈕 setShareOpen 之後
+            沒人渲染。抬到兩條路徑共用（Grok pr00 review 的 ShareSheet lift）。 */}
+        {shareOpen && room && (
+          <ShareSheet
+            presentation={sharePresentation(roomMediaType(reviewRoom ?? room), (reviewRoom ?? room).title)}
+            state={shareState}
+            onRetry={openShare}
+            onClose={() => setShareOpen(false)}
+            onToast={showToast}
+            onPreviewThumbnail={setPreviewThumbnail}
+            onRotatePreview={rotatePreview}
+            onCustomize={customizeShare}
+          />
+        )}
         <ToastStack toasts={toasts} onDismiss={dismiss} />
       </>
     );

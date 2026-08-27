@@ -113,7 +113,7 @@ export type CloudWrites = {
   deleteRelation: (relationId: string) => void;
   createPoll: (poll: RoomPoll) => void;
   votePoll: (vote: PollVote) => void;
-  insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => void;
+  insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
   createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
@@ -931,7 +931,26 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
     deleteRelation: (relationId) => run(() => deleteRelation(supabase!, boundRef.current!, relationId)),
     createPoll: (poll) => run(() => insertPoll(supabase!, poll)),
     votePoll: (vote) => run(() => votePoll(supabase!, vote)),
-    insertDiscussion: (message) => run(() => insertDiscussion(supabase!, message)),
+    // 討論訊息要能在 UI 上呈現「未送出／重試」，所以回傳可等待的成敗，
+    // 而且失敗不丟進 pending 閉包佇列 — 重試的唯一擁有者是 App 端的
+    // outbox（stale 閉包稍後自動重跑會跟使用者手動重試打架）。
+    // duplicate-key 視為成功：id 相同代表上一次其實已寫入、只是回應沒到。
+    insertDiscussion: async (message) => {
+      if (!supabase || !boundRef.current) return false;
+      setStatus("syncing");
+      try {
+        await insertDiscussion(supabase, message);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+        return true;
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return true;
+        }
+        setStatus("offline-pending");
+        return false;
+      }
+    },
     setDiscussionSupport: (messageId, add) => run(() => repoSetDiscussionSupport(supabase!, boundRef.current!, messageId, add)),
     createWhiteboard: (board) => run(() => insertWhiteboard(supabase!, board)),
     updateWhiteboard: (board) => run(() => repoUpdateWhiteboard(supabase!, board)),

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ShowToast } from "../toast";
 import type {
   AnnotationRegion,
@@ -89,6 +90,8 @@ export type WorkspaceApi = {
   /** Legacy stroke being previewed from the 舊圈畫 manager; null keeps view mode clean. */
   previewStrokeId: string | null;
   chatInput: string;
+  /** single 房的房級討論面（雲端房才有）；工作區把它掛進自己的聊天位。 */
+  discussionDrawer?: ReactNode;
   saveState: SaveState;
   coachSeen: boolean;
   canUndo: boolean;

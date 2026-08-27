@@ -707,6 +707,19 @@ async function loadRoomBranch(supabase: SupabaseClient, roomId: string, branchId
       : ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
     updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
   });
+  // 討論殼永遠掛著（分支對稿只是疊在上面的 overlay），所以 branch 快照也要
+  // 帶回 collab slice — 否則開著 poster/video 時的 realtime 討論事件會走
+  // branch reload 路徑，拿到一份沒有 discussion 的快照，把 feed 凍結住。
+  try {
+    const collab = await loadCollaborationSummary(supabase, roomId);
+    room.whiteboards = collab.whiteboards;
+    room.discussion = collab.discussion;
+    room.discussionSupports = collab.discussionSupports;
+    room.decisions = collab.decisions;
+    room.allowBoardEdit = collab.allowBoardEdit;
+  } catch {
+    /* 0014 not applied yet */
+  }
   return { room, proposals, role: roleFromResult(roleRes) };
 }
 

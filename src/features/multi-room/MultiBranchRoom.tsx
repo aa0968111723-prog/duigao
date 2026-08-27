@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   BranchStatus,
   BranchType,
@@ -78,15 +78,25 @@ export type MultiBranchRoomApi = {
   onShare: () => void;
   onOpenAi: (assetId?: string) => void;
   onGoHome: () => void;
+  /**
+   * 疊在討論殼上的對稿工作區（poster/video 有版本時由 App 建好傳入）。
+   * 殼在 overlay 底下持續掛著，返回時所有殼內狀態都還在。
+   */
+  workspace?: { node: ReactNode; branchId: string } | null;
+  /** 樂觀送出但尚未落到快照的討論訊息（outbox ghosts）。 */
+  discussionGhosts?: DiscussionMessage[];
+  /** 各訊息送出狀態；配合 onRetryDiscussion 呈現「未送出 · 重試」。 */
+  discussionSendStates?: Record<string, "sending" | "failed">;
+  onRetryDiscussion?: (messageId: string) => void;
 };
 
-type RoomTab = "overview" | "content" | "plan" | "discuss";
+/** 從討論殼「推進去」的次要面板；討論本身是房間的根畫面，不再是並列分頁。 */
+type PushedPane = "overview" | "content" | "plan";
 
-const TABS: { id: RoomTab; label: string; icon: string }[] = [
+const PANE_META: { id: PushedPane; label: string; icon: string }[] = [
   { id: "overview", label: "總覽", icon: "⌂" },
   { id: "content", label: "內容", icon: "▧" },
   { id: "plan", label: "企劃", icon: "☷" },
-  { id: "discuss", label: "討論", icon: "💬" },
 ];
 
 function emptyPlan(branch: RoomBranch): PlanDocument {
@@ -230,7 +240,12 @@ function PlanEditor({
   const [draft, setDraft] = useState<PlanDocument>(saved);
   const [relationTarget, setRelationTarget] = useState("");
 
-  useEffect(() => setDraft(saved), [saved]);
+  // room.plans 的陣列身分每次快照都會變；無條件 reset 會把「打字中、還沒按
+  // 完成」的 blocks 洗掉（realtime nudge → branch reload → echo 快照）。
+  // 只有遠端真的比較新（別人存的）才接受，否則保留本地編輯。
+  useEffect(() => {
+    setDraft((current) => (saved.updatedAt > current.updatedAt ? saved : current));
+  }, [saved]);
 
   const relations = (room.relations ?? []).filter(
     (relation) => relation.fromBranchId === branch.id || relation.toBranchId === branch.id,
@@ -427,8 +442,9 @@ function PollSheet({ onClose, onCreate }: { onClose: () => void; onCreate: (ques
 export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const normalized = normalizeRoomBranches(api.room);
   const isMobile = useIsMobile();
-  const [tab, setTab] = useState<RoomTab>(api.activeBranchId ? "plan" : api.activeWhiteboardId ? "discuss" : "overview");
-  const [discussPane, setDiscussPane] = useState<"chat" | "board" | "voice">(api.activeWhiteboardId ? "board" : "chat");
+  // 討論是根畫面；總覽/內容/企劃是可返回的推進面板（Grok pr00 F1/F3）。
+  const [pushedPane, setPushedPane] = useState<PushedPane | null>(null);
+  const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
@@ -436,6 +452,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const [contentKind, setContentKind] = useState<"all" | "poster" | "video">("all");
 
   const activeBranch = normalized.branches?.find((branch) => branch.id === api.activeBranchId) ?? null;
+  // poster/video 有版本時 App 會傳 workspace overlay；殼內的分支詳情頁只
+  // 服務 plan/copy 與還沒有版本的分支。
+  const inShellBranch = activeBranch && !api.workspace ? activeBranch : null;
   const branches = useMemo(() => {
     const base = normalized.branches ?? [];
     const searched = search.trim().toLowerCase()
@@ -445,14 +464,17 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   }, [normalized.branches, search, sortRecent]);
 
   useEffect(() => {
-    if (activeBranch) setTab(activeBranch.branchType === "plan" || activeBranch.branchType === "copy" ? "plan" : "content");
-  }, [activeBranch?.id, activeBranch?.branchType]);
-  useEffect(() => {
+    // 深連結/白板卡把人帶到某塊白板時，根畫面切到白板 pane；推進面板收合。
     if (api.activeWhiteboardId) {
-      setTab("discuss");
       setDiscussPane("board");
+      setPushedPane(null);
     }
   }, [api.activeWhiteboardId]);
+
+  const openBranch = (branchId: string, opts?: { startTime?: number }) => {
+    setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合
+    api.onOpenBranch(branchId, opts);
+  };
 
   const tabBranches = (type: BranchType) => branches.filter((branch) => branchHasType(branch, type) && branch.status !== "archived");
   const [createType, setCreateType] = useState<BranchType | undefined>();
@@ -483,7 +505,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     <div className="project-room" data-testid="multi-branch-room">
       <header className="project-room-header">
         <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="回到房間列表">●</button>
-        {api.activeBranchId ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
+        {inShellBranch ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
         <div className="project-room-heading"><span className="project-kicker">活動房</span><h1>{api.room.title}</h1></div>
         <div className="project-head-actions">
           <button type="button" className="project-ai-button" onClick={() => api.onOpenAi()}>✦ AI</button>
@@ -491,7 +513,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         </div>
       </header>
 
-      {!api.activeBranchId && (
+      {!inShellBranch && (
         <div className="project-search-wrap">
           <span aria-hidden>⌕</span>
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜尋茶會、擺攤、招生…" aria-label="搜尋房間內容" />
@@ -499,27 +521,27 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         </div>
       )}
 
-      {api.activeBranchId && activeBranch ? (
+      {inShellBranch ? (
           <main className="project-branch-detail">
             <div className="project-detail-head">
-            <div><span className="project-kicker">{branchTypeLabel(activeBranch.branchType)}</span><h2>{activeBranch.name}</h2></div>
+            <div><span className="project-kicker">{branchTypeLabel(inShellBranch.branchType)}</span><h2>{inShellBranch.name}</h2></div>
             {api.canManage ? (
-              <select value={activeBranch.status} onChange={(event) => api.onUpdateBranch(activeBranch.id, { status: event.target.value as BranchStatus })} aria-label="分支狀態">
+              <select value={inShellBranch.status} onChange={(event) => api.onUpdateBranch(inShellBranch.id, { status: event.target.value as BranchStatus })} aria-label="分支狀態">
                 {BRANCH_STATUSES.map((status) => <option value={status} key={status}>{branchStatusLabel(status)}</option>)}
               </select>
-            ) : <span className={`project-status project-status-${activeBranch.status}`}>{branchStatusLabel(activeBranch.status)}</span>}
+            ) : <span className={`project-status project-status-${inShellBranch.status}`}>{branchStatusLabel(inShellBranch.status)}</span>}
           </div>
-          {api.loadingBranchId === activeBranch.id ? (
+          {api.loadingBranchId === inShellBranch.id ? (
             <div className="project-branch-empty-detail project-loading-detail"><span className="project-spinner" aria-hidden />正在載入這份內容…</div>
-          ) : (activeBranch.branchType === "plan" || activeBranch.branchType === "copy") ? (
-            <PlanEditor room={normalized} branch={activeBranch} canManage={api.canManage} onSave={api.onSavePlan} onCreateRelation={api.onCreateRelation} onDeleteRelation={api.onDeleteRelation} />
+          ) : (inShellBranch.branchType === "plan" || inShellBranch.branchType === "copy") ? (
+            <PlanEditor room={normalized} branch={inShellBranch} canManage={api.canManage} onSave={api.onSavePlan} onCreateRelation={api.onCreateRelation} onDeleteRelation={api.onDeleteRelation} />
           ) : (
             <div className="project-branch-empty-detail">
-              <p>{branchVersions(normalized, activeBranch.id).length ? "準備好進入檢視器。" : `這份${branchTypeLabel(activeBranch.branchType)}還沒有版本。`}</p>
+              <p>{branchVersions(normalized, inShellBranch.id).length ? "準備好進入檢視器。" : `這份${branchTypeLabel(inShellBranch.branchType)}還沒有版本。`}</p>
               {api.canManage && (
                 <label className="project-upload-button">
-                  <span>＋ {branchVersions(normalized, activeBranch.id).length ? "新增版本" : `加入${branchTypeLabel(activeBranch.branchType)}`}</span>
-                  <input type="file" accept={activeBranch.branchType === "poster" ? "image/*" : VIDEO_ACCEPT} onChange={(event) => api.onAddFiles(activeBranch.id, event.target.files)} />
+                  <span>＋ {branchVersions(normalized, inShellBranch.id).length ? "新增版本" : `加入${branchTypeLabel(inShellBranch.branchType)}`}</span>
+                  <input type="file" accept={inShellBranch.branchType === "poster" ? "image/*" : VIDEO_ACCEPT} onChange={(event) => api.onAddFiles(inShellBranch.id, event.target.files)} />
                 </label>
               )}
             </div>
@@ -527,21 +549,26 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         </main>
       ) : (
         <>
-          <nav className="project-tabs" aria-label="房間內容">
-            {TABS.map((item) => <button type="button" key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}{item.id === "content" && tabBranches("poster").length + tabBranches("video").length > 0 ? <small>{tabBranches("poster").length + tabBranches("video").length}</small> : item.id === "plan" && tabBranches("plan").length > 0 ? <small>{tabBranches("plan").length}</small> : item.id === "discuss" && (api.room.discussion?.length ?? 0) > 0 ? <small>{api.room.discussion!.length}</small> : null}</button>)}
+          <nav className="project-entry-chips" aria-label="房間內容">
+            {PANE_META.map((item) => (
+              <button type="button" key={item.id} data-testid={`open-${item.id}-pane`} onClick={() => setPushedPane(item.id)}>
+                <span aria-hidden>{item.icon}</span>{item.label}
+                {item.id === "content" && tabBranches("poster").length + tabBranches("video").length > 0 ? <small>{tabBranches("poster").length + tabBranches("video").length}</small> : null}
+                {item.id === "plan" && tabBranches("plan").length > 0 ? <small>{tabBranches("plan").length}</small> : null}
+              </button>
+            ))}
           </nav>
-          <main className="project-room-main">
+          <main className="project-room-main is-discussion-root">
             {search.trim() ? (
               <section className="project-section" data-testid="search-results">
                 <div className="project-section-title-row"><h2>搜尋結果</h2><span>{branches.length} 項</span></div>
-                {branches.length ? branches.map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} />) : <p className="project-muted">找不到相關內容</p>}
+                {branches.length ? branches.map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => openBranch(branch.id)} />) : <p className="project-muted">找不到相關內容</p>}
               </section>
-            ) : tab === "discuss" ? (
+            ) : (
               <section className="project-section" data-testid="discuss-workspace">
                 <div className="rd-tabs" role="tablist" aria-label="討論">
                   <button type="button" className={discussPane === "chat" ? "is-active" : ""} onClick={() => { setDiscussPane("chat"); api.onOpenWhiteboard(null); }}>對話</button>
                   <button type="button" className={discussPane === "board" ? "is-active" : ""} onClick={() => setDiscussPane("board")}>白板</button>
-                  <button type="button" className={discussPane === "voice" ? "is-active" : ""} onClick={() => setDiscussPane("voice")}>語音</button>
                 </div>
                 {discussPane === "board" ? (
                   <WhiteboardWorkspace api={{
@@ -567,7 +594,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onCreateEdge: api.onCreateEdge,
                     onShareNode: api.onShareNodeToDiscussion,
                     onOpenContent: (branchId, opts) => {
-                      api.onOpenBranch(branchId, opts);
+                      openBranch(branchId, opts);
                     },
                     onCreatePoll: (question, options) => {
                       const id = crypto.randomUUID();
@@ -594,11 +621,17 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     userId: api.userId ?? api.guest.id,
                     canManage: api.canManage,
                     canTalk: true,
-                    messages: api.room.discussion ?? [],
+                    messages: (() => {
+                      const base = api.room.discussion ?? [];
+                      const ids = new Set(base.map((m) => m.id));
+                      return [...base, ...(api.discussionGhosts ?? []).filter((m) => !ids.has(m.id))];
+                    })(),
                     supports: api.room.discussionSupports ?? [],
                     decisions: api.room.decisions ?? [],
                     boards: api.room.whiteboards ?? [],
                     hideTabs: true,
+                    sendStates: api.discussionSendStates,
+                    onRetry: api.onRetryDiscussion,
                     pane: discussPane,
                     draft: api.chatInput,
                     setDraft: api.setChatInput,
@@ -616,19 +649,29 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     },
                     onCreateDecision: api.onCreateDecision,
                     onFinalizeDecision: api.onFinalizeDecision,
-                    onOpenContent: api.onOpenBranch,
+                    onOpenContent: openBranch,
                   }} />
                 )}
               </section>
-            ) : tab === "overview" ? (
-              <>
+            )}
+          </main>
+          {api.canManage && <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>}
+          {pushedPane && (
+            <div className="project-push-pane" data-testid={`${pushedPane}-pane`}>
+              <header className="project-push-head">
+                <button type="button" className="project-back-button" onClick={() => setPushedPane(null)} aria-label="返回討論">‹</button>
+                <h2>{PANE_META.find((item) => item.id === pushedPane)?.label}</h2>
+              </header>
+              <div className="project-push-body">
+                {pushedPane === "overview" ? (
+                  <>
                 <section className="project-section project-welcome">
                   <p className="project-section-eyebrow">{normalized.branches?.length ? "這個活動房正在進行" : "從一份內容開始"}</p>
                   <h2>{normalized.branches?.length ? "最近發生了什麼" : "這間房還沒有內容"}</h2>
                   {!normalized.branches?.length && <p className="project-muted">把文宣、影片和企劃放在一起，之後再慢慢補齊。</p>}
                 </section>
                 <section className="project-section" data-testid="recent-updates"><div className="project-section-title-row"><h2>最近更新</h2><span>查看全部內容</span></div>
-                  {branches.slice(0, 4).map((branch) => <div className="project-update-row" key={branch.id} onClick={() => api.onOpenBranch(branch.id)}><span>{branchTypeLabel(branch.branchType)}</span><strong>{branch.name}</strong><small>{relativeTime(branch.updatedAt)}</small></div>)}
+                  {branches.slice(0, 4).map((branch) => <div className="project-update-row" key={branch.id} onClick={() => openBranch(branch.id)}><span>{branchTypeLabel(branch.branchType)}</span><strong>{branch.name}</strong><small>{relativeTime(branch.updatedAt)}</small></div>)}
                   {!branches.length && <p className="project-muted">還沒有最近更新</p>}
                 </section>
                 <section className="project-section" data-testid="decisions"><div className="project-section-title-row"><h2>待決策</h2>{api.canManage && <button type="button" className="project-text-button" onClick={() => setPollOpen(true)}>＋ 新增</button>}</div>
@@ -636,17 +679,17 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                   {!(api.room.polls ?? []).some((poll) => !poll.closedAt) && <p className="project-muted">目前沒有待決策</p>}
                 </section>
                 <section className="project-section"><div className="project-section-title-row"><h2>進行中的分支</h2><button type="button" className="project-sort-button" onClick={() => setSortRecent((value) => !value)}>{sortRecent ? "依最近更新" : "依順序"}</button></div>
-                  {branches.filter((branch) => branch.status === "in_progress" || branch.status === "pending").slice(0, 5).map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} />)}
+                  {branches.filter((branch) => branch.status === "in_progress" || branch.status === "pending").slice(0, 5).map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => openBranch(branch.id)} />)}
                 </section>
                 <section className="project-section" data-testid="recent-feedback"><div className="project-section-title-row"><h2>最近回饋</h2><span>{api.room.comments.length} 則</span></div>
-                  {recentComments.map((comment) => <button type="button" className="project-feedback-row" key={comment.id} onClick={() => { const branch = normalized.branches?.find((item) => item.id === comment.branchId || branchVersions(normalized, item.id).some((version) => version.id === comment.versionId)); if (branch) api.onOpenBranch(branch.id); }}><span className="project-feedback-dot" style={{ background: comment.authorColor }} /> <span><strong>{branchNameForVersion(comment.versionId)}</strong><small>{comment.body}</small></span></button>)}
+                  {recentComments.map((comment) => <button type="button" className="project-feedback-row" key={comment.id} onClick={() => { const branch = normalized.branches?.find((item) => item.id === comment.branchId || branchVersions(normalized, item.id).some((version) => version.id === comment.versionId)); if (branch) openBranch(branch.id); }}><span className="project-feedback-dot" style={{ background: comment.authorColor }} /> <span><strong>{branchNameForVersion(comment.versionId)}</strong><small>{comment.body}</small></span></button>)}
                   {!recentComments.length && <p className="project-muted">還沒有回饋</p>}
                 </section>
-                <section className="project-section project-room-chat"><div className="project-section-title-row"><h2>房間討論</h2><button type="button" className="project-text-button" onClick={() => setTab("discuss")}>打開工作台</button></div><div className="project-chat-list">{(api.room.discussion ?? api.room.messages).slice(-3).map((message) => <p key={message.id}><b>{message.authorName}</b>{message.body}</p>)}{!(api.room.discussion ?? api.room.messages).length && <p className="project-muted">先留一句房間層級的討論吧</p>}</div><div className="project-chat-input"><input value={api.chatInput} onChange={(event) => api.setChatInput(event.target.value)} placeholder="這週先主推哪一份？" onKeyDown={(event) => event.key === "Enter" && api.sendChat()} /><button type="button" onClick={api.sendChat} disabled={!api.chatInput.trim()}>送出</button></div></section>
-              </>
-            ) : (
-              <section className="project-section project-list-section" data-testid={`${tab}-branches`}>
-                {tab === "content" ? (
+                <section className="project-section project-room-chat"><div className="project-section-title-row"><h2>房間討論</h2><button type="button" className="project-text-button" onClick={() => setPushedPane(null)}>回到討論</button></div><div className="project-chat-list">{(api.room.discussion ?? api.room.messages).slice(-3).map((message) => <p key={message.id}><b>{message.authorName}</b>{message.body}</p>)}{!(api.room.discussion ?? api.room.messages).length && <p className="project-muted">先留一句房間層級的討論吧</p>}</div><div className="project-chat-input"><input value={api.chatInput} onChange={(event) => api.setChatInput(event.target.value)} placeholder="這週先主推哪一份？" onKeyDown={(event) => event.key === "Enter" && api.sendChat()} /><button type="button" onClick={api.sendChat} disabled={!api.chatInput.trim()}>送出</button></div></section>
+                  </>
+                ) : (
+              <section className="project-section project-list-section" data-testid={`${pushedPane}-branches`}>
+                {pushedPane === "content" ? (
                   <>
                     <div className="project-section-title-row"><div><span className="project-section-eyebrow">文宣與影片</span><h2>內容</h2></div>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate(contentKind === "video" ? "video" : "poster")}>＋ 新增</button>}</div>
                     <div className="rd-tabs" style={{ marginTop: 0 }}>
@@ -659,14 +702,14 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     {(contentKind === "all" || contentKind === "poster") && (
                       <div data-testid="poster-branches">
                         <div className="project-section-title-row"><h3>文宣</h3>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate("poster")}>＋ 新增文宣</button>}</div>
-                        <div className="project-branch-list">{tabBranches("poster").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
+                        <div className="project-branch-list">{tabBranches("poster").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => openBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
                         {!tabBranches("poster").length && api.canManage && <EmptyType label="文宣" onAdd={() => openCreate("poster")} />}
                       </div>
                     )}
                     {(contentKind === "all" || contentKind === "video") && (
                       <div data-testid="video-branches">
                         <div className="project-section-title-row"><h3>影片</h3>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate("video")}>＋ 新增影片</button>}</div>
-                        <div className="project-branch-list">{tabBranches("video").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
+                        <div className="project-branch-list">{tabBranches("video").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => openBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
                         {!tabBranches("video").length && api.canManage && <EmptyType label="影片" onAdd={() => openCreate("video")} />}
                       </div>
                     )}
@@ -674,19 +717,27 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                 ) : (
                   <>
                     <div className="project-section-title-row"><div><span className="project-section-eyebrow">企劃、文案與清單</span><h2>企劃</h2></div>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate("plan")}>＋ 新增企劃</button>}</div>
-                    <div className="project-branch-list">{tabBranches("plan").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
+                    <div className="project-branch-list">{tabBranches("plan").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => openBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
                     {!tabBranches("plan").length && api.canManage && <EmptyType label="企劃" onAdd={() => openCreate("plan")} />}
                   </>
                 )}
               </section>
-            )}
-          </main>
-          {api.canManage && <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>}
-          <nav className="project-bottom-nav" aria-label="主要導覽">{TABS.map((item) => <button type="button" key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}><span>{item.icon}</span>{item.label}</button>)}</nav>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
       {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} />}
       {pollOpen && <PollSheet onClose={() => setPollOpen(false)} onCreate={createPoll} />}
+      {api.workspace && (
+        // 對稿工作區疊在討論殼上；殼不卸載，返回時狀態全在。此容器（與其
+        // 祖先）不可有 transform/filter/contain，工作區自己的 fixed 底欄
+        // 才能繼續對 viewport 定位。
+        <div className="project-workspace-overlay" data-testid="branch-workspace-overlay">
+          {api.workspace.node}
+        </div>
+      )}
     </div>
   );
 }

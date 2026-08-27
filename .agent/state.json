@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T13:28:36.000Z",
+  "generatedAt": "2026-08-27T16:01:00.000Z",
   "git": {
-    "branch": "agent/collaborative-intelligence-workspace",
-    "sha": "438b590d2a2bde862adab525f5a8b671a74a5354",
-    "mainSha": "5cf3f06eeaed9310db1cfa1759928d0b94f50662",
+    "branch": "feat/discussion-room-shell",
+    "sha": "344459e890a47f4e4f6cfd338cf757a94eadc18f",
+    "mainSha": "344459e890a47f4e4f6cfd338cf757a94eadc18f",
     "dirty": true
   },
   "project": {
@@ -37,11 +37,27 @@
       "items": [
         {
           "baseRefName": "main",
-          "headRefName": "agent/collaborative-intelligence-workspace",
-          "isDraft": true,
-          "number": 38,
-          "title": "Collaborative Intelligence Workspace 1.0 / 智慧協作工作台 1.0",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/38"
+          "headRefName": "codex/third-agent-rls-author-acl",
+          "isDraft": false,
+          "number": 47,
+          "title": "fix(rls): author-only writes for shared library and visual proposals",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/47"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "codex/third-agent-context-path-strip",
+          "isDraft": false,
+          "number": 46,
+          "title": "fix(ai): strip poster/image/video storage paths from Room Context",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/46"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "codex/third-agent-offline-stale-replay",
+          "isDraft": false,
+          "number": 45,
+          "title": "fix(offline): stop stale run() replay from overwriting newer cloud writes",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/45"
         }
       ]
     },

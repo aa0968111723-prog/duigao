@@ -260,6 +260,8 @@ function SidePanel({ api }: { api: WorkspaceApi }) {
             />
           ))}
         </div>
+      ) : api.discussionDrawer ? (
+        <div className="panel-body">{api.discussionDrawer}</div>
       ) : (
         <>
           <div className="panel-body">

@@ -873,3 +873,6 @@
   .v-capture { padding: 10px 0 0; }
   .v-capture-main { max-width: 260px; }
 }
+
+/* 房級討論的兩段切換（回饋｜房間討論）；沿用 m-sheet-tabs 視覺 */
+.v-discuss-tabs { margin: 8px 12px 0; }
