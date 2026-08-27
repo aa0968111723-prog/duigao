@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T16:19:11.000Z",
+  "generatedAt": "2026-08-27T17:48:30.000Z",
   "git": {
-    "branch": "codex/third-agent-ai-proposal-apply",
-    "sha": "ddb916e2f9d47d0effeda12f707be182de5cba90",
-    "mainSha": "ddb916e2f9d47d0effeda12f707be182de5cba90",
+    "branch": "feat/discussion-room-shell",
+    "sha": "481d59b6ad6d184f04177f5d3ee4d03ee9dfad35",
+    "mainSha": "9b8d388fe507ab76a69ca87a06f8d223884f1c14",
     "dirty": true
   },
   "project": {
@@ -34,7 +34,40 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": []
+      "items": [
+        {
+          "baseRefName": "main",
+          "headRefName": "feat/discussion-room-shell",
+          "isDraft": false,
+          "number": 48,
+          "title": "PR-01a: 討論成為房間殼 — 對稿 overlay、推進面板、送出重試、single 房討論 drawer",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/48"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "codex/third-agent-rls-author-acl",
+          "isDraft": false,
+          "number": 47,
+          "title": "fix(rls): author-only writes for shared library and visual proposals",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/47"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "codex/third-agent-context-path-strip",
+          "isDraft": false,
+          "number": 46,
+          "title": "fix(ai): strip poster/image/video storage paths from Room Context",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/46"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "codex/third-agent-offline-stale-replay",
+          "isDraft": false,
+          "number": 45,
+          "title": "fix(offline): stop stale run() replay from overwriting newer cloud writes",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/45"
+        }
+      ]
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
