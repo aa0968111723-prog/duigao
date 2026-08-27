@@ -25,6 +25,7 @@
     "scripts/e2e",
     "scripts/tests",
     "src/App.tsx",
+    "src/ai",
     "src/cloud",
     "src/cloud/assets.ts",
     "src/cloud/auth.ts",
@@ -51,6 +52,7 @@
   ],
   "testCommands": [
     "npm run test:agent",
+    "npm run test:asset-intelligence",
     "npm run test:migrations",
     "npm run test:multi-branch",
     "npm run test:multi-branch-e2e",
@@ -72,6 +74,7 @@
     "make:og-cover",
     "preview",
     "test:agent",
+    "test:asset-intelligence",
     "test:migrations",
     "test:multi-branch",
     "test:multi-branch-e2e",

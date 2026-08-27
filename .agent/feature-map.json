@@ -18,6 +18,66 @@
   },
   "features": [
     {
+      "id": "asset-intelligence",
+      "name": "Asset intelligence layer",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/ai/featureFlags.ts",
+          "src/ai/understanding.ts",
+          "src/ai/versionAwareness.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": [
+          "docs/collaborative-intelligence-workspace.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 3,
+          "found": 3,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.94,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/collaborative-intelligence-workspace.md",
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/ai/featureFlags.ts",
+        "src/ai/understanding.ts",
+        "src/ai/versionAwareness.ts",
+        "supabase/migrations/0014_asset_intelligence.sql"
+      ],
+      "priority": 1,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
       "id": "custom-share-cover",
       "name": "Custom share cover",
       "status": "implemented",
@@ -487,6 +547,64 @@
         "scripts/e2e/migrations.mjs",
         "src/cloud/roomRepository.ts",
         "supabase/migrations/0007_room_capabilities.sql"
+      ],
+      "priority": 1,
+      "notes": [
+        "Status is based on executable evidence, not documentation or PR metadata."
+      ]
+    },
+    {
+      "id": "room-context-api",
+      "name": "Room Context API",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/ai/roomContext.ts",
+          "src/ai/video.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": [
+          "docs/collaborative-intelligence-workspace.md"
+        ]
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.92,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "docs/collaborative-intelligence-workspace.md",
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/ai/roomContext.ts",
+        "src/ai/video.ts",
+        "supabase/migrations/0014_asset_intelligence.sql"
       ],
       "priority": 1,
       "notes": [

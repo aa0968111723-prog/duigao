@@ -72,6 +72,17 @@
       ]
     },
     {
+      "name": "Asset intelligence",
+      "path": [
+        "src/ai"
+      ],
+      "responsibility": "Understand room posters, videos, plans and versions; retrieve a Room Context slice for tku-zen-agent.",
+      "dependsOn": [
+        "Multi-branch project room",
+        "Cloud layer"
+      ]
+    },
+    {
       "name": "Cloud layer",
       "path": [
         "src/cloud"

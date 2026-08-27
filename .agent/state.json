@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T02:53:12.000Z",
+  "generatedAt": "2026-08-27T04:43:02.000Z",
   "git": {
-    "branch": "codex/multi-branch-room-1",
-    "sha": "a3379e005be67fa007e3f2f45f83f191b08f5a0a",
-    "mainSha": "a3379e005be67fa007e3f2f45f83f191b08f5a0a",
+    "branch": "agent/collaborative-intelligence-workspace",
+    "sha": "cec65183b598d9a588a346a636a4201f20ef6370",
+    "mainSha": "cec65183b598d9a588a346a636a4201f20ef6370",
     "dirty": true
   },
   "project": {
@@ -20,6 +20,7 @@
       "Image review",
       "Video review",
       "Discussion",
+      "Asset intelligence",
       "Cloud layer",
       "Authentication",
       "Storage/upload",
@@ -40,6 +41,35 @@
     }
   },
   "features": {
+    "asset-intelligence": {
+      "status": "implemented",
+      "confidence": 0.94,
+      "evidence": {
+        "source": [
+          "src/ai/featureFlags.ts",
+          "src/ai/understanding.ts",
+          "src/ai/versionAwareness.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": [
+          "docs/collaborative-intelligence-workspace.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/collaborative-intelligence-workspace.md",
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/ai/featureFlags.ts",
+        "src/ai/understanding.ts",
+        "src/ai/versionAwareness.ts",
+        "supabase/migrations/0014_asset_intelligence.sql"
+      ],
+      "missing": []
+    },
     "custom-share-cover": {
       "status": "implemented",
       "confidence": 0.92,
@@ -259,6 +289,33 @@
         "scripts/e2e/migrations.mjs",
         "src/cloud/roomRepository.ts",
         "supabase/migrations/0007_room_capabilities.sql"
+      ],
+      "missing": []
+    },
+    "room-context-api": {
+      "status": "implemented",
+      "confidence": 0.92,
+      "evidence": {
+        "source": [
+          "src/ai/roomContext.ts",
+          "src/ai/video.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": [
+          "docs/collaborative-intelligence-workspace.md"
+        ]
+      },
+      "relatedFiles": [
+        "docs/collaborative-intelligence-workspace.md",
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/ai/roomContext.ts",
+        "src/ai/video.ts",
+        "supabase/migrations/0014_asset_intelligence.sql"
       ],
       "missing": []
     },
@@ -559,7 +616,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0013",
+    "repoMigrationHead": "0014",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -573,15 +630,17 @@
       "supabase/migrations/0010_security_definer_acl.sql",
       "supabase/migrations/0011_share_preview_customization.sql",
       "supabase/migrations/0012_video_review_feedback.sql",
-      "supabase/migrations/0013_project_room_branches.sql"
+      "supabase/migrations/0013_project_room_branches.sql",
+      "supabase/migrations/0014_asset_intelligence.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0013",
+    "productionMigrationExpectation": "0014",
     "requiresLiveCheck": true
   },
   "tests": {
     "requiredCommands": [
       "npm run test:agent",
+      "npm run test:asset-intelligence",
       "npm run test:migrations",
       "npm run test:multi-branch",
       "npm run test:multi-branch-e2e",
@@ -686,7 +745,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0013_project_room_branches.sql."
+        "message": "Migration order is contiguous through 0014_asset_intelligence.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",

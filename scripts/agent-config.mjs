@@ -178,6 +178,29 @@ export const featureDefinitions = [
     tests: [{ path: "scripts/e2e/multi-branch-room.mjs", contains: ["Android", "multi-branch", "plan"] }],
     minimum: { source: 3, migrations: 1, tests: 1 },
   },
+  {
+    id: "asset-intelligence", name: "Asset intelligence layer", priority: 1,
+    source: [
+      { path: "src/ai/understanding.ts", contains: ["understandImage", "extractPlanDocument"] },
+      { path: "src/ai/versionAwareness.ts", contains: ["currentVersion", "改二"] },
+      { path: "src/ai/featureFlags.ts", contains: ["ai.assetIntelligence", "collaboration.whiteboard"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_asset_intelligence.sql", contains: ["asset_records", "asset_analyses", "room_knowledge_entries", "row level security"] }],
+    tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["這張文宣在講什麼", "IMG_3819"] }],
+    docs: [{ path: "docs/collaborative-intelligence-workspace.md", contains: ["PHASE 1"] }],
+    minimum: { source: 3, migrations: 1, tests: 1 },
+  },
+  {
+    id: "room-context-api", name: "Room Context API", priority: 1,
+    source: [
+      { path: "src/ai/roomContext.ts", contains: ["retrieveRoomContext", "buildZenAgentRequest", "fullRoomDumped"] },
+      { path: "src/ai/video.ts", contains: ["parseTimestamp", "segmentsFromComments"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_asset_intelligence.sql", contains: ["search_room_knowledge"] }],
+    tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["tku-zen-agent", "00:40", "fullRoomDumped"] }],
+    docs: [{ path: "docs/collaborative-intelligence-workspace.md", contains: ["Room Context"] }],
+    minimum: { source: 2, migrations: 1, tests: 1 },
+  },
 ];
 
 export const architectureDefinitions = [
@@ -187,6 +210,7 @@ export const architectureDefinitions = [
   { name: "Image review", paths: ["src/features/image-review"], responsibility: "Immutable image annotation and comparison workspace.", dependsOn: ["Discussion", "Cloud layer"] },
   { name: "Video review", paths: ["src/features/video-review"], responsibility: "Playback, temporal feedback, review brief, reactions, verdicts, and summary.", dependsOn: ["Discussion", "Cloud layer", "Storage/upload"] },
   { name: "Discussion", paths: ["src/features/discussion"], responsibility: "Shared pin comments and discussion cards.", dependsOn: ["Cloud layer"] },
+  { name: "Asset intelligence", paths: ["src/ai"], responsibility: "Understand room posters, videos, plans and versions; retrieve a Room Context slice for tku-zen-agent.", dependsOn: ["Multi-branch project room", "Cloud layer"] },
   { name: "Cloud layer", paths: ["src/cloud"], responsibility: "Supabase persistence, realtime, mapping, invites, and signed media access.", dependsOn: ["Authentication", "Storage/upload", "Migrations"] },
   { name: "Authentication", paths: ["src/cloud/auth.ts", "src/cloud/invite.ts"], responsibility: "Anonymous sessions and fragment-only room invite capability.", dependsOn: ["Cloud layer"] },
   { name: "Storage/upload", paths: ["src/cloud/assets.ts", "src/cloud/videoAssets.ts", "src/cloud/videoRoom.ts"], responsibility: "Private room-assets paths, signed URLs, upload, cancellation, and cleanup.", dependsOn: ["Cloud layer", "Migrations"] },
