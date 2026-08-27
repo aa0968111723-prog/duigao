@@ -11,6 +11,22 @@ export function isCloudWriteAcknowledged(result: unknown): result is true | Whit
   return Boolean(result && typeof result === "object" && "id" in result && "version" in result);
 }
 
+export type NodeWriteRetry = {
+  acknowledged: boolean;
+  queueDurable: boolean;
+  queueMemory: boolean;
+};
+
+/**
+ * Failed / unbound node writes retry only through the durable IndexedDB queue.
+ * An in-memory closure must not also keep the old payload — a later success
+ * would clear IDB and leave the stale task to overwrite newer cloud content.
+ */
+export function decideNodeWriteRetry(outcome: "success" | "unbound" | "failed"): NodeWriteRetry {
+  if (outcome === "success") return { acknowledged: true, queueDurable: false, queueMemory: false };
+  return { acknowledged: false, queueDurable: true, queueMemory: false };
+}
+
 /**
  * Replay durable pending node edits. Records stay queued unless the write
  * returns an explicit ack (true or the persisted node). A skipped / queued /

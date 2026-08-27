@@ -95,6 +95,7 @@ import {
   upsertNode as repoUpsertNode,
   deleteNode as repoDeleteNode,
 } from "./collaborationRepository";
+import { decideNodeWriteRetry } from "../features/collaboration/offline";
 
 export type CloudWrites = {
   setTitle: (title: string) => void;
@@ -455,8 +456,9 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
   );
 
   /**
-   * Awaitable write used by collaboration persist/flush. Returns false when the
-   * room is not bound or the write was only queued, so callers keep IndexedDB.
+   * Awaitable node write. Failures are NOT pushed to the in-memory `pending`
+   * queue — IndexedDB is the only retry owner, so a later successful edit
+   * cannot be overwritten by a stale captured closure.
    */
   const writeAck = useCallback(
     async <T>(task: () => Promise<T>): Promise<T | false> => {
@@ -471,9 +473,12 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
           setStatus(pending.current.length ? "offline-pending" : "synced");
           return false;
         }
-        pending.current.push(async () => {
-          await task();
-        });
+        const retry = decideNodeWriteRetry("failed");
+        if (retry.queueMemory) {
+          pending.current.push(async () => {
+            await task();
+          });
+        }
         setStatus("offline-pending");
         return false;
       }

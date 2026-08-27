@@ -196,18 +196,14 @@ export function formatVideoRange(start?: number, end?: number): string {
 }
 
 /**
- * Advance the client version for an existing node so the next persist is not
- * compared against a stale expected version. New nodes stay at version 1
- * (inserts do not run touch_whiteboard_node).
+ * Optimistic-lock precondition for touch_whiteboard_node: send the last
+ * acknowledged server version, never a client-advanced guess. The trigger
+ * increments after a successful write; adopting that increment is what
+ * prepares the next persist.
  */
-export function stampPersistedNode(node: WhiteboardNode, previous?: WhiteboardNode | null): WhiteboardNode {
-  if (!previous) return { ...node, version: node.version || 1 };
-  const previousVersion = previous.version ?? 1;
-  const incoming = node.version ?? 1;
-  return {
-    ...node,
-    version: incoming > previousVersion ? incoming : previousVersion + 1,
-  };
+export function stampPersistedNode(node: WhiteboardNode, lastAcked?: WhiteboardNode | number | null): WhiteboardNode {
+  const acked = typeof lastAcked === "number" ? lastAcked : lastAcked?.version;
+  return { ...node, version: acked ?? node.version ?? 1 };
 }
 
 /** Keep local content; only take a newer server version/timestamp after ack. */
@@ -219,13 +215,18 @@ export function adoptPersistedNode(local: WhiteboardNode, persisted: WhiteboardN
   };
 }
 
+/** Mirrors 0014 touch_whiteboard_node: reject only versions lower than stored. */
+export function touchWhiteboardNodeVersion(incoming: number, stored: number): number {
+  if (incoming !== stored && incoming < stored) throw new Error("stale-write");
+  return stored + 1;
+}
+
 export function applyNodePatch(node: WhiteboardNode, patch: Partial<Pick<WhiteboardNode, "x" | "y" | "width" | "height" | "content" | "parentGroupId">>): WhiteboardNode {
   return {
     ...node,
     ...patch,
     content: patch.content ? { ...node.content, ...patch.content } : node.content,
     updatedAt: Date.now(),
-    version: (node.version ?? 1) + 1,
   };
 }
 
@@ -255,9 +256,7 @@ export function groupSelected(nodes: WhiteboardNode[], selectedIds: string[], cr
 
 export function moveNodes(nodes: WhiteboardNode[], ids: string[], dx: number, dy: number): WhiteboardNode[] {
   const moving = new Set(ids);
-  return nodes.map((node) => (moving.has(node.id)
-    ? { ...node, x: node.x + dx, y: node.y + dy, updatedAt: Date.now(), version: (node.version ?? 1) + 1 }
-    : node));
+  return nodes.map((node) => (moving.has(node.id) ? { ...node, x: node.x + dx, y: node.y + dy, updatedAt: Date.now() } : node));
 }
 
 export function createRelationEdges(

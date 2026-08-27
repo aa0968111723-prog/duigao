@@ -65,6 +65,7 @@ import { collectBoardEditors, stampWriter } from "./features/collaboration/prese
 import {
   applyPendingCloudWrites,
   clearPendingEdit,
+  decideNodeWriteRetry,
   isBrowserOnline,
   isCloudWriteAcknowledged,
   listPendingEdits,
@@ -188,6 +189,8 @@ export function App() {
   isMobileRef.current = isMobile;
   const collabRef = useRef<Collab | null>(null);
   const roomRef = useRef<Room | null>(null);
+  const lastAckedNodeVersion = useRef(new Map<string, number>());
+  const nodePersistChain = useRef(new Map<string, Promise<void>>());
   const viewRef = useRef<ViewState>(view);
   const saveSeq = useRef(0);
   const busy = useRef<Set<string>>(new Set());
@@ -286,6 +289,11 @@ export function App() {
         : incomingEdges.length
           ? incomingEdges
           : currentEdges;
+      for (const node of whiteboardNodes) {
+        const incoming = node.version ?? 1;
+        const known = lastAckedNodeVersion.current.get(node.id) ?? 0;
+        if (incoming > known) lastAckedNodeVersion.current.set(node.id, incoming);
+      }
       return {
         ...normalized,
         whiteboardNodes,
@@ -956,7 +964,10 @@ export function App() {
     (nodes: WhiteboardNode[], persist: "now" | "end" = "now") => {
       const writer = { id: cloud.userId ?? guest?.id ?? "local", name: guest?.name ?? "我" };
       const existingById = new Map((roomRef.current?.whiteboardNodes ?? []).map((node) => [node.id, node]));
-      const stamped = nodes.map((node) => stampPersistedNode(stampWriter(node, writer), existingById.get(node.id)));
+      const stamped = nodes.map((node) => {
+        const lastAcked = lastAckedNodeVersion.current.get(node.id) ?? existingById.get(node.id)?.version;
+        return stampPersistedNode(stampWriter(node, writer), lastAcked);
+      });
       updateRoom((r) => {
         const byId = new Map((r.whiteboardNodes ?? []).map((node) => [node.id, node]));
         for (const node of stamped) byId.set(node.id, node);
@@ -965,27 +976,37 @@ export function App() {
       void persist;
       const roomId = roomRef.current?.id ?? stamped[0]?.roomId ?? "";
       const persistCloud = async (node: WhiteboardNode) => {
-        const result = await cloudRef.current.writes.upsertNode?.(node);
-        if (isCloudWriteAcknowledged(result)) {
-          if (result && typeof result === "object") {
-            updateRoom((r) => ({
-              ...r,
-              whiteboardNodes: (r.whiteboardNodes ?? []).map((item) => item.id === result.id ? adoptPersistedNode(item, result) : item),
-            }));
+        const prev = nodePersistChain.current.get(node.id) ?? Promise.resolve();
+        const next = prev.catch(() => undefined).then(async () => {
+          const latest = roomRef.current?.whiteboardNodes?.find((item) => item.id === node.id) ?? node;
+          const acked = lastAckedNodeVersion.current.get(latest.id) ?? latest.version ?? 1;
+          const toWrite = stampPersistedNode(latest, acked);
+          const result = await cloudRef.current.writes.upsertNode?.(toWrite);
+          if (isCloudWriteAcknowledged(result)) {
+            if (result && typeof result === "object") {
+              lastAckedNodeVersion.current.set(result.id, result.version ?? acked);
+              updateRoom((r) => ({
+                ...r,
+                whiteboardNodes: (r.whiteboardNodes ?? []).map((item) => item.id === result.id ? adoptPersistedNode(item, result) : item),
+              }));
+            }
+            await clearPendingEdit(`node:${node.id}`);
+            return;
           }
-          await clearPendingEdit(`node:${node.id}`);
-          return;
-        }
-        if (cloudRef.current.active) {
-          await queuePendingEdit({
-            id: `node:${node.id}`,
-            roomId,
-            kind: "node",
-            op: "upsert",
-            payload: node,
-            createdAt: Date.now(),
-          });
-        }
+          const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
+          if (retry.queueDurable && cloudRef.current.active) {
+            await queuePendingEdit({
+              id: `node:${node.id}`,
+              roomId,
+              kind: "node",
+              op: "upsert",
+              payload: toWrite,
+              createdAt: Date.now(),
+            });
+          }
+        });
+        nodePersistChain.current.set(node.id, next);
+        await next;
       };
       if (isBrowserOnline()) {
         stamped.forEach((node) => void persistCloud(node));
@@ -1034,7 +1055,8 @@ export function App() {
           await clearPendingEdit(`node-del:${id}`);
           return;
         }
-        if (cloudRef.current.active) {
+        const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
+        if (retry.queueDurable && cloudRef.current.active) {
           await queuePendingEdit({
             id: `node-del:${id}`,
             roomId: roomRef.current?.id ?? "",
