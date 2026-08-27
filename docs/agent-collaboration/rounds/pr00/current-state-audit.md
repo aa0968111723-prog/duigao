@@ -1,5 +1,9 @@
 # 現況盤點（Current-State Audit）
 
+> **Errata（Grok round pr00 抽查修正）**：
+> 1. §五中「transcode 沒有文件」的說法不成立 — docs/pr29 存在且 §七自己正確標 SPEC_ONLY；以 SPEC_ONLY 為準。
+> 2. §四 plan chunk 上限：經 scrubText（5000）後有效上限為 5000，非 8000。
+
 基準：main @ f327a70。方法：7 區域並行深讀（13 agents、452 tool calls），每個 blocker 級 gap 由第二個獨立 agent 對抗驗證。所有主張皆附 file:line 證據。
 
 對照的產品契約：討論是 Home；白板/文宣/影片/企劃/語音/AI/3D 同一房間脈絡；手機平板優先；AI 產出必經人類 Apply；原稿不可變；單一 UniversalIntake；progressive disclosure。

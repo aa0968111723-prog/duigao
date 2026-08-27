@@ -1,28 +1,170 @@
 {
-  "text": "先對齊倉庫現況與計畫文件，再以獨立對抗視角抽查 ROADMAP、ADR 與 audit 主張。正在讀取 agent 狀態與計畫文件，並對照倉庫原始碼抽查 audit 主張。",
-  "stopReason": "cancelled",
-  "sessionId": "01a043f5-d163-7c40-84d3-221e51a9435b",
-  "requestId": "9a351cb9-992b-487b-8419-af3ca3f97834",
-  "thought": "The user wants me to review a plan PR from an adversarial perspective. This is a review of planning documents, not code implementation. Let me follow the workspace rules:\nThe review skill is designed for code review of diffs. The user asked for a plan PR review of planning documents, with a specific format. They also asked me to use an independent adversarial perspecti...我來直接審查這份 PR 計畫文件，聚焦在產品定位（人先討論、AI 輔助、手機平板最強、一體成形不混亂）與文件一致性。\n\n**1. 定位誤解**  \n{high, claim: ROADMAP 把「討論是 Home 頁」做成另一個互相競爭的分頁, evidence: ROADMAP.md 第 12-15 行提到「討論頁」與「檔案頁」並列，暗示討論是獨立入口, suggested_fix: 把討論頁改成「Home 頁內嵌討論區」，移除獨立討論 頁面, blocks_release: false}\n\n**2. 序列依賴**  \n{medium, claim: PR-01→02→04 關鍵路徑有隱藏依賴, evidence: ROADMAP.",
-  "usage": {
-    "input_tokens": 23133,
-    "cache_read_input_tokens": 17664,
-    "cache_creation_input_tokens": 0,
-    "output_tokens": 1686,
-    "reasoning_tokens": 1258,
-    "total_tokens": 42483
-  },
-  "num_turns": 2,
-  "total_cost_usd": 0.01108638,
-  "total_cost_usd_ticks": 110863800,
-  "modelUsage": {
-    "grok-4.6-build": {
-      "inputTokens": 23133,
-      "outputTokens": 1686,
-      "cacheReadInputTokens": 17664,
-      "cacheCreationInputTokens": 0,
-      "modelCalls": 2,
-      "costUSD": 0.01108638
+  "round": "pr00",
+  "reviewer": "grok-4.6",
+  "branch": "plan/human-first-visual-collaboration",
+  "sha": "985c5f9de6b0b52cde32fa2ffef13325e350c684",
+  "base": "f327a70456dd0699eac608ab90ab395c9a638cb9",
+  "verdict": "PLAN_MUST_REVISE",
+  "summary": "Audit 的核心現況主張大多站得住（討論不是 Home、兩套白板、AI actions 斷頭、intake 分散、開板無 inbound realtime）。計畫把「討論是 Home」做成改預設 tab，且沒有處理進 poster/video 會離開房間殼。PR-01 過大；鍵盤/上傳被丟到 PR-08；PR-04 需要的 audit migration 與契約 cap 沒寫進範圍。ADR-001 成立。ADR-005 把安全的 S2S artifact 路徑一併 BLOCKED，過寬。",
+  "confirmed_audit_claims": [
+    "MultiBranchRoom.tsx:83,430 default overview, discuss 4th tab",
+    "App.tsx:2264-2270 showProjectShell exits on poster/video with versions",
+    "RoomWorkspace.tsx:29-33 single rooms -> Image/VideoWorkspace",
+    "DiscussionWorkspace unmounted (only collaboration.test.ts readFileSync)",
+    "RoomAiSheet.tsx:243-254 no answer.actions",
+    "registerIntelligentAsset defined assetIntelligence.ts:315, zero callers",
+    "collaborationRepository.ts:202-205 summary nodes:[], edges:[]",
+    "WhiteboardWorkspace.tsx:390-391 broadcast throttle stamps time, sends nothing",
+    "assets.ts:40 upsert:true; App.tsx:725-727 image addVersion fire-and-forget",
+    "no onPaste/capture/share_target/getUserMedia in src",
+    "collaboration_audit_events check 3 types; SELECT-only policy 0014:722-724",
+    "intelligent_assets_insert requires can_manage_media 0015:530-531",
+    "voice.ts VOICE_ROOM_MVP=false throws"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "critical",
+      "claim": "ROADMAP PR-01 把「討論是 Home」做成改預設分頁，仍保留互相競爭的 tab 殼。",
+      "evidence": "ROADMAP.md:19「Project room 預設 tab 改為討論（overview 內容併入討論頂部的 context 卡）」；現況 MultiBranchRoom.tsx:83-90 四 tab overview|content|plan|discuss、:541-544 discuss 內再建 chat|board|voice、:530 頂部 project-tabs 與 :685 底部 project-bottom-nav 是同一組四 tab。計畫沒有刪 tab、沒有把白板/內容降成從討論打開的 surface。",
+      "suggested_fix": "重寫 PR-01 IA：討論 = 房間殼。內容/企劃/白板從討論卡或 composer 推進（overlay 或可返回的 workspace），不是并列 tab。頂部 tabs 與底部 nav 擇一或都拿掉。voice 在 BLOCKED 期間不要占一個 pane。",
+      "blocks_release": true
+    },
+    {
+      "id": "F2",
+      "severity": "critical",
+      "claim": "進 poster/video 會離開房間殼；整條 ROADMAP 沒有 owner。討論當不成 Home。",
+      "evidence": "App.tsx:2264-2270 showProjectShell 在 activeProjectBranch 為 poster/video 且 versions.length>0 時為 false，改渲染 RoomWorkspace；:2174-2181 onOpenBranch 對 poster/video 直接 setView(initialView(...))。MultiBranchRoom.tsx:537/619/631/662/669 所有內容卡都走 onOpenBranch。PR-01..08 沒有這條。",
+      "suggested_fix": "把「從討論打開內容必須可返回討論、不丟房間脈絡」寫進 PR-01（或與 ContextAnchor 併成同一個 IA PR）。Reviewer 極簡對稿面可以是 discussion 上的 overlay/workspace，不是第二個 app。",
+      "blocks_release": true
+    },
+    {
+      "id": "F3",
+      "severity": "high",
+      "claim": "PR-01→02 序列把 Home 與「討論卡就是進入內容的方式」切開，01 會先交出一個聊天 tab。",
+      "evidence": "關鍵路徑 ROADMAP.md:72「PR-01 → PR-02 → PR-04」。PR-02 才做 ContextAnchor 契約與訊息⇄節點。PR-01 的 Home 若不含 in-place 打開內容，手機使用者進房看到的是第四個聊天室 + 底部四鍵。",
+      "suggested_fix": "IA + 返回討論 + 卡→內容 必須同 PR（或 02 的 IA 部分先於 01 的 tab 改動）。UniversalIntake 從 PR-01 拆出。AI Apply（04）仍可跟在 canonical 白板（02）之後。",
+      "blocks_release": true
+    },
+    {
+      "id": "F4",
+      "severity": "high",
+      "claim": "PR-01 範圍混了四件不相干的事，且吃掉了沒做的 Thread gap。",
+      "evidence": "ROADMAP.md:15-23：改 Home、UniversalIntake 統一 8 入口、generic attachments、paste/camera、single-mode 討論面；:15 宣稱吃掉「Thread 只有單層 reply」，範圍第 4 點只說不動 legacy messages。DECISIONS.md 沒有訊息遷移 ADR，但 ROADMAP:23 說「遷移策略記入 DECISIONS」。DISCUSSION_KINDS / 0014:149-151 沒有 document/audio/link。",
+      "suggested_fix": "切成：01a 房間 IA（討論殼+返回）；01b UniversalIntake（圖/影入口收斂+paste/capture）；附件另 PR。Thread 要做就寫進範圍並加 ADR；不做就從「吃掉的 gaps」刪掉並 ADR「單層 quote-reply 足夠」。補 ADR-008 雙訊息表策略。",
+      "blocks_release": true
+    },
+    {
+      "id": "F5",
+      "severity": "high",
+      "claim": "PR-01 用 registerIntelligentAsset 當討論附件，會撞上 reviewer-no-media-management，且沒有「資產庫」面。",
+      "evidence": "0015:530-531 intelligent_assets_insert with check can_manage_media；invariants reviewer-no-media-management；registerIntelligentAsset 零呼叫者（assetIntelligence.ts:315）；PR-01 gate「pdf 附件出現於資產庫」但 library_assets 無 client（audit 已證），mounted UI 也沒有資產庫。Composer 附件若走 intelligent_assets，reviewer 會被 RLS 擋。",
+      "suggested_fix": "討論附件走 room_discussion_messages.kind（需 migration 加 document/audio/link 或重用 room_asset）+ 成員可寫的 storage 路徑，與 versions/intelligent_assets 的 can_manage_media 分開。Reviewer 可以貼檔補充，不可管理版本。Gate 改測「訊息卡出現 PDF」，不要假裝有資產庫。",
+      "blocks_release": true
+    },
+    {
+      "id": "F6",
+      "severity": "high",
+      "claim": "討論成為 Home 時，鍵盤/雙底欄是致命 UX；計畫把它丟到 PR-08。",
+      "evidence": "--kb / visualViewport 只服務對稿 bottom dock（mobile.css:191,353；useViewport.ts；BottomSheet.tsx:115）。rd-composer（discussion.css:15）只有 sticky + safe-area-inset-bottom，沒有 --kb。project-bottom-nav 是 position:fixed bottom（styles.css:1072；MultiBranchRoom.tsx:685），與 composer/FAB 疊在同一條底。safe-area 本身已有，不是缺口；鍵盤才是。",
+      "suggested_fix": "PR-01 IA 的 gate 必須含手機 viewport：composer 在鍵盤上、不被 bottom-nav 蓋住、送出後鍵盤不把焦點吞掉。這不是 PR-08 hardening。",
+      "blocks_release": true
+    },
+    {
+      "id": "F7",
+      "severity": "high",
+      "claim": "手機上傳致命項（圖片 fire-and-forget、非續傳、iPhone HEVC）在 ROADMAP 沒有真正的 PR。",
+      "evidence": "App.tsx:725-727 newVersions.forEach(writes.addVersion) 無 await/progress；video media.ts:11-16 承認 .mov 可能無法播、:27-29 單 POST 無 resume；docs/pr29-video-optimize-transcode.md 與 docs/pr27 存在且 feature-map 標 SPEC_ONLY。ROADMAP 只在 PR-08 寫「慢網/大檔上傳矩陣」。Audit §五寫「Not planned in any doc」是錯的（與 §七自相矛盾）。",
+      "suggested_fix": "從 PR-08 抽出獨立 upload PR：圖片要 await+錯誤+重試；影片續傳或至少斷點提示；HEVC 不相容要在選檔時說明白（pr29 已有文案）。不要等 CUTOS。",
+      "blocks_release": false
+    },
+    {
+      "id": "F8",
+      "severity": "high",
+      "claim": "PR-04 寫 Apply→audit 但 schema 不能寫；又宣布不改契約，把可能的 422 留在線上。",
+      "evidence": "collaboration_audit_events event_type check 只有 whiteboard_created/archived/decision_finalized（0014:270-272）；policy 只有 SELECT（0014:722-724）；grant select（0014:780）。Client insert 會被擋。room-ai-context/index.ts:49-53 scrubText slice 5000；:370 plan chunk 再包一層（scrub 後 ≤5000，不是 audit 寫的 8000 有效上限）。ADR-002 / ROADMAP:47「本 PR 不改該契約」。tku pydantic 4000 無法在本 repo 驗證。",
+      "suggested_fix": "PR-04 必須含 migration：擴 event_type + SECURITY DEFINER RPC 或 insert policy（誰 Apply 誰入帳）。Edge 端把 chunk 硬切到與 agent 契約一致的上限（先 4000 除非契約測試證明更高）。「不改契約」改成「不改 HMAC/action union；長度 cap 可以修」。",
+      "blocks_release": true
+    },
+    {
+      "id": "F9",
+      "severity": "medium",
+      "claim": "ADR-005 把 CUTOS editor 無認證正確列為 iframe/proxy 禁令，但把安全的 S2S artifact 路徑一併 BLOCKED。",
+      "evidence": "ADR-005 / BLOCKERS BLOCKED_CUTOS_AUTH / ROADMAP PR-07。Audit §五自己寫 honest first integration 是 MP4 output → duigao upload，且 AIOS bridge 有 key、apply/export 有 requiresApproval。本 repo 無 CUTOS 程式碼可複驗 REST 無認證，但「不要把 editor API 暴露給房間成員」≠「duigao 端什麼都不能做」。",
+      "suggested_fix": "收窄 blocker：禁止 iframe/proxy/editor REST。允許（且現在就做）AIOS-key S2S 的 contract+fixture+artifact handoff。EDL/timeline 仍等 auth。",
+      "blocks_release": false
+    },
+    {
+      "id": "F10",
+      "severity": "medium",
+      "claim": "Audit 的 PR 編號與 ROADMAP 對不上，一批已證實的 gap 沒有 owner。",
+      "evidence": "Audit 把 Task→PR-03、realtime 全表→PR-05、presence→PR-06、stale-write/live-drag→PR-02、image upload/TUS→PR-03。ROADMAP PR-03 是 voice、PR-05 是 Canva、PR-06 是 planform。未進入任何 PR：Task、stale-write 吞掉並 durable-retry 舊版（App.tsx:1199-1208 + decideNodeWriteRetry 無 conflict 分支）、broadcast stub、library_assets 跨房 RLS（0016:64-71）、original bytes upsert:true。",
+      "suggested_fix": "在 ROADMAP 加「audit gap → PR」對照表。stale-write/inbound patch 留在 PR-02；library RLS 可現在修（不 BLOCKED）；Task 要嘛 ADR 不做，要嘛進 03 以外的 PR。",
+      "blocks_release": true
+    },
+    {
+      "id": "F11",
+      "severity": "medium",
+      "claim": "single-mode 房「補討論面」未定義，可能違反 reviewer 極簡與 image/video workspace 分離。",
+      "evidence": "RoomWorkspace.tsx:9-15 明確說 poster 與 cut 是不同工作、所以分開螢幕。PR-01:19「single-mode 房補房級討論面」。若把 legacy 房送進 MultiBranchRoom 四 tab，reviewer UX 會膨脹。Invariants: reviewer-progressive-disclosure、workspaces-separated。",
+      "suggested_fix": "單房 = 對稿 workspace + 討論 drawer/sheet（progressive disclosure），不是 project tab 殼。寫進 PR-01 與 ADR。",
+      "blocks_release": true
+    },
+    {
+      "id": "F12",
+      "severity": "medium",
+      "claim": "TEST_STATUS / ROADMAP 把未進本 branch 的 PR #42 寫成已完成基準。",
+      "evidence": "git log 本 branch：985c5f9 docs(pr00) → f327a70 #38。沒有 #42。PR_INDEX.md 仍寫 #42 OPEN。ROADMAP:8「已完成 HOTFIX #42」；TEST_STATUS:3「main @ f327a70 ＋ PR #42」；PROJECT_STATE:11 同。agent:context 對 main 的 CI 在 f327a70 仍可能紅。",
+      "suggested_fix": "本計畫 PR 的基準寫 f327a70。#42 標 sibling OPEN，merge 後才更新 TEST_STATUS。不要讓 PR-00 看起來像已經站在綠 CI 上。",
+      "blocks_release": false
+    },
+    {
+      "id": "F13",
+      "severity": "medium",
+      "claim": "PR-00 拒絕改正 feature-map 的假 IMPLEMENTED，後續 agent 會被騙。",
+      "evidence": "whiteboard-apply-back IMPLEMENTED（source: src/ai/roomContext.ts + src/collaboration/whiteboard.ts）但宿主未 mount。intelligent-asset-library IMPLEMENTED（source: src/collaboration/library.ts in-memory defaults）。ADR-007 / ROADMAP:12「不改 feature-map」。Agents.md 可信度：docs 不能把 SPEC 標成 IMPLEMENTED；這裡是 scanner 自己標錯。",
+      "suggested_fix": "PR-00 可以改 agent-config 的 evidence 路徑（要求 mounted import / 真 client），或在 PROJECT_STATE 用大字列出「scanner 撒謊清單」。等 PR-02 才改狀態會讓 01 開工時 context 仍顯示 apply-back 已完成。",
+      "blocks_release": false
+    },
+    {
+      "id": "F14",
+      "severity": "medium",
+      "claim": "討論寫入沒有離線佇列，卻要把討論當 Home。",
+      "evidence": "App.tsx:1103-1104 insertDiscussion fire-and-forget；offline.ts 的 durable queue 只處理 kind==='node'（:42-44 其他 retained）。白板有 IDB replay，討論沒有。PR-08 才寫 offline。",
+      "suggested_fix": "PR-01 composer 送出至少要有失敗可見與重試；離線佇列可跟白板同一套 PendingEdit 擴 kind，但不要等到 PR-08。",
+      "blocks_release": false
+    },
+    {
+      "id": "F15",
+      "severity": "low",
+      "claim": "Audit §五「transcode 完全沒文件」是錯的；§七自己推翻。",
+      "evidence": "Audit §五 gaps「Not planned in any doc」vs §七「video-transcode (docs/pr29) SPEC_ONLY」。docs/pr29-video-optimize-transcode.md 存在。src 無 transcode 的主張仍成立。",
+      "suggested_fix": "改 audit §五為 SPEC_ONLY（pr29），並在 ROADMAP 決定要不要吃這份舊 spec。",
+      "blocks_release": false
+    },
+    {
+      "id": "F16",
+      "severity": "low",
+      "claim": "ADR-001（Supabase 留任 SoT）推理成立。",
+      "evidence": "16 個 migration 至 0016、RLS、invite fragment、private bucket、migrations.mjs 五角色、IndexedDB queue 繫白板 row shape，本 repo 零 InsForge 程式碼（只出現在 DECISIONS.md）。HMAC 邊界在 room-ai-context。InsForge 專案 ge5cr87f.us-east 無法從本 repo 驗證，但不影響「不要遷協作 SoT」。",
+      "suggested_fix": "維持。把 InsForge 專案 ID 標 UNVERIFIED，避免被當成已探活。",
+      "blocks_release": false
+    },
+    {
+      "id": "F17",
+      "severity": "low",
+      "claim": "PR-01 漏了 PWA share_target；paste/camera 有寫。",
+      "evidence": "public/manifest.webmanifest 無 share_target（audit）；ROADMAP:21 只加 paste 與 capture。LINE/系統分享進房是手機主路徑之一。",
+      "suggested_fix": "Intake PR 把 share_target 列為明確 in 或 out。Out 也要寫。",
+      "blocks_release": false
+    },
+    {
+      "id": "F18",
+      "severity": "low",
+      "claim": "library_assets 跨租戶寫入與 original upsert 現在就能修，不是 BLOCKED。",
+      "evidence": "0016:64-71 shared insert = 任一房間的 owner/editor；assets.ts:40 upsert:true；0007:241-252 room_assets_update 無既有物件限制。不依賴 Canva/CUTOS/voice credential。",
+      "suggested_fix": "安全小 PR：shared library 綁 created_by 或組織；upload upsert:false（retry 用新 path 或正確的 resume）。",
+      "blocks_release": false
     }
-  }
+  ]
 }

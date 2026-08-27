@@ -3,7 +3,7 @@
 > 恢復規則：任何 session 重新進入工作，先讀本檔，再讀 ROADMAP.md 與 BLOCKERS.md，
 > 然後執行 `npm run agent:context` 比對現況。不重做已驗證工作。
 
-更新：2026-08-27（Asia/Taipei）
+更新：2026-08-28（Asia/Taipei）
 基準：main @ f327a70（Collaborative Intelligence Workspace 1.0 #38）
 
 ## 目前 phase
@@ -15,7 +15,7 @@ PR-00（本計畫 PR）＋ 已完成的前置 hotfix PR #42。
 | 項目 | 證據 |
 |---|---|
 | 雙 AI 握手 | rounds/pr00/grok-smoke.json（exit 0、回覆逐字 GROK_DUAL_COLLAB_READY、grok 1.0.5 / grok-4.6-build）；rounds/pr00/grok-inspect.txt（讀到 Agents.md、35 permissions、22 skills）。Claude 端：本 session 是 Claude Code 桌面/agent session，shell 內無 `claude` CLI（如實記錄，未冒充） |
-| CI 紅燈根因修復 | PR #42（fix/video-e2e-fault-race）。全域 fault 注入 race；A/B：舊碼 6×CPU load 156/157、新碼同載 157/157×2。Grok round ci-red-fix 三 findings 已裁決（F1 落實、F2 記錄殘餘、F3 註解修正） |
+| CI 紅燈根因修復 | **sibling PR #42（OPEN，未合併；本計畫基準 f327a70 不含它）**。全域 fault 注入 race；A/B：舊碼 6×CPU load 156/157、新碼同載 157/157×2。Grok round ci-red-fix 已裁決 |
 | 現況深度盤點 | 7 區域 × 13 agents，rounds/pr00/current-state-audit.md；blocker 級 gap 全數經第二 agent 對抗驗證（6 CONFIRMED / 1 PARTIAL） |
 | 測試基準線 | TEST_STATUS.md（main @ f327a70 + PR42 修復後全綠） |
 | 外部 repo 實際存取 | planform-iso（public，shallow clone 已讀）、CUTOS（private，gh 可讀，shallow clone 已讀）、tku-zen-agent（private，本機 D:\生成系統最新\tku-zen-agent = origin/main f6dc790） |
@@ -40,6 +40,14 @@ PR-01 起的實作序列。
 8. **production migration 狀態 unknown**：agent:context 顯示 repo head 0016，線上未驗證；本機無 VITE_SUPABASE_URL（cloud env missing）。
 9. Realtime 是單 channel ~26 bindings → 整房快照 reload；行動端負載風險，PR-02/08 需 row-patch。
 10. Task 實體完全不存在；ActivityEvent 只有 3 種 audit 事件；Thread 只有單層 reply_to_id。
+
+## feature-map scanner 已知誤報（Grok F13；PR-02 修 scanner 前開工必讀）
+
+| feature-map 條目 | 標示 | 實況 |
+|---|---|---|
+| whiteboard-apply-back | implemented | 證據檔 src/collaboration/whiteboard.ts / src/ai/roomContext.ts 未被任何 mounted 元件 import；AI apply-back 不會出現在出貨 UI |
+| intelligent-asset-library | implemented | src/collaboration/library.ts 是 in-memory，無 client 寫入 library_assets |
+| room-ai-context / asset-analysis 相關 | implemented | 後端管線真、UI 端 actions 斷頭（PR-04 目標） |
 
 ## 可直接恢復的下一步
 

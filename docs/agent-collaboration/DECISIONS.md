@@ -53,3 +53,26 @@ planform 是純前端 local-first PWA（無後端、localStorage/IDB、PROJECT_V
 日期：2026-08-28　狀態：**採納**
 
 PR-00 是 docs-only 的計畫 checkpoint（任務規範明定第一個 PR 為計畫 PR）。它不標任何功能 IMPLEMENTED，不改 feature-map。
+
+## ADR-005 修訂（v2）：收窄 CUTOS 封鎖範圍（Grok F9）
+
+日期：2026-08-28　狀態：**採納**（取代 v1 表述）
+
+禁止：iframe／proxy／把無認證 editor REST 暴露給任何房間成員。
+允許現在做：以 `CUTOS_API_KEY` 保護的 `/api/aios/invoke` S2S contract＋fixture；CUTOS 輸出 MP4 → 上傳為 duigao artifact。EDL／deep-link 深整合仍以 CUTOS auth 落地為前置。
+
+## ADR-008：雙訊息表策略（Grok F4）
+
+日期：2026-08-28　狀態：**採納**
+
+- 新寫入一律 `room_discussion_messages`（0014，11 kinds＋jsonb payload，PR-01b 再擴附件 kind）。
+- legacy `messages`（0001）唯讀保留服務既有 single 房歷史；不遷移、不雙寫。
+- single 房的「討論 drawer」讀寫 room_discussion_messages；歷史 messages 以唯讀卡顯示（如有）。
+- 移除 legacy 表屬 PR-08 之後的獨立決策，需線上資料盤點。
+
+## ADR-009：Thread 與 Task 本輪不做（Grok F4/F10）
+
+日期：2026-08-28　狀態：**採納**
+
+- Thread：維持單層 reply_to_id（引用式回覆）。巢狀 thread 對手機殼的 IA 成本高、audit 未顯示使用者需求證據；待真實使用回饋再開 ADR。
+- Task：不建 Task 表。決定（decision_records）＋提案卡已覆蓋「收斂結論」主流程；行動項先以 decision 附註承載。若 PR-04 之後 AI 產生行動項的需求成立，屆時以 migration 補。
