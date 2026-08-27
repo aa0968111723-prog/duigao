@@ -178,6 +178,71 @@ export const featureDefinitions = [
     tests: [{ path: "scripts/e2e/multi-branch-room.mjs", contains: ["Android", "multi-branch", "plan"] }],
     minimum: { source: 3, migrations: 1, tests: 1 },
   },
+  {
+    id: "asset-intelligence", name: "Asset Intelligence Layer", priority: 1,
+    source: [
+      { path: "src/lib/assetIntelligence.ts", contains: ["RoomContextResponse", "NormalizedAssetRegion"] },
+      { path: "src/cloud/assetIntelligence.ts", contains: ["askRoomContext", "listIntelligentAssets"] },
+      { path: "supabase/functions/room-ai-context/index.ts", contains: ["ai_readable", "currentByBranch", "relation"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0014_asset_intelligence.sql", contains: ["intelligent_assets", "asset_analysis_jobs", "row level security"] }],
+    tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["image", "video", "RLS", "selected"], match: "any" }],
+    minimum: { source: 3, migrations: 1, tests: 1 },
+  },
+  {
+    id: "image-understanding", name: "Image and poster understanding", priority: 1,
+    source: [
+      { path: "supabase/functions/asset-analysis/index.ts", contains: ["ocr", "asset_regions", "image"] },
+      { path: "src/features/image-review/Stage.tsx", contains: ["focusTarget", "image-region"] },
+    ],
+    tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["normalized", "region"] }],
+    minimum: { source: 2, tests: 1 },
+  },
+  {
+    id: "video-understanding", name: "Video temporal understanding", priority: 1,
+    source: [
+      { path: "supabase/functions/asset-analysis/index.ts", contains: ["keyframes", "asset_video_segments"] },
+      { path: "../tku-zen-agent/app/services/asset_providers.py", contains: ["VideoUnderstandingProvider", "duration_seconds"] },
+    ],
+    tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["segment", "timestamp"] }],
+    minimum: { source: 2, tests: 1 },
+  },
+  {
+    id: "document-understanding", name: "Document extraction and chunks", priority: 1,
+    source: [
+      { path: "../tku-zen-agent/app/services/asset_providers.py", contains: ["DocumentUnderstandingProvider", "PdfReader"] },
+      { path: "supabase/functions/asset-analysis/index.ts", contains: ["document_chunks", "chunkText"] },
+    ],
+    tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["chunk", "document"] }],
+    minimum: { source: 2, tests: 1 },
+  },
+  {
+    id: "room-context-api", name: "Permission-filtered Room Context API", priority: 1,
+    source: [{ path: "supabase/functions/room-ai-context/index.ts", contains: ["auth.getUser", "RoomContextPayload", "EXTERNAL_AI_BLOCKED"] }],
+    migrations: [{ path: "supabase/migrations/0014_asset_intelligence.sql", contains: ["ai_readable", "external_ai_allowed"] }],
+    tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["context", "secret"] }],
+    minimum: { source: 1, migrations: 1, tests: 1 },
+  },
+  {
+    id: "asset-relations", name: "Asset relations and version awareness", priority: 1,
+    source: [{ path: "src/cloud/assetIntelligence.ts", contains: ["createAssetRelation", "removeAssetRelation"] }],
+    migrations: [{ path: "supabase/migrations/0014_asset_intelligence.sql", contains: ["asset_relations", "guard_asset_relation_rooms"] }],
+    tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["relation", "latest version"] }],
+    minimum: { source: 1, migrations: 1, tests: 1 },
+  },
+  {
+    id: "tku-zen-agent-integration", name: "tku-zen-agent / ai_os context adapters", priority: 1,
+    source: [
+      { path: "../tku-zen-agent/app/services/duigao_integration.py", contains: ["require_duigao_signature", "answer_room_context"] },
+      { path: "../ai_os/server/services/duigaoRoomContext.ts", contains: ["verifyDuigaoSignature", "answerDuigaoRoomContext"] },
+    ],
+    tests: [
+      { path: "scripts/tests/asset-intelligence.test.ts", contains: ["adapter", "HMAC"] },
+      { path: "../tku-zen-agent/tests/test_duigao_integration.py", contains: ["signature", "asset_analysis"] },
+      { path: "../ai_os/server/services/duigaoRoomContext.test.ts", contains: ["HMAC", "citation"] },
+    ],
+    minimum: { source: 2, tests: 1 },
+  },
 ];
 
 export const architectureDefinitions = [

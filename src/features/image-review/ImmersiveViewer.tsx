@@ -71,6 +71,7 @@ export function ImmersiveViewer({ api, onClose }: Props) {
 
   const label = metrics ? zoomLabel(transform, metrics.frame, metrics.natural) : "Fit";
   const isCommenting = api.tool === "pin" && !api.draftPin;
+  const currentAsset = api.ai?.assets.find((asset) => asset.versionId === api.view.versionId);
 
   return (
     <div className="immersive-viewer" role="dialog" aria-modal="true" aria-label="文宣檢視器" data-testid="immersive-viewer">
@@ -103,6 +104,11 @@ export function ImmersiveViewer({ api, onClose }: Props) {
             >
               ＋ 留意見
             </button>
+            {api.ai && (
+              <button type="button" className="immersive-control-btn immersive-ai-btn" onClick={() => api.ai?.open(currentAsset?.id)} data-testid="viewer-ai-analysis">
+                ✦ AI 分析
+              </button>
+            )}
           </div>
         </header>
 
@@ -126,6 +132,7 @@ export function ImmersiveViewer({ api, onClose }: Props) {
           onMetricsChange={updateMetrics}
           zoomRequest={zoomRequest}
           focusPinId={api.selectedPinId}
+          focusTarget={api.ai?.focusTarget}
           showAnnotations={showAnnotations}
           onTap={() => setControlsVisible((visible) => !visible)}
         />

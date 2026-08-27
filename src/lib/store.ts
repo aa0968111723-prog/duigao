@@ -1,8 +1,10 @@
 import type { Guest, Room } from "./types";
+import type { RoomContextResponse } from "./assetIntelligence";
 
 const DB_NAME = "duigao";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const ROOMS = "rooms";
+const AI_CONTEXTS = "ai-contexts";
 const GUEST_KEY = "duigao.guest";
 
 function openDb(): Promise<IDBDatabase> {
@@ -13,10 +15,60 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(ROOMS)) {
         db.createObjectStore(ROOMS, { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains(AI_CONTEXTS)) {
+        db.createObjectStore(AI_CONTEXTS, { keyPath: "key" });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+type CachedAiContext = { key: string; response: RoomContextResponse; savedAt: number };
+
+/** Cache bounded, permission-filtered answers only; never cache binaries or secrets. */
+export async function saveAiContext(key: string, response: RoomContextResponse): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(AI_CONTEXTS, "readwrite");
+      tx.objectStore(AI_CONTEXTS).put({ key, response, savedAt: Date.now() } satisfies CachedAiContext);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadAiContext(key: string, maxAgeMs = 5 * 60_000): Promise<RoomContextResponse | undefined> {
+  const db = await openDb();
+  try {
+    const value = await new Promise<CachedAiContext | undefined>((resolve, reject) => {
+      const tx = db.transaction(AI_CONTEXTS, "readonly");
+      const req = tx.objectStore(AI_CONTEXTS).get(key);
+      req.onsuccess = () => resolve(req.result as CachedAiContext | undefined);
+      req.onerror = () => reject(req.error);
+    });
+    if (!value || Date.now() - value.savedAt > maxAgeMs) return undefined;
+    return value.response;
+  } finally {
+    db.close();
+  }
+}
+
+export async function deleteAiContext(key: string): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(AI_CONTEXTS, "readwrite");
+      tx.objectStore(AI_CONTEXTS).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
 }
 
 export async function saveRoom(room: Room): Promise<void> {

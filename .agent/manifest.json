@@ -51,6 +51,8 @@
   ],
   "testCommands": [
     "npm run test:agent",
+    "npm run test:asset-intelligence",
+    "npm run test:asset-intelligence-e2e",
     "npm run test:migrations",
     "npm run test:multi-branch",
     "npm run test:multi-branch-e2e",
@@ -72,6 +74,8 @@
     "make:og-cover",
     "preview",
     "test:agent",
+    "test:asset-intelligence",
+    "test:asset-intelligence-e2e",
     "test:migrations",
     "test:multi-branch",
     "test:multi-branch-e2e",

@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T02:53:12.000Z",
+  "generatedAt": "2026-08-27T04:41:53.000Z",
   "git": {
     "branch": "codex/multi-branch-room-1",
-    "sha": "a3379e005be67fa007e3f2f45f83f191b08f5a0a",
-    "mainSha": "a3379e005be67fa007e3f2f45f83f191b08f5a0a",
+    "sha": "8422766763fe319b3fff51d83f3a11edbd9bb4b9",
+    "mainSha": "cec65183b598d9a588a346a636a4201f20ef6370",
     "dirty": true
   },
   "project": {
@@ -40,6 +40,54 @@
     }
   },
   "features": {
+    "asset-intelligence": {
+      "status": "implemented",
+      "confidence": 0.94,
+      "evidence": {
+        "source": [
+          "src/cloud/assetIntelligence.ts",
+          "src/lib/assetIntelligence.ts",
+          "supabase/functions/room-ai-context/index.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/cloud/assetIntelligence.ts",
+        "src/lib/assetIntelligence.ts",
+        "supabase/functions/room-ai-context/index.ts",
+        "supabase/migrations/0014_asset_intelligence.sql"
+      ],
+      "missing": []
+    },
+    "asset-relations": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/cloud/assetIntelligence.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/cloud/assetIntelligence.ts",
+        "supabase/migrations/0014_asset_intelligence.sql"
+      ],
+      "missing": []
+    },
     "custom-share-cover": {
       "status": "implemented",
       "confidence": 0.92,
@@ -67,6 +115,27 @@
       ],
       "missing": []
     },
+    "document-understanding": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "../tku-zen-agent/app/services/asset_providers.py",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "../tku-zen-agent/app/services/asset_providers.py",
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/asset-analysis/index.ts"
+      ],
+      "missing": []
+    },
     "image-review": {
       "status": "implemented",
       "confidence": 0.9,
@@ -88,6 +157,27 @@
         "scripts/e2e/share-flow.mjs",
         "src/features/image-review/ImageWorkspace.tsx",
         "src/features/image-review/Stage.tsx"
+      ],
+      "missing": []
+    },
+    "image-understanding": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "src/features/image-review/Stage.tsx",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "src/features/image-review/Stage.tsx",
+        "supabase/functions/asset-analysis/index.ts"
       ],
       "missing": []
     },
@@ -262,6 +352,28 @@
       ],
       "missing": []
     },
+    "room-context-api": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "supabase/functions/room-ai-context/index.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0014_asset_intelligence.sql"
+        ],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/room-ai-context/index.ts",
+        "supabase/migrations/0014_asset_intelligence.sql"
+      ],
+      "missing": []
+    },
     "share-preview": {
       "status": "implemented",
       "confidence": 0.92,
@@ -286,6 +398,31 @@
         "src/cloud/sharePreview.ts",
         "supabase/functions/share-preview/index.ts",
         "supabase/migrations/0005_share_previews.sql"
+      ],
+      "missing": []
+    },
+    "tku-zen-agent-integration": {
+      "status": "implemented",
+      "confidence": 0.94,
+      "evidence": {
+        "source": [
+          "../ai_os/server/services/duigaoRoomContext.ts",
+          "../tku-zen-agent/app/services/duigao_integration.py"
+        ],
+        "migrations": [],
+        "tests": [
+          "../ai_os/server/services/duigaoRoomContext.test.ts",
+          "../tku-zen-agent/tests/test_duigao_integration.py",
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "../ai_os/server/services/duigaoRoomContext.test.ts",
+        "../ai_os/server/services/duigaoRoomContext.ts",
+        "../tku-zen-agent/app/services/duigao_integration.py",
+        "../tku-zen-agent/tests/test_duigao_integration.py",
+        "scripts/tests/asset-intelligence.test.ts"
       ],
       "missing": []
     },
@@ -530,6 +667,27 @@
         "tests: need 1, found 0"
       ]
     },
+    "video-understanding": {
+      "status": "implemented",
+      "confidence": 0.9,
+      "evidence": {
+        "source": [
+          "../tku-zen-agent/app/services/asset_providers.py",
+          "supabase/functions/asset-analysis/index.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/asset-intelligence.test.ts"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "../tku-zen-agent/app/services/asset_providers.py",
+        "scripts/tests/asset-intelligence.test.ts",
+        "supabase/functions/asset-analysis/index.ts"
+      ],
+      "missing": []
+    },
     "video-upload": {
       "status": "implemented",
       "confidence": 0.92,
@@ -559,7 +717,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0013",
+    "repoMigrationHead": "0014",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -573,15 +731,18 @@
       "supabase/migrations/0010_security_definer_acl.sql",
       "supabase/migrations/0011_share_preview_customization.sql",
       "supabase/migrations/0012_video_review_feedback.sql",
-      "supabase/migrations/0013_project_room_branches.sql"
+      "supabase/migrations/0013_project_room_branches.sql",
+      "supabase/migrations/0014_asset_intelligence.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0013",
+    "productionMigrationExpectation": "0014",
     "requiresLiveCheck": true
   },
   "tests": {
     "requiredCommands": [
       "npm run test:agent",
+      "npm run test:asset-intelligence",
+      "npm run test:asset-intelligence-e2e",
       "npm run test:migrations",
       "npm run test:multi-branch",
       "npm run test:multi-branch-e2e",
@@ -686,7 +847,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0013_project_room_branches.sql."
+        "message": "Migration order is contiguous through 0014_asset_intelligence.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",

@@ -24,6 +24,7 @@ import { CloudError } from "./errors";
 import {
   dataUrlToBlob,
   proposalAssetPath,
+  sha256Blob,
   signedUrl,
   uploadAsset,
   versionPath,
@@ -801,18 +802,30 @@ export async function addVersion(
   branchId?: string,
 ): Promise<Version> {
   const id = uuid();
-  const { path, mime } = await uploadVersion(supabase, roomId, id, imageDataUrl);
-  const { error } = await supabase
+  const { blob, mime } = await dataUrlToBlob(imageDataUrl);
+  const path = versionPath(roomId, id, mime);
+  await uploadAsset(supabase, path, blob, mime);
+  const contentHash = await sha256Blob(blob).catch(() => undefined);
+  const versionRow = {
+    id,
+    room_id: roomId,
+    label,
+    sort_order: sortOrder,
+    image_path: path,
+    mime_type: mime,
+    ...(contentHash ? { content_hash: contentHash } : {}),
+    ...(branchId ? { branch_id: branchId } : {}),
+  };
+  let { error } = await supabase
     .from("versions")
-    .insert({
-      id,
-      room_id: roomId,
-      label,
-      sort_order: sortOrder,
-      image_path: path,
-      mime_type: mime,
-      ...(branchId ? { branch_id: branchId } : {}),
-    });
+    .insert(versionRow);
+  // A mixed-version deployment may not have 0014 yet. The upload is already
+  // in the existing private bucket, so retry the legacy row shape rather than
+  // breaking the established review flow while the migration rolls out.
+  if (error && /content_hash|column/i.test(error.message)) {
+    const { content_hash: _ignored, ...legacyRow } = versionRow;
+    ({ error } = await supabase.from("versions").insert(legacyRow));
+  }
   if (error) throw new CloudError(error.message, "version");
   return { id, label, imageDataUrl: await signedUrl(supabase, path), ...(branchId ? { branchId } : {}) };
 }
@@ -839,9 +852,10 @@ export async function addVideoVersion(
     fileSize: number | null;
     width: number | null;
     height: number | null;
+    contentHash?: string;
   },
 ): Promise<void> {
-  const { error } = await supabase.from("versions").insert({
+  const versionRow = {
     id: input.id,
     room_id: roomId,
     label: input.label,
@@ -854,8 +868,14 @@ export async function addVideoVersion(
     file_size: input.fileSize,
     width: input.width,
     height: input.height,
+    ...(input.contentHash ? { content_hash: input.contentHash } : {}),
     ...(input.branchId ? { branch_id: input.branchId } : {}),
-  });
+  };
+  let { error } = await supabase.from("versions").insert(versionRow);
+  if (error && /content_hash|column/i.test(error.message)) {
+    const { content_hash: _ignored, ...legacyRow } = versionRow;
+    ({ error } = await supabase.from("versions").insert(legacyRow));
+  }
   if (error) throw new CloudError(error.message, "version");
 }
 

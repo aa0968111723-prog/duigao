@@ -1070,6 +1070,84 @@ try {
   const replayDelete = as(owner, `delete from public.room_branches where id = '${projectPoster}'::uuid;`);
   ok("重跑 0013 後 branch 封存規則仍在", !replayArchive.failed && replayDelete.failed, [replayArchive.err, replayDelete.err].filter(Boolean).join(" | "));
 
+  section("Asset Intelligence：統一素材、分析佇列、版本優先與 RLS");
+  const intelligenceShape = () => psql(`select
+    (select count(*) from information_schema.tables where table_name in ('intelligent_assets','asset_analysis','asset_regions','asset_video_segments','asset_document_chunks','asset_relations','asset_embeddings','asset_human_metadata','asset_analysis_jobs')) || '/' ||
+    (select count(*) from pg_policies where tablename in ('intelligent_assets','asset_analysis','asset_regions','asset_video_segments','asset_document_chunks','asset_relations','asset_embeddings','asset_human_metadata','asset_analysis_jobs')) || '/' ||
+    (select count(*) from pg_indexes where indexname in ('idx_intelligent_assets_room_type_updated','idx_asset_video_segments_asset_time','idx_asset_document_chunks_asset','idx_asset_relations_source','idx_asset_analysis_jobs_asset')) || '/' ||
+    (select count(*) from pg_trigger where tgname in ('versions_sync_intelligent_asset','intelligent_assets_enqueue','asset_relations_room_guard'));`).out;
+  const intelligenceBefore = intelligenceShape();
+  psqlFile(join(MIGRATIONS, "0014_asset_intelligence.sql"));
+  ok("0014 可以重複套用，tables / policies / indexes / triggers 數量不變", intelligenceBefore === intelligenceShape(), `${intelligenceBefore} → ${intelligenceShape()}`);
+  const posterAsset = as(owner, `select id from public.intelligent_assets where version_id = '${projectPosterVersion}'::uuid;`).out;
+  const videoAsset = as(owner, `select id from public.intelligent_assets where version_id = '${projectVideoVersion}'::uuid;`).out;
+  const planAsset = as(owner, `select id from public.intelligent_assets where branch_id = '${projectPlan}'::uuid and asset_type = 'plan';`).out;
+  ok(
+    "既有 image / video / plan 自動建立統一 asset 並保留版本關係",
+    Boolean(posterAsset) && Boolean(videoAsset) && Boolean(planAsset)
+      && as(owner, `select asset_type from public.intelligent_assets where id = '${posterAsset}'::uuid;`).out === "image"
+      && as(owner, `select asset_type from public.intelligent_assets where id = '${videoAsset}'::uuid;`).out === "video"
+      && as(owner, `select asset_type from public.intelligent_assets where id = '${planAsset}'::uuid;`).out === "plan",
+  );
+  ok(
+    "新增 asset 會排入 Tier 1 且同一分析版本去重",
+    as(owner, `select count(*) from public.asset_analysis_jobs where asset_id in ('${posterAsset}'::uuid, '${videoAsset}'::uuid, '${planAsset}'::uuid) and tier = 1 and status = 'queued';`).out === "3",
+  );
+  const customAsset = psql("select gen_random_uuid();").out;
+  const customKey = `manual:${customAsset}`;
+  const customInsert = as(owner, `insert into public.intelligent_assets (id, room_id, branch_id, asset_type, title, source_key, ai_readable, external_ai_allowed, created_by) values ('${customAsset}'::uuid, '${capRoom}'::uuid, '${projectPoster}'::uuid, 'image', '擺攤照片', '${customKey}', true, false, '${owner}'::uuid);`);
+  const customSelect = as(reviewer, `select id from public.intelligent_assets where id = '${customAsset}'::uuid;`);
+  const customUpdate = as(reviewer, `update public.intelligent_assets set title = '越權' where id = '${customAsset}'::uuid;`);
+  const customTitleAfterReviewerUpdate = as(owner, `select title from public.intelligent_assets where id = '${customAsset}'::uuid;`);
+  ok(
+    "owner 可以建立自訂素材，reviewer 只能讀",
+    !customInsert.failed && !customSelect.failed && customTitleAfterReviewerUpdate.out === "擺攤照片",
+    JSON.stringify({
+      insert: { failed: customInsert.failed, out: customInsert.out, err: customInsert.err },
+      select: { failed: customSelect.failed, out: customSelect.out, err: customSelect.err },
+      update: { failed: customUpdate.failed, out: customUpdate.out, err: customUpdate.err },
+      titleAfterReviewerUpdate: customTitleAfterReviewerUpdate.out,
+    }),
+  );
+  ok(
+    "reviewer 不能寫分析、區域、時間片段或關聯",
+    [
+      as(reviewer, `insert into public.asset_analysis (asset_id, room_id, summary) values ('${customAsset}'::uuid, '${capRoom}'::uuid, 'blocked');`),
+      as(reviewer, `insert into public.asset_regions (asset_id, room_id, x, y, width, height) values ('${customAsset}'::uuid, '${capRoom}'::uuid, .1, .1, .2, .2);`),
+      as(reviewer, `insert into public.asset_video_segments (asset_id, room_id, start_seconds, end_seconds) values ('${customAsset}'::uuid, '${capRoom}'::uuid, 1, 2);`),
+      as(reviewer, `insert into public.asset_relations (room_id, source_asset_id, target_asset_id, relation_type) values ('${capRoom}'::uuid, '${customAsset}'::uuid, '${posterAsset}'::uuid, 'related_to');`),
+    ].every((result) => result.failed),
+  );
+  ok(
+    "子表 room_id 與 asset 不一致會被 guard 擋下",
+    as(owner, `insert into public.asset_analysis (asset_id, room_id, summary) values ('${customAsset}'::uuid, '${roomId}'::uuid, 'cross-room');`).failed,
+  );
+  const otherAsset = psql("select gen_random_uuid();").out;
+  as(stranger, `insert into public.intelligent_assets (id, room_id, asset_type, title, source_key, created_by) values ('${otherAsset}'::uuid, '${roomId}'::uuid, 'image', 'room asset', 'manual:${otherAsset}', '${stranger}'::uuid);`);
+  ok(
+    "跨房間 asset relation 會被 guard 擋下，非成員讀不到",
+    as(owner, `insert into public.asset_relations (room_id, source_asset_id, target_asset_id, relation_type) values ('${capRoom}'::uuid, '${customAsset}'::uuid, '${otherAsset}'::uuid, 'related_to');`).failed
+      && as(stranger, `select count(*) from public.intelligent_assets where id = '${customAsset}'::uuid;`).out === "0",
+  );
+  const regionId = psql("select gen_random_uuid();").out;
+  const segmentId = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可保存 normalized region、影片 timestamp segment 與 human override",
+    !as(owner, `insert into public.asset_regions (id, asset_id, room_id, region_type, label, x, y, width, height, confidence) values ('${regionId}'::uuid, '${customAsset}'::uuid, '${capRoom}'::uuid, 'headline', '主標題', .12, .08, .76, .13, .94);`).failed
+      && !as(owner, `insert into public.asset_video_segments (id, asset_id, room_id, start_seconds, end_seconds, summary) values ('${segmentId}'::uuid, '${videoAsset}'::uuid, '${capRoom}'::uuid, 42, 55, '禪學社介紹');`).failed
+      && !as(owner, `insert into public.asset_human_metadata (asset_id, room_id, title, tags) values ('${customAsset}'::uuid, '${capRoom}'::uuid, '茶會照片', '{"茶會","主視覺"}');`).failed,
+  );
+  ok(
+    "不合法 normalized region 會被資料庫擋下",
+    as(owner, `insert into public.asset_regions (asset_id, room_id, x, y, width, height) values ('${customAsset}'::uuid, '${capRoom}'::uuid, .9, .1, .2, .2);`).failed,
+  );
+  ok(
+    "anon 讀不到所有 intelligence 表",
+    asAnon(`select count(*) from public.intelligent_assets;`).out !== "1"
+      && asAnon(`select count(*) from public.asset_analysis_jobs;`).out !== "1"
+      && asAnon(`select count(*) from public.asset_relations;`).out !== "1",
+  );
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

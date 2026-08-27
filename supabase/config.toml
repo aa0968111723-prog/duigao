@@ -13,3 +13,14 @@ project_id = "duigao"
 # anon-granted RPC that exposes no room data, and never receives the invite
 # token (it lives in the URL fragment, which no browser sends to a server).
 verify_jwt = false
+
+[functions.room-ai-context]
+# The function checks the caller's Supabase JWT and RLS-visible membership
+# before returning a bounded, metadata-only context projection.
+verify_jwt = true
+
+[functions.asset-analysis]
+# Queueing and re-analysis are owner/editor operations.  The function uses the
+# caller's JWT, never a service-role key, and only creates short-lived provider
+# URLs after the asset's external_ai_allowed policy passes.
+verify_jwt = true

@@ -48,6 +48,7 @@ export type MultiBranchRoomApi = {
   setChatInput: (value: string) => void;
   sendChat: () => void;
   onShare: () => void;
+  onOpenAi: (assetId?: string) => void;
   onGoHome: () => void;
 };
 
@@ -447,7 +448,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="回到房間列表">●</button>
         {api.activeBranchId ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
         <div className="project-room-heading"><span className="project-kicker">活動房</span><h1>{api.room.title}</h1></div>
-        <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>
+        <div className="project-head-actions">
+          <button type="button" className="project-ai-button" onClick={() => api.onOpenAi()}>✦ AI</button>
+          <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>
+        </div>
       </header>
 
       {!api.activeBranchId && (
