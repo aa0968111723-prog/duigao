@@ -21,6 +21,7 @@ import type {
   VideoAnchor,
 } from "../lib/types";
 import { isReviewStatus } from "../lib/types";
+import { anchorFromCommentColumns } from "../lib/contextAnchor";
 import { normalizeRegion } from "../lib/region";
 
 /** User-facing sync state. Never exposes the transport (Supabase/PeerJS/RLS). */
@@ -158,15 +159,12 @@ const ms = (iso: string): number => {
  * better than a NaN that renders as an invisible marker.
  */
 export function anchorFromRow(row: CommentRow): VideoAnchor | undefined {
-  const kind = row.anchor_type ?? "";
-  if (!kind.startsWith("video-")) return undefined;
-  const time = Number(row.time_seconds);
-  if (!Number.isFinite(time) || time < 0) return undefined;
-  const end = Number(row.end_time_seconds);
-  if (kind === "video-range" && Number.isFinite(end) && end > time) {
-    return { kind: "range", startTime: time, endTime: end };
-  }
-  return { kind: "point", time };
+  // 委派 ContextAnchor 契約層（PR-02d）：同一份「說不通的列退回 image
+  // 語意」規則現在只寫在一個地方。
+  const anchor = anchorFromCommentColumns(row);
+  if (anchor.type === "video-range") return { kind: "range", startTime: anchor.startTime, endTime: anchor.endTime };
+  if (anchor.type === "video-point") return { kind: "point", time: anchor.time };
+  return undefined;
 }
 
 export function commentFromRow(row: CommentRow): CommentPin {
