@@ -486,6 +486,8 @@ test("第一屏契約如今綁在真殼上：討論根＋對話/白板 tabs＋�
   assert.match(shell, />白板</);
   const discussion = readFileSync(resolve(ROOT, "src/features/room-discussion/RoomDiscussion.tsx"), "utf8");
   assert.match(discussion, /voice-boundary/);
+});
+
 test("stale-write 的排隊編輯在重放時被清出佇列而不是永遠重試", async () => {
   const pending = [
     { id: "node:a", roomId: "r", kind: "node", op: "upsert", payload: { id: "a", version: 1 }, createdAt: 1 },
