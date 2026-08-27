@@ -1759,20 +1759,21 @@
       "status": "implemented",
       "evidence": {
         "source": [
-          "src/ai/roomContext.ts",
-          "src/collaboration/whiteboard.ts"
+          "src/App.tsx",
+          "src/ai/proposals.ts",
+          "src/features/asset-intelligence/RoomAiSheet.tsx"
         ],
         "migrations": [],
         "tests": [
-          "scripts/tests/collaboration.test.ts"
+          "scripts/tests/ai-proposals.test.ts"
         ],
         "docs": []
       },
       "requirements": [
         {
           "kind": "source",
-          "required": 2,
-          "found": 2,
+          "required": 3,
+          "found": 3,
           "satisfied": true
         },
         {
@@ -1782,16 +1783,17 @@
           "satisfied": true
         }
       ],
-      "confidence": 0.9,
+      "confidence": 0.92,
       "implemented": [
         "source",
         "tests"
       ],
       "missing": [],
       "relatedFiles": [
-        "scripts/tests/collaboration.test.ts",
-        "src/ai/roomContext.ts",
-        "src/collaboration/whiteboard.ts"
+        "scripts/tests/ai-proposals.test.ts",
+        "src/App.tsx",
+        "src/ai/proposals.ts",
+        "src/features/asset-intelligence/RoomAiSheet.tsx"
       ],
       "priority": 1,
       "notes": []

@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T16:01:00.000Z",
+  "generatedAt": "2026-08-27T16:19:11.000Z",
   "git": {
-    "branch": "feat/discussion-room-shell",
-    "sha": "344459e890a47f4e4f6cfd338cf757a94eadc18f",
-    "mainSha": "344459e890a47f4e4f6cfd338cf757a94eadc18f",
+    "branch": "codex/third-agent-ai-proposal-apply",
+    "sha": "ddb916e2f9d47d0effeda12f707be182de5cba90",
+    "mainSha": "ddb916e2f9d47d0effeda12f707be182de5cba90",
     "dirty": true
   },
   "project": {
@@ -34,32 +34,7 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": [
-        {
-          "baseRefName": "main",
-          "headRefName": "codex/third-agent-rls-author-acl",
-          "isDraft": false,
-          "number": 47,
-          "title": "fix(rls): author-only writes for shared library and visual proposals",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/47"
-        },
-        {
-          "baseRefName": "main",
-          "headRefName": "codex/third-agent-context-path-strip",
-          "isDraft": false,
-          "number": 46,
-          "title": "fix(ai): strip poster/image/video storage paths from Room Context",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/46"
-        },
-        {
-          "baseRefName": "main",
-          "headRefName": "codex/third-agent-offline-stale-replay",
-          "isDraft": false,
-          "number": 45,
-          "title": "fix(offline): stop stale run() replay from overwriting newer cloud writes",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/45"
-        }
-      ]
+      "items": []
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -873,22 +848,24 @@
     },
     "whiteboard-apply-back": {
       "status": "implemented",
-      "confidence": 0.9,
+      "confidence": 0.92,
       "evidence": {
         "source": [
-          "src/ai/roomContext.ts",
-          "src/collaboration/whiteboard.ts"
+          "src/App.tsx",
+          "src/ai/proposals.ts",
+          "src/features/asset-intelligence/RoomAiSheet.tsx"
         ],
         "migrations": [],
         "tests": [
-          "scripts/tests/collaboration.test.ts"
+          "scripts/tests/ai-proposals.test.ts"
         ],
         "docs": []
       },
       "relatedFiles": [
-        "scripts/tests/collaboration.test.ts",
-        "src/ai/roomContext.ts",
-        "src/collaboration/whiteboard.ts"
+        "scripts/tests/ai-proposals.test.ts",
+        "src/App.tsx",
+        "src/ai/proposals.ts",
+        "src/features/asset-intelligence/RoomAiSheet.tsx"
       ],
       "missing": []
     },

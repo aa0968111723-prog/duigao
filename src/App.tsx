@@ -76,6 +76,16 @@ import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/coll
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { DiscussionDrawer } from "./features/room-discussion/DiscussionDrawer";
 import { adoptPersistedNode, stampPersistedNode } from "./features/collaboration/nodes";
+import {
+  applyGate,
+  applyReasonMessage,
+  commentBodyFromAction,
+  nodeFromAddWhiteboardAction,
+  planDraftTitle,
+  pollFromAction,
+  type AiProposal,
+  type ApplyProposalResult,
+} from "./ai/proposals";
 import { collectBoardEditors, stampWriter } from "./features/collaboration/presence";
 import {
   applyPendingCloudWrites,
@@ -213,6 +223,7 @@ export function App() {
   const roomRef = useRef<Room | null>(null);
   const lastAckedNodeVersion = useRef(new Map<string, number>());
   const nodePersistChain = useRef(new Map<string, Promise<void>>());
+  const appliedAiProposalIds = useRef(new Set<string>());
   const viewRef = useRef<ViewState>(view);
   const saveSeq = useRef(0);
   const busy = useRef<Set<string>>(new Set());
@@ -1161,7 +1172,7 @@ export function App() {
   );
 
   const createWhiteboard = useCallback(
-    (title: string) => {
+    (title: string): Whiteboard | undefined => {
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者不能建立白板。", { tone: "error" });
         return;
@@ -1180,6 +1191,7 @@ export function App() {
       updateRoom((r) => ({ ...r, whiteboards: [board, ...(r.whiteboards ?? [])] }));
       cloudRef.current.writes.createWhiteboard?.(board);
       setActiveWhiteboardId(board.id);
+      return board;
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
   );
@@ -1408,6 +1420,65 @@ export function App() {
     updateRoom((r) => ({ ...r, allowBoardEdit: !r.allowBoardEdit }));
     cloudRef.current.writes.setAllowBoardEdit?.(!(roomRef.current?.allowBoardEdit));
   }, [cloud.role, showToast, updateRoom]);
+
+  const applyAiProposal = useCallback(
+    async (proposal: AiProposal, extraConfirmed = false): Promise<ApplyProposalResult> => {
+      const current = roomRef.current;
+      const actor = cloud.userId ?? guest?.id ?? "local";
+      const canTalk = Boolean(guest);
+      const canManage = !cloud.boundRoomId || cloud.canManageMedia;
+      const canEditBoard = canManage || Boolean(current?.allowBoardEdit);
+      const gate = applyGate({
+        proposal,
+        alreadyApplied: appliedAiProposalIds.current.has(proposal.id),
+        extraConfirmed,
+        canTalk,
+        canManage,
+        canEditBoard,
+      });
+      if (!gate.ok) {
+        return { ok: false, reason: gate.reason, message: applyReasonMessage(gate.reason) };
+      }
+      if (!current) return { ok: false, reason: "failed", message: "房間還沒準備好。" };
+
+      const audit = (body: string) => sendDiscussion({ kind: "text", body, payload: { title: proposal.label } });
+
+      try {
+        if (proposal.type === "create_comment") {
+          sendDiscussion({ kind: "text", body: commentBodyFromAction(proposal.payload, proposal.label) });
+        } else if (proposal.type === "create_poll") {
+          createProjectPoll(pollFromAction(proposal.payload, current.id, actor));
+          audit(`已套用 AI 提案：${proposal.label}`);
+        } else if (proposal.type === "create_plan_draft") {
+          await createProjectContent("plan", planDraftTitle(proposal.payload, proposal.label), null);
+          audit(`已套用 AI 提案：${proposal.label}`);
+        } else if (proposal.type === "add_whiteboard_node") {
+          const existing = (current.whiteboards ?? []).find((board) => !board.archivedAt);
+          const board = existing ?? createWhiteboard("討論白板");
+          if (!board) return { ok: false, reason: "forbidden", message: applyReasonMessage("forbidden") };
+          const count = (roomRef.current?.whiteboardNodes ?? []).filter((node) => node.whiteboardId === board.id).length;
+          const node = nodeFromAddWhiteboardAction({
+            payload: proposal.payload,
+            whiteboardId: board.id,
+            roomId: current.id,
+            createdBy: actor,
+            x: 80 + (count % 4) * 24,
+            y: 80 + (count % 5) * 24,
+          });
+          upsertNode(node);
+          setActiveWhiteboardId(board.id);
+          setFocusNodeId(node.id);
+          audit(`已套用 AI 提案：${proposal.label}`);
+        }
+        appliedAiProposalIds.current.add(proposal.id);
+        showToast("已套用 AI 提案", { tone: "success" });
+        return { ok: true, message: "已套用。原稿沒有被改寫。" };
+      } catch {
+        return { ok: false, reason: "failed", message: "套用失敗，請稍後再試。" };
+      }
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, createProjectContent, createProjectPoll, createWhiteboard, guest, sendDiscussion, showToast, upsertNode],
+  );
 
   useEffect(() => {
     const flushPendingBoardEdits = () => {
@@ -2374,6 +2445,7 @@ export function App() {
           onRetryAnalysis={retryAi}
           onUpdatePolicy={updateAiPolicy}
           onUpdateHumanMetadata={updateHumanMetadata}
+          onApplyProposal={applyAiProposal}
           canManage={cloud.canManageMedia}
         />}
         {/* 分享單以前只掛在對稿樹上；殼的「分享」按鈕 setShareOpen 之後
@@ -2553,6 +2625,7 @@ export function App() {
         onRetryAnalysis={retryAi}
         onUpdatePolicy={updateAiPolicy}
         onUpdateHumanMetadata={updateHumanMetadata}
+        onApplyProposal={applyAiProposal}
         canManage={cloud.canManageMedia}
       />}
 
