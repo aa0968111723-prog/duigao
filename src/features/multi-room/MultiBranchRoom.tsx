@@ -11,6 +11,15 @@ import type {
   RoomBranch,
   RoomPoll,
 } from "../../lib/types";
+import type {
+  DiscussionMessage,
+  PresenceEditor,
+  WhiteboardEdge,
+  WhiteboardNode,
+} from "../collaboration/types";
+import { RoomDiscussion } from "../room-discussion/RoomDiscussion";
+import { WhiteboardWorkspace } from "../whiteboard/WhiteboardWorkspace";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import {
   BRANCH_STATUSES,
   BRANCH_TYPES,
@@ -33,7 +42,7 @@ export type MultiBranchRoomApi = {
   userId?: string | null;
   canManage: boolean;
   activeBranchId: string | null;
-  onOpenBranch: (branchId: string) => void;
+  onOpenBranch: (branchId: string, opts?: { startTime?: number }) => void;
   loadingBranchId?: string | null;
   onBackToRoom: () => void;
   onCreateContent: (type: BranchType, name: string, files: FileList | null) => void;
@@ -47,17 +56,36 @@ export type MultiBranchRoomApi = {
   chatInput: string;
   setChatInput: (value: string) => void;
   sendChat: () => void;
+  onSendDiscussion: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
+  onSupportDiscussion: (messageId: string, add: boolean) => void;
+  onCreateWhiteboard: (title: string) => void;
+  onArchiveWhiteboard: (id: string) => void;
+  onOpenWhiteboard: (id: string | null) => void;
+  onUpsertNode: (node: WhiteboardNode, persist?: "now" | "end") => void;
+  onUpsertNodes: (nodes: WhiteboardNode[]) => void;
+  onDeleteNode: (id: string) => void;
+  onCreateEdge: (edge: WhiteboardEdge) => void;
+  onShareNodeToDiscussion: (node: WhiteboardNode) => void;
+  onAddMessageToBoard: (message: DiscussionMessage, whiteboardId: string) => void;
+  onCreateDecision: (title: string, source?: { type: "poll"; id: string }, status?: "pending" | "decided") => void;
+  onFocusNode?: (nodeId: string | null) => void;
+  onFinalizeDecision: (id: string) => void;
+  onToggleAllowBoardEdit: () => void;
+  activeWhiteboardId: string | null;
+  focusNodeId: string | null;
+  online: number;
+  editors: PresenceEditor[];
   onShare: () => void;
   onGoHome: () => void;
 };
 
-type RoomTab = "overview" | "poster" | "video" | "plan";
+type RoomTab = "overview" | "content" | "plan" | "discuss";
 
-const TABS: { id: RoomTab; label: string; type?: BranchType }[] = [
-  { id: "overview", label: "總覽" },
-  { id: "poster", label: "文宣", type: "poster" },
-  { id: "video", label: "影片", type: "video" },
-  { id: "plan", label: "企劃", type: "plan" },
+const TABS: { id: RoomTab; label: string; icon: string }[] = [
+  { id: "overview", label: "總覽", icon: "⌂" },
+  { id: "content", label: "內容", icon: "▧" },
+  { id: "plan", label: "企劃", icon: "☷" },
+  { id: "discuss", label: "討論", icon: "💬" },
 ];
 
 function emptyPlan(branch: RoomBranch): PlanDocument {
@@ -397,11 +425,14 @@ function PollSheet({ onClose, onCreate }: { onClose: () => void; onCreate: (ques
 
 export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const normalized = normalizeRoomBranches(api.room);
-  const [tab, setTab] = useState<RoomTab>(api.activeBranchId ? "plan" : "overview");
+  const isMobile = useIsMobile();
+  const [tab, setTab] = useState<RoomTab>(api.activeBranchId ? "plan" : api.activeWhiteboardId ? "discuss" : "overview");
+  const [discussPane, setDiscussPane] = useState<"chat" | "board" | "voice">(api.activeWhiteboardId ? "board" : "chat");
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
   const [sortRecent, setSortRecent] = useState(true);
+  const [contentKind, setContentKind] = useState<"all" | "poster" | "video">("all");
 
   const activeBranch = normalized.branches?.find((branch) => branch.id === api.activeBranchId) ?? null;
   const branches = useMemo(() => {
@@ -413,8 +444,14 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   }, [normalized.branches, search, sortRecent]);
 
   useEffect(() => {
-    if (activeBranch) setTab(activeBranch.branchType === "video" ? "video" : activeBranch.branchType === "poster" ? "poster" : "plan");
+    if (activeBranch) setTab(activeBranch.branchType === "plan" || activeBranch.branchType === "copy" ? "plan" : "content");
   }, [activeBranch?.id, activeBranch?.branchType]);
+  useEffect(() => {
+    if (api.activeWhiteboardId) {
+      setTab("discuss");
+      setDiscussPane("board");
+    }
+  }, [api.activeWhiteboardId]);
 
   const tabBranches = (type: BranchType) => branches.filter((branch) => branchHasType(branch, type) && branch.status !== "archived");
   const [createType, setCreateType] = useState<BranchType | undefined>();
@@ -487,13 +524,97 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       ) : (
         <>
           <nav className="project-tabs" aria-label="房間內容">
-            {TABS.map((item) => <button type="button" key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}{item.type && tabBranches(item.type).length > 0 ? <small>{tabBranches(item.type).length}</small> : null}</button>)}
+            {TABS.map((item) => <button type="button" key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}>{item.label}{item.id === "content" && tabBranches("poster").length + tabBranches("video").length > 0 ? <small>{tabBranches("poster").length + tabBranches("video").length}</small> : item.id === "plan" && tabBranches("plan").length > 0 ? <small>{tabBranches("plan").length}</small> : item.id === "discuss" && (api.room.discussion?.length ?? 0) > 0 ? <small>{api.room.discussion!.length}</small> : null}</button>)}
           </nav>
           <main className="project-room-main">
             {search.trim() ? (
               <section className="project-section" data-testid="search-results">
                 <div className="project-section-title-row"><h2>搜尋結果</h2><span>{branches.length} 項</span></div>
                 {branches.length ? branches.map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} />) : <p className="project-muted">找不到相關內容</p>}
+              </section>
+            ) : tab === "discuss" ? (
+              <section className="project-section" data-testid="discuss-workspace">
+                <div className="rd-tabs" role="tablist" aria-label="討論">
+                  <button type="button" className={discussPane === "chat" ? "is-active" : ""} onClick={() => { setDiscussPane("chat"); api.onOpenWhiteboard(null); }}>對話</button>
+                  <button type="button" className={discussPane === "board" ? "is-active" : ""} onClick={() => setDiscussPane("board")}>白板</button>
+                  <button type="button" className={discussPane === "voice" ? "is-active" : ""} onClick={() => setDiscussPane("voice")}>語音</button>
+                </div>
+                {discussPane === "board" ? (
+                  <WhiteboardWorkspace api={{
+                    room: normalized,
+                    boards: api.room.whiteboards ?? [],
+                    nodes: api.room.whiteboardNodes ?? [],
+                    edges: api.room.whiteboardEdges ?? [],
+                    canManageBoards: api.canManage,
+                    canEdit: api.canManage || Boolean(api.room.allowBoardEdit),
+                    roleAllowsEdit: api.canManage,
+                    online: api.online,
+                    editors: api.editors,
+                    isMobile,
+                    focusNodeId: api.focusNodeId,
+                    activeBoardId: api.activeWhiteboardId,
+                    onOpenBoard: api.onOpenWhiteboard,
+                    onCreateBoard: api.onCreateWhiteboard,
+                    onArchiveBoard: api.onArchiveWhiteboard,
+                    onRenameBoard: () => undefined,
+                    onUpsertNode: api.onUpsertNode,
+                    onDeleteNode: api.onDeleteNode,
+                    onUpsertNodes: api.onUpsertNodes,
+                    onCreateEdge: api.onCreateEdge,
+                    onShareNode: api.onShareNodeToDiscussion,
+                    onOpenContent: (branchId, opts) => {
+                      api.onOpenBranch(branchId, opts);
+                    },
+                    onCreatePoll: (question, options) => {
+                      const id = crypto.randomUUID();
+                      api.onCreatePoll({
+                        id,
+                        roomId: api.room.id,
+                        question,
+                        options,
+                        createdBy: api.guest.id,
+                        createdAt: Date.now(),
+                        updatedAt: Date.now(),
+                      });
+                      return id;
+                    },
+                    onCreateDecision: api.onCreateDecision,
+                    onToggleAllowEdit: api.onToggleAllowBoardEdit,
+                    allowBoardEdit: Boolean(api.room.allowBoardEdit),
+                    canToggleOpenEdit: api.role === "owner" || (!api.role && api.canManage),
+                  }} />
+                ) : (
+                  <RoomDiscussion api={{
+                    room: normalized,
+                    guest: api.guest,
+                    userId: api.userId ?? api.guest.id,
+                    canManage: api.canManage,
+                    canTalk: true,
+                    messages: api.room.discussion ?? [],
+                    supports: api.room.discussionSupports ?? [],
+                    decisions: api.room.decisions ?? [],
+                    boards: api.room.whiteboards ?? [],
+                    hideTabs: true,
+                    pane: discussPane,
+                    draft: api.chatInput,
+                    setDraft: api.setChatInput,
+                    onSend: (input) => {
+                      if (input) api.onSendDiscussion(input);
+                      else api.sendChat();
+                    },
+                    onSupport: api.onSupportDiscussion,
+                    onCreatePoll: createPoll,
+                    onAddToBoard: api.onAddMessageToBoard,
+                    onOpenBoardNode: (whiteboardId, nodeId) => {
+                      setDiscussPane("board");
+                      api.onOpenWhiteboard(whiteboardId);
+                      api.onFocusNode?.(nodeId ?? null);
+                    },
+                    onCreateDecision: api.onCreateDecision,
+                    onFinalizeDecision: api.onFinalizeDecision,
+                    onOpenContent: api.onOpenBranch,
+                  }} />
+                )}
               </section>
             ) : tab === "overview" ? (
               <>
@@ -517,18 +638,47 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                   {recentComments.map((comment) => <button type="button" className="project-feedback-row" key={comment.id} onClick={() => { const branch = normalized.branches?.find((item) => item.id === comment.branchId || branchVersions(normalized, item.id).some((version) => version.id === comment.versionId)); if (branch) api.onOpenBranch(branch.id); }}><span className="project-feedback-dot" style={{ background: comment.authorColor }} /> <span><strong>{branchNameForVersion(comment.versionId)}</strong><small>{comment.body}</small></span></button>)}
                   {!recentComments.length && <p className="project-muted">還沒有回饋</p>}
                 </section>
-                <section className="project-section project-room-chat"><div className="project-section-title-row"><h2>房間討論</h2><span>跨內容</span></div><div className="project-chat-list">{api.room.messages.slice(-3).map((message) => <p key={message.id}><b>{message.authorName}</b>{message.body}</p>)}{!api.room.messages.length && <p className="project-muted">先留一句房間層級的討論吧</p>}</div><div className="project-chat-input"><input value={api.chatInput} onChange={(event) => api.setChatInput(event.target.value)} placeholder="這週先主推哪一份？" onKeyDown={(event) => event.key === "Enter" && api.sendChat()} /><button type="button" onClick={api.sendChat} disabled={!api.chatInput.trim()}>送出</button></div></section>
+                <section className="project-section project-room-chat"><div className="project-section-title-row"><h2>房間討論</h2><button type="button" className="project-text-button" onClick={() => setTab("discuss")}>打開工作台</button></div><div className="project-chat-list">{(api.room.discussion ?? api.room.messages).slice(-3).map((message) => <p key={message.id}><b>{message.authorName}</b>{message.body}</p>)}{!(api.room.discussion ?? api.room.messages).length && <p className="project-muted">先留一句房間層級的討論吧</p>}</div><div className="project-chat-input"><input value={api.chatInput} onChange={(event) => api.setChatInput(event.target.value)} placeholder="這週先主推哪一份？" onKeyDown={(event) => event.key === "Enter" && api.sendChat()} /><button type="button" onClick={api.sendChat} disabled={!api.chatInput.trim()}>送出</button></div></section>
               </>
             ) : (
               <section className="project-section project-list-section" data-testid={`${tab}-branches`}>
-                <div className="project-section-title-row"><div><span className="project-section-eyebrow">{tab === "poster" ? "圖片與海報" : tab === "video" ? "影片與 Reel" : "企劃、文案與清單"}</span><h2>{TABS.find((item) => item.id === tab)?.label}</h2></div>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate(tab === "plan" ? "plan" : tab)}>＋ 新增{tab === "poster" ? "文宣" : tab === "video" ? "影片" : "企劃"}</button>}</div>
-                <div className="project-branch-list">{tabBranches(tab === "poster" ? "poster" : tab === "video" ? "video" : "plan").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
-                {!tabBranches(tab === "poster" ? "poster" : tab === "video" ? "video" : "plan").length && api.canManage && <EmptyType label={tab === "poster" ? "文宣" : tab === "video" ? "影片" : "企劃"} onAdd={() => openCreate(tab === "plan" ? "plan" : tab)} />}
+                {tab === "content" ? (
+                  <>
+                    <div className="project-section-title-row"><div><span className="project-section-eyebrow">文宣與影片</span><h2>內容</h2></div>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate(contentKind === "video" ? "video" : "poster")}>＋ 新增</button>}</div>
+                    <div className="rd-tabs" style={{ marginTop: 0 }}>
+                      {(["all", "poster", "video"] as const).map((item) => (
+                        <button type="button" key={item} className={contentKind === item ? "is-active" : ""} onClick={() => setContentKind(item)}>
+                          {item === "all" ? "全部" : item === "poster" ? "文宣" : "影片"}
+                        </button>
+                      ))}
+                    </div>
+                    {(contentKind === "all" || contentKind === "poster") && (
+                      <div data-testid="poster-branches">
+                        <div className="project-section-title-row"><h3>文宣</h3>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate("poster")}>＋ 新增文宣</button>}</div>
+                        <div className="project-branch-list">{tabBranches("poster").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
+                        {!tabBranches("poster").length && api.canManage && <EmptyType label="文宣" onAdd={() => openCreate("poster")} />}
+                      </div>
+                    )}
+                    {(contentKind === "all" || contentKind === "video") && (
+                      <div data-testid="video-branches">
+                        <div className="project-section-title-row"><h3>影片</h3>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate("video")}>＋ 新增影片</button>}</div>
+                        <div className="project-branch-list">{tabBranches("video").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
+                        {!tabBranches("video").length && api.canManage && <EmptyType label="影片" onAdd={() => openCreate("video")} />}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="project-section-title-row"><div><span className="project-section-eyebrow">企劃、文案與清單</span><h2>企劃</h2></div>{api.canManage && <button type="button" className="project-text-button" onClick={() => openCreate("plan")}>＋ 新增企劃</button>}</div>
+                    <div className="project-branch-list">{tabBranches("plan").map((branch) => <BranchCard key={branch.id} room={normalized} branch={branch} onOpen={() => api.onOpenBranch(branch.id)} draggable onDrop={() => undefined} />)}</div>
+                    {!tabBranches("plan").length && api.canManage && <EmptyType label="企劃" onAdd={() => openCreate("plan")} />}
+                  </>
+                )}
               </section>
             )}
           </main>
           {api.canManage && <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>}
-          <nav className="project-bottom-nav" aria-label="主要導覽">{TABS.map((item) => <button type="button" key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}><span>{item.id === "overview" ? "⌂" : item.id === "poster" ? "▧" : item.id === "video" ? "▶" : "☷"}</span>{item.label}</button>)}</nav>
+          <nav className="project-bottom-nav" aria-label="主要導覽">{TABS.map((item) => <button type="button" key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => setTab(item.id)}><span>{item.icon}</span>{item.label}</button>)}</nav>
         </>
       )}
       {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} />}

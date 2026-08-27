@@ -25,7 +25,7 @@ export function newRoomId(): string {
  * invite token — a bare `#room=<id>` is never produced anywhere in the app
  * (PR #16); it only survives as an inbound legacy format.
  */
-export type RoomTarget = { branchId?: string; versionId?: string };
+export type RoomTarget = { branchId?: string; versionId?: string; whiteboardId?: string; nodeId?: string };
 
 /**
  * Build the only share URL shape the app emits. Content targeting deliberately
@@ -36,22 +36,26 @@ export function buildInviteUrl(roomId: string, token: string, target?: RoomTarge
   const params = new URLSearchParams({ room: roomId, invite: token });
   if (target?.branchId) params.set("branch", target.branchId);
   if (target?.versionId) params.set("item", target.versionId);
+  if (target?.whiteboardId) params.set("board", target.whiteboardId);
+  if (target?.nodeId) params.set("node", target.nodeId);
   return `${location.origin}${location.pathname}#${params.toString()}`;
 }
 
 /** Add a branch/version target without moving any share data into the query. */
 export function addRoomTarget(url: string, target?: RoomTarget): string {
-  if (!target?.branchId && !target?.versionId) return url;
+  if (!target?.branchId && !target?.versionId && !target?.whiteboardId && !target?.nodeId) return url;
   const hashAt = url.indexOf("#");
   const base = hashAt >= 0 ? url.slice(0, hashAt) : url;
   const currentHash = hashAt >= 0 ? url.slice(hashAt + 1) : "";
   const params = new URLSearchParams(currentHash);
   if (target.branchId) params.set("branch", target.branchId);
   if (target.versionId) params.set("item", target.versionId);
+  if (target.whiteboardId) params.set("board", target.whiteboardId);
+  if (target.nodeId) params.set("node", target.nodeId);
   return `${base}#${params.toString()}`;
 }
 
-export type UrlInvite = { roomId: string; invite: string | null; branchId?: string; versionId?: string };
+export type UrlInvite = { roomId: string; invite: string | null; branchId?: string; versionId?: string; whiteboardId?: string; nodeId?: string };
 
 /** Parse `#room=<id>&invite=<secret>` (or legacy `#room=<code>`). */
 export function readInviteFromUrl(): UrlInvite | null {
@@ -65,11 +69,15 @@ export function readInviteFromUrl(): UrlInvite | null {
   const invite = /[#&]invite=([^&]+)/i.exec(inviteSource);
   const branch = /[#&]branch=([^&]+)/i.exec(inviteSource);
   const item = /[#&]item=([^&]+)/i.exec(inviteSource);
+  const board = /[#&]board=([^&]+)/i.exec(inviteSource);
+  const node = /[#&]node=([^&]+)/i.exec(inviteSource);
   return {
     roomId: decodeURIComponent(room[1]),
     invite: invite ? decodeURIComponent(invite[1]) : null,
     branchId: branch ? decodeURIComponent(branch[1]) : undefined,
     versionId: item ? decodeURIComponent(item[1]) : undefined,
+    whiteboardId: board ? decodeURIComponent(board[1]) : undefined,
+    nodeId: node ? decodeURIComponent(node[1]) : undefined,
   };
 }
 
@@ -84,7 +92,7 @@ export function readInviteFromUrl(): UrlInvite | null {
  */
 export type RoomLink =
   | { kind: "none" }
-  | { kind: "cloud"; roomId: string; invite: string; branchId?: string; versionId?: string }
+  | { kind: "cloud"; roomId: string; invite: string; branchId?: string; versionId?: string; whiteboardId?: string; nodeId?: string }
   | { kind: "legacy"; roomId: string };
 
 export function readRoomLink(): RoomLink {
@@ -97,6 +105,8 @@ export function readRoomLink(): RoomLink {
       invite: url.invite,
       branchId: url.branchId,
       versionId: url.versionId,
+      whiteboardId: url.whiteboardId,
+      nodeId: url.nodeId,
     };
   }
   return { kind: "legacy", roomId: url.roomId };

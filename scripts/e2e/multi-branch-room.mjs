@@ -198,7 +198,7 @@ try {
     check("手機企劃可快速編輯段落與 checkbox", await page.locator('input[aria-label="段落內容"]').first().inputValue() === "目標：招募新生" && await page.locator('input[aria-label="完成項目"]').isChecked());
 
     await page.locator(".project-back-button").click();
-    await page.locator('.project-tabs button').filter({ hasText: "文宣" }).click();
+    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
     const poster = { name: "演講文宣", mimeType: "image/png", buffer: TINY_PNG };
     await page.getByRole("button", { name: /新增文宣/ }).click();
     const posterSheet = page.getByTestId("create-content-sheet");
@@ -236,7 +236,7 @@ try {
     await page.locator(".project-back-button").click();
 
     const videoBytes = await recordWebm(page);
-    await page.locator('.project-tabs button').filter({ hasText: "影片" }).click();
+    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
     await page.getByRole("button", { name: /新增影片/ }).click();
     const videoSheet = page.getByTestId("create-content-sheet");
     await videoSheet.locator('input:not([type="file"])').first().fill("招生影片");
@@ -252,7 +252,7 @@ try {
 
     // A branch share is intentionally checked from a real workspace. The
     // preview path may change, but its fragment must remain the app target.
-    await page.locator('.project-tabs button').filter({ hasText: "文宣" }).click();
+    await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
     await page.locator('[data-testid="poster-branches"] .project-branch-card').filter({ hasText: "演講文宣" }).click();
     await page.locator("button.m-share").click();
     await page.waitForSelector("input.m-share-url", { timeout: 30000 });
