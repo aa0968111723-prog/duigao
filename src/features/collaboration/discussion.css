@@ -1,0 +1,81 @@
+.project-discussion-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: #111;
+  display: flex;
+  flex-direction: column;
+}
+.discussion-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: #111;
+  color: #f4efe6;
+}
+.discussion-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 12px 12px 0;
+}
+.discussion-tabs button {
+  min-height: 44px;
+  border-radius: 999px;
+  border: 0;
+  background: #1c1c1c;
+  color: inherit;
+}
+.discussion-tabs button.is-active { background: #c45c4a; }
+.discussion-tabs button:disabled { opacity: 0.45; }
+.discussion-chat, .discussion-board, .discussion-voice {
+  flex: 1;
+  padding: 16px;
+  min-height: 320px;
+  position: relative;
+}
+.discussion-muted { opacity: 0.65; }
+.board-node {
+  position: absolute;
+  min-width: 88px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: #f6e27a;
+  color: #222;
+}
+.board-node.is-selected { outline: 2px solid #c45c4a; }
+.discussion-dock {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 8px 12px calc(12px + env(safe-area-inset-bottom));
+}
+.discussion-dock button, .discussion-plus button, .discussion-ai-sheet button {
+  min-height: 44px;
+}
+.discussion-plus {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+.discussion-ai {
+  position: absolute;
+  right: 16px;
+  bottom: 88px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 0;
+  background: #c45c4a;
+  color: #fff;
+}
+.discussion-ai-sheet {
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: #1b1b1b;
+}
+.discussion-ai-sheet textarea { min-height: 72px; }

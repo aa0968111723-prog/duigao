@@ -76,6 +76,19 @@
       ]
     },
     {
+      "name": "Asset intelligence",
+      "path": [
+        "src/ai",
+        "src/lib/assetIntelligence.ts",
+        "src/cloud/assetIntelligence.ts"
+      ],
+      "responsibility": "Understand room assets and retrieve a bounded Room Context slice.",
+      "dependsOn": [
+        "Multi-branch project room",
+        "Cloud layer"
+      ]
+    },
+    {
       "name": "Discussion",
       "path": [
         "src/features/discussion"

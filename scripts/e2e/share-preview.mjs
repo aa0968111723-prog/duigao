@@ -564,7 +564,22 @@ async function browserLeg(previewId, handler) {
     res.writeHead(out.status, Object.fromEntries(out.headers.entries()));
     res.end(body);
   });
-  await new Promise((r) => fnServer.listen(FN_PORT, r));
+  const listen = (port) =>
+    new Promise((resolve, reject) => {
+      const onError = (err) => reject(err);
+      fnServer.once("error", onError);
+      fnServer.listen(port, "127.0.0.1", () => {
+        fnServer.off("error", onError);
+        resolve(fnServer.address().port);
+      });
+    });
+  let boundPort = FN_PORT;
+  try {
+    boundPort = await listen(FN_PORT);
+  } catch (err) {
+    if (err?.code !== "EADDRINUSE") throw err;
+    boundPort = await listen(0);
+  }
 
   const browser = await chromium.launch(
     process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
@@ -577,7 +592,7 @@ async function browserLeg(previewId, handler) {
     });
 
     const fragment = `#room=${ROOM_ID}&invite=${INVITE_SECRET}`;
-    await page.goto(`http://127.0.0.1:${FN_PORT}/share-preview/${previewId}${fragment}`, {
+    await page.goto(`http://127.0.0.1:${boundPort}/share-preview/${previewId}${fragment}`, {
       waitUntil: "domcontentloaded",
     });
     await page.waitForURL((u) => u.origin === APP_ORIGIN, { timeout: 10000 }).catch(() => undefined);
@@ -601,7 +616,7 @@ async function browserLeg(previewId, handler) {
     );
   } finally {
     await browser.close();
-    fnServer.close();
+    await new Promise((resolve) => fnServer.close(() => resolve()));
   }
 }
 

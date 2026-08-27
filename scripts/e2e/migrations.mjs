@@ -1235,6 +1235,27 @@ try {
   psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
   ok("重跑 0014 之後 tables / policies / triggers 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
 
+  section("素材庫：0016 RLS");
+  const libRoom = psql("select gen_random_uuid();").out;
+  const libShared = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可以寫房間素材與共用素材",
+    !as(owner, `insert into public.library_assets (id, scope, room_id, title, summary, topics, kind) values ('${libRoom}'::uuid, 'room', '${capRoom}'::uuid, '茶會文宣', '春季茶會主視覺', array['茶會'], 'poster');`).failed
+      && !as(owner, `insert into public.library_assets (id, scope, title, summary, topics, kind) values ('${libShared}'::uuid, 'shared', '社團 Logo', '固定標誌', array['主視覺'], 'image');`).failed,
+  );
+  ok(
+    "reviewer 可讀但不能寫 library",
+    as(reviewer, `select count(*) from public.library_assets where id = '${libRoom}'::uuid;`).out === "1"
+      && as(reviewer, `insert into public.library_assets (scope, room_id, title, kind) values ('room', '${capRoom}'::uuid, 'blocked', 'image');`).failed,
+  );
+  ok("非成員讀不到房間素材庫", as(stranger, `select count(*) from public.library_assets where id = '${libRoom}'::uuid;`).out === "0");
+  const libraryShape = () => psql(`select
+    (select count(*) from information_schema.tables where table_name = 'library_assets') || '/' ||
+    (select count(*) from pg_policies where tablename = 'library_assets');`).out;
+  const libraryBefore = libraryShape();
+  psqlFile(join(MIGRATIONS, "0016_asset_library.sql"));
+  ok("重跑 0016 後 tables / policies 數量不變", libraryBefore === libraryShape(), `${libraryBefore} → ${libraryShape()}`);
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

@@ -18,7 +18,7 @@
     "test:asset-intelligence": "tsx --test scripts/tests/asset-intelligence.test.ts",
     "test:asset-intelligence-e2e": "node scripts/e2e/asset-intelligence.mjs",
     "test:multi-branch": "tsx --test scripts/tests/multi-branch.test.ts",
-    "test:collaboration": "tsx --test scripts/tests/collaboration-workspace.test.ts",
+    "test:collaboration": "tsx --test scripts/tests/collaboration-workspace.test.ts scripts/tests/collaboration.test.ts",
     "test:multi-branch-e2e": "node scripts/e2e/multi-branch-room.mjs",
     "test:collaboration-e2e": "node scripts/e2e/collaboration-workspace.mjs",
     "test:migrations": "node scripts/e2e/migrations.mjs",

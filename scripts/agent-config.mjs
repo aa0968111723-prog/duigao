@@ -321,6 +321,24 @@ export const featureDefinitions = [
     tests: [{ path: "scripts/tests/collaboration-workspace.test.ts", contains: ["decision nodes"] }],
     minimum: { source: 2, migrations: 1, tests: 1 },
   },
+  {
+    id: "intelligent-asset-library", name: "Intelligent asset library", priority: 1,
+    source: [
+      { path: "src/collaboration/library.ts", contains: ["searchLibrary", "shared"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0016_asset_library.sql", contains: ["library_assets", "row level security"] }],
+    tests: [{ path: "scripts/tests/collaboration.test.ts", contains: ["IMG_3819", "茶會"] }],
+    minimum: { source: 1, migrations: 1, tests: 1 },
+  },
+  {
+    id: "whiteboard-apply-back", name: "Whiteboard context apply-back", priority: 1,
+    source: [
+      { path: "src/ai/roomContext.ts", contains: ["applyBackToWhiteboard", "retrieveRoomContext"] },
+      { path: "src/collaboration/whiteboard.ts", contains: ["createFlow", "createMindmap"] },
+    ],
+    tests: [{ path: "scripts/tests/collaboration.test.ts", contains: ["加入白板", "招生"] }],
+    minimum: { source: 2, tests: 1 },
+  },
 ];
 
 export const architectureDefinitions = [
@@ -330,6 +348,7 @@ export const architectureDefinitions = [
   { name: "Image review", paths: ["src/features/image-review"], responsibility: "Immutable image annotation and comparison workspace.", dependsOn: ["Discussion", "Cloud layer"] },
   { name: "Video review", paths: ["src/features/video-review"], responsibility: "Playback, temporal feedback, review brief, reactions, verdicts, and summary.", dependsOn: ["Discussion", "Cloud layer", "Storage/upload"] },
   { name: "Collaboration workspace", paths: ["src/features/collaboration", "src/features/whiteboard", "src/features/room-discussion"], responsibility: "Room-layer discussion, multi-whiteboard nodes/edges, decisions, and mobile board UX.", dependsOn: ["Multi-branch project room", "Discussion", "Cloud layer"] },
+  { name: "Asset intelligence", paths: ["src/ai", "src/lib/assetIntelligence.ts", "src/cloud/assetIntelligence.ts"], responsibility: "Understand room assets and retrieve a bounded Room Context slice.", dependsOn: ["Multi-branch project room", "Cloud layer"] },
   { name: "Discussion", paths: ["src/features/discussion"], responsibility: "Shared pin comments and discussion cards.", dependsOn: ["Cloud layer"] },
   { name: "Cloud layer", paths: ["src/cloud"], responsibility: "Supabase persistence, realtime, mapping, invites, and signed media access.", dependsOn: ["Authentication", "Storage/upload", "Migrations"] },
   { name: "Authentication", paths: ["src/cloud/auth.ts", "src/cloud/invite.ts"], responsibility: "Anonymous sessions and fragment-only room invite capability.", dependsOn: ["Cloud layer"] },

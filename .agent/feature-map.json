@@ -290,10 +290,9 @@
     {
       "id": "document-understanding",
       "name": "Document extraction and chunks",
-      "status": "implemented",
+      "status": "partial",
       "evidence": {
         "source": [
-          "../tku-zen-agent/app/services/asset_providers.py",
           "supabase/functions/asset-analysis/index.ts"
         ],
         "migrations": [],
@@ -306,8 +305,8 @@
         {
           "kind": "source",
           "required": 2,
-          "found": 2,
-          "satisfied": true
+          "found": 1,
+          "satisfied": false
         },
         {
           "kind": "tests",
@@ -316,19 +315,21 @@
           "satisfied": true
         }
       ],
-      "confidence": 0.9,
+      "confidence": 0.67,
       "implemented": [
-        "source",
         "tests"
       ],
-      "missing": [],
+      "missing": [
+        "source: need 2, found 1"
+      ],
       "relatedFiles": [
-        "../tku-zen-agent/app/services/asset_providers.py",
         "scripts/tests/asset-intelligence.test.ts",
         "supabase/functions/asset-analysis/index.ts"
       ],
       "priority": 1,
-      "notes": []
+      "notes": [
+        "Executable evidence is incomplete: source: need 2, found 1."
+      ]
     },
     {
       "id": "flowchart",
@@ -460,6 +461,57 @@
         "scripts/tests/asset-intelligence.test.ts",
         "src/features/image-review/Stage.tsx",
         "supabase/functions/asset-analysis/index.ts"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
+      "id": "intelligent-asset-library",
+      "name": "Intelligent asset library",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/collaboration/library.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0016_asset_library.sql"
+        ],
+        "tests": [
+          "scripts/tests/collaboration.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration.test.ts",
+        "src/collaboration/library.ts",
+        "supabase/migrations/0016_asset_library.sql"
       ],
       "priority": 1,
       "notes": []
@@ -1042,16 +1094,11 @@
     {
       "id": "tku-zen-agent-integration",
       "name": "tku-zen-agent / ai_os context adapters",
-      "status": "implemented",
+      "status": "partial",
       "evidence": {
-        "source": [
-          "../ai_os/server/services/duigaoRoomContext.ts",
-          "../tku-zen-agent/app/services/duigao_integration.py"
-        ],
+        "source": [],
         "migrations": [],
         "tests": [
-          "../ai_os/server/services/duigaoRoomContext.test.ts",
-          "../tku-zen-agent/tests/test_duigao_integration.py",
           "scripts/tests/asset-intelligence.test.ts"
         ],
         "docs": []
@@ -1060,31 +1107,30 @@
         {
           "kind": "source",
           "required": 2,
-          "found": 2,
-          "satisfied": true
+          "found": 0,
+          "satisfied": false
         },
         {
           "kind": "tests",
           "required": 1,
-          "found": 3,
+          "found": 1,
           "satisfied": true
         }
       ],
-      "confidence": 0.94,
+      "confidence": 0.35,
       "implemented": [
-        "source",
         "tests"
       ],
-      "missing": [],
+      "missing": [
+        "source: need 2, found 0"
+      ],
       "relatedFiles": [
-        "../ai_os/server/services/duigaoRoomContext.test.ts",
-        "../ai_os/server/services/duigaoRoomContext.ts",
-        "../tku-zen-agent/app/services/duigao_integration.py",
-        "../tku-zen-agent/tests/test_duigao_integration.py",
         "scripts/tests/asset-intelligence.test.ts"
       ],
       "priority": 1,
-      "notes": []
+      "notes": [
+        "Executable evidence is incomplete: source: need 2, found 0."
+      ]
     },
     {
       "id": "tus-resumable-upload",
@@ -1608,10 +1654,9 @@
     {
       "id": "video-understanding",
       "name": "Video temporal understanding",
-      "status": "implemented",
+      "status": "partial",
       "evidence": {
         "source": [
-          "../tku-zen-agent/app/services/asset_providers.py",
           "supabase/functions/asset-analysis/index.ts"
         ],
         "migrations": [],
@@ -1624,8 +1669,8 @@
         {
           "kind": "source",
           "required": 2,
-          "found": 2,
-          "satisfied": true
+          "found": 1,
+          "satisfied": false
         },
         {
           "kind": "tests",
@@ -1634,19 +1679,21 @@
           "satisfied": true
         }
       ],
-      "confidence": 0.9,
+      "confidence": 0.67,
       "implemented": [
-        "source",
         "tests"
       ],
-      "missing": [],
+      "missing": [
+        "source: need 2, found 1"
+      ],
       "relatedFiles": [
-        "../tku-zen-agent/app/services/asset_providers.py",
         "scripts/tests/asset-intelligence.test.ts",
         "supabase/functions/asset-analysis/index.ts"
       ],
       "priority": 1,
-      "notes": []
+      "notes": [
+        "Executable evidence is incomplete: source: need 2, found 1."
+      ]
     },
     {
       "id": "video-upload",
@@ -1705,6 +1752,49 @@
       "notes": [
         "Status is based on executable evidence, not documentation or PR metadata."
       ]
+    },
+    {
+      "id": "whiteboard-apply-back",
+      "name": "Whiteboard context apply-back",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/ai/roomContext.ts",
+          "src/collaboration/whiteboard.ts"
+        ],
+        "migrations": [],
+        "tests": [
+          "scripts/tests/collaboration.test.ts"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 2,
+          "found": 2,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/tests/collaboration.test.ts",
+        "src/ai/roomContext.ts",
+        "src/collaboration/whiteboard.ts"
+      ],
+      "priority": 1,
+      "notes": []
     },
     {
       "id": "whiteboard-edges",
