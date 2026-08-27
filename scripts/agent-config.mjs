@@ -167,11 +167,23 @@ export const featureDefinitions = [
     tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["version comparison", "版本比較"], match: "any" }],
     docs: [{ path: "docs/pr32-video-review-feedback-2.md", contains: ["版本"] }], minimum: { source: 1, tests: 1 },
   },
+  {
+    id: "multi-branch-room", name: "Multi-branch project room", priority: 1,
+    source: [
+      { path: "src/features/multi-room/MultiBranchRoom.tsx", contains: ["project-room", "plan-editor", "project-poll-card"] },
+      { path: "src/lib/roomBranches.ts", contains: ["normalizeRoomBranches", "roomForBranch"] },
+      { path: "src/cloud/roomRepository.ts", contains: ["room_branches", "plan_documents", "content_relations"] },
+    ],
+    migrations: [{ path: "supabase/migrations/0013_project_room_branches.sql", contains: ["room_branches", "plan_documents", "content_relations", "room_polls", "row level security"] }],
+    tests: [{ path: "scripts/e2e/multi-branch-room.mjs", contains: ["Android", "multi-branch", "plan"] }],
+    minimum: { source: 3, migrations: 1, tests: 1 },
+  },
 ];
 
 export const architectureDefinitions = [
   { name: "App entry", paths: ["src/main.tsx"], responsibility: "Boot React and normalize inbound legacy share URLs.", dependsOn: ["Workspace router"] },
   { name: "Workspace router", paths: ["src/App.tsx", "src/components/RoomWorkspace.tsx"], responsibility: "Select image or video workspace and coordinate room state.", dependsOn: ["Image review", "Video review", "Cloud layer"] },
+  { name: "Multi-branch project room", paths: ["src/features/multi-room", "src/lib/roomBranches.ts"], responsibility: "Mobile-first room overview, content-family branches, lightweight plans, relations, and decisions.", dependsOn: ["Workspace router", "Discussion", "Cloud layer"] },
   { name: "Image review", paths: ["src/features/image-review"], responsibility: "Immutable image annotation and comparison workspace.", dependsOn: ["Discussion", "Cloud layer"] },
   { name: "Video review", paths: ["src/features/video-review"], responsibility: "Playback, temporal feedback, review brief, reactions, verdicts, and summary.", dependsOn: ["Discussion", "Cloud layer", "Storage/upload"] },
   { name: "Discussion", paths: ["src/features/discussion"], responsibility: "Shared pin comments and discussion cards.", dependsOn: ["Cloud layer"] },

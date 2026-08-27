@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  ContentRelation,
   Guest,
+  PlanDocument,
+  PollVote,
   ReactionType,
   ReviewBrief,
   ReviewProgress,
   ReviewStatus,
   Room,
+  RoomBranch,
+  RoomPoll,
   Verdict,
   Version,
   VersionVerdict,
@@ -30,14 +35,21 @@ import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping"
 import {
   addVersion as repoAddVersion,
   createRoom,
+  deleteRelation,
   deleteStroke as repoDeleteStroke,
+  insertBranch,
   insertComment,
   insertMessage,
+  insertPoll,
   insertReply as repoInsertReply,
+  insertRelation,
   insertStroke,
   joinRoom,
   canManageMedia,
   loadRoom,
+  updateBranch,
+  upsertPlan,
+  votePoll,
   type RoomRole,
   setCommentResolved,
   setPreference,
@@ -69,6 +81,7 @@ import { uploadVideoVersion, type VideoUploadHandle, type VideoUploadInput } fro
 import { signedVideoUrl } from "./videoAssets";
 import { subscribeRoom, type Unsubscribe } from "./roomSync";
 import type { SyncStatus } from "./types";
+import { mergeRoomBranch } from "../lib/roomBranches";
 
 export type CloudWrites = {
   setTitle: (title: string) => void;
@@ -77,7 +90,15 @@ export type CloudWrites = {
   insertStroke: (stroke: import("../lib/types").Stroke) => void;
   deleteStroke: (id: string) => void;
   insertMessage: (msg: import("../lib/types").ChatMessage) => void;
-  addVersion: (label: string, sortOrder: number, imageDataUrl: string) => void;
+  addVersion: (label: string, sortOrder: number, imageDataUrl: string, branchId?: string) => void;
+  /** Resolves after the branch FK exists, so a first version/plan can follow it. */
+  createBranch: (branch: RoomBranch) => Promise<void>;
+  updateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => void;
+  savePlan: (plan: PlanDocument) => void;
+  createRelation: (relation: ContentRelation) => void;
+  deleteRelation: (relationId: string) => void;
+  createPoll: (poll: RoomPoll) => void;
+  votePoll: (vote: PollVote) => void;
   toggleSupport: (commentId: string, add: boolean) => void;
   insertReply: (reply: import("../lib/types").CommentReply) => void;
   setProposalPref: (versionId: string, choice: string) => void;
@@ -145,6 +166,7 @@ export type PreviewOpts = {
 type Params = {
   guest: Guest | null;
   room: Room | null;
+  activeBranchId?: string | null;
   isGuestSession: boolean;
   onSnapshot: (room: Room) => void;
   showToast: ShowToast;
@@ -207,7 +229,7 @@ function rememberCloudRoom(localRoomId: string, roomId: string, token: string): 
  * Binds the active room to the cloud when configured. Inert (returns
  * local-only) otherwise, so the local IndexedDB + PeerJS path is untouched.
  */
-export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToast }: Params) {
+export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSnapshot, showToast }: Params) {
   const [status, setStatus] = useState<SyncStatus>(isCloudConfigured ? "connecting" : "local-only");
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
@@ -235,6 +257,10 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   const revisions = useRef<Map<string, number>>(new Map());
   const pending = useRef<Array<() => Promise<void>>>([]);
   const reloadTimer = useRef<number | null>(null);
+  const roomRef = useRef<Room | null>(room);
+  const activeBranchRef = useRef<string | null>(activeBranchId ?? null);
+  roomRef.current = room;
+  activeBranchRef.current = activeBranchId ?? null;
   const supabase = getSupabase();
 
   /**
@@ -270,10 +296,21 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     if (!supabase || !rid) return;
     setStatus("syncing");
     try {
-      const snap = await loadRoom(supabase, rid);
+      const selected = activeBranchRef.current;
+      const current = roomRef.current;
+      const selectedBranch = selected ? current?.branches?.find((branch) => branch.id === selected) : undefined;
+      const detailBranchId = selectedBranch && (selectedBranch.branchType === "poster" || selectedBranch.branchType === "video")
+        ? selectedBranch.id
+        : null;
+      const snap = detailBranchId
+        ? await loadRoom(supabase, rid, { mode: "branch", branchId: detailBranchId })
+        : await loadRoom(supabase, rid);
+      const nextRoom = detailBranchId && current?.projectMode
+        ? mergeRoomBranch(current, snap.room, detailBranchId)
+        : snap.room;
       setRole(snap.role);
-      onSnapshot(snap.room);
-      saveRoom(snap.room).catch(() => undefined);
+      onSnapshot(nextRoom);
+      saveRoom(nextRoom).catch(() => undefined);
       revisions.current = new Map(snap.proposals.map((p) => [p.id, p.revision]));
       applyCloudProposals(rid, snap.proposals.map(proposalToStore));
       setStatus("synced");
@@ -281,9 +318,35 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
       // never delay the video or the discussion appearing. Riding on `reload`
       // also means every realtime nudge and every reconnect refreshes it, which
       // is exactly the "at least reload after reconnect" the spec asks for.
-      void reloadReview(rid, roomMediaType(snap.room));
+      const selectedMediaType = selectedBranch?.branchType === "video" ? "video" : roomMediaType(nextRoom);
+      void reloadReview(rid, selectedMediaType);
     } catch {
       setStatus("error");
+    }
+  }, [supabase, onSnapshot, reloadReview]);
+
+  /** Load one content branch without pulling other branches' assets/comments. */
+  const loadBranch = useCallback(async (branchId: string): Promise<boolean> => {
+    const rid = boundRef.current;
+    if (!supabase || !rid) return false;
+    setStatus("syncing");
+    try {
+      const snap = await loadRoom(supabase, rid, { mode: "branch", branchId });
+      const current = roomRef.current;
+      const nextRoom = current?.projectMode ? mergeRoomBranch(current, snap.room, branchId) : snap.room;
+      setRole(snap.role);
+      onSnapshot(nextRoom);
+      saveRoom(nextRoom).catch(() => undefined);
+      revisions.current = new Map(snap.proposals.map((p) => [p.id, p.revision]));
+      applyCloudProposals(rid, snap.proposals.map(proposalToStore));
+      setStatus("synced");
+      const branch = current?.branches?.find((item) => item.id === branchId) ?? snap.room.branches?.find((item) => item.id === branchId);
+      const selectedMediaType = branch?.branchType === "video" ? "video" : roomMediaType(nextRoom);
+      void reloadReview(rid, selectedMediaType);
+      return true;
+    } catch {
+      setStatus("error");
+      return false;
     }
   }, [supabase, onSnapshot, reloadReview]);
 
@@ -322,6 +385,32 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
           pending.current.push(task);
           setStatus("offline-pending");
         });
+    },
+    [supabase],
+  );
+
+  /**
+   * A small awaitable sibling for writes whose dependants are sent in the same
+   * gesture. The normal `run` intentionally swallows errors into the offline
+   * queue; branch creation must be observable so a first plan/version never
+   * races its `(branch_id, room_id)` foreign key on a slow mobile connection.
+   */
+  const runAndWait = useCallback(
+    async (task: () => Promise<void>): Promise<void> => {
+      if (!supabase || !boundRef.current) return;
+      setStatus("syncing");
+      try {
+        await task();
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        pending.current.push(task);
+        setStatus("offline-pending");
+        throw err;
+      }
     },
     [supabase],
   );
@@ -413,6 +502,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
             ]);
           },
           onFeedbackChange: scheduleReload,
+          onProjectChange: scheduleReload,
           onPresence: setOnline,
           onStatus: (connected) => {
             if (connected) void flushPending();
@@ -662,7 +752,16 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
   // the Edge Function reads to pick a fallback brand, so leaving it implicit
   // would make an untouched poster card indistinguishable from a row that
   // predates the column.
-  const previewExtras = () => ({ mediaType: room ? roomMediaType(room) : ("image" as const) });
+  const previewExtras = () => {
+    const branch = activeBranchRef.current
+      ? roomRef.current?.branches?.find((item) => item.id === activeBranchRef.current)
+      : undefined;
+    return {
+      mediaType: branch
+        ? branch.branchType === "video" ? "video" as const : "image" as const
+        : roomRef.current ? roomMediaType(roomRef.current) : "image" as const,
+    };
+  };
 
   const preview: SharePreviewApi = {
     ensure: async (opts) => {
@@ -695,7 +794,11 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
    */
   const refreshReview = () => {
     const rid = boundRef.current;
-    if (rid && room) void reloadReview(rid, roomMediaType(room));
+    const branch = activeBranchRef.current
+      ? room?.branches?.find((item) => item.id === activeBranchRef.current)
+      : undefined;
+    const mediaType = branch?.branchType === "video" ? "video" : room ? roomMediaType(room) : "image";
+    if (rid && room) void reloadReview(rid, mediaType);
   };
 
   const reviewApi: ReviewApi = {
@@ -744,12 +847,19 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     insertStroke: (stroke) => run(() => insertStroke(supabase!, boundRef.current!, stroke)),
     deleteStroke: (id) => run(() => repoDeleteStroke(supabase!, id)),
     insertMessage: (msg) => run(() => insertMessage(supabase!, boundRef.current!, msg)),
-    addVersion: (label, sortOrder, imageDataUrl) =>
+    addVersion: (label, sortOrder, imageDataUrl, branchId) =>
       run(async () => {
-        const v: Version = await repoAddVersion(supabase!, boundRef.current!, label, sortOrder, imageDataUrl);
+        const v: Version = await repoAddVersion(supabase!, boundRef.current!, label, sortOrder, imageDataUrl, branchId);
         void v;
         scheduleReload();
       }),
+    createBranch: (branch) => runAndWait(() => insertBranch(supabase!, branch)),
+    updateBranch: (branchId, patch) => run(() => updateBranch(supabase!, boundRef.current!, branchId, patch)),
+    savePlan: (plan) => run(() => upsertPlan(supabase!, plan, boundRef.current!)),
+    createRelation: (relation) => run(() => insertRelation(supabase!, relation)),
+    deleteRelation: (relationId) => run(() => deleteRelation(supabase!, boundRef.current!, relationId)),
+    createPoll: (poll) => run(() => insertPoll(supabase!, poll)),
+    votePoll: (vote) => run(() => votePoll(supabase!, vote)),
     toggleSupport: (commentId, add) => run(() => setSupport(supabase!, boundRef.current!, commentId, add)),
     insertReply: (reply) => run(() => repoInsertReply(supabase!, boundRef.current!, reply)),
     setProposalPref: (versionId, choice) => run(() => setPreference(supabase!, boundRef.current!, versionId, choice)),
@@ -769,6 +879,7 @@ export function useCloudRoom({ guest, room, isGuestSession, onSnapshot, showToas
     ensureShared,
     ensureCloudRoom,
     forgetCloudRoom,
+    loadBranch,
     uploadVideo,
     refreshVideoUrl,
     retry,

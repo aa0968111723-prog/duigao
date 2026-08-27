@@ -1,6 +1,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ChatMessage, CommentPin, CommentReply, Guest, Point, Room, Stroke, Version } from "../lib/types";
+import type {
+  BranchStatus,
+  BranchSummary,
+  BranchType,
+  ChatMessage,
+  CommentPin,
+  CommentReply,
+  ContentRelation,
+  Guest,
+  PlanDocument,
+  PollVote,
+  Room,
+  RoomBranch,
+  RoomPoll,
+  Point,
+  Stroke,
+  Version,
+} from "../lib/types";
 import { roomMediaType } from "../lib/types";
+import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
 import {
@@ -13,17 +31,29 @@ import {
 import { signedVideoUrl } from "./videoAssets";
 import {
   commentFromRow,
+  branchFromRow,
+  branchSummaryFromRow,
   mediaTypeOf,
   messageFromRow,
+  planFromRow,
+  pollFromRow,
+  pollVoteFromRow,
   prefFromRow,
+  relationFromRow,
   replyFromRow,
   strokeFromRow,
   supportFromRow,
   type CommentRow,
+  type BranchRow,
+  type BranchSummaryRow,
   type MessageRow,
+  type PlanRow,
+  type PollRow,
+  type PollVoteRow,
   type PrefRow,
   type ProposalRow,
   type ReplyRow,
+  type RelationRow,
   type RoomRow,
   type StrokeRow,
   type SupportRow,
@@ -57,6 +87,8 @@ export function canManageMedia(role: RoomRole | null): boolean {
 export type CloudSnapshot = { room: Room; proposals: CloudProposal[]; role: RoomRole | null };
 
 const uuid = () => crypto.randomUUID();
+const isUuid = (value: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 /**
  * The anchor half of a comment row.
@@ -95,13 +127,14 @@ async function versionFromRow(supabase: SupabaseClient, row: VersionRow): Promis
   const poster = row.image_path ? await signedUrl(supabase, row.image_path).catch(() => "") : "";
   const archivedAt = row.archived_at ?? undefined;
   if (row.media_kind !== "video") {
-    return { id: row.id, label: row.label, imageDataUrl: poster, kind: "image", archivedAt };
+    return { id: row.id, label: row.label, imageDataUrl: poster, kind: "image", branchId: row.branch_id ?? undefined, archivedAt };
   }
   const videoUrl = row.video_path ? await signedVideoUrl(supabase, row.video_path).catch(() => "") : "";
   return {
     id: row.id,
     label: row.label,
     imageDataUrl: poster,
+    branchId: row.branch_id ?? undefined,
     kind: "video",
     archivedAt,
     videoUrl,
@@ -184,6 +217,7 @@ export async function createRoom(
 ): Promise<{ roomId: string; token: string }> {
   await ensureSession(supabase);
   const roomId = uuid();
+  const sourceRoom = normalizeRoomBranches(local.room);
 
   const { error: rpcErr } = await supabase.rpc("create_room_with_invite", {
     p_room_id: roomId,
@@ -203,10 +237,42 @@ export async function createRoom(
     if (error) throw new CloudError(error.message, "create");
   }
 
+  // 0013 is additive. Keep the migration path usable while an older project is
+  // being upgraded: the old room/version model still works if the optional
+  // branch table is not exposed yet.
+  const { error: modeError } = await supabase
+    .from("rooms")
+    .update({ room_mode: sourceRoom.projectMode ? "project" : "single" })
+    .eq("id", roomId);
+  const hasBranchSchema = !modeError;
+  const branchIdMap = new Map<string, string>();
+  const sourceBranches = sourceRoom.branches ?? [];
+  if (hasBranchSchema && sourceBranches.length) {
+    const branchRows = sourceBranches.map((branch) => {
+      // Project branches are created locally before the first share. Keeping
+      // their UUIDs lets an upload that creates the cloud room in the same
+      // gesture continue writing into the branch it just created. Legacy
+      // compatibility ids (branch_default_...) still get a fresh UUID.
+      const id = isUuid(branch.id) ? branch.id : uuid();
+      branchIdMap.set(branch.id, id);
+      return {
+        id,
+        room_id: roomId,
+        name: branch.name,
+        branch_type: branch.branchType,
+        sort_order: branch.sortOrder,
+        status: branch.status,
+        created_by: isUuid(branch.createdBy) ? branch.createdBy : null,
+      };
+    });
+    const { error } = await supabase.from("room_branches").insert(branchRows);
+    if (error) throw new CloudError(error.message, "branches");
+  }
+
   const versionIdMap = new Map<string, string>();
   const versionRows = [];
-  for (let i = 0; i < local.room.versions.length; i++) {
-    const v = local.room.versions[i];
+  for (let i = 0; i < sourceRoom.versions.length; i++) {
+    const v = sourceRoom.versions[i];
     const newId = uuid();
     versionIdMap.set(v.id, newId);
     if (v.kind === "video") {
@@ -221,7 +287,17 @@ export async function createRoom(
       throw new CloudError("影片房間不需要搬移，請直接分享", "versions");
     }
     const { path, mime } = await uploadVersion(supabase, roomId, newId, v.imageDataUrl);
-    versionRows.push({ id: newId, room_id: roomId, label: v.label, sort_order: i, image_path: path, mime_type: mime });
+    versionRows.push({
+      id: newId,
+      room_id: roomId,
+      label: v.label,
+      sort_order: i,
+      image_path: path,
+      mime_type: mime,
+      ...(hasBranchSchema && v.branchId && branchIdMap.get(v.branchId)
+        ? { branch_id: branchIdMap.get(v.branchId) }
+        : {}),
+    });
   }
   if (versionRows.length) {
     const { error } = await supabase.from("versions").insert(versionRows);
@@ -230,7 +306,7 @@ export async function createRoom(
 
   const remap = (vid: string) => versionIdMap.get(vid) ?? vid;
 
-  const commentRows = local.room.comments.map((c) => ({
+  const commentRows = sourceRoom.comments.map((c) => ({
     id: uuid(),
     room_id: roomId,
     version_id: remap(c.versionId),
@@ -248,7 +324,7 @@ export async function createRoom(
   }));
   if (commentRows.length) await supabase.from("comments").insert(commentRows);
 
-  const strokeRows = local.room.strokes.map((s) => ({
+  const strokeRows = sourceRoom.strokes.map((s) => ({
     id: uuid(),
     room_id: roomId,
     version_id: remap(s.versionId),
@@ -258,7 +334,7 @@ export async function createRoom(
   }));
   if (strokeRows.length) await supabase.from("strokes").insert(strokeRows);
 
-  const messageRows = local.room.messages.map((m) => ({
+  const messageRows = sourceRoom.messages.map((m) => ({
     id: uuid(),
     room_id: roomId,
     author_name: m.authorName,
@@ -266,6 +342,60 @@ export async function createRoom(
     body: m.body,
   }));
   if (messageRows.length) await supabase.from("messages").insert(messageRows);
+
+  if (hasBranchSchema) {
+    const planRows = (sourceRoom.plans ?? [])
+      .map((plan) => ({
+        room_id: roomId,
+        branch_id: plan.branchId ? branchIdMap.get(plan.branchId) : undefined,
+        title: plan.title,
+        description: plan.description,
+        blocks: plan.blocks,
+        updated_by: isUuid(plan.updatedBy ?? "") ? plan.updatedBy : null,
+      }))
+      .filter((row): row is typeof row & { branch_id: string } => Boolean(row.branch_id));
+    if (planRows.length) {
+      const { error } = await supabase.from("plan_documents").insert(planRows);
+      if (error) throw new CloudError(error.message, "plans");
+    }
+
+    const relationRows = (sourceRoom.relations ?? [])
+      .map((relation) => ({
+        id: uuid(),
+        room_id: roomId,
+        from_branch_id: branchIdMap.get(relation.fromBranchId),
+        to_branch_id: branchIdMap.get(relation.toBranchId),
+        relation_type: "related",
+        created_by: isUuid(relation.createdBy) ? relation.createdBy : null,
+      }))
+      .filter((row): row is typeof row & { from_branch_id: string; to_branch_id: string } =>
+        Boolean(row.from_branch_id && row.to_branch_id),
+      );
+    if (relationRows.length) {
+      const { error } = await supabase.from("content_relations").insert(relationRows);
+      if (error) throw new CloudError(error.message, "relations");
+    }
+
+    const pollIdMap = new Map<string, string>();
+    const pollRows = (sourceRoom.polls ?? []).map((poll) => {
+      const id = uuid();
+      pollIdMap.set(poll.id, id);
+      return {
+        id,
+        room_id: roomId,
+        question: poll.question,
+        options: poll.options,
+        created_by: isUuid(poll.createdBy) ? poll.createdBy : null,
+      };
+    });
+    if (pollRows.length) {
+      const { error } = await supabase.from("room_polls").insert(pollRows);
+      if (error) throw new CloudError(error.message, "polls");
+    }
+    // Local guest ids are intentionally not auth UUIDs. Poll definitions are
+    // migrated; votes are device-local and are not fabricated as another user.
+    void pollIdMap;
+  }
 
   for (const p of local.proposals) {
     const newId = uuid();
@@ -296,8 +426,24 @@ export async function joinRoom(supabase: SupabaseClient, roomId: string, token: 
   if (error) throw new CloudError(error.message, "join");
 }
 
-export async function loadRoom(supabase: SupabaseClient, roomId: string): Promise<CloudSnapshot> {
-  const [roomRes, versionsRes, commentsRes, strokesRes, messagesRes, proposalsRes, supportsRes, repliesRes, prefsRes, roleRes] =
+async function loadRoomFull(supabase: SupabaseClient, roomId: string): Promise<CloudSnapshot> {
+  const [
+    roomRes,
+    versionsRes,
+    commentsRes,
+    strokesRes,
+    messagesRes,
+    proposalsRes,
+    supportsRes,
+    repliesRes,
+    prefsRes,
+    branchesRes,
+    plansRes,
+    relationsRes,
+    pollsRes,
+    pollVotesRes,
+    roleRes,
+  ] =
     await Promise.all([
       supabase.from("rooms").select("*").eq("id", roomId).single(),
       supabase.from("versions").select("*").eq("room_id", roomId).order("sort_order", { ascending: true }),
@@ -308,6 +454,14 @@ export async function loadRoom(supabase: SupabaseClient, roomId: string): Promis
       supabase.from("comment_supports").select("*").eq("room_id", roomId),
       supabase.from("comment_replies").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
       supabase.from("proposal_preferences").select("*").eq("room_id", roomId),
+      // These are additive to the entity-level room load. A project that has
+      // not run 0013 yet returns an error for these queries; old rooms still
+      // load through the compatibility branch created below.
+      supabase.from("room_branches").select("*").eq("room_id", roomId).order("sort_order", { ascending: true }),
+      supabase.from("plan_documents").select("*").eq("room_id", roomId),
+      supabase.from("content_relations").select("*").eq("room_id", roomId),
+      supabase.from("room_polls").select("*").eq("room_id", roomId).order("created_at", { ascending: false }),
+      supabase.from("room_poll_votes").select("*").eq("room_id", roomId),
       // The caller's own membership row. A member can always read it (0001's
       // room_members_select), and it is the only place the role lives.
       supabase.rpc("room_role", { p_room_id: roomId }),
@@ -326,10 +480,15 @@ export async function loadRoom(supabase: SupabaseClient, roomId: string): Promis
     ((versionsRes.data as VersionRow[] | null) ?? []).map((row) => versionFromRow(supabase, row)),
   );
 
-  const room: Room = {
+  const branches = ((branchesRes.data as BranchRow[] | null) ?? [])
+    .map(branchFromRow)
+    .filter((branch): branch is RoomBranch => Boolean(branch));
+  const projectMode = roomRow.room_mode === "project" || branches.some((branch) => branch.branchType === "plan" || branch.branchType === "copy") || branches.length > 1;
+  const room: Room = normalizeRoomBranches({
     id: roomRow.id,
     title: roomRow.title,
     mediaType: mediaTypeOf(roomRow.media_type),
+    projectMode,
     versions,
     comments: ((commentsRes.data as CommentRow[] | null) ?? []).map(commentFromRow),
     strokes: ((strokesRes.data as StrokeRow[] | null) ?? []).map(strokeFromRow),
@@ -337,8 +496,13 @@ export async function loadRoom(supabase: SupabaseClient, roomId: string): Promis
     supports: ((supportsRes.data as SupportRow[] | null) ?? []).map(supportFromRow),
     replies: ((repliesRes.data as ReplyRow[] | null) ?? []).map(replyFromRow),
     proposalPrefs: ((prefsRes.data as PrefRow[] | null) ?? []).map(prefFromRow),
+    ...(branches.length ? { branches } : {}),
+    plans: ((plansRes.data as PlanRow[] | null) ?? []).map(planFromRow),
+    relations: ((relationsRes.data as RelationRow[] | null) ?? []).map(relationFromRow),
+    polls: ((pollsRes.data as PollRow[] | null) ?? []).map(pollFromRow),
+    pollVotes: ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
     updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
-  };
+  });
 
   const proposals: CloudProposal[] = await Promise.all(
     ((proposalsRes.data as ProposalRow[] | null) ?? []).map(async (row) => ({
@@ -352,6 +516,172 @@ export async function loadRoom(supabase: SupabaseClient, roomId: string): Promis
   );
 
   return { room, proposals, role };
+}
+
+export type RoomLoadOptions = {
+  /** auto (default) keeps legacy single-media rooms on the old full path. */
+  mode?: "auto" | "summary" | "branch";
+  branchId?: string;
+};
+
+function roleFromResult(value: { error?: unknown; data?: unknown }): RoomRole | null {
+  return value.error ? "editor" : normaliseRole(value.data);
+}
+
+/**
+ * Project-room first paint. It intentionally contains branch/poll summaries,
+ * recent feedback and the last few room messages, but no signed media URLs,
+ * strokes, proposals or complete comment history. A branch fetch fills those
+ * slices only after the person opens that branch.
+ */
+async function loadRoomSummary(supabase: SupabaseClient, roomId: string, force = false): Promise<CloudSnapshot> {
+  const [roomRes, branchesRes, roleRes] = await Promise.all([
+    supabase.from("rooms").select("*").eq("id", roomId).single(),
+    supabase.from("room_branches").select("*").eq("room_id", roomId).order("sort_order", { ascending: true }),
+    supabase.rpc("room_role", { p_room_id: roomId }),
+  ]);
+  if (roomRes.error) throw new CloudError(roomRes.error.message, "load");
+  // Before 0013 the branch table does not exist. Falling back here preserves
+  // the exact old image/video loading path during a rolling deployment.
+  if (branchesRes.error) return loadRoomFull(supabase, roomId);
+  const roomRow = roomRes.data as RoomRow;
+  const branches = ((branchesRes.data as BranchRow[] | null) ?? [])
+    .map(branchFromRow)
+    .filter((branch): branch is RoomBranch => Boolean(branch));
+  const isProject = force
+    || roomRow.room_mode === "project"
+    || branches.length > 1;
+  if (!isProject) return loadRoomFull(supabase, roomId);
+
+  const [summaryRes, plansRes, relationsRes, pollsRes, pollVotesRes, messagesRes, commentsRes] = await Promise.all([
+    supabase.rpc("get_room_branch_summaries", { p_room_id: roomId }),
+    supabase.from("plan_documents").select("branch_id,room_id,title,description,updated_by,updated_at").eq("room_id", roomId),
+    supabase.from("content_relations").select("*").eq("room_id", roomId),
+    supabase.from("room_polls").select("*").eq("room_id", roomId).order("created_at", { ascending: false }),
+    supabase.from("room_poll_votes").select("*").eq("room_id", roomId),
+    supabase.from("messages").select("*").eq("room_id", roomId).order("created_at", { ascending: false }).limit(3),
+    // The embedded relation is metadata only: it labels recent feedback with
+    // its branch without loading version paths or signing any media URL.
+    supabase.from("comments").select("*,versions(branch_id)").eq("room_id", roomId).order("created_at", { ascending: false }).limit(4),
+  ]);
+  const summaries = !summaryRes.error
+    ? ((summaryRes.data as BranchSummaryRow[] | null) ?? []).map(branchSummaryFromRow)
+    : branches.map((branch) => ({
+        branchId: branch.id,
+        versionCount: 0,
+        openCommentCount: 0,
+        feedbackCount: 0,
+      } satisfies BranchSummary));
+  const room: Room = {
+    id: roomRow.id,
+    title: roomRow.title,
+    mediaType: mediaTypeOf(roomRow.media_type),
+    projectMode: true,
+    versions: [],
+    comments: ((commentsRes.data as CommentRow[] | null) ?? []).map(commentFromRow),
+    strokes: [],
+    messages: ((messagesRes.data as MessageRow[] | null) ?? []).map(messageFromRow),
+    supports: [],
+    replies: [],
+    proposalPrefs: [],
+    branches,
+    branchSummaries: summaries,
+    plans: ((plansRes.data as PlanRow[] | null) ?? []).map((row) => planFromRow({ ...row, blocks: Array.isArray(row.blocks) ? row.blocks : [] })),
+    relations: ((relationsRes.data as RelationRow[] | null) ?? []).map(relationFromRow),
+    polls: ((pollsRes.data as PollRow[] | null) ?? []).map(pollFromRow),
+    pollVotes: ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
+    updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
+  };
+  return { room: normalizeRoomBranches(room), proposals: [], role: roleFromResult(roleRes) };
+}
+
+/** Fetch one branch's signed assets and annotation children on demand. */
+async function loadRoomBranch(supabase: SupabaseClient, roomId: string, branchId: string): Promise<CloudSnapshot> {
+  const [roomRes, branchRes, versionsRes, roleRes] = await Promise.all([
+    supabase.from("rooms").select("*").eq("id", roomId).single(),
+    supabase.from("room_branches").select("*").eq("room_id", roomId).eq("id", branchId).limit(1),
+    supabase.from("versions").select("*").eq("room_id", roomId).eq("branch_id", branchId).order("sort_order", { ascending: true }),
+    supabase.rpc("room_role", { p_room_id: roomId }),
+  ]);
+  if (roomRes.error) throw new CloudError(roomRes.error.message, "load");
+  if (versionsRes.error) throw new CloudError(versionsRes.error.message, "load");
+  const roomRow = roomRes.data as RoomRow;
+  const branches = ((branchRes.data as BranchRow[] | null) ?? [])
+    .map(branchFromRow)
+    .filter((branch): branch is RoomBranch => Boolean(branch));
+  if (!branches.length) throw new CloudError("找不到這份內容", "load");
+  const versionRows = (versionsRes.data as VersionRow[] | null) ?? [];
+  const versions = await Promise.all(versionRows.map((row) => versionFromRow(supabase, row)));
+  const versionIds = versionRows.map((row) => row.id);
+  const empty = <T>() => Promise.resolve({ data: [] as T[], error: null });
+  const [commentsRes, strokesRes, prefsRes, proposalsRes, plansRes, relationsRes, pollsRes, pollVotesRes] = await Promise.all([
+    versionIds.length ? supabase.from("comments").select("*").eq("room_id", roomId).in("version_id", versionIds).order("created_at", { ascending: true }) : empty<CommentRow>(),
+    versionIds.length ? supabase.from("strokes").select("*").eq("room_id", roomId).in("version_id", versionIds).order("created_at", { ascending: true }) : empty<StrokeRow>(),
+    versionIds.length ? supabase.from("proposal_preferences").select("*").eq("room_id", roomId).in("version_id", versionIds) : empty<PrefRow>(),
+    versionIds.length ? supabase.from("visual_proposals").select("*").eq("room_id", roomId).in("version_id", versionIds).order("created_at", { ascending: true }) : empty<ProposalRow>(),
+    supabase.from("plan_documents").select("*").eq("room_id", roomId).eq("branch_id", branchId),
+    // These are room-level metadata. Keeping them in a branch response lets a
+    // realtime refresh while a branch is open update relations and decisions
+    // without downloading any other branch's media.
+    supabase.from("content_relations").select("*").eq("room_id", roomId),
+    supabase.from("room_polls").select("*").eq("room_id", roomId).order("created_at", { ascending: false }),
+    supabase.from("room_poll_votes").select("*").eq("room_id", roomId),
+  ]);
+  const comments = ((commentsRes.data as CommentRow[] | null) ?? [])
+    .map(commentFromRow)
+    .map((comment) => ({ ...comment, branchId }));
+  const commentIds = comments.map((comment) => comment.id);
+  // The first parallel batch above deliberately avoids an all-room child read.
+  // Resolve support/reply rows with the now-known comment ids for this branch.
+  const [branchSupportsRes, branchRepliesRes] = await Promise.all([
+    commentIds.length ? supabase.from("comment_supports").select("*").eq("room_id", roomId).in("comment_id", commentIds) : empty<SupportRow>(),
+    commentIds.length ? supabase.from("comment_replies").select("*").eq("room_id", roomId).in("comment_id", commentIds).order("created_at", { ascending: true }) : empty<ReplyRow>(),
+  ]);
+  const proposals: CloudProposal[] = await Promise.all(
+    ((proposalsRes.data as ProposalRow[] | null) ?? []).map(async (row) => ({
+      id: row.id,
+      versionId: row.version_id,
+      authorName: row.author_name,
+      name: row.name,
+      payload: (await resolvePayload(supabase, row.payload)) as Record<string, unknown>,
+      revision: row.revision,
+    })),
+  );
+  const room: Room = normalizeRoomBranches({
+    id: roomRow.id,
+    title: roomRow.title,
+    mediaType: mediaTypeOf(roomRow.media_type),
+    projectMode: true,
+    versions,
+    comments,
+    strokes: ((strokesRes.data as StrokeRow[] | null) ?? []).map(strokeFromRow),
+    messages: [],
+    supports: ((branchSupportsRes.data as SupportRow[] | null) ?? []).map(supportFromRow),
+    replies: ((branchRepliesRes.data as ReplyRow[] | null) ?? []).map(replyFromRow),
+    proposalPrefs: ((prefsRes.data as PrefRow[] | null) ?? []).map(prefFromRow),
+    branches,
+    plans: ((plansRes.data as PlanRow[] | null) ?? []).map(planFromRow),
+    relations: relationsRes.error
+      ? undefined
+      : ((relationsRes.data as RelationRow[] | null) ?? []).map(relationFromRow),
+    polls: pollsRes.error
+      ? undefined
+      : ((pollsRes.data as PollRow[] | null) ?? []).map(pollFromRow),
+    pollVotes: pollVotesRes.error
+      ? undefined
+      : ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
+    updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
+  });
+  return { room, proposals, role: roleFromResult(roleRes) };
+}
+
+/** Public loader with a safe default: project shells are summary-first. */
+export async function loadRoom(supabase: SupabaseClient, roomId: string, options: RoomLoadOptions = {}): Promise<CloudSnapshot> {
+  if (options.mode === "branch") {
+    if (!options.branchId) throw new CloudError("缺少內容定位", "load");
+    return loadRoomBranch(supabase, roomId, options.branchId);
+  }
+  return loadRoomSummary(supabase, roomId, options.mode === "summary");
 }
 
 function normaliseRole(value: unknown): RoomRole | null {
@@ -468,14 +798,23 @@ export async function addVersion(
   label: string,
   sortOrder: number,
   imageDataUrl: string,
+  branchId?: string,
 ): Promise<Version> {
   const id = uuid();
   const { path, mime } = await uploadVersion(supabase, roomId, id, imageDataUrl);
   const { error } = await supabase
     .from("versions")
-    .insert({ id, room_id: roomId, label, sort_order: sortOrder, image_path: path, mime_type: mime });
+    .insert({
+      id,
+      room_id: roomId,
+      label,
+      sort_order: sortOrder,
+      image_path: path,
+      mime_type: mime,
+      ...(branchId ? { branch_id: branchId } : {}),
+    });
   if (error) throw new CloudError(error.message, "version");
-  return { id, label, imageDataUrl: await signedUrl(supabase, path) };
+  return { id, label, imageDataUrl: await signedUrl(supabase, path), ...(branchId ? { branchId } : {}) };
 }
 
 /**
@@ -492,6 +831,7 @@ export async function addVideoVersion(
     id: string;
     label: string;
     sortOrder: number;
+    branchId?: string;
     videoPath: string;
     posterPath: string | null;
     mimeType: string;
@@ -514,8 +854,92 @@ export async function addVideoVersion(
     file_size: input.fileSize,
     width: input.width,
     height: input.height,
+    ...(input.branchId ? { branch_id: input.branchId } : {}),
   });
   if (error) throw new CloudError(error.message, "version");
+}
+
+// ---- project-room branches / plans / relations / decisions ---------------
+
+export async function insertBranch(supabase: SupabaseClient, branch: RoomBranch): Promise<void> {
+  const { error } = await supabase.from("room_branches").insert({
+    id: branch.id,
+    room_id: branch.roomId,
+    name: branch.name,
+    branch_type: branch.branchType,
+    sort_order: branch.sortOrder,
+    status: branch.status,
+    created_by: isUuid(branch.createdBy) ? branch.createdBy : null,
+  });
+  if (error) throw new CloudError(error.message, "branch");
+}
+
+export async function updateBranch(
+  supabase: SupabaseClient,
+  roomId: string,
+  branchId: string,
+  patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>,
+): Promise<void> {
+  const row = {
+    ...(patch.name !== undefined ? { name: patch.name } : {}),
+    ...(patch.sortOrder !== undefined ? { sort_order: patch.sortOrder } : {}),
+    ...(patch.status !== undefined ? { status: patch.status } : {}),
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from("room_branches").update(row).eq("id", branchId).eq("room_id", roomId);
+  if (error) throw new CloudError(error.message, "branch");
+}
+
+export async function upsertPlan(supabase: SupabaseClient, plan: PlanDocument, roomId: string): Promise<void> {
+  const { error } = await supabase.from("plan_documents").upsert(
+    {
+      room_id: roomId,
+      branch_id: plan.branchId,
+      title: plan.title,
+      description: plan.description,
+      blocks: plan.blocks,
+      updated_by: isUuid(plan.updatedBy ?? "") ? plan.updatedBy : null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "branch_id" },
+  );
+  if (error) throw new CloudError(error.message, "plan");
+}
+
+export async function insertRelation(supabase: SupabaseClient, relation: ContentRelation): Promise<void> {
+  const { error } = await supabase.from("content_relations").insert({
+    id: relation.id,
+    room_id: relation.roomId,
+    from_branch_id: relation.fromBranchId,
+    to_branch_id: relation.toBranchId,
+    relation_type: "related",
+    created_by: isUuid(relation.createdBy) ? relation.createdBy : null,
+  });
+  if (error) throw new CloudError(error.message, "relation");
+}
+
+export async function deleteRelation(supabase: SupabaseClient, roomId: string, relationId: string): Promise<void> {
+  const { error } = await supabase.from("content_relations").delete().eq("id", relationId).eq("room_id", roomId);
+  if (error) throw new CloudError(error.message, "relation");
+}
+
+export async function insertPoll(supabase: SupabaseClient, poll: RoomPoll): Promise<void> {
+  const { error } = await supabase.from("room_polls").insert({
+    id: poll.id,
+    room_id: poll.roomId,
+    question: poll.question,
+    options: poll.options,
+    created_by: isUuid(poll.createdBy) ? poll.createdBy : null,
+  });
+  if (error) throw new CloudError(error.message, "poll");
+}
+
+export async function votePoll(supabase: SupabaseClient, vote: PollVote): Promise<void> {
+  const { error } = await supabase.from("room_poll_votes").upsert(
+    { poll_id: vote.pollId, room_id: vote.roomId, option: vote.option },
+    { onConflict: "poll_id,user_id" },
+  );
+  if (error) throw new CloudError(error.message, "poll-vote");
 }
 
 /** Mark a room as a video room. Used when a video room is created in the cloud. */

@@ -42,6 +42,8 @@ export type Version = {
   id: string;
   label: string;
   imageDataUrl: string;
+  /** The branch owns the version in a project room. Absent on pre-branch data. */
+  branchId?: string;
   /** Absent on rooms created before video existed — treat as "image". */
   kind?: MediaType;
   /** Playable URL for the video itself (signed, and refreshed on expiry). */
@@ -207,6 +209,8 @@ export type ReviewProgress = {
 export type CommentPin = {
   id: string;
   versionId: string;
+  /** Derived project-room context; never replaces the version foreign key. */
+  branchId?: string;
   authorId: string;
   authorName: string;
   authorColor: string;
@@ -258,6 +262,93 @@ export type ChatMessage = {
   createdAt: number;
 };
 
+/* ------------------------------------------------ 同房多分支 1.0 ----------- */
+
+/** User-facing content families. `branch` is deliberately not exposed in UI copy. */
+export type BranchType = "poster" | "video" | "plan" | "copy";
+export type BranchStatus = "in_progress" | "pending" | "completed" | "archived";
+
+export const BRANCH_STATUS_LABEL: Record<BranchStatus, string> = {
+  in_progress: "進行中",
+  pending: "待確認",
+  completed: "已完成",
+  archived: "封存",
+};
+
+export const BRANCH_TYPE_LABEL: Record<BranchType, string> = {
+  poster: "文宣",
+  video: "影片",
+  plan: "企劃",
+  copy: "文案",
+};
+
+export type RoomBranch = {
+  id: string;
+  roomId: string;
+  name: string;
+  branchType: BranchType;
+  sortOrder: number;
+  status: BranchStatus;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** Lightweight overview data; detail rows/assets are loaded when a branch opens. */
+export type BranchSummary = {
+  branchId: string;
+  versionCount: number;
+  latestVersionId?: string;
+  latestLabel?: string;
+  latestUpdatedAt?: number;
+  openCommentCount: number;
+  feedbackCount: number;
+};
+
+export type PlanBlock =
+  | { id: string; kind: "paragraph"; text: string }
+  | { id: string; kind: "list"; text: string }
+  | { id: string; kind: "checklist"; text: string; checked: boolean }
+  | { id: string; kind: "link"; text: string; url: string };
+
+export type PlanDocument = {
+  branchId: string;
+  title: string;
+  description: string;
+  blocks: PlanBlock[];
+  updatedBy?: string;
+  updatedAt: number;
+};
+
+export type ContentRelation = {
+  id: string;
+  roomId: string;
+  fromBranchId: string;
+  toBranchId: string;
+  relationType: "related";
+  createdBy: string;
+  createdAt: number;
+};
+
+export type RoomPoll = {
+  id: string;
+  roomId: string;
+  question: string;
+  options: string[];
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  closedAt?: number;
+};
+
+export type PollVote = {
+  pollId: string;
+  roomId: string;
+  userId: string;
+  option: string;
+  createdAt: number;
+};
+
 /** "我也覺得" — one per user per comment. */
 export type CommentSupport = { commentId: string; userId: string };
 
@@ -290,6 +381,15 @@ export type Room = {
   supports?: CommentSupport[];
   replies?: CommentReply[];
   proposalPrefs?: ProposalPref[];
+  /** Present for project rooms; absent on legacy single-media rooms. */
+  projectMode?: boolean;
+  branches?: RoomBranch[];
+  /** Summary-only project data; no image/video bytes or full comment bodies. */
+  branchSummaries?: BranchSummary[];
+  plans?: PlanDocument[];
+  relations?: ContentRelation[];
+  polls?: RoomPoll[];
+  pollVotes?: PollVote[];
 };
 
 export type Guest = {

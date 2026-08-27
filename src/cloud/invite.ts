@@ -25,11 +25,33 @@ export function newRoomId(): string {
  * invite token — a bare `#room=<id>` is never produced anywhere in the app
  * (PR #16); it only survives as an inbound legacy format.
  */
-export function buildInviteUrl(roomId: string, token: string): string {
-  return `${location.origin}${location.pathname}#room=${encodeURIComponent(roomId)}&invite=${encodeURIComponent(token)}`;
+export type RoomTarget = { branchId?: string; versionId?: string };
+
+/**
+ * Build the only share URL shape the app emits. Content targeting deliberately
+ * stays in the fragment with the invite: fragments never reach servers,
+ * previews, access logs, or referrers.
+ */
+export function buildInviteUrl(roomId: string, token: string, target?: RoomTarget): string {
+  const params = new URLSearchParams({ room: roomId, invite: token });
+  if (target?.branchId) params.set("branch", target.branchId);
+  if (target?.versionId) params.set("item", target.versionId);
+  return `${location.origin}${location.pathname}#${params.toString()}`;
 }
 
-export type UrlInvite = { roomId: string; invite: string | null };
+/** Add a branch/version target without moving any share data into the query. */
+export function addRoomTarget(url: string, target?: RoomTarget): string {
+  if (!target?.branchId && !target?.versionId) return url;
+  const hashAt = url.indexOf("#");
+  const base = hashAt >= 0 ? url.slice(0, hashAt) : url;
+  const currentHash = hashAt >= 0 ? url.slice(hashAt + 1) : "";
+  const params = new URLSearchParams(currentHash);
+  if (target.branchId) params.set("branch", target.branchId);
+  if (target.versionId) params.set("item", target.versionId);
+  return `${base}#${params.toString()}`;
+}
+
+export type UrlInvite = { roomId: string; invite: string | null; branchId?: string; versionId?: string };
 
 /** Parse `#room=<id>&invite=<secret>` (or legacy `#room=<code>`). */
 export function readInviteFromUrl(): UrlInvite | null {
@@ -41,9 +63,13 @@ export function readInviteFromUrl(): UrlInvite | null {
   const room = /[#?&]room=([^&]+)/i.exec(roomSource);
   if (!room) return null;
   const invite = /[#&]invite=([^&]+)/i.exec(inviteSource);
+  const branch = /[#&]branch=([^&]+)/i.exec(inviteSource);
+  const item = /[#&]item=([^&]+)/i.exec(inviteSource);
   return {
     roomId: decodeURIComponent(room[1]),
     invite: invite ? decodeURIComponent(invite[1]) : null,
+    branchId: branch ? decodeURIComponent(branch[1]) : undefined,
+    versionId: item ? decodeURIComponent(item[1]) : undefined,
   };
 }
 
@@ -58,13 +84,21 @@ export function readInviteFromUrl(): UrlInvite | null {
  */
 export type RoomLink =
   | { kind: "none" }
-  | { kind: "cloud"; roomId: string; invite: string }
+  | { kind: "cloud"; roomId: string; invite: string; branchId?: string; versionId?: string }
   | { kind: "legacy"; roomId: string };
 
 export function readRoomLink(): RoomLink {
   const url = readInviteFromUrl();
   if (!url) return { kind: "none" };
-  if (url.invite) return { kind: "cloud", roomId: url.roomId, invite: url.invite };
+  if (url.invite) {
+    return {
+      kind: "cloud",
+      roomId: url.roomId,
+      invite: url.invite,
+      branchId: url.branchId,
+      versionId: url.versionId,
+    };
+  }
   return { kind: "legacy", roomId: url.roomId };
 }
 

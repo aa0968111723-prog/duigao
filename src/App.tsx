@@ -5,6 +5,8 @@ import {
   VIDEO_VERSION_LABELS,
   roomMediaType,
   type AnnotationRegion,
+  type BranchStatus,
+  type BranchType,
   type ChatMessage,
   type CommentPin,
   type CommentReply,
@@ -15,17 +17,23 @@ import {
   type ReviewType,
   type VideoCategory,
   type MediaType,
+  type PlanDocument,
+  type ContentRelation,
+  type PollVote,
+  type RoomBranch,
+  type RoomPoll,
   type Tool,
   type Version,
   type VideoAnchor,
   type ViewState,
 } from "./lib/types";
 import { regionCenter } from "./lib/region";
+import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
 import { roomCode, uid } from "./lib/id";
 import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
-import { readRoomLink } from "./cloud/invite";
+import { addRoomTarget, readRoomLink } from "./cloud/invite";
 import { type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
 import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
@@ -49,6 +57,7 @@ import {
 import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
+import { MultiBranchRoom, type MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
 import "./usability.css";
 
 const EMPTY_FORM: PinForm = { body: "", suggestion: "", type: "文字", priority: "一般" };
@@ -132,6 +141,9 @@ export function App() {
   const [guest, setGuest] = useState<Guest | null>(() => loadGuest());
   const [nameInput, setNameInput] = useState("");
   const [room, setRoom] = useState<Room | null>(null);
+  /** Project rooms stay at the room shell until a poster/video branch opens. */
+  const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
+  const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(() => initialView(null));
   const [tool, setTool] = useState<Tool>("pan");
   const [recent, setRecent] = useState<Room[]>([]);
@@ -236,20 +248,43 @@ export function App() {
   }, [room]);
 
   const applyRemoteRoom = useCallback((next: Room) => {
-    setRoom(next);
+    const normalized = normalizeRoomBranches(next);
+    setRoom(normalized);
+    if (roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
+      setActiveBranchId(roomLink.branchId);
+    }
     setView((v) => {
-      const ids = next.versions.map((x) => x.id);
-      const versionId = ids.includes(v.versionId) ? v.versionId : ids[0] ?? "";
+      const ids = normalized.versions.map((x) => x.id);
+      const requestedVersionId = roomLink.kind === "cloud" ? roomLink.versionId : undefined;
+      const versionId = requestedVersionId && ids.includes(requestedVersionId)
+        ? requestedVersionId
+        : ids.includes(v.versionId)
+          ? v.versionId
+          : ids[0] ?? "";
       const compareId = ids.includes(v.compareId) ? v.compareId : versionId;
       return { ...v, versionId, compareId };
     });
-  }, []);
+  }, [roomLink]);
 
   // Cloud persistence (only active when VITE_SUPABASE_* are set). Inert in
   // local-only mode, so the IndexedDB + PeerJS path below is unchanged.
-  const cloud = useCloudRoom({ guest, room, isGuestSession, onSnapshot: applyRemoteRoom, showToast });
+  const cloud = useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSnapshot: applyRemoteRoom, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
+
+  // A branch/version deep-link can select the branch while the first cloud
+  // snapshot is still being reduced to a summary. Hydrate that target just as
+  // a tap would, but only when the summary says there is detail to fetch.
+  useEffect(() => {
+    if (!room || !activeBranchId || !cloud.boundRoomId || loadingBranchId) return;
+    const branch = branchForId(room, activeBranchId);
+    if (!branch || (branch.branchType !== "poster" && branch.branchType !== "video")) return;
+    if (branchVersions(room, activeBranchId).length || branchSummaryFor(room, activeBranchId)?.versionCount === 0) return;
+    setLoadingBranchId(activeBranchId);
+    void cloud.loadBranch(activeBranchId).finally(() => {
+      setLoadingBranchId((current) => (current === activeBranchId ? null : current));
+    });
+  }, [activeBranchId, cloud.boundRoomId, cloud.loadBranch, loadingBranchId, room]);
 
   // Cache-first load for cloud guests: a room seen before renders instantly
   // from IndexedDB while auth + join + the fresh cloud snapshot catch up.
@@ -374,45 +409,73 @@ export function App() {
       // would show another room a red banner about something that never
       // happened there.
       setVideoUpload({ state: "idle" });
-      setRoom(r);
-      setView(initialView(r));
+      const normalized = normalizeRoomBranches(r);
+      setActiveBranchId(null);
+      setLoadingBranchId(null);
+      setRoom(normalized);
+      setView(initialView(normalized));
     },
     [clearUndo],
   );
 
+  const createProjectRoom = useCallback(() => {
+    const next: Room = {
+      ...emptyRoom(roomCode(), "未命名活動房"),
+      projectMode: true,
+      branches: [],
+      plans: [],
+      relations: [],
+      polls: [],
+      pollVotes: [],
+    };
+    clearUndo();
+    setActiveBranchId(null);
+    setLoadingBranchId(null);
+    setRoom(next);
+    setView(initialView(next));
+    trackSave(next);
+  }, [clearUndo, trackSave]);
+
   const addImageFiles = useCallback(
-    async (files: FileList | null) => {
+    async (files: FileList | null, forcedBranchId?: string, roomOverride?: Room) => {
       if (!files || files.length === 0) return;
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者可以留言與投票，但不能建立文宣版本。", { tone: "error" });
+        return;
+      }
       if (busy.current.has("upload")) return;
       busy.current.add("upload");
       try {
-        const current = roomRef.current ?? emptyRoom(roomCode(), "未命名文宣");
-        const created = !roomRef.current;
+        const current = roomOverride ?? roomRef.current ?? emptyRoom(roomCode(), "未命名文宣");
+        const created = !roomOverride && !roomRef.current;
+        const targetBranchId = forcedBranchId ?? activeBranchId ?? (current.branches?.length === 1 ? current.branches[0].id : undefined);
+        const branchCount = targetBranchId ? branchVersions(current, targetBranchId).length : current.versions.length;
         const newVersions: Version[] = [];
         for (const file of Array.from(files)) {
           if (!file.type.startsWith("image/")) continue;
           const dataUrl = await fileToDataUrl(file);
-          const idx = current.versions.length + newVersions.length;
-          newVersions.push({ id: uid("v_"), label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl });
+          const idx = branchCount + newVersions.length;
+          newVersions.push({ id: uid("v_"), label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl, ...(targetBranchId ? { branchId: targetBranchId } : {}) });
         }
         if (newVersions.length === 0) {
           showToast("這個檔案不是圖片，換一張文宣試試。", { tone: "error" });
           return;
         }
         if (!created) pushUndo(current);
-        const next: Room = { ...current, versions: [...current.versions, ...newVersions], updatedAt: Date.now() };
+        const next: Room = normalizeRoomBranches({ ...current, versions: [...current.versions, ...newVersions], updatedAt: Date.now() });
         setRoom(next);
         setView((v) => {
-          if (created || !v.versionId) return initialView(next);
-          if (v.compareId === v.versionId && next.versions.length >= 2) {
-            const other = next.versions.find((x) => x.id !== v.versionId);
+          const viewRoom = targetBranchId ? roomForBranch(next, targetBranchId) : next;
+          if (created || !v.versionId) return initialView(viewRoom);
+          if (v.compareId === v.versionId && viewRoom.versions.length >= 2) {
+            const other = viewRoom.versions.find((x) => x.id !== v.versionId);
             if (other) return { ...v, compareId: other.id };
           }
           return v;
         });
         persist(next);
         newVersions.forEach((v, i) =>
-          cloudRef.current.writes.addVersion(v.label, current.versions.length + i, v.imageDataUrl),
+          cloudRef.current.writes.addVersion(v.label, branchCount + i, v.imageDataUrl, targetBranchId),
         );
         const added = newVersions[newVersions.length - 1];
         if (!created) {
@@ -425,7 +488,7 @@ export function App() {
         busy.current.delete("upload");
       }
     },
-    [persist, pushUndo, showToast, undoLast],
+    [activeBranchId, cloud.boundRoomId, cloud.canManageMedia, persist, pushUndo, showToast, undoLast],
   );
 
   /**
@@ -439,9 +502,13 @@ export function App() {
    * closes the page, the whole point of the feature.
    */
   const addVideoFile = useCallback(
-    async (files: FileList | null) => {
+    async (files: FileList | null, forcedBranchId?: string, roomOverride?: Room) => {
       const file = files?.[0];
       if (!file) return;
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者可以留言與投票，但不能建立影片版本。", { tone: "error" });
+        return;
+      }
       if (busy.current.has("upload")) return;
 
       const check = acceptVideoFile(file);
@@ -464,16 +531,18 @@ export function App() {
       }
 
       busy.current.add("upload");
-      const existing = roomRef.current;
+      const existing = roomOverride ?? roomRef.current;
       const isNewRoom = !existing;
       const base = existing ?? emptyRoom(roomCode(), "未命名影片", "video");
+      const targetBranchId = forcedBranchId ?? activeBranchId ?? (base.branches?.length === 1 ? base.branches[0].id : undefined);
+      const branchCount = targetBranchId ? branchVersions(base, targetBranchId).length : base.versions.length;
       if (isNewRoom) {
         setRoom(base);
         setView(initialView(base));
       }
 
       const versionId = crypto.randomUUID();
-      const index = base.versions.length;
+      const index = branchCount;
       const label = VIDEO_VERSION_LABELS[index] ?? `改${index}`;
       // Cancelling has to work from the first frame, not only once the XHR
       // exists: the cloud room is created first, and that takes a moment on a
@@ -505,6 +574,7 @@ export function App() {
             versionId,
             label,
             sortOrder: index,
+            branchId: targetBranchId,
             file: check.file,
             mime: check.mime,
             roomTitle: base.title,
@@ -538,8 +608,8 @@ export function App() {
         // row, keyed by the same id.
         const next: Room = {
           ...stillHere,
-          mediaType: "video",
-          versions: [...stillHere.versions, version],
+          mediaType: stillHere.projectMode ? stillHere.mediaType : "video",
+          versions: [...stillHere.versions, { ...version, ...(targetBranchId ? { branchId: targetBranchId } : {}) }],
           updatedAt: Date.now(),
         };
         setRoom(next);
@@ -588,20 +658,171 @@ export function App() {
         busy.current.delete("upload");
       }
     },
-    [showToast, trackSave],
+    [activeBranchId, cloud.boundRoomId, cloud.canManageMedia, showToast, trackSave],
   );
 
   /** Picks route by what the room IS, so neither workspace has to check. */
   const addFiles = useCallback(
     (files: FileList | null) => {
       const current = roomRef.current;
-      if (current && roomMediaType(current) === "video") {
+      const branch = current && activeBranchId ? branchForId(current, activeBranchId) : undefined;
+      if (branch?.branchType === "video" || (!branch && current && roomMediaType(current) === "video")) {
         void addVideoFile(files);
         return;
       }
       void addImageFiles(files);
     },
+    [activeBranchId, addImageFiles, addVideoFile],
+  );
+
+  const createProjectContent = useCallback(
+    async (type: BranchType, name: string, files: FileList | null) => {
+      const current = roomRef.current;
+      if (!current || !guest) return;
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者可以查看、留言與投票，但不能新增內容。", { tone: "error" });
+        return;
+      }
+      const normalized = normalizeRoomBranches(current);
+      const now = Date.now();
+      const branch: RoomBranch = {
+        id: crypto.randomUUID(),
+        roomId: current.id,
+        name,
+        branchType: type,
+        sortOrder: normalized.branches?.length ?? 0,
+        status: "in_progress",
+        createdBy: cloud.userId ?? guest.id,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const plan = type === "plan" || type === "copy"
+        ? { branchId: branch.id, title: name, description: "", blocks: [], updatedBy: cloud.userId ?? guest.id, updatedAt: now } satisfies PlanDocument
+        : null;
+      const next: Room = {
+        ...normalized,
+        projectMode: true,
+        branches: [...(normalized.branches ?? []), branch],
+        plans: plan ? [...(normalized.plans ?? []), plan] : normalized.plans,
+        updatedAt: now,
+      };
+      setRoom(next);
+      persist(next);
+      setActiveBranchId(branch.id);
+      try {
+        // Wait for the branch FK before writing its plan or first media version.
+        // This matters on a slow phone: a fixed timeout cannot establish order.
+        await cloudRef.current.writes.createBranch(branch);
+      } catch {
+        showToast("建立內容失敗，請確認連線後再試一次。", { tone: "error" });
+        return;
+      }
+      if (plan) cloudRef.current.writes.savePlan(plan);
+      if (files?.length) {
+        if (type === "poster") void addImageFiles(files, branch.id, next);
+        if (type === "video") void addVideoFile(files, branch.id, next);
+      }
+      showToast(`已建立${type === "copy" ? "文案" : type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片"}`, { tone: "success" });
+    },
+    [addImageFiles, addVideoFile, cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, persist, showToast],
+  );
+
+  const addFilesToBranch = useCallback(
+    (branchId: string, files: FileList | null) => {
+      const branch = roomRef.current ? branchForId(roomRef.current, branchId) : undefined;
+      if (!branch || !files?.length) return;
+      if (branch.branchType === "poster") void addImageFiles(files, branchId);
+      else if (branch.branchType === "video") void addVideoFile(files, branchId);
+    },
     [addImageFiles, addVideoFile],
+  );
+
+  const updateProjectBranch = useCallback(
+    (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能修改分支設定。", { tone: "error" });
+        return;
+      }
+      updateRoom((r) => ({
+        ...r,
+        branches: (normalizeRoomBranches(r).branches ?? []).map((branch) =>
+          branch.id === branchId ? { ...branch, ...patch, updatedAt: Date.now() } : branch,
+        ),
+      }));
+      cloudRef.current.writes.updateBranch(branchId, patch);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, showToast, updateRoom],
+  );
+
+  const saveProjectPlan = useCallback(
+    (plan: PlanDocument) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能編輯企劃正文。", { tone: "error" });
+        return;
+      }
+      const nextPlan = { ...plan, updatedBy: cloud.userId ?? guest?.id, updatedAt: Date.now() };
+      updateRoom((r) => ({
+        ...r,
+        plans: [...(r.plans ?? []).filter((item) => item.branchId !== plan.branchId), nextPlan],
+        branches: (normalizeRoomBranches(r).branches ?? []).map((branch) =>
+          branch.id === plan.branchId ? { ...branch, updatedAt: Date.now() } : branch,
+        ),
+      }));
+      cloudRef.current.writes.savePlan(nextPlan);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const createProjectRelation = useCallback(
+    (relation: ContentRelation) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能管理相關內容。", { tone: "error" });
+        return;
+      }
+      const nextRelation = { ...relation, createdBy: cloud.userId ?? relation.createdBy };
+      updateRoom((r) => ({ ...r, relations: [...(r.relations ?? []), nextRelation] }));
+      cloudRef.current.writes.createRelation(nextRelation);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, showToast, updateRoom],
+  );
+
+  const deleteProjectRelation = useCallback(
+    (relationId: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能管理相關內容。", { tone: "error" });
+        return;
+      }
+      updateRoom((r) => ({ ...r, relations: (r.relations ?? []).filter((relation) => relation.id !== relationId) }));
+      cloudRef.current.writes.deleteRelation(relationId);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, showToast, updateRoom],
+  );
+
+  const createProjectPoll = useCallback(
+    (poll: RoomPoll) => {
+      if (!cloud.canManageMedia && cloud.boundRoomId) {
+        showToast("檢視者可以投票，但不能建立待決策。", { tone: "error" });
+        return;
+      }
+      const nextPoll = { ...poll, createdBy: cloud.userId ?? poll.createdBy };
+      updateRoom((r) => ({ ...r, polls: [...(r.polls ?? []), nextPoll] }));
+      cloudRef.current.writes.createPoll(nextPoll);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, showToast, updateRoom],
+  );
+
+  const voteProjectPoll = useCallback(
+    (vote: PollVote) => {
+      updateRoom((r) => ({
+        ...r,
+        pollVotes: [
+          ...(r.pollVotes ?? []).filter((item) => !(item.pollId === vote.pollId && item.userId === vote.userId)),
+          vote,
+        ],
+      }));
+      cloudRef.current.writes.votePoll(vote);
+    },
+    [updateRoom],
   );
 
   /**
@@ -1051,7 +1272,12 @@ export function App() {
           // definitively failed. Sending `appUrl` in this window is exactly the
           // bug — LINE would get a fragment-only URL and show the generic cover
           // even though the poster frame was already sitting in Storage.
-          const appUrl = res.url;
+          const appUrl = addRoomTarget(
+            res.url,
+            activeBranchId
+              ? { branchId: activeBranchId, versionId: viewRef.current.versionId || undefined }
+              : undefined,
+          );
           setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "building" }, card: null });
           withPreviewTimeout(cloudRef.current.preview.ensure({ versionId: viewRef.current.versionId }))
             .then((preview) => applyPreview(seq, appUrl, preview))
@@ -1067,12 +1293,20 @@ export function App() {
       // against `import.meta.env.DEV` on purpose: the legacy URL is compiled
       // out of production bundles entirely, not merely branched around.
       startHosting();
-      setShareState({ kind: "local", url: `${location.origin}${location.pathname}#room=${current.id}` });
+      setShareState({
+        kind: "local",
+        url: addRoomTarget(
+          `${location.origin}${location.pathname}#room=${current.id}`,
+          activeBranchId
+            ? { branchId: activeBranchId, versionId: viewRef.current.versionId || undefined }
+            : undefined,
+        ),
+      });
       return;
     }
     // Deployed without VITE_SUPABASE_* — there is no permanent link to give.
     setShareState({ kind: "unavailable" });
-  }, [isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
+  }, [activeBranchId, isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
 
   /** 顯示文宣縮圖 / 顯示影片封面 toggle in the share sheet's 連結預覽 block. */
   const setPreviewThumbnail = useCallback(
@@ -1213,8 +1447,14 @@ export function App() {
     [showToast],
   );
 
+  const normalizedRoom = room ? normalizeRoomBranches(room) : null;
+  const activeBranch = normalizedRoom && activeBranchId ? branchForId(normalizedRoom, activeBranchId) : undefined;
+  const reviewRoom = normalizedRoom && activeBranch && (activeBranch.branchType === "poster" || activeBranch.branchType === "video")
+    ? roomForBranch(normalizedRoom, activeBranch.id)
+    : normalizedRoom;
+
   const video: VideoApi | null =
-    room && roomMediaType(room) === "video"
+    reviewRoom && roomMediaType(reviewRoom) === "video"
       ? {
           upload: videoUpload,
           commitVideoComment,
@@ -1248,9 +1488,9 @@ export function App() {
         }
       : null;
 
-  const api: WorkspaceApi | null = room
+  const api: WorkspaceApi | null = reviewRoom
     ? {
-        room,
+        room: reviewRoom,
         view,
         guest: guest!,
         tool,
@@ -1282,8 +1522,12 @@ export function App() {
         sendChat,
         addFiles,
         setTitle: (title) => {
-          updateRoom((r) => ({ ...r, title }));
-          cloudRef.current.writes.setTitle(title);
+          if (activeBranchId) {
+            updateProjectBranch(activeBranchId, { name: title });
+          } else {
+            updateRoom((r) => ({ ...r, title }));
+            cloudRef.current.writes.setTitle(title);
+          }
         },
         copySummary,
         markCoachSeen,
@@ -1293,11 +1537,17 @@ export function App() {
         goHome: () => {
           videoCancelRef.current?.();
           setVideoUpload({ state: "idle" });
-          clearUndo();
-          setRoom(null);
           setSelectedPinId(null);
           setPreviewStrokeId(null);
-          location.hash = "";
+          if (activeBranchId && roomRef.current) {
+            setActiveBranchId(null);
+            setLoadingBranchId(null);
+            setView(initialView(roomRef.current));
+          } else {
+            clearUndo();
+            setRoom(null);
+            location.hash = "";
+          }
         },
       }
     : null;
@@ -1326,6 +1576,73 @@ export function App() {
           </button>
         </div>
       </div>
+    );
+  }
+
+  const projectApi: MultiBranchRoomApi | null = room?.projectMode
+    ? {
+        room: normalizedRoom ?? room,
+        guest,
+        role: cloud.role,
+        userId: cloud.userId,
+        canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
+        activeBranchId,
+        loadingBranchId,
+        onOpenBranch: (branchId) => {
+          const target = roomRef.current ? branchForId(roomRef.current, branchId) : undefined;
+          if (!target) return;
+          setActiveBranchId(branchId);
+          if (target.branchType === "poster" || target.branchType === "video") {
+            setView(initialView(roomForBranch(roomRef.current!, branchId)));
+          }
+          if (cloudRef.current.boundRoomId) {
+            setLoadingBranchId(branchId);
+            void cloudRef.current.loadBranch(branchId).finally(() => {
+              setLoadingBranchId((current) => (current === branchId ? null : current));
+            });
+          }
+        },
+        onBackToRoom: () => {
+          setActiveBranchId(null);
+          setLoadingBranchId(null);
+          if (roomRef.current) setView(initialView(roomRef.current));
+        },
+        onCreateContent: createProjectContent,
+        onAddFiles: addFilesToBranch,
+        onUpdateBranch: updateProjectBranch,
+        onSavePlan: saveProjectPlan,
+        onCreateRelation: createProjectRelation,
+        onDeleteRelation: deleteProjectRelation,
+        onCreatePoll: createProjectPoll,
+        onVotePoll: voteProjectPoll,
+        chatInput,
+        setChatInput,
+        sendChat,
+        onShare: openShare,
+        onGoHome: () => {
+          clearUndo();
+          setActiveBranchId(null);
+          setLoadingBranchId(null);
+          setRoom(null);
+          location.hash = "";
+        },
+      }
+    : null;
+
+  const activeProjectBranch = normalizedRoom && activeBranchId ? branchForId(normalizedRoom, activeBranchId) : undefined;
+  const showProjectShell = Boolean(
+    projectApi &&
+      (!activeProjectBranch ||
+        activeProjectBranch.branchType === "plan" ||
+        activeProjectBranch.branchType === "copy" ||
+        branchVersions(normalizedRoom!, activeProjectBranch.id).length === 0),
+  );
+  if (showProjectShell) {
+    return (
+      <>
+        <MultiBranchRoom api={projectApi!} />
+        <ToastStack toasts={toasts} onDismiss={dismiss} />
+      </>
     );
   }
 
@@ -1454,6 +1771,7 @@ export function App() {
           onVideoFiles={addVideoFile}
           videoAvailable={isCloudConfigured}
           onOpen={openRoom}
+          onCreateProject={createProjectRoom}
         />
         <ToastStack toasts={toasts} onDismiss={dismiss} />
       </div>
@@ -1473,7 +1791,7 @@ export function App() {
 
       {shareOpen && room && (
         <ShareSheet
-          presentation={sharePresentation(roomMediaType(room), room.title)}
+          presentation={sharePresentation(roomMediaType(reviewRoom ?? room), (reviewRoom ?? room).title)}
           state={shareState}
           onRetry={openShare}
           onClose={() => setShareOpen(false)}

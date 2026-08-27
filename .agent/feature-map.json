@@ -170,9 +170,64 @@
       ]
     },
     {
+      "id": "multi-branch-room",
+      "name": "Multi-branch project room",
+      "status": "implemented",
+      "evidence": {
+        "source": [
+          "src/cloud/roomRepository.ts",
+          "src/features/multi-room/MultiBranchRoom.tsx",
+          "src/lib/roomBranches.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0013_project_room_branches.sql"
+        ],
+        "tests": [
+          "scripts/e2e/multi-branch-room.mjs"
+        ],
+        "docs": []
+      },
+      "requirements": [
+        {
+          "kind": "source",
+          "required": 3,
+          "found": 3,
+          "satisfied": true
+        },
+        {
+          "kind": "migrations",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        },
+        {
+          "kind": "tests",
+          "required": 1,
+          "found": 1,
+          "satisfied": true
+        }
+      ],
+      "confidence": 0.94,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
+      ],
+      "missing": [],
+      "relatedFiles": [
+        "scripts/e2e/multi-branch-room.mjs",
+        "src/cloud/roomRepository.ts",
+        "src/features/multi-room/MultiBranchRoom.tsx",
+        "src/lib/roomBranches.ts",
+        "supabase/migrations/0013_project_room_branches.sql"
+      ],
+      "priority": 1,
+      "notes": []
+    },
+    {
       "id": "orphan-asset-cleanup",
       "name": "Orphan asset cleanup",
-      "status": "partial",
+      "status": "implemented",
       "evidence": {
         "source": [
           "src/cloud/videoRoom.ts"
@@ -180,7 +235,9 @@
         "migrations": [
           "supabase/migrations/0009_asset_orphans.sql"
         ],
-        "tests": [],
+        "tests": [
+          "scripts/e2e/migrations.mjs"
+        ],
         "docs": []
       },
       "requirements": [
@@ -199,26 +256,24 @@
         {
           "kind": "tests",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 1,
+          "satisfied": true
         }
       ],
-      "confidence": 0.67,
+      "confidence": 0.9,
       "implemented": [
         "source",
-        "migrations"
+        "migrations",
+        "tests"
       ],
-      "missing": [
-        "tests: need 1, found 0"
-      ],
+      "missing": [],
       "relatedFiles": [
+        "scripts/e2e/migrations.mjs",
         "src/cloud/videoRoom.ts",
         "supabase/migrations/0009_asset_orphans.sql"
       ],
       "priority": 2,
-      "notes": [
-        "Executable evidence is incomplete: tests: need 1, found 0."
-      ]
+      "notes": []
     },
     {
       "id": "quick-reactions",

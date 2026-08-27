@@ -427,6 +427,31 @@ try {
     );
   }
 
+  section("Storage 孤兒資產：只盤點與清除沒有版本參照的舊物件");
+  {
+    const linkedVersion = psql("select gen_random_uuid();").out;
+    const orphanAsset = `rooms/${roomId}/videos/orphan-test/orphan.webm`;
+    const linkedAsset = `rooms/${roomId}/videos/linked-test/linked.webm`;
+    psql(`insert into storage.objects (bucket_id, name, created_at)
+            values ('room-assets', '${orphanAsset}', now() - interval '8 days'),
+                   ('room-assets', '${linkedAsset}', now() - interval '8 days');
+          insert into public.versions
+            (id, room_id, label, sort_order, image_path, media_kind, video_path, created_by)
+          values ('${linkedVersion}'::uuid, '${roomId}'::uuid, '孤兒測試參照', 98, null, 'video', '${linkedAsset}', '${owner}'::uuid);`);
+    ok(
+      "orphaned_room_assets 只盤點沒有版本參照的舊物件",
+      psql(`select name from public.orphaned_room_assets(interval '0 seconds') where name = '${orphanAsset}';`).out === orphanAsset
+        && psql(`select name from public.orphaned_room_assets(interval '0 seconds') where name = '${linkedAsset}';`).out === "",
+    );
+    ok(
+      "purge_orphaned_room_assets 受單次上限保護且不刪有參照物件",
+      psql("select name from public.purge_orphaned_room_assets(interval '0 seconds', 1);").out === orphanAsset
+        && psql(`select count(*) from storage.objects where bucket_id = 'room-assets' and name = '${linkedAsset}';`).out === "1",
+    );
+    psql(`delete from storage.objects where bucket_id = 'room-assets' and name = '${linkedAsset}';
+          delete from public.versions where id = '${linkedVersion}'::uuid;`);
+  }
+
   section("影片房：rooms.media_type 與舊房間相容");
   {
     ok(
@@ -452,7 +477,8 @@ try {
       values ('${videoVersionId}'::uuid, '${roomId}'::uuid, '初剪', 1, 'video',
         'rooms/${roomId}/versions/${videoVersionId}/poster.jpg',
         'rooms/${roomId}/videos/${videoVersionId}/original.mp4', 'video/mp4', 84.5, 12345678);`;
-    ok("成員可以新增影片版本", !as(owner, insertVideo).failed);
+    const insertVideoResult = as(owner, insertVideo);
+    ok("成員可以新增影片版本", !insertVideoResult.failed, insertVideoResult.err);
 
     const noVideoPath = psql("select gen_random_uuid();").out;
     ok(
@@ -485,14 +511,12 @@ try {
     );
 
     const nullDuration = psql("select gen_random_uuid();").out;
-    ok(
-      "duration 讀不到時寫 NULL 是允許的",
-      !as(
-        owner,
-        `insert into public.versions (id, room_id, label, sort_order, media_kind, video_path)
-         values ('${nullDuration}'::uuid, '${roomId}'::uuid, '長度未知', 8, 'video', 'rooms/x/v2.mp4');`,
-      ).failed,
+    const nullDurationResult = as(
+      owner,
+      `insert into public.versions (id, room_id, label, sort_order, media_kind, video_path)
+       values ('${nullDuration}'::uuid, '${roomId}'::uuid, '長度未知', 8, 'video', 'rooms/x/v2.mp4');`,
     );
+    ok("duration 讀不到時寫 NULL 是允許的", !nullDurationResult.failed, nullDurationResult.err);
     psql(`delete from public.versions where id = '${nullDuration}'::uuid;`);
 
     ok(
@@ -534,24 +558,20 @@ try {
     );
 
     const pointId = psql("select gen_random_uuid();").out;
-    ok(
-      "影片時間點留言",
-      !as(
-        owner,
-        `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, body)
-         values ('${pointId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-point', 13.42, '字幕出現太慢');`,
-      ).failed,
+    const pointResult = as(
+      owner,
+      `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, body)
+       values ('${pointId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-point', 13.42, '字幕出現太慢');`,
     );
+    ok("影片時間點留言", !pointResult.failed, pointResult.err);
 
     const rangeId = psql("select gen_random_uuid();").out;
-    ok(
-      "影片片段留言",
-      !as(
-        owner,
-        `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, end_time_seconds, body)
-         values ('${rangeId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-range', 22, 27.5, '這段轉場太突然');`,
-      ).failed,
+    const rangeResult = as(
+      owner,
+      `insert into public.comments (id, room_id, version_id, author_name, anchor_type, time_seconds, end_time_seconds, body)
+       values ('${rangeId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '夥伴', 'video-range', 22, 27.5, '這段轉場太突然');`,
     );
+    ok("影片片段留言", !rangeResult.failed, rangeResult.err);
 
     const badRange = psql("select gen_random_uuid();").out;
     ok(
@@ -610,14 +630,12 @@ try {
     // would be testing that unique index instead of the composite foreign key
     // it exists to test.
     psql(`update public.share_previews set enabled = false where room_id = '${roomId}'::uuid;`);
-    ok(
-      "share_previews 可以指向一支影片版本",
-      !as(
-        owner,
-        `insert into public.share_previews (id, room_id, version_id, title, description)
-         values ('${videoPreviewId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '影片對稿', '幫我看一下這支影片');`,
-      ).failed,
+    const videoPreviewResult = as(
+      owner,
+      `insert into public.share_previews (id, room_id, version_id, title, description)
+       values ('${videoPreviewId}'::uuid, '${roomId}'::uuid, '${videoVersionId}'::uuid, '影片對稿', '幫我看一下這支影片');`,
     );
+    ok("share_previews 可以指向一支影片版本", !videoPreviewResult.failed, videoPreviewResult.err);
     psql(`delete from public.share_previews where id = '${videoPreviewId}'::uuid;`);
 
     // 0011 adds media_type on a NEW function (v3). This assertion is what keeps
@@ -714,6 +732,73 @@ try {
   as(reviewer, `update public.share_previews set title = 'blocked' where id = '${capPreview}'::uuid;`);
   as(reviewer, `delete from public.share_previews where id = '${capPreview}'::uuid;`);
   ok("reviewer cannot modify/delete share_previews", as(owner, `select title, count(*) from public.share_previews where id = '${capPreview}'::uuid group by title;`).out === "capability|1");
+
+  // -------------------------------------------------------- project rooms
+  section("同房多分支：branch / plan / relation / poll 的 RLS 與相容層");
+  const projectPoster = psql("select gen_random_uuid();").out;
+  const projectVideo = psql("select gen_random_uuid();").out;
+  const projectPlan = psql("select gen_random_uuid();").out;
+  const projectPosterVersion = psql("select gen_random_uuid();").out;
+  const projectVideoVersion = psql("select gen_random_uuid();").out;
+  const projectPoll = psql("select gen_random_uuid();").out;
+  const projectRelation = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}';
+    insert into public.room_branches (id, room_id, name, branch_type, sort_order, created_by)
+      values ('${projectPoster}'::uuid, '${capRoom}'::uuid, '演講文宣', 'poster', 0, '${owner}'::uuid),
+             ('${projectVideo}'::uuid, '${capRoom}'::uuid, '招生影片', 'video', 1, '${owner}'::uuid),
+             ('${projectPlan}'::uuid, '${capRoom}'::uuid, '擺攤計畫', 'plan', 2, '${owner}'::uuid);
+    update public.rooms set room_mode = 'project' where id = '${capRoom}'::uuid;
+    insert into public.versions (id, room_id, label, sort_order, image_path, media_kind, video_path, branch_id)
+      values ('${projectPosterVersion}'::uuid, '${capRoom}'::uuid, '文宣初稿', 50, 'project-poster.png', 'image', null, '${projectPoster}'::uuid),
+             ('${projectVideoVersion}'::uuid, '${capRoom}'::uuid, '影片第一剪', 51, 'project-video.png', 'video', 'project-video.webm', '${projectVideo}'::uuid);
+    insert into public.plan_documents (branch_id, room_id, title, description, blocks)
+      values ('${projectPlan}'::uuid, '${capRoom}'::uuid, '擺攤計畫', '招募新生', '[{"id":"b1","kind":"checklist","text":"QR code","checked":false}]'::jsonb);
+    insert into public.content_relations (id, room_id, from_branch_id, to_branch_id)
+      values ('${projectRelation}'::uuid, '${capRoom}'::uuid, '${projectPlan}'::uuid, '${projectPoster}'::uuid);
+    insert into public.room_polls (id, room_id, question, options)
+      values ('${projectPoll}'::uuid, '${capRoom}'::uuid, '這週先主推哪一份？', '["茶會","演講"]'::jsonb);`);
+  ok(
+    "owner/editor 可以建立同房多分支與關聯內容",
+    !as(editor, `insert into public.room_branches (room_id, name, branch_type) values ('${capRoom}'::uuid, 'Editor 文案', 'copy');`).failed
+      && as(owner, `select count(*) from public.room_branches where room_id = '${capRoom}'::uuid and id in ('${projectPoster}'::uuid, '${projectVideo}'::uuid, '${projectPlan}'::uuid);`).out === "3"
+      && as(owner, `select count(*) from public.content_relations where id = '${projectRelation}'::uuid;`).out === "1",
+  );
+  ok(
+    "版本各自屬於正確 branch",
+    as(reviewer, `select count(*) from public.versions where id = '${projectPosterVersion}'::uuid and branch_id = '${projectPoster}'::uuid;`).out === "1"
+      && as(reviewer, `select count(*) from public.versions where id = '${projectVideoVersion}'::uuid and branch_id = '${projectVideo}'::uuid;`).out === "1",
+  );
+  const reviewerSummary = as(reviewer, `select count(*) from public.get_room_branch_summaries('${capRoom}'::uuid);`);
+  ok("reviewer 可以讀 branch summary / plan / relation / poll", !as(reviewer, `select count(*) from public.room_branches where room_id = '${capRoom}'::uuid;`).failed && reviewerSummary.out === "5" && as(reviewer, `select count(*) from public.plan_documents where branch_id = '${projectPlan}'::uuid;`).out === "1" && as(reviewer, `select count(*) from public.content_relations where id = '${projectRelation}'::uuid;`).out === "1" && as(reviewer, `select count(*) from public.room_polls where id = '${projectPoll}'::uuid;`).out === "1");
+  ok("reviewer 不能建立 branch / plan / relation / poll", [
+    as(reviewer, `insert into public.room_branches (room_id, name, branch_type) values ('${capRoom}'::uuid, 'blocked', 'copy');`),
+    as(reviewer, `insert into public.plan_documents (branch_id, room_id, title, blocks) values ('${projectPlan}'::uuid, '${capRoom}'::uuid, 'blocked', '[]'::jsonb);`),
+    as(reviewer, `insert into public.content_relations (room_id, from_branch_id, to_branch_id) values ('${capRoom}'::uuid, '${projectPlan}'::uuid, '${projectVideo}'::uuid);`),
+    as(reviewer, `insert into public.room_polls (room_id, question, options) values ('${capRoom}'::uuid, 'blocked', '["A","B"]'::jsonb);`),
+  ].every((result) => result.failed));
+  ok(
+    "reviewer 可以投票，且只能寫自己的 user_id",
+    !as(reviewer, `insert into public.room_poll_votes (poll_id, room_id, option) values ('${projectPoll}'::uuid, '${capRoom}'::uuid, '茶會');`).failed
+      && as(reviewer, `select count(*) from public.room_poll_votes where poll_id = '${projectPoll}'::uuid and user_id = '${reviewer}'::uuid;`).out === "1"
+      && as(reviewer, `insert into public.room_poll_votes (poll_id, room_id, user_id, option) values ('${projectPoll}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid, '演講');`).failed,
+  );
+  const archivedBranch = as(owner, `update public.room_branches set status = 'archived' where id = '${projectPlan}'::uuid;`);
+  const archivedBranchRead = as(owner, `select archived_at is not null from public.room_branches where id = '${projectPlan}'::uuid;`);
+  const archivedBranchDelete = as(owner, `delete from public.room_branches where id = '${projectPlan}'::uuid;`);
+  ok("有歷史內容的 branch 只能封存，不能 hard delete", !archivedBranch.failed && archivedBranchRead.out === "t" && archivedBranchDelete.failed, [archivedBranch.err, archivedBranchRead.err, archivedBranchDelete.err].filter(Boolean).join(" | "));
+  ok("匿名讀不到 project tables / summary RPC", asAnon(`select count(*) from public.room_branches;`).out !== "1" && asAnon(`select count(*) from public.room_polls;`).out !== "1" && asAnon(`select count(*) from public.get_room_branch_summaries('${capRoom}'::uuid);`).failed);
+
+  const compatImageRoom = psql("select gen_random_uuid();").out;
+  const compatVideoRoom = psql("select gen_random_uuid();").out;
+  const compatImageVersion = psql("select gen_random_uuid();").out;
+  const compatVideoVersion = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}';
+    select create_room_with_invite('${compatImageRoom}'::uuid, '舊文宣房', 'compat-image-token', 'Owner', '#111111');
+    insert into public.versions (id, room_id, label, sort_order, image_path) values ('${compatImageVersion}'::uuid, '${compatImageRoom}'::uuid, '舊圖初稿', 0, 'old.png');
+    select create_room_with_invite('${compatVideoRoom}'::uuid, '舊影片房', 'compat-video-token', 'Owner', '#111111');
+    update public.rooms set media_type = 'video' where id = '${compatVideoRoom}'::uuid;
+    insert into public.versions (id, room_id, label, sort_order, image_path, media_kind, video_path) values ('${compatVideoVersion}'::uuid, '${compatVideoRoom}'::uuid, '舊片初剪', 0, 'old.png', 'video', 'old.webm');`);
+  ok("舊 image / video room 自動建立相容 branch", as(owner, `select count(*) from public.room_branches where room_id = '${compatImageRoom}'::uuid and branch_type = 'poster';`).out === "1" && as(owner, `select count(*) from public.room_branches where room_id = '${compatVideoRoom}'::uuid and branch_type = 'video';`).out === "1" && as(owner, `select count(*) from public.versions where id = '${compatImageVersion}'::uuid and branch_id is not null;`).out === "1" && as(owner, `select count(*) from public.versions where id = '${compatVideoVersion}'::uuid and branch_id is not null;`).out === "1");
 
   const reviewerComment = psql("select gen_random_uuid();").out;
   const ownerComment = psql("select gen_random_uuid();").out;
@@ -971,6 +1056,19 @@ try {
         psql(`select body from public.version_review_briefs where version_id = '${vVersion}'::uuid;`).out === "這次想確認節奏",
     );
   }
+
+  section("同房多分支：0013 migration 可以重跑");
+  const projectShape = () => psql(`select
+    (select count(*) from information_schema.tables where table_name in ('room_branches', 'plan_documents', 'content_relations', 'room_polls', 'room_poll_votes')) || '/' ||
+    (select count(*) from pg_policies where tablename in ('room_branches', 'plan_documents', 'content_relations', 'room_polls', 'room_poll_votes')) || '/' ||
+    (select count(*) from pg_indexes where indexname in ('idx_room_branches_room_sort', 'idx_plan_documents_room', 'idx_content_relations_from', 'idx_room_polls_room')) || '/' ||
+    (select count(*) from pg_trigger where tgname in ('room_branches_no_delete', 'versions_assign_branch'));`).out;
+  const projectShapeBefore = projectShape();
+  psqlFile(join(MIGRATIONS, "0013_project_room_branches.sql"));
+  ok("重跑 0013 之後 tables / policies / indexes / triggers 數量不變", projectShapeBefore === projectShape(), `${projectShapeBefore} → ${projectShape()}`);
+  const replayArchive = as(owner, `update public.room_branches set status = 'completed' where id = '${projectPoster}'::uuid;`);
+  const replayDelete = as(owner, `delete from public.room_branches where id = '${projectPoster}'::uuid;`);
+  ok("重跑 0013 後 branch 封存規則仍在", !replayArchive.failed && replayDelete.failed, [replayArchive.err, replayDelete.err].filter(Boolean).join(" | "));
 
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {

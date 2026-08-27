@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-24T15:50:53.000Z",
+  "generatedAt": "2026-08-27T02:53:12.000Z",
   "git": {
-    "branch": "codex/review-viewer-2",
-    "sha": "9a04a11ff8ba4a539771e1b2c20c0456b2176f20",
-    "mainSha": "9a04a11ff8ba4a539771e1b2c20c0456b2176f20",
+    "branch": "codex/multi-branch-room-1",
+    "sha": "a3379e005be67fa007e3f2f45f83f191b08f5a0a",
+    "mainSha": "a3379e005be67fa007e3f2f45f83f191b08f5a0a",
     "dirty": true
   },
   "project": {
@@ -16,6 +16,7 @@
     "architectureComponents": [
       "App entry",
       "Workspace router",
+      "Multi-branch project room",
       "Image review",
       "Video review",
       "Discussion",
@@ -112,9 +113,35 @@
       ],
       "missing": []
     },
+    "multi-branch-room": {
+      "status": "implemented",
+      "confidence": 0.94,
+      "evidence": {
+        "source": [
+          "src/cloud/roomRepository.ts",
+          "src/features/multi-room/MultiBranchRoom.tsx",
+          "src/lib/roomBranches.ts"
+        ],
+        "migrations": [
+          "supabase/migrations/0013_project_room_branches.sql"
+        ],
+        "tests": [
+          "scripts/e2e/multi-branch-room.mjs"
+        ],
+        "docs": []
+      },
+      "relatedFiles": [
+        "scripts/e2e/multi-branch-room.mjs",
+        "src/cloud/roomRepository.ts",
+        "src/features/multi-room/MultiBranchRoom.tsx",
+        "src/lib/roomBranches.ts",
+        "supabase/migrations/0013_project_room_branches.sql"
+      ],
+      "missing": []
+    },
     "orphan-asset-cleanup": {
-      "status": "partial",
-      "confidence": 0.67,
+      "status": "implemented",
+      "confidence": 0.9,
       "evidence": {
         "source": [
           "src/cloud/videoRoom.ts"
@@ -122,16 +149,17 @@
         "migrations": [
           "supabase/migrations/0009_asset_orphans.sql"
         ],
-        "tests": [],
+        "tests": [
+          "scripts/e2e/migrations.mjs"
+        ],
         "docs": []
       },
       "relatedFiles": [
+        "scripts/e2e/migrations.mjs",
         "src/cloud/videoRoom.ts",
         "supabase/migrations/0009_asset_orphans.sql"
       ],
-      "missing": [
-        "tests: need 1, found 0"
-      ]
+      "missing": []
     },
     "quick-reactions": {
       "status": "implemented",
@@ -531,7 +559,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0012",
+    "repoMigrationHead": "0013",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -544,16 +572,19 @@
       "supabase/migrations/0009_asset_orphans.sql",
       "supabase/migrations/0010_security_definer_acl.sql",
       "supabase/migrations/0011_share_preview_customization.sql",
-      "supabase/migrations/0012_video_review_feedback.sql"
+      "supabase/migrations/0012_video_review_feedback.sql",
+      "supabase/migrations/0013_project_room_branches.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0012",
+    "productionMigrationExpectation": "0013",
     "requiresLiveCheck": true
   },
   "tests": {
     "requiredCommands": [
       "npm run test:agent",
       "npm run test:migrations",
+      "npm run test:multi-branch",
+      "npm run test:multi-branch-e2e",
       "npm run test:review-viewer",
       "npm run test:share-e2e",
       "npm run test:share-preview",
@@ -607,18 +638,6 @@
       ]
     },
     {
-      "id": "orphan-asset-cleanup",
-      "status": "partial",
-      "priority": 2,
-      "missing": [
-        "tests: need 1, found 0"
-      ],
-      "relatedFiles": [
-        "src/cloud/videoRoom.ts",
-        "supabase/migrations/0009_asset_orphans.sql"
-      ]
-    },
-    {
       "id": "version-archive",
       "status": "partial",
       "priority": 2,
@@ -667,7 +686,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0012_video_review_feedback.sql."
+        "message": "Migration order is contiguous through 0013_project_room_branches.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",
@@ -728,12 +747,6 @@
     },
     {
       "rank": 4,
-      "feature": "orphan-asset-cleanup",
-      "status": "partial",
-      "reason": "tests: need 1, found 0"
-    },
-    {
-      "rank": 5,
       "feature": "version-archive",
       "status": "partial",
       "reason": "source: need 1, found 0"

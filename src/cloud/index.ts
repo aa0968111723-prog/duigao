@@ -10,6 +10,7 @@ export { getSupabase } from "./client";
 export { ensureSession } from "./auth";
 export { CloudError, isInvalidInvite, isRevisionConflict } from "./errors";
 export {
+  addRoomTarget,
   buildInviteUrl,
   generateInviteToken,
   newRoomId,
@@ -17,6 +18,7 @@ export {
   readRoomLink,
   replaceUrlWithInvite,
   type RoomLink,
+  type RoomTarget,
   type UrlInvite,
 } from "./invite";
 export { upgradeLegacyShareUrl } from "./legacy";

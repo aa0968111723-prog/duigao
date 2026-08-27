@@ -5,3 +5,4 @@ dist/
 
 # adversarial-test working dirs (raw artifacts stay local)
 _grok_reliability/
+output/
