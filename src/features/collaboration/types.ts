@@ -136,6 +136,15 @@ export type DiscussionPayload = {
   name?: string;
   /** link：目標 URL（渲染端只接受 http/https）。 */
   href?: string;
+  /** attachment：planform 場佈摘要（PR-06；client 主張，顯示用）。 */
+  planform?: {
+    projectId?: string;
+    name: string;
+    version: number;
+    zoneCount: number;
+    objectCount: number;
+    routeCount: number;
+  };
   branchId?: string;
   versionId?: string;
   whiteboardId?: string;
