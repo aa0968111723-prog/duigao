@@ -100,6 +100,10 @@ export type RoomContextItem = {
   endSeconds?: number;
   score: number;
   isCurrentVersion?: boolean;
+  nodeId?: string;
+  nodeType?: string;
+  fromNodeId?: string;
+  toNodeId?: string;
 };
 
 export type RoomContextQuery = {

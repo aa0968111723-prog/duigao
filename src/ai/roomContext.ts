@@ -16,10 +16,11 @@ import { extractPlanDocument, rankPhotosForUse, understandImage } from "./unders
 import { currentVersion, isCurrentVersionId, requestedCompareLabels, versionsForQuery } from "./versionAwareness";
 import { describeMoment, parseTimestamp, segmentsFromComments } from "./video";
 import {
-  applyWhiteboardActions,
+  createEdge,
+  createNode,
   selectedSlice,
-  type WhiteboardApplyAction,
   type WhiteboardGraph,
+  type WhiteboardNode,
 } from "../collaboration/whiteboard";
 
 const DEFAULT_LIMIT = 12;
@@ -158,6 +159,31 @@ function scoreEntry(entry: KnowledgeEntry, query: string, intent: RoomContextInt
   return score;
 }
 
+function knowledgeItem(
+  entry: KnowledgeEntry,
+  room: Room,
+  input: { segments?: AssetVideoSegment[] },
+  score: number,
+): RoomContextItem {
+  const segment = (input.segments ?? [])
+    .concat(segmentsFromComments(room.comments, entry.versionId ?? "", entry.assetId ?? ""))
+    .find((item) => item.id === entry.segmentId);
+  return {
+    kind: entry.kind,
+    title: entry.title,
+    body: entry.body,
+    topics: entry.topics,
+    assetId: entry.assetId,
+    versionId: entry.versionId,
+    versionLabel: room.versions.find((version) => version.id === entry.versionId)?.label,
+    branchId: entry.branchId,
+    startSeconds: segment?.startSeconds,
+    endSeconds: segment?.endSeconds,
+    score,
+    isCurrentVersion: entry.isCurrentVersion,
+  };
+}
+
 export function retrieveRoomContext(input: {
   room: Room;
   query: RoomContextQuery | string;
@@ -176,6 +202,51 @@ export function retrieveRoomContext(input: {
   const limit = Math.max(1, Math.min(raw.limit ?? DEFAULT_LIMIT, 24));
   const entries = indexRoomKnowledge(input);
   const compare = compareLabels.length > 0;
+  const selectedIds = raw.selectedNodeIds ?? input.selectedNodeIds;
+  const items: RoomContextItem[] = [];
+
+  if (input.whiteboard && (selectedIds?.length || intent === "board_summary")) {
+    const slice = selectedIds?.length ? selectedSlice(input.whiteboard, selectedIds) : input.whiteboard;
+    for (const node of slice.nodes) {
+      items.push({
+        kind: "whiteboard_node",
+        title: node.text,
+        body: `${node.type}${node.linkedVersionId ? ` version:${node.linkedVersionId}` : ""}${node.linkedAssetId ? ` asset:${node.linkedAssetId}` : ""}`,
+        topics: [node.type],
+        assetId: node.linkedAssetId,
+        versionId: node.linkedVersionId,
+        branchId: node.linkedBranchId,
+        startSeconds: node.videoTimestamp,
+        score: 8,
+        isCurrentVersion: true,
+        nodeId: node.id,
+        nodeType: node.type,
+      });
+    }
+    for (const edge of slice.edges) {
+      const from = slice.nodes.find((node) => node.id === edge.fromNodeId);
+      const to = slice.nodes.find((node) => node.id === edge.toNodeId);
+      items.push({
+        kind: "whiteboard_edge",
+        title: `${from?.text ?? edge.fromNodeId} → ${to?.text ?? edge.toNodeId}`,
+        body: edge.kind,
+        topics: [edge.kind],
+        score: 7,
+        isCurrentVersion: true,
+        fromNodeId: edge.fromNodeId,
+        toNodeId: edge.toNodeId,
+      });
+    }
+    const linkedVersionIds = new Set(slice.nodes.flatMap((node) => node.linkedVersionId ? [node.linkedVersionId] : []));
+    const linkedAssetIds = new Set(slice.nodes.flatMap((node) => node.linkedAssetId ? [node.linkedAssetId] : []));
+    for (const entry of entries) {
+      if (items.length >= limit) break;
+      const linked = (entry.versionId && linkedVersionIds.has(entry.versionId))
+        || (entry.assetId && linkedAssetIds.has(entry.assetId));
+      if (linked) items.push(knowledgeItem(entry, room, input, 6));
+    }
+  }
+
   const scoped = entries.filter((entry) => {
     if (raw.selectedAssetIds?.length && entry.assetId && !raw.selectedAssetIds.includes(entry.assetId)) return false;
     if (compare && entry.versionId) {
@@ -192,34 +263,22 @@ export function retrieveRoomContext(input: {
     return true;
   });
 
+  const taken = new Set(items.map((item) => `${item.kind}:${item.versionId ?? item.nodeId ?? item.title}`));
   const ranked = scoped
     .map((entry) => ({
       entry,
       score: scoreEntry(entry, raw.text, intent, timeSeconds),
     }))
     .filter((item) => item.score > 0 || scoped.length <= limit)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .sort((a, b) => b.score - a.score);
 
-  const items: RoomContextItem[] = ranked.map(({ entry, score }) => {
-    const segment = (input.segments ?? [])
-      .concat(segmentsFromComments(room.comments, entry.versionId ?? "", entry.assetId ?? ""))
-      .find((item) => item.id === entry.segmentId);
-    return {
-      kind: entry.kind,
-      title: entry.title,
-      body: entry.body,
-      topics: entry.topics,
-      assetId: entry.assetId,
-      versionId: entry.versionId,
-      versionLabel: room.versions.find((version) => version.id === entry.versionId)?.label,
-      branchId: entry.branchId,
-      startSeconds: segment?.startSeconds,
-      endSeconds: segment?.endSeconds,
-      score,
-      isCurrentVersion: entry.isCurrentVersion,
-    };
-  });
+  for (const { entry, score } of ranked) {
+    if (items.length >= limit) break;
+    const key = `${entry.kind}:${entry.versionId ?? entry.id}`;
+    if (taken.has(key) || taken.has(`${entry.kind}:${entry.title}`)) continue;
+    items.push(knowledgeItem(entry, room, input, score));
+    taken.add(key);
+  }
 
   if (intent === "photo_fit") {
     const photos = items.filter((item) => item.kind === "image_analysis").map((item) => ({
@@ -235,38 +294,6 @@ export function retrieveRoomContext(input: {
     }
   }
 
-  const selectedIds = raw.selectedNodeIds ?? input.selectedNodeIds;
-  if (input.whiteboard && (selectedIds?.length || intent === "board_summary")) {
-    const slice = selectedIds?.length ? selectedSlice(input.whiteboard, selectedIds) : input.whiteboard;
-    for (const node of slice.nodes) {
-      items.push({
-        kind: "whiteboard_node",
-        title: node.text,
-        body: `${node.type}${node.linkedVersionId ? ` version:${node.linkedVersionId}` : ""}${node.linkedAssetId ? ` asset:${node.linkedAssetId}` : ""}`,
-        topics: [node.type],
-        assetId: node.linkedAssetId,
-        versionId: node.linkedVersionId,
-        branchId: node.linkedBranchId,
-        startSeconds: node.videoTimestamp,
-        score: 8,
-        isCurrentVersion: true,
-      });
-    }
-    for (const edge of slice.edges) {
-      const from = slice.nodes.find((node) => node.id === edge.fromNodeId);
-      const to = slice.nodes.find((node) => node.id === edge.toNodeId);
-      items.push({
-        kind: "whiteboard_edge",
-        title: `${from?.text ?? edge.fromNodeId} → ${to?.text ?? edge.toNodeId}`,
-        body: edge.kind,
-        topics: [edge.kind],
-        score: 7,
-        isCurrentVersion: true,
-      });
-    }
-  }
-
-  const bounded = items.slice(0, limit);
   return {
     roomId: room.id,
     query: raw.text,
@@ -275,7 +302,7 @@ export function retrieveRoomContext(input: {
     truncated: true,
     fullRoomDumped: false,
     currentVersionOnly: !compare,
-    items: bounded,
+    items: items.slice(0, limit),
   };
 }
 
@@ -373,22 +400,43 @@ export function latestLabels(versions: Version[]): string[] {
   return current ? [current.label] : [];
 }
 
-export function suggestedBoardActions(query: string): WhiteboardApplyAction[] {
-  if (/建立流程|加入白板/.test(query) || /吸引注意/.test(query)) {
-    return [{
-      type: "create_flow",
-      label: "加入白板",
-      payload: { steps: ["吸引注意", "互動", "介紹活動", "QR", "後續聯絡"] },
-    }];
+export function applyBackToWhiteboard(graph: WhiteboardGraph, context: RoomContext): WhiteboardGraph {
+  let next = graph;
+  const idMap = new Map<string, string>();
+  for (const item of context.items.filter((entry) => entry.kind === "whiteboard_node")) {
+    const existing = next.nodes.find((node) => node.id === item.nodeId)
+      ?? next.nodes.find((node) => node.text === item.title && node.type === (item.nodeType ?? "flow"));
+    if (existing) {
+      if (item.nodeId) idMap.set(item.nodeId, existing.id);
+      continue;
+    }
+    const made = createNode(next, {
+      id: item.nodeId,
+      type: (item.nodeType as WhiteboardNode["type"]) ?? "flow",
+      text: item.title,
+      x: 32,
+      y: next.nodes.length * 96,
+      linkedAssetId: item.assetId,
+      linkedVersionId: item.versionId,
+      linkedBranchId: item.branchId,
+      videoTimestamp: item.startSeconds,
+    });
+    next = made.graph;
+    idMap.set(item.nodeId ?? made.node.id, made.node.id);
   }
-  if (/心智圖/.test(query)) {
-    return [{ type: "create_mindmap", label: "建立心智圖", payload: { center: "招生", children: ["擺攤", "茶會", "演講"] } }];
+  for (const item of context.items.filter((entry) => entry.kind === "whiteboard_edge")) {
+    const fromId = (item.fromNodeId && idMap.get(item.fromNodeId))
+      ?? item.fromNodeId
+      ?? next.nodes.find((node) => item.title.startsWith(node.text))?.id;
+    const toId = (item.toNodeId && idMap.get(item.toNodeId))
+      ?? item.toNodeId
+      ?? next.nodes.find((node) => item.title.endsWith(node.text))?.id;
+    if (!fromId || !toId) continue;
+    if (next.edges.some((edge) => edge.fromNodeId === fromId && edge.toNodeId === toId)) continue;
+    const kind = item.body === "mindmap" ? "mindmap" : item.body === "related" ? "related" : "flow";
+    next = createEdge(next, fromId, toId, kind).graph;
   }
-  return [{ type: "add_whiteboard_node", label: "加入白板", payload: { text: query } }];
-}
-
-export function applyBackToWhiteboard(graph: WhiteboardGraph, query: string): WhiteboardGraph {
-  return applyWhiteboardActions(graph, suggestedBoardActions(query));
+  return next;
 }
 
 export { isCurrentVersionId, versionsForQuery };

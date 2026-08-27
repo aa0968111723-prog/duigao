@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { isFeatureEnabled } from "../../ai/featureFlags";
+import type { RoomContext } from "../../ai/types";
 import { answerFromContext, applyBackToWhiteboard, retrieveRoomContext } from "../../ai/roomContext";
 import { discussionTabs, plusMenuItems, voiceIsWorkingRoom } from "../../collaboration/discussionShell";
 import {
@@ -28,6 +29,7 @@ export function DiscussionWorkspace({ room, graph: incoming, library = [], onGra
   const [aiOpen, setAiOpen] = useState(false);
   const [query, setQuery] = useState("幫我整理目前方向。");
   const [answer, setAnswer] = useState("");
+  const [retrieved, setRetrieved] = useState<RoomContext | null>(null);
   const [graph, setGraph] = useState<WhiteboardGraph>(incoming ?? emptyGraph(room.id));
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -46,10 +48,20 @@ export function DiscussionWorkspace({ room, graph: incoming, library = [], onGra
       whiteboard: graph,
       selectedNodeIds: selected,
     });
+    setRetrieved(context);
     setAnswer(answerFromContext(query, context, room));
   };
 
-  const applyBoard = () => setNext(applyBackToWhiteboard(graph, query || "加入白板"));
+  const applyBoard = () => {
+    const context = retrieved ?? retrieveRoomContext({
+      room,
+      query,
+      whiteboard: graph,
+      selectedNodeIds: selected,
+    });
+    setRetrieved(context);
+    setNext(applyBackToWhiteboard(graph, context));
+  };
 
   return (
     <div className="discussion-shell" data-testid="discussion-shell" data-first-screen="對話,白板,語音">

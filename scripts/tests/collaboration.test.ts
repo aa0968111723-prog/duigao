@@ -99,26 +99,53 @@ test("one node+edge model covers sticky, room ref, poll, flow, mindmap without c
 });
 
 test("Room Context selection is bounded and apply-back inserts real nodes and edges", () => {
-  const activity = room();
-  let graph = createFlow(emptyGraph(activity.id), ["招生", "擺攤", "互動", "QR", "茶會"]);
-  const selected = graph.nodes.slice(0, 3).map((node) => node.id);
+  const branches = Array.from({ length: 14 }, (_, index) => ({
+    id: `b${index}`,
+    roomId: "room-activity",
+    name: `內容 ${index}`,
+    branchType: "poster" as const,
+    sortOrder: index,
+    status: "in_progress" as const,
+    createdBy: "owner",
+    createdAt: index,
+    updatedAt: index,
+  }));
+  const crowded: Room = {
+    ...room(),
+    branches,
+    versions: branches.map((branch, index) => ({
+      id: `ver${index}`,
+      label: "改二",
+      kind: "image",
+      imageDataUrl: "data:image/png;base64,AA==",
+      branchId: branch.id,
+    })),
+  };
+  const source = createFlow(emptyGraph(crowded.id), ["招生", "擺攤", "互動", "QR", "茶會"]);
+  const selected = source.nodes.filter((node) => node.text === "招生" || node.text === "擺攤").map((node) => node.id);
   const context = retrieveRoomContext({
-    room: activity,
+    room: crowded,
     query: "幫我整理目前方向。",
-    whiteboard: graph,
+    whiteboard: source,
     selectedNodeIds: selected,
   });
   assert.equal(context.fullRoomDumped, false);
   assert.ok(context.items.length <= 12);
   assert.equal(context.items.some((item) => item.body.includes("雜訊訊息")), false);
-  assert.ok(context.items.some((item) => item.kind === "whiteboard_node" || item.kind === "whiteboard_edge"));
-  const reply = answerFromContext("幫我整理目前方向。", context, activity);
+  const boardNodes = context.items.filter((item) => item.kind === "whiteboard_node");
+  const boardEdges = context.items.filter((item) => item.kind === "whiteboard_edge");
+  assert.ok(boardNodes.some((item) => item.title === "招生"), JSON.stringify(context.items.map((item) => item.kind + ":" + item.title)));
+  assert.ok(boardNodes.some((item) => item.title === "擺攤"));
+  assert.ok(boardEdges.some((item) => item.title.includes("招生") && item.title.includes("擺攤")));
+  const reply = answerFromContext("幫我整理目前方向。", context, crowded);
   assert.match(reply, /缺少報名後的追蹤|目前流程/);
-  const before = graph.nodes.length;
-  graph = applyBackToWhiteboard(graph, "加入白板 建立流程 吸引注意");
-  assert.ok(graph.nodes.length > before);
-  assert.ok(graph.nodes.some((node) => node.text === "吸引注意"));
-  assert.ok(graph.edges.some((edge) => edge.kind === "flow"));
+  const applied = applyBackToWhiteboard(emptyGraph(crowded.id), context);
+  assert.ok(applied.nodes.some((node) => node.text === "招生"));
+  assert.ok(applied.nodes.some((node) => node.text === "擺攤"));
+  const from = applied.nodes.find((node) => node.text === "招生");
+  const to = applied.nodes.find((node) => node.text === "擺攤");
+  assert.ok(from && to && applied.edges.some((edge) => edge.fromNodeId === from.id && edge.toNodeId === to.id));
+  assert.equal(applied.nodes.some((node) => node.text === "吸引注意"), false);
 });
 
 test("library search ranks understood tea poster above filename-only photo", () => {
