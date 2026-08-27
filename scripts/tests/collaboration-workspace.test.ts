@@ -1,4 +1,7 @@
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { addRoomTarget, buildInviteUrl, readInviteFromUrl } from "../../src/cloud/invite.ts";
 import {
@@ -18,6 +21,7 @@ import {
   touchWhiteboardNodeVersion,
 } from "../../src/features/collaboration/nodes.ts";
 import { arrangeBoard, arrangeFlow, arrangeGrid, arrangeMindmap } from "../../src/features/collaboration/layout.ts";
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 import { buildDiscussionContext, getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "../../src/features/collaboration/links.ts";
 import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion, stickyTextInputProps } from "../../src/features/collaboration/permissions.ts";
@@ -453,4 +457,11 @@ test("invite parser never reads invite from the query string", () => {
   } finally {
     Object.defineProperty(globalThis, "location", { configurable: true, value: prev });
   }
+});
+
+test("discussion shell publishes --kb itself (keyboard contract is real)", () => {
+  const source = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
+  assert.match(source, /useViewport\(\)/);
+  const hook = readFileSync(resolve(ROOT, "src/hooks/useViewport.ts"), "utf8");
+  assert.match(hook, /kbConsumers/);
 });

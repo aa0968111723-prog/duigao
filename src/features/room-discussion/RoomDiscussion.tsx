@@ -34,6 +34,8 @@ export type RoomDiscussionApi = {
   showDecisions?: boolean;
   /** 白板/投票等房間層動作；single 房 drawer 對 reviewer 關閉。 */
   showRoomActions?: boolean;
+  /** 語音邊界說明；single 房 drawer 不顯示（語音是房間殼的事）。 */
+  showVoiceNote?: boolean;
 };
 
 function timeLabel(ts: number): string {
@@ -76,9 +78,11 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       )}
 
       {/* 語音在 provider 落地前是一行不可互動的說明，不佔 pane（Grok pr00 F1）。 */}
+      {(api.showVoiceNote ?? true) && (
       <div className="rd-voice-note" data-testid="voice-boundary">
         {VOICE_ROOM_MVP ? "語音已開啟" : voiceUnavailableReason()}
       </div>
+      )}
 
       {showDecisions && (
       <section className="rd-decisions" data-testid="decision-area">
@@ -114,6 +118,8 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           const supportCount = api.supports.filter((item) => item.messageId === message.id).length;
           const supported = api.supports.some((item) => item.messageId === message.id && item.userId === api.userId);
           const sendState = api.sendStates?.[message.id];
+          // legacy（0001 messages）唯讀：沒有討論表的列可以支持/回覆。
+          const readOnly = Boolean((message.payload as { legacy?: boolean }).legacy);
           return (
             <article
               className={`rd-msg${sendState === "sending" ? " is-sending" : ""}${sendState === "failed" ? " is-failed" : ""}`}
@@ -143,12 +149,14 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   未送出 · 重試
                 </button>
               )}
+              {!readOnly && (
               <div className="rd-actions">
                 <button type="button" onClick={() => setReply(message)}>回覆</button>
                 <button type="button" onClick={() => api.onSupport(message.id, !supported)}>支持{supportCount ? ` ${supportCount}` : ""}</button>
                 {showRoomActions && api.canManage && <button type="button" onClick={() => api.onCreatePoll(message.body || "要不要這樣做？", ["贊成", "再想想"])}>建立投票</button>}
                 {showRoomActions && <button type="button" onClick={() => setBoardPick(message)}>加入白板</button>}
               </div>
+              )}
               {menuId === message.id && showRoomActions && (
                 <div className="rd-actions">
                   <button type="button" onClick={() => { setBoardPick(message); setMenuId(null); }}>加入白板</button>

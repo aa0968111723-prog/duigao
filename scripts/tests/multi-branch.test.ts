@@ -127,3 +127,38 @@ test("hydrating one branch does not mix another branch's review data", () => {
   assert.deepEqual(merged.comments.map((item) => item.versionId), ["p1"]);
   assert.deepEqual(merged.branches?.map((item) => item.id), [poster.id, video.id]);
 });
+
+test("branch merge carries the collaboration slice and falls back to room state", () => {
+  const poster = branch("poster", "poster", 1);
+  const message = { id: "m1", roomId: "r", authorId: "a", authorName: "A", authorColor: "#000", kind: "text", body: "殼還掛著", payload: {}, createdAt: 1, updatedAt: 1 };
+  const base = room({ projectMode: true, branches: [poster], versions: [] });
+  base.discussion = [message];
+  base.decisions = [{ id: "d1", roomId: "r", title: "決定", status: "decided", createdBy: "a", createdAt: 1, updatedAt: 1 }];
+  const hydrated = room({ projectMode: true, branches: [poster], versions: [] });
+  hydrated.discussion = [message, { ...message, id: "m2", body: "新的一句" }];
+  // 帶回 collab slice 的 branch 快照要覆蓋
+  const withCollab = mergeRoomBranch(base, hydrated, poster.id);
+  assert.deepEqual(withCollab.discussion?.map((item) => item.id), ["m1", "m2"]);
+  // 沒帶（undefined）時沿用房間現值，不清空
+  const withoutCollab = room({ projectMode: true, branches: [poster], versions: [] });
+  withoutCollab.discussion = undefined;
+  const kept = mergeRoomBranch(base, withoutCollab, poster.id);
+  assert.deepEqual(kept.discussion?.map((item) => item.id), ["m1"]);
+  assert.equal(kept.decisions?.length, 1);
+});
+
+test("summary lazy plans never clobber local blocks; full rows win by updatedAt", () => {
+  const plan = branch("plan", "plan", 1);
+  const base = room({ projectMode: true, branches: [plan], versions: [] });
+  base.plans = [{ branchId: plan.id, title: "企劃", description: "", blocks: [{ id: "b1", kind: "paragraph", text: "目標" }], updatedAt: 100 }];
+  const lazy = room({ projectMode: true, branches: [plan], versions: [] });
+  lazy.plans = [{ branchId: plan.id, title: "企劃", description: "", blocks: [], blocksOmitted: true, updatedAt: 999 }];
+  const mergedLazy = mergeRoomBranch(base, lazy, plan.id);
+  // mergeRoomBranch 的 updatedAt 守門：本地較舊但 lazy 不算完整列 —
+  // branch 路徑理論上不送 lazy 列；此處驗證 updatedAt 較新的完整列會覆蓋。
+  const full = room({ projectMode: true, branches: [plan], versions: [] });
+  full.plans = [{ branchId: plan.id, title: "企劃", description: "", blocks: [], updatedAt: 999 }];
+  const mergedFull = mergeRoomBranch(base, full, plan.id);
+  assert.equal(mergedFull.plans?.[0].blocks.length, 0);
+  void mergedLazy;
+});

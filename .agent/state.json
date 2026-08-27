@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T17:53:21.000Z",
+  "generatedAt": "2026-08-27T17:55:19.000Z",
   "git": {
     "branch": "feat/discussion-room-shell",
-    "sha": "a3211dbf9eca60f89a4e6635c9a009a5ab7ac4bf",
+    "sha": "b4a078dc5802363c6fc97c0fe215946ddeacf0d6",
     "mainSha": "77f6f9d59c20d9418a6cc705a4ab4a8ac15aee44",
-    "dirty": false
+    "dirty": true
   },
   "project": {
     "name": "duigao",

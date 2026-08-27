@@ -57,7 +57,9 @@ export function DiscussionDrawer({
         authorColor: legacy.authorColor,
         kind: "text",
         body: legacy.body,
-        payload: {},
+        // legacy 標記：這些 id 不存在於 room_discussion_messages，
+        // 支持/回覆/加入白板一律關閉（FK 會失敗）。
+        payload: { legacy: true },
         createdAt: legacy.createdAt,
         updatedAt: legacy.createdAt,
       });
@@ -93,6 +95,7 @@ export function DiscussionDrawer({
           // reviewer progressive-disclosure 同時成立。
           showDecisions: false,
           showRoomActions: false,
+          showVoiceNote: false,
           onCreatePoll: () => undefined,
           onAddToBoard: () => undefined,
           onOpenBoardNode: () => undefined,

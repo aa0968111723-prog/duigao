@@ -319,6 +319,13 @@ try {
     await page.getByRole("button", { name: "送出" }).click();
     await page.waitForSelector(".rd-msg.is-failed [data-testid='discussion-retry'], .rd-msg.is-failed", { timeout: 15000 });
     check("失敗的討論訊息看得到、可重試", await page.locator(".rd-msg.is-failed").count() === 1 && await page.getByTestId("discussion-retry").count() === 1);
+    // wholesale 快照替換不能吃掉 ghost：先送一句成功的（觸發 realtime
+    // reload → 整包快照不含失敗那句），失敗列必須還在（Grok pr01a F4/F7）。
+    await page.getByLabel("房間討論").fill("這句會成功並觸發快照");
+    await page.locator(".rd-composer").getByRole("button", { name: "送出" }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("這句會成功並觸發快照"), null, { timeout: 15000 });
+    await page.waitForTimeout(600);
+    check("失敗的 ghost 活過整包快照替換", await page.locator(".rd-msg.is-failed").count() === 1, "failed rows=" + await page.locator(".rd-msg.is-failed").count());
     await page.getByTestId("discussion-retry").click();
     await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 });
     await page.waitForTimeout(400);

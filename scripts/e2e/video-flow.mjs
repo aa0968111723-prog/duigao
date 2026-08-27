@@ -1305,6 +1305,17 @@ try {
   check("M. 桌機影片工作區有播放器與時間軸", (await D.isVisible("video.v-video")) && (await D.isVisible(".v-track")));
   check("M. 桌機有回首頁與標題", (await D.isVisible("header.topbar .brand")) && (await D.isVisible("header.topbar input.title-input")));
   check("M. 桌機討論在右側", await D.isVisible(".v-desktop-side"));
+  {
+    // PR-01a：single 雲端房的房級討論以「回饋｜房間討論」兩段掛在桌機側欄。
+    const side = D.locator(".v-desktop-side");
+    if (await side.locator(".v-discuss-tabs button").count()) {
+      await side.locator(".v-discuss-tabs button").filter({ hasText: "房間討論" }).click();
+      check("M. 桌機房間討論 segment 掛的是 drawer", await D.getByTestId("discussion-drawer").count() === 1);
+      await side.locator(".v-discuss-tabs button").filter({ hasText: "回饋" }).click();
+    } else {
+      check("M. 桌機房間討論 segment 掛的是 drawer", false, "v-discuss-tabs 不存在（drawer 未掛）");
+    }
+  }
   await D.click("header.topbar .btn-primary:has-text('分享')");
   await D.waitForSelector("input.m-share-url", { timeout: 30000 });
   const desktopUrl = await D.inputValue("input.m-share-url");

@@ -334,6 +334,15 @@ try {
       await deepPage.click("button.btn-primary");
       await deepPage.waitForSelector("input[aria-label=\"文宣名稱\"]", { timeout: 30000 });
       check("branch deep-link 直接開到指定文宣", await deepPage.locator('input[aria-label="文宣名稱"]').inputValue() === "演講文宣");
+      // one-shot：返回討論殼後，別的 realtime 快照不得把人再推回分支
+      //（Grok pr01a F6/F7）。用一句討論訊息當 nudge。
+      await deepPage.locator("button.m-home").click();
+      await deepPage.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
+      await deepPage.getByLabel("房間討論").fill("nudge 一下");
+      await deepPage.getByRole("button", { name: "送出" }).click();
+      await deepPage.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("nudge 一下"), null, { timeout: 15000 });
+      await deepPage.waitForTimeout(600);
+      check("deep-link 是一次性的：返回後快照不再推回分支", !(await deepPage.getByTestId("branch-workspace-overlay").count()));
     } finally {
       await deepContext.close();
     }

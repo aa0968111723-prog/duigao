@@ -338,7 +338,9 @@ export function App() {
       const plans = (normalized.plans ?? []).map((incoming) => {
         const existing = current?.plans?.find((plan) => plan.branchId === incoming.branchId);
         if (!existing) return incoming;
-        if (!incoming.blocks.length && existing.blocks.length) return existing;
+        // summary lazy 列（blocksOmitted）永遠不覆蓋有內容的版本；
+        // 完整列（含真的被清空的空陣列）走 updatedAt 比新。
+        if (incoming.blocksOmitted && existing.blocks.length) return existing;
         return incoming.updatedAt >= existing.updatedAt ? incoming : existing;
       });
       return {
@@ -352,16 +354,20 @@ export function App() {
         projectMode: normalized.projectMode || current?.projectMode,
       };
     });
-    // 深連結只在第一份快照套用一次。每次 realtime snapshot 都重套的話，
-    // 使用者按返回離開分支/白板後，下一個別人觸發的 reload 又會把他推回去。
+    // 深連結只套用一次 — 但只有「目標真的存在於這份快照」才算消耗：
+    // cache-first 的舊快照可能還沒有那個 branch，不該把 one-shot 吃掉
+    //（Grok pr01a F6）。套用後不再重套，返回的人不會被 reload 推回去。
     const applyLink = !roomLinkAppliedRef.current;
-    if (applyLink) roomLinkAppliedRef.current = true;
-    if (applyLink && roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
-      setActiveBranchId(roomLink.branchId);
-    }
-    if (applyLink && roomLink.kind === "cloud" && roomLink.whiteboardId) {
-      setActiveWhiteboardId(roomLink.whiteboardId);
-      setFocusNodeId(roomLink.nodeId ?? null);
+    if (applyLink && roomLink.kind === "cloud") {
+      const wantsBranch = Boolean(roomLink.branchId);
+      const branchReady = wantsBranch && Boolean(normalized.branches?.some((branch) => branch.id === roomLink.branchId));
+      if (branchReady) setActiveBranchId(roomLink.branchId!);
+      if (roomLink.whiteboardId) {
+        setActiveWhiteboardId(roomLink.whiteboardId);
+        setFocusNodeId(roomLink.nodeId ?? null);
+      }
+      // branch 目標還沒出現 → 不消耗，等下一份快照；其他情況消耗。
+      if (!wantsBranch || branchReady) roomLinkAppliedRef.current = true;
     }
     setView((v) => {
       const ids = normalized.versions.map((x) => x.id);
@@ -387,6 +393,7 @@ export function App() {
     insert: cloud.writes.insertDiscussion,
     bound: Boolean(cloud.boundRoomId),
     boundRoomId: cloud.boundRoomId ?? null,
+    localRoomId: room?.id ?? null,
     serverIds: serverDiscussionIds,
   });
   const discussionOutboxRef = useRef(discussionOutbox);
@@ -1160,6 +1167,9 @@ export function App() {
     (messageId: string, add: boolean) => {
       const userId = cloud.userId ?? guest?.id;
       if (!userId) return;
+      // legacy messages（0001 表）唯讀併入 drawer；它們的 id 不存在於
+      // room_discussion_messages，寫支持會 FK 失敗（Grok pr01a F5）。
+      if (!(roomRef.current?.discussion ?? []).some((message) => message.id === messageId)) return;
       updateRoom((r) => ({
         ...r,
         discussionSupports: add
@@ -2088,10 +2098,12 @@ export function App() {
       // Video rooms have their own Escape ladder (draft → range pick →
       // selection). Running both would cancel two things per press.
       if (roomRef.current && roomMediaType(roomRef.current) === "video") return;
-      if (draftPin) cancelPin();
-      else if (tool === "region") setTool("pan");
-      else if (selectedPinId) setSelectedPinId(null);
-      else if (previewStrokeId) setPreviewStrokeId(null);
+      // 消費掉的 Escape 要標記 defaultPrevented：外層（對稿 overlay／推進
+      // 面板）以此判斷這一下已被內層 ladder 用掉，一次只關一件事。
+      if (draftPin) { e.preventDefault(); cancelPin(); }
+      else if (tool === "region") { e.preventDefault(); setTool("pan"); }
+      else if (selectedPinId) { e.preventDefault(); setSelectedPinId(null); }
+      else if (previewStrokeId) { e.preventDefault(); setPreviewStrokeId(null); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

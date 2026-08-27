@@ -1124,11 +1124,11 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .project-room-main.is-discussion-root { --rd-dock: 0px; padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
 
 /* 推進面板：由討論殼推進、可返回的次要畫面 */
-.project-push-pane { position: fixed; inset: 0; z-index: 28; background: var(--bg); overflow-y: auto; }
+.project-push-pane { position: fixed; inset: 0; z-index: 32; background: var(--bg); overflow-y: auto; }
 .project-push-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 10px 16px calc(10px); background: var(--bg); border-bottom: 1px solid var(--line-soft); }
 .project-push-head h2 { margin: 0; font-size: 17px; }
 .project-push-body { width: min(680px, calc(100% - 32px)); margin: 0 auto; padding: 10px 0 96px; }
 
 /* 對稿工作區 overlay：疊在討論殼上。此容器不可有 transform/filter/contain，
    工作區自己的 fixed 底欄才能繼續對 viewport 定位。 */
-.project-workspace-overlay { position: fixed; inset: 0; z-index: 30; background: var(--bg); }
+.project-workspace-overlay { position: fixed; inset: 0; z-index: 40; background: var(--bg); }

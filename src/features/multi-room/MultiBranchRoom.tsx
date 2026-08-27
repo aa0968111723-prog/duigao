@@ -20,6 +20,7 @@ import type {
 import { RoomDiscussion } from "../room-discussion/RoomDiscussion";
 import { WhiteboardWorkspace } from "../whiteboard/WhiteboardWorkspace";
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { useViewport } from "../../hooks/useViewport";
 import {
   BRANCH_STATUSES,
   BRANCH_TYPES,
@@ -442,6 +443,9 @@ function PollSheet({ onClose, onCreate }: { onClose: () => void; onCreate: (ques
 export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const normalized = normalizeRoomBranches(api.room);
   const isMobile = useIsMobile();
+  // 討論殼的 composer 是 fixed dock，靠 --kb 騎在鍵盤上；殼自己就是
+  // publisher（ref-counted，與 overlay 裡的對稿工作區共存）。
+  useViewport();
   // 討論是根畫面；總覽/內容/企劃是可返回的推進面板（Grok pr00 F1/F3）。
   const [pushedPane, setPushedPane] = useState<PushedPane | null>(null);
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
@@ -470,6 +474,20 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       setPushedPane(null);
     }
   }, [api.activeWhiteboardId]);
+
+  // 桌機 Escape：對稿 overlay 是最外層的「可返回」，讓工作區自己的
+  // ladder（modal/sheet）先吃；事件冒泡到 document 而沒被吃掉才關 overlay。
+  // 推進面板同理。
+  useEffect(() => {
+    if (!api.workspace && !pushedPane) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (api.workspace) api.onBackToRoom();
+      else setPushedPane(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [api.workspace, pushedPane, api.onBackToRoom]);
 
   const openBranch = (branchId: string, opts?: { startTime?: number }) => {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合

@@ -611,7 +611,7 @@ async function loadRoomSummary(supabase: SupabaseClient, roomId: string, force =
     proposalPrefs: [],
     branches,
     branchSummaries: summaries,
-    plans: ((plansRes.data as PlanRow[] | null) ?? []).map((row) => planFromRow({ ...row, blocks: Array.isArray(row.blocks) ? row.blocks : [] })),
+    plans: ((plansRes.data as PlanRow[] | null) ?? []).map(planFromRow),
     relations: ((relationsRes.data as RelationRow[] | null) ?? []).map(relationFromRow),
     polls: ((pollsRes.data as PollRow[] | null) ?? []).map(pollFromRow),
     pollVotes: ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
