@@ -191,18 +191,25 @@ export function retrieveRoomContext(input: {
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 
-  const items: RoomContextItem[] = ranked.map(({ entry, score }) => ({
-    kind: entry.kind,
-    title: entry.title,
-    body: entry.body,
-    topics: entry.topics,
-    assetId: entry.assetId,
-    versionId: entry.versionId,
-    versionLabel: room.versions.find((version) => version.id === entry.versionId)?.label,
-    branchId: entry.branchId,
-    score,
-    isCurrentVersion: entry.isCurrentVersion,
-  }));
+  const items: RoomContextItem[] = ranked.map(({ entry, score }) => {
+    const segment = (input.segments ?? [])
+      .concat(segmentsFromComments(room.comments, entry.versionId ?? "", entry.assetId ?? ""))
+      .find((item) => item.id === entry.segmentId);
+    return {
+      kind: entry.kind,
+      title: entry.title,
+      body: entry.body,
+      topics: entry.topics,
+      assetId: entry.assetId,
+      versionId: entry.versionId,
+      versionLabel: room.versions.find((version) => version.id === entry.versionId)?.label,
+      branchId: entry.branchId,
+      startSeconds: segment?.startSeconds,
+      endSeconds: segment?.endSeconds,
+      score,
+      isCurrentVersion: entry.isCurrentVersion,
+    };
+  });
 
   if (intent === "photo_fit") {
     const photos = items.filter((item) => item.kind === "image_analysis").map((item) => ({
@@ -259,12 +266,50 @@ export function answerFromContext(query: string, context: RoomContext, room?: Ro
 }
 
 export function buildZenAgentRequest(query: string, context: RoomContext): ZenAgentRoomRequest {
+  const assets = context.items.slice(0, 12).map((item, index) => {
+    const sourceId = item.assetId || item.versionId || `ctx_${index}`;
+    const assetType = item.kind === "document" ? "plan" : item.kind === "video_segment" ? "video" : "image";
+    return {
+      sourceId,
+      assetId: sourceId,
+      title: item.title.slice(0, 240),
+      assetType,
+      branchId: item.branchId,
+      versionId: item.versionId,
+      versionLabel: item.versionLabel,
+      isCurrent: item.isCurrentVersion !== false,
+      archived: false,
+      summary: item.body.slice(0, 5000),
+      topics: item.topics.slice(0, 30),
+      keywords: item.topics.slice(0, 30),
+      ...(item.kind === "video_segment" && item.startSeconds != null
+        ? {
+            segments: [{
+              startSeconds: item.startSeconds,
+              endSeconds: item.endSeconds ?? item.startSeconds,
+              summary: item.body,
+              topics: item.topics,
+            }],
+          }
+        : {}),
+    };
+  });
   return {
     agent: "tku-zen-agent",
     source: "duigao.room-context",
     notASecondAgent: true,
     query,
-    roomContext: context,
+    context: assets,
+    sources: assets.map((asset) => ({
+      sourceId: asset.sourceId,
+      assetId: asset.assetId,
+      title: asset.title,
+      assetType: asset.assetType,
+      versionId: asset.versionId,
+      versionLabel: asset.versionLabel,
+      excerpt: asset.summary?.slice(0, 900),
+    })),
+    relations: [],
   };
 }
 

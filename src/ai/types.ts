@@ -121,10 +121,40 @@ export type RoomContext = {
   items: RoomContextItem[];
 };
 
+/** Matches tku-zen-agent `DuigaoAsset` / `DuigaoContextRequest`. Extra fields are ignored there. */
+export type ZenAgentAsset = {
+  sourceId: string;
+  assetId: string;
+  title: string;
+  assetType: string;
+  branchId?: string;
+  versionId?: string;
+  versionLabel?: string;
+  isCurrent: boolean;
+  archived: boolean;
+  summary?: string;
+  detectedText?: string;
+  topics: string[];
+  keywords: string[];
+  segments?: Array<{ startSeconds: number; endSeconds: number; summary: string; topics: string[] }>;
+};
+
+export type ZenAgentSource = {
+  sourceId: string;
+  assetId?: string;
+  title: string;
+  assetType?: string;
+  versionId?: string;
+  versionLabel?: string;
+  excerpt?: string;
+};
+
 export type ZenAgentRoomRequest = {
   agent: "tku-zen-agent";
   source: "duigao.room-context";
   notASecondAgent: true;
   query: string;
-  roomContext: RoomContext;
+  context: ZenAgentAsset[];
+  sources: ZenAgentSource[];
+  relations: Array<{ sourceId: string; targetId: string; relationType: string }>;
 };

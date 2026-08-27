@@ -241,9 +241,11 @@ test("tku-zen-agent payload is retrieved context, not a second agent or a whole-
   const payload = buildZenAgentRequest("這張文宣在講什麼？", context);
   assert.equal(payload.agent, "tku-zen-agent");
   assert.equal(payload.notASecondAgent, true);
-  assert.equal(payload.roomContext.fullRoomDumped, false);
-  assert.ok(payload.roomContext.items.length < room.messages.length);
-  assert.equal(payload.roomContext.items.some((item) => item.body.includes("雜訊訊息")), false);
+  assert.ok(payload.context.length <= 12);
+  assert.ok(payload.context.length < room.messages.length);
+  assert.equal(payload.context.some((item) => (item.summary ?? "").includes("雜訊訊息")), false);
+  assert.ok(payload.sources.every((source) => source.sourceId && source.title));
+  assert.equal("storagePath" in payload || "invite" in payload, false);
 });
 
 test("query classifier does not treat every question as dumping the room", () => {
