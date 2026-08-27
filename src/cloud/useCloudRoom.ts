@@ -96,6 +96,12 @@ import {
   deleteNode as repoDeleteNode,
 } from "./collaborationRepository";
 import { decideNodeWriteRetry } from "../features/collaboration/offline";
+import {
+  acknowledgePendingWrite,
+  enqueuePendingWrite,
+  flushPendingWrites,
+  type PendingWrite,
+} from "./pendingWrites";
 
 export type CloudWrites = {
   setTitle: (title: string) => void;
@@ -279,7 +285,7 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
   const boundRef = useRef<string | null>(null); // cloud room id
   const unsubRef = useRef<Unsubscribe | null>(null);
   const revisions = useRef<Map<string, number>>(new Map());
-  const pending = useRef<Array<() => Promise<void>>>([]);
+  const pending = useRef<PendingWrite[]>([]);
   const reloadTimer = useRef<number | null>(null);
   const roomRef = useRef<Room | null>(room);
   const activeBranchRef = useRef<string | null>(activeBranchId ?? null);
@@ -399,30 +405,27 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
     if (!pending.current.length) return;
     const queue = pending.current;
     pending.current = [];
-    for (const task of queue) {
-      try {
-        await task();
-      } catch (err) {
-        // The write already landed on a previous attempt: done, not an error.
-        if (!isDuplicateKey(err)) pending.current.push(task);
-      }
-    }
+    pending.current = await flushPendingWrites(queue, isDuplicateKey);
     setStatus(pending.current.length ? "offline-pending" : "synced");
   }, []);
 
   /** Run a cloud write with optimistic UI already done; queue + degrade on failure. */
   const run = useCallback(
-    (task: () => Promise<void>) => {
+    (key: string, task: () => Promise<void>) => {
       if (!supabase || !boundRef.current) return;
       setStatus("syncing");
       task()
-        .then(() => setStatus(pending.current.length ? "offline-pending" : "synced"))
+        .then(() => {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+        })
         .catch((err) => {
           if (isDuplicateKey(err)) {
+            pending.current = acknowledgePendingWrite(pending.current, key);
             setStatus(pending.current.length ? "offline-pending" : "synced");
             return;
           }
-          pending.current.push(task);
+          pending.current = enqueuePendingWrite(pending.current, { key, task });
           setStatus("offline-pending");
         });
     },
@@ -436,18 +439,20 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
    * races its `(branch_id, room_id)` foreign key on a slow mobile connection.
    */
   const runAndWait = useCallback(
-    async (task: () => Promise<void>): Promise<void> => {
+    async (key: string, task: () => Promise<void>): Promise<void> => {
       if (!supabase || !boundRef.current) return;
       setStatus("syncing");
       try {
         await task();
+        pending.current = acknowledgePendingWrite(pending.current, key);
         setStatus(pending.current.length ? "offline-pending" : "synced");
       } catch (err) {
         if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
           setStatus(pending.current.length ? "offline-pending" : "synced");
           return;
         }
-        pending.current.push(task);
+        pending.current = enqueuePendingWrite(pending.current, { key, task });
         setStatus("offline-pending");
         throw err;
       }
@@ -474,11 +479,8 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
           return false;
         }
         const retry = decideNodeWriteRetry("failed");
-        if (retry.queueMemory) {
-          pending.current.push(async () => {
-            await task();
-          });
-        }
+        // queueMemory stays false: IndexedDB is the only node retry owner.
+        void retry;
         setStatus("offline-pending");
         return false;
       }
@@ -537,7 +539,7 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
         // cleanup no longer knows about.
         if (cancelled) return;
         setProposalCloudSync(targetRoomId, (doc) => {
-          run(async () => {
+          run(`proposal:${doc.id}`, async () => {
             const expected = revisions.current.get(doc.id) ?? 0;
             try {
               const next = await upsertProposal(supabase, targetRoomId!, {
@@ -607,8 +609,10 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
    */
   useEffect(() => {
     const revive = () => {
-      void flushPending();
-      if (boundRef.current) void reload();
+      void (async () => {
+        await flushPending();
+        if (boundRef.current) await reload();
+      })();
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") revive();
@@ -625,8 +629,10 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
   const retry = useCallback(() => {
     setInviteInvalid(false);
     if (boundRef.current) {
-      void flushPending();
-      void reload();
+      void (async () => {
+        await flushPending();
+        await reload();
+      })();
     } else {
       setStatus("connecting");
       setBindNonce((n) => n + 1);
@@ -672,7 +678,7 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
       setInviteUrl(url);
       await reload();
       setProposalCloudSync(roomId, (doc) => {
-        run(async () => {
+        run(`proposal:${doc.id}`, async () => {
           const expected = revisions.current.get(doc.id) ?? 0;
           const next = await upsertProposal(supabase, roomId, {
             id: doc.id,
@@ -912,41 +918,41 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
   };
 
   const writes: CloudWrites = {
-    setTitle: (title) => run(() => setRoomTitle(supabase!, boundRef.current!, title)),
-    insertComment: (pin) => run(() => insertComment(supabase!, boundRef.current!, pin)),
-    setResolved: (id, resolved) => run(() => setCommentResolved(supabase!, id, resolved)),
-    insertStroke: (stroke) => run(() => insertStroke(supabase!, boundRef.current!, stroke)),
-    deleteStroke: (id) => run(() => repoDeleteStroke(supabase!, id)),
-    insertMessage: (msg) => run(() => insertMessage(supabase!, boundRef.current!, msg)),
+    setTitle: (title) => run("room-title", () => setRoomTitle(supabase!, boundRef.current!, title)),
+    insertComment: (pin) => run(`comment:${pin.id}`, () => insertComment(supabase!, boundRef.current!, pin)),
+    setResolved: (id, resolved) => run(`comment-resolved:${id}`, () => setCommentResolved(supabase!, id, resolved)),
+    insertStroke: (stroke) => run(`stroke:${stroke.id}`, () => insertStroke(supabase!, boundRef.current!, stroke)),
+    deleteStroke: (id) => run(`stroke-del:${id}`, () => repoDeleteStroke(supabase!, id)),
+    insertMessage: (msg) => run(`message:${msg.id}`, () => insertMessage(supabase!, boundRef.current!, msg)),
     addVersion: (label, sortOrder, imageDataUrl, branchId) =>
-      run(async () => {
+      run(`version:${branchId ?? "room"}:${sortOrder}:${label}`, async () => {
         const v: Version = await repoAddVersion(supabase!, boundRef.current!, label, sortOrder, imageDataUrl, branchId);
         void v;
         scheduleReload();
       }),
-    createBranch: (branch) => runAndWait(() => insertBranch(supabase!, branch)),
-    updateBranch: (branchId, patch) => run(() => updateBranch(supabase!, boundRef.current!, branchId, patch)),
-    savePlan: (plan) => run(() => upsertPlan(supabase!, plan, boundRef.current!)),
-    createRelation: (relation) => run(() => insertRelation(supabase!, relation)),
-    deleteRelation: (relationId) => run(() => deleteRelation(supabase!, boundRef.current!, relationId)),
-    createPoll: (poll) => run(() => insertPoll(supabase!, poll)),
-    votePoll: (vote) => run(() => votePoll(supabase!, vote)),
-    insertDiscussion: (message) => run(() => insertDiscussion(supabase!, message)),
-    setDiscussionSupport: (messageId, add) => run(() => repoSetDiscussionSupport(supabase!, boundRef.current!, messageId, add)),
-    createWhiteboard: (board) => run(() => insertWhiteboard(supabase!, board)),
-    updateWhiteboard: (board) => run(() => repoUpdateWhiteboard(supabase!, board)),
+    createBranch: (branch) => runAndWait(`branch-insert:${branch.id}`, () => insertBranch(supabase!, branch)),
+    updateBranch: (branchId, patch) => run(`branch:${branchId}`, () => updateBranch(supabase!, boundRef.current!, branchId, patch)),
+    savePlan: (plan) => run(`plan:${plan.branchId}`, () => upsertPlan(supabase!, plan, boundRef.current!)),
+    createRelation: (relation) => run(`relation:${relation.id}`, () => insertRelation(supabase!, relation)),
+    deleteRelation: (relationId) => run(`relation-del:${relationId}`, () => deleteRelation(supabase!, boundRef.current!, relationId)),
+    createPoll: (poll) => run(`poll:${poll.id}`, () => insertPoll(supabase!, poll)),
+    votePoll: (vote) => run(`vote:${vote.pollId}:${vote.userId}`, () => votePoll(supabase!, vote)),
+    insertDiscussion: (message) => run(`discussion:${message.id}`, () => insertDiscussion(supabase!, message)),
+    setDiscussionSupport: (messageId, add) => run(`support:${messageId}`, () => repoSetDiscussionSupport(supabase!, boundRef.current!, messageId, add)),
+    createWhiteboard: (board) => run(`whiteboard-insert:${board.id}`, () => insertWhiteboard(supabase!, board)),
+    updateWhiteboard: (board) => run(`whiteboard:${board.id}`, () => repoUpdateWhiteboard(supabase!, board)),
     upsertNode: (node) => writeAck(() => repoUpsertNode(supabase!, { ...node, roomId: boundRef.current! })),
     deleteNode: (id) => writeAck(async () => {
       await repoDeleteNode(supabase!, boundRef.current!, id);
       return true;
     }),
-    createEdge: (edge) => run(() => insertEdge(supabase!, edge)),
-    createDecision: (decision) => run(() => insertDecision(supabase!, decision)),
-    updateDecision: (decision) => run(() => repoUpdateDecision(supabase!, decision)),
-    setAllowBoardEdit: (allow) => run(() => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),
-    toggleSupport: (commentId, add) => run(() => setSupport(supabase!, boundRef.current!, commentId, add)),
-    insertReply: (reply) => run(() => repoInsertReply(supabase!, boundRef.current!, reply)),
-    setProposalPref: (versionId, choice) => run(() => setPreference(supabase!, boundRef.current!, versionId, choice)),
+    createEdge: (edge) => run(`edge:${edge.id}`, () => insertEdge(supabase!, edge)),
+    createDecision: (decision) => run(`decision-insert:${decision.id}`, () => insertDecision(supabase!, decision)),
+    updateDecision: (decision) => run(`decision:${decision.id}`, () => repoUpdateDecision(supabase!, decision)),
+    setAllowBoardEdit: (allow) => run("allow-board-edit", () => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),
+    toggleSupport: (commentId, add) => run(`comment-support:${commentId}`, () => setSupport(supabase!, boundRef.current!, commentId, add)),
+    insertReply: (reply) => run(`reply:${reply.id}`, () => repoInsertReply(supabase!, boundRef.current!, reply)),
+    setProposalPref: (versionId, choice) => run(`pref:${versionId}`, () => setPreference(supabase!, boundRef.current!, versionId, choice)),
   };
 
   return {
