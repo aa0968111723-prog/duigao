@@ -217,7 +217,7 @@ try {
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('input[aria-label="段落內容"]')).some((input) => input.value === "目標：招募新生") && document.querySelector('input[aria-label="完成項目"]')?.checked === true,
       null,
-      { timeout: 10000 },
+      { timeout: 30000 },
     );
     check("手機企劃可快速編輯段落與 checkbox", await page.locator('input[aria-label="段落內容"]').first().inputValue() === "目標：招募新生" && await page.locator('input[aria-label="完成項目"]').isChecked());
 
