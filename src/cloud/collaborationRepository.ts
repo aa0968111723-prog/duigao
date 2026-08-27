@@ -332,6 +332,24 @@ export async function insertDiscussion(supabase: SupabaseClient, message: Discus
   if (error) throw new CloudError(error.message, "discussion");
 }
 
+/**
+ * AI 套用的稽核列（0019）。payload 只存呈現層事實（id/type/label），
+ * 不存 proposal 原始 payload。RLS 保證 actor=自己、房間=所屬、型別只能
+ * 是 ai_proposal_applied — 這裡不重複檢查，policy 是唯一權威。
+ */
+export async function insertAiApplyAudit(
+  supabase: SupabaseClient,
+  entry: { roomId: string; actorUserId: string; proposalId: string; proposalType: string; label: string },
+): Promise<void> {
+  const { error } = await supabase.from("collaboration_audit_events").insert({
+    room_id: entry.roomId,
+    event_type: "ai_proposal_applied",
+    actor_user_id: entry.actorUserId,
+    payload: { proposal_id: entry.proposalId, type: entry.proposalType, label: entry.label.slice(0, 240) },
+  });
+  if (error) throw new CloudError(error.message, "ai-audit");
+}
+
 export async function setDiscussionSupport(supabase: SupabaseClient, roomId: string, messageId: string, add: boolean): Promise<void> {
   if (add) {
     const { error } = await supabase.from("room_discussion_supports").upsert({ message_id: messageId, room_id: roomId });

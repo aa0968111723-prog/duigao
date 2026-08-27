@@ -85,6 +85,7 @@ import { mergeRoomBranch } from "../lib/roomBranches";
 import {
   edgeFromRow,
   insertDecision,
+  insertAiApplyAudit,
   insertDiscussion,
   insertEdge,
   nodeFromRow,
@@ -122,6 +123,8 @@ export type CloudWrites = {
   createPoll: (poll: RoomPoll) => void;
   votePoll: (vote: PollVote) => void;
   insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
+  /** AI 套用稽核列（0019）。回傳成敗；失敗不重試 — 討論串訊息是人看的 fallback。 */
+  recordAiApplyAudit?: (entry: { proposalId: string; proposalType: string; label: string }) => Promise<boolean>;
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
   createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
@@ -299,6 +302,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
    * "my verdict" and "my reaction" never find anything.
    */
   const [userId, setUserId] = useState<string | null>(null);
+  const userIdRef = useRef<string | null>(null);
+  userIdRef.current = userId;
 
   const boundRef = useRef<string | null>(null); // cloud room id
   const unsubRef = useRef<Unsubscribe | null>(null);
@@ -997,6 +1002,21 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     // 而且失敗不進 pending 佇列（keyed run 也不用）— 重試的唯一擁有者是
     // App 端的 outbox（自動補送會跟使用者手動重試打架）。
     // duplicate-key 視為成功：id 相同代表上一次其實已寫入、只是回應沒到。
+    recordAiApplyAudit: async (entry) => {
+      if (!supabase || !boundRef.current || !userIdRef.current) return false;
+      try {
+        await insertAiApplyAudit(supabase, {
+          roomId: boundRef.current,
+          actorUserId: userIdRef.current,
+          proposalId: entry.proposalId,
+          proposalType: entry.proposalType,
+          label: entry.label,
+        });
+        return true;
+      } catch {
+        return false; // 稽核失敗不擋套用結果；App 端以 toast 誠實告知
+      }
+    },
     insertDiscussion: async (message) => {
       if (!supabase || !boundRef.current) return false;
       setStatus("syncing");
