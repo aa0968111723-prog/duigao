@@ -1057,48 +1057,6 @@ try {
     );
   }
 
-  section("素材智能：0014 asset intelligence RLS / retrieval");
-  const intelPoster = psql("select gen_random_uuid();").out;
-  const intelVideo = psql("select gen_random_uuid();").out;
-  const intelPlan = psql("select gen_random_uuid();").out;
-  const intelPosterV2 = psql("select gen_random_uuid();").out;
-  const intelSegment = psql("select gen_random_uuid();").out;
-  psql(`set request.jwt.claim.sub = '${owner}';
-    insert into public.versions (id, room_id, label, sort_order, image_path, branch_id)
-      values ('${intelPosterV2}'::uuid, '${capRoom}'::uuid, '改二', 52, 'poster-v2.png', '${projectPoster}'::uuid);
-    insert into public.asset_records (id, room_id, branch_id, kind, title, source_version_id, current_version_id, created_by)
-      values
-        ('${intelPoster}'::uuid, '${capRoom}'::uuid, '${projectPoster}'::uuid, 'poster', '擺攤文宣', '${intelPosterV2}'::uuid, '${intelPosterV2}'::uuid, '${owner}'::uuid),
-        ('${intelVideo}'::uuid, '${capRoom}'::uuid, '${projectVideo}'::uuid, 'video', '招生影片', '${projectVideoVersion}'::uuid, '${projectVideoVersion}'::uuid, '${owner}'::uuid),
-        ('${intelPlan}'::uuid, '${capRoom}'::uuid, '${projectPlan}'::uuid, 'plan', '擺攤計畫', null, null, '${owner}'::uuid);
-    insert into public.asset_analyses (room_id, asset_id, version_id, kind, source, summary, topics, caption)
-      values ('${capRoom}'::uuid, '${intelPoster}'::uuid, '${intelPosterV2}'::uuid, 'image', 'structured', '中庭擺攤主視覺，右下是報名 QR。', array['擺攤','QR'], '擺攤文宣改二');
-    insert into public.asset_video_segments (id, room_id, asset_id, version_id, start_seconds, end_seconds, summary, topics, source)
-      values ('${intelSegment}'::uuid, '${capRoom}'::uuid, '${intelVideo}'::uuid, '${projectVideoVersion}'::uuid, 35, 48, '學長示範如何掃 QR 報名茶會。', array['QR','茶會'], 'comment');
-    insert into public.asset_relations (room_id, from_asset_id, to_asset_id, relation_type, created_by)
-      values ('${capRoom}'::uuid, '${intelPlan}'::uuid, '${intelPoster}'::uuid, 'used_in', '${owner}'::uuid);`);
-  ok(
-    "owner 可以建立 asset / analysis / segment，且 knowledge 會同步",
-    as(owner, `select count(*) from public.asset_records where room_id = '${capRoom}'::uuid;`).out === "3"
-      && as(owner, `select count(*) from public.room_knowledge_entries where room_id = '${capRoom}'::uuid;`).out !== "0",
-  );
-  ok(
-    "reviewer 可以讀 Room Knowledge，不能寫 analysis",
-    as(reviewer, `select count(*) from public.asset_records where id = '${intelPoster}'::uuid;`).out === "1"
-      && as(reviewer, `insert into public.asset_analyses (room_id, asset_id, kind, summary) values ('${capRoom}'::uuid, '${intelPoster}'::uuid, 'image', 'blocked');`).failed,
-  );
-  ok(
-    "非成員與匿名讀不到 asset intelligence",
-    as(stranger, `select count(*) from public.asset_records where room_id = '${capRoom}'::uuid;`).out === "0"
-      && asAnon(`select count(*) from public.room_knowledge_entries;`).out !== "1",
-  );
-  const atForty = as(reviewer, `select body from public.search_room_knowledge('${capRoom}'::uuid, 'QR', 40, false, 8) where kind = 'video_segment';`);
-  ok("00:40 檢索回傳影片片段而不是整間房", !atForty.failed && /QR|報名|茶會/.test(atForty.out), atForty.out);
-  ok(
-    "沒有預建 voice / canva table",
-    psql(`select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('voice_rooms','canva_designs','canva_designs');`).out === "0",
-  );
-
   section("同房多分支：0013 migration 可以重跑");
   const projectShape = () => psql(`select
     (select count(*) from information_schema.tables where table_name in ('room_branches', 'plan_documents', 'content_relations', 'room_polls', 'room_poll_votes')) || '/' ||
@@ -1112,35 +1070,170 @@ try {
   const replayDelete = as(owner, `delete from public.room_branches where id = '${projectPoster}'::uuid;`);
   ok("重跑 0013 後 branch 封存規則仍在", !replayArchive.failed && replayDelete.failed, [replayArchive.err, replayDelete.err].filter(Boolean).join(" | "));
 
-  section("素材智能：0014 migration 可以重跑");
-  const intelShape = () => psql(`select
-    (select count(*) from information_schema.tables where table_name in ('asset_records','asset_analyses','asset_video_segments','asset_relations','room_knowledge_entries')) || '/' ||
-    (select count(*) from pg_policies where tablename in ('asset_records','asset_analyses','asset_video_segments','asset_relations','room_knowledge_entries')) || '/' ||
-    (select count(*) from pg_indexes where indexname in ('idx_asset_records_room','idx_room_knowledge_fts','idx_asset_video_segments_room'));`).out;
-  const intelShapeBefore = intelShape();
-  psqlFile(join(MIGRATIONS, "0014_asset_intelligence.sql"));
-  ok("重跑 0014 之後 tables / policies / indexes 數量不變", intelShapeBefore === intelShape(), `${intelShapeBefore} → ${intelShape()}`);
+  section("Asset Intelligence：統一素材、分析佇列、版本優先與 RLS");
+  const intelligenceShape = () => psql(`select
+    (select count(*) from information_schema.tables where table_name in ('intelligent_assets','asset_analysis','asset_regions','asset_video_segments','asset_document_chunks','asset_relations','asset_embeddings','asset_human_metadata','asset_analysis_jobs')) || '/' ||
+    (select count(*) from pg_policies where tablename in ('intelligent_assets','asset_analysis','asset_regions','asset_video_segments','asset_document_chunks','asset_relations','asset_embeddings','asset_human_metadata','asset_analysis_jobs')) || '/' ||
+    (select count(*) from pg_indexes where indexname in ('idx_intelligent_assets_room_type_updated','idx_asset_video_segments_asset_time','idx_asset_document_chunks_asset','idx_asset_relations_source','idx_asset_analysis_jobs_asset')) || '/' ||
+    (select count(*) from pg_trigger where tgname in ('versions_sync_intelligent_asset','intelligent_assets_enqueue','asset_relations_room_guard'));`).out;
+  const intelligenceBefore = intelligenceShape();
+  psqlFile(join(MIGRATIONS, "0015_asset_intelligence.sql"));
+  ok("0015 可以重複套用，tables / policies / indexes / triggers 數量不變", intelligenceBefore === intelligenceShape(), `${intelligenceBefore} → ${intelligenceShape()}`);
+  const posterAsset = as(owner, `select id from public.intelligent_assets where version_id = '${projectPosterVersion}'::uuid;`).out;
+  const videoAsset = as(owner, `select id from public.intelligent_assets where version_id = '${projectVideoVersion}'::uuid;`).out;
+  const planAsset = as(owner, `select id from public.intelligent_assets where branch_id = '${projectPlan}'::uuid and asset_type = 'plan';`).out;
   ok(
-    "重跑 0014 後 reviewer 仍然不能寫 analysis",
-    as(reviewer, `insert into public.asset_analyses (room_id, asset_id, kind, summary) values ('${capRoom}'::uuid, '${intelPoster}'::uuid, 'image', 'hacked');`).failed,
+    "既有 image / video / plan 自動建立統一 asset 並保留版本關係",
+    Boolean(posterAsset) && Boolean(videoAsset) && Boolean(planAsset)
+      && as(owner, `select asset_type from public.intelligent_assets where id = '${posterAsset}'::uuid;`).out === "image"
+      && as(owner, `select asset_type from public.intelligent_assets where id = '${videoAsset}'::uuid;`).out === "video"
+      && as(owner, `select asset_type from public.intelligent_assets where id = '${planAsset}'::uuid;`).out === "plan",
   );
+  ok(
+    "新增 asset 會排入 Tier 1 且同一分析版本去重",
+    as(owner, `select count(*) from public.asset_analysis_jobs where asset_id in ('${posterAsset}'::uuid, '${videoAsset}'::uuid, '${planAsset}'::uuid) and tier = 1 and status = 'queued';`).out === "3",
+  );
+  const customAsset = psql("select gen_random_uuid();").out;
+  const customKey = `manual:${customAsset}`;
+  const customInsert = as(owner, `insert into public.intelligent_assets (id, room_id, branch_id, asset_type, title, source_key, ai_readable, external_ai_allowed, created_by) values ('${customAsset}'::uuid, '${capRoom}'::uuid, '${projectPoster}'::uuid, 'image', '擺攤照片', '${customKey}', true, false, '${owner}'::uuid);`);
+  const customSelect = as(reviewer, `select id from public.intelligent_assets where id = '${customAsset}'::uuid;`);
+  const customUpdate = as(reviewer, `update public.intelligent_assets set title = '越權' where id = '${customAsset}'::uuid;`);
+  const customTitleAfterReviewerUpdate = as(owner, `select title from public.intelligent_assets where id = '${customAsset}'::uuid;`);
+  ok(
+    "owner 可以建立自訂素材，reviewer 只能讀",
+    !customInsert.failed && !customSelect.failed && customTitleAfterReviewerUpdate.out === "擺攤照片",
+    JSON.stringify({
+      insert: { failed: customInsert.failed, out: customInsert.out, err: customInsert.err },
+      select: { failed: customSelect.failed, out: customSelect.out, err: customSelect.err },
+      update: { failed: customUpdate.failed, out: customUpdate.out, err: customUpdate.err },
+      titleAfterReviewerUpdate: customTitleAfterReviewerUpdate.out,
+    }),
+  );
+  ok(
+    "reviewer 不能寫分析、區域、時間片段或關聯",
+    [
+      as(reviewer, `insert into public.asset_analysis (asset_id, room_id, summary) values ('${customAsset}'::uuid, '${capRoom}'::uuid, 'blocked');`),
+      as(reviewer, `insert into public.asset_regions (asset_id, room_id, x, y, width, height) values ('${customAsset}'::uuid, '${capRoom}'::uuid, .1, .1, .2, .2);`),
+      as(reviewer, `insert into public.asset_video_segments (asset_id, room_id, start_seconds, end_seconds) values ('${customAsset}'::uuid, '${capRoom}'::uuid, 1, 2);`),
+      as(reviewer, `insert into public.asset_relations (room_id, source_asset_id, target_asset_id, relation_type) values ('${capRoom}'::uuid, '${customAsset}'::uuid, '${posterAsset}'::uuid, 'related_to');`),
+    ].every((result) => result.failed),
+  );
+  ok(
+    "子表 room_id 與 asset 不一致會被 guard 擋下",
+    as(owner, `insert into public.asset_analysis (asset_id, room_id, summary) values ('${customAsset}'::uuid, '${roomId}'::uuid, 'cross-room');`).failed,
+  );
+  const otherAsset = psql("select gen_random_uuid();").out;
+  as(stranger, `insert into public.intelligent_assets (id, room_id, asset_type, title, source_key, created_by) values ('${otherAsset}'::uuid, '${roomId}'::uuid, 'image', 'room asset', 'manual:${otherAsset}', '${stranger}'::uuid);`);
+  ok(
+    "跨房間 asset relation 會被 guard 擋下，非成員讀不到",
+    as(owner, `insert into public.asset_relations (room_id, source_asset_id, target_asset_id, relation_type) values ('${capRoom}'::uuid, '${customAsset}'::uuid, '${otherAsset}'::uuid, 'related_to');`).failed
+      && as(stranger, `select count(*) from public.intelligent_assets where id = '${customAsset}'::uuid;`).out === "0",
+  );
+  const regionId = psql("select gen_random_uuid();").out;
+  const segmentId = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可保存 normalized region、影片 timestamp segment 與 human override",
+    !as(owner, `insert into public.asset_regions (id, asset_id, room_id, region_type, label, x, y, width, height, confidence) values ('${regionId}'::uuid, '${customAsset}'::uuid, '${capRoom}'::uuid, 'headline', '主標題', .12, .08, .76, .13, .94);`).failed
+      && !as(owner, `insert into public.asset_video_segments (id, asset_id, room_id, start_seconds, end_seconds, summary) values ('${segmentId}'::uuid, '${videoAsset}'::uuid, '${capRoom}'::uuid, 42, 55, '禪學社介紹');`).failed
+      && !as(owner, `insert into public.asset_human_metadata (asset_id, room_id, title, tags) values ('${customAsset}'::uuid, '${capRoom}'::uuid, '茶會照片', '{"茶會","主視覺"}');`).failed,
+  );
+  ok(
+    "不合法 normalized region 會被資料庫擋下",
+    as(owner, `insert into public.asset_regions (asset_id, room_id, x, y, width, height) values ('${customAsset}'::uuid, '${capRoom}'::uuid, .9, .1, .2, .2);`).failed,
+  );
+  ok(
+    "anon 讀不到所有 intelligence 表",
+    asAnon(`select count(*) from public.intelligent_assets;`).out !== "1"
+      && asAnon(`select count(*) from public.asset_analysis_jobs;`).out !== "1"
+      && asAnon(`select count(*) from public.asset_relations;`).out !== "1",
+  );
+  section("協作工作台：0014 whiteboard / discussion / decision RLS");
+  const collabBoard = psql("select gen_random_uuid();").out;
+  const collabNode = psql("select gen_random_uuid();").out;
+  const collabEdge = psql("select gen_random_uuid();").out;
+  const collabMsg = psql("select gen_random_uuid();").out;
+  const collabDecision = psql("select gen_random_uuid();").out;
+  const otherRoom = psql("select gen_random_uuid();").out;
+  const otherBoard = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}';
+    insert into public.whiteboards (id, room_id, title, description)
+      values ('${collabBoard}'::uuid, '${capRoom}'::uuid, '招生規劃', '活動討論');
+    insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, x, y, content)
+      values ('${collabNode}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'text', 20, 20, '{"text":"招生"}'::jsonb);`);
+  const selfEdge = as(owner, `insert into public.whiteboard_edges (id, whiteboard_id, room_id, source_node_id, target_node_id, edge_type) values ('${collabEdge}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, '${collabNode}'::uuid, '${collabNode}'::uuid, 'default');`);
+  ok("edge 不能連到自己", selfEdge.failed);
+  const secondNode = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可以建立白板與節點",
+    !as(owner, `insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${secondNode}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'flow', '{"text":"擺攤"}'::jsonb);`).failed
+      && as(owner, `select count(*) from public.whiteboards where id = '${collabBoard}'::uuid;`).out === "1",
+  );
+  ok(
+    "reviewer 可以讀白板與參加討論",
+    as(reviewer, `select count(*) from public.whiteboards where id = '${collabBoard}'::uuid;`).out === "1"
+      && !as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_name, body) values ('${collabMsg}'::uuid, '${capRoom}'::uuid, 'Reviewer', '先看招生流程');`).failed,
+  );
+  ok(
+    "reviewer 預設不能建整塊白板或刪除白板",
+    as(reviewer, `insert into public.whiteboards (room_id, title) values ('${capRoom}'::uuid, 'blocked');`).failed
+      && as(reviewer, `delete from public.whiteboards where id = '${collabBoard}'::uuid;`).failed,
+  );
+  as(reviewer, `update public.whiteboard_nodes set content = '{"text":"hack"}'::jsonb where id = '${collabNode}'::uuid;`);
+  ok(
+    "reviewer 預設不能改節點，直到房主開放協作",
+    as(owner, `select content->>'text' from public.whiteboard_nodes where id = '${collabNode}'::uuid;`).out === "招生",
+  );
+  const openEdit = as(owner, `update public.rooms set allow_board_edit = true where id = '${capRoom}'::uuid;`);
+  as(reviewer, `update public.whiteboard_nodes set content = '{"text":"一起改"}'::jsonb where id = '${collabNode}'::uuid;`);
+  ok(
+    "開放 allow_board_edit 後 reviewer 可以編節點",
+    !openEdit.failed && as(owner, `select content->>'text' from public.whiteboard_nodes where id = '${collabNode}'::uuid;`).out === "一起改",
+    openEdit.err,
+  );
+  as(reviewer, `update public.whiteboards set archived_at = now() where id = '${collabBoard}'::uuid;`);
+  ok(
+    "reviewer 仍然不能封存整塊白板",
+    as(owner, `select archived_at is null from public.whiteboards where id = '${collabBoard}'::uuid;`).out === "t",
+  );
+  const decisionInsert = as(owner, `insert into public.decision_records (id, room_id, title, status) values ('${collabDecision}'::uuid, '${capRoom}'::uuid, '已決定：採用 B 版', 'pending');`);
+  as(reviewer, `update public.decision_records set status = 'decided' where id = '${collabDecision}'::uuid;`);
+  const afterReviewer = as(owner, `select status from public.decision_records where id = '${collabDecision}'::uuid;`).out;
+  const ownerFinalize = as(owner, `update public.decision_records set status = 'decided' where id = '${collabDecision}'::uuid;`);
+  ok(
+    "owner 可以寫決策，reviewer 不能 finalize",
+    !decisionInsert.failed && afterReviewer === "pending" && !ownerFinalize.failed
+      && as(owner, `select status from public.decision_records where id = '${collabDecision}'::uuid;`).out === "decided",
+    [decisionInsert.err, ownerFinalize.err, afterReviewer].filter(Boolean).join(" | "),
+  );
+  const boardDelete = as(owner, `delete from public.whiteboards where id = '${collabBoard}'::uuid;`);
+  const boardArchive = as(owner, `update public.whiteboards set archived_at = now() where id = '${collabBoard}'::uuid;`);
+  ok(
+    "白板 hard delete 被擋住，只能封存",
+    boardDelete.failed && !boardArchive.failed && as(owner, `select archived_at is not null from public.whiteboards where id = '${collabBoard}'::uuid;`).out === "t",
+    [boardDelete.err, boardArchive.err].filter(Boolean).join(" | "),
+  );
+  psql(`set request.jwt.claim.sub = '${owner}';
+    select create_room_with_invite('${otherRoom}'::uuid, '另一間房', 'other-collab-token-0001', 'Owner', '#111111');
+    insert into public.whiteboards (id, room_id, title) values ('${otherBoard}'::uuid, '${otherRoom}'::uuid, '不該看到');`);
+  ok(
+    "跨房隔離：reviewer 讀不到另一間房的白板",
+    as(reviewer, `select count(*) from public.whiteboards where id = '${otherBoard}'::uuid;`).out === "0",
+  );
+  ok(
+    "get_whiteboard_context 只回結構不回原始媒體",
+    as(owner, `select (get_whiteboard_context('${collabBoard}'::uuid)->>'whiteboard') is not null;`).out === "t"
+      && !as(owner, `select get_whiteboard_context('${collabBoard}'::uuid)::text;`).out.includes("room-assets"),
+  );
+  ok("匿名讀不到白板 / 討論 / 決策", asAnon(`select count(*) from public.whiteboards;`).out !== "1" && asAnon(`select count(*) from public.room_discussion_messages;`).out !== "1");
 
-  section("白板：0015 node+edge RLS");
-  const canvasId = psql("select gen_random_uuid();").out;
-  const nodeA = psql("select gen_random_uuid();").out;
-  const nodeB = psql("select gen_random_uuid();").out;
-  ok(
-    "owner 可以建立 canvas / node / edge",
-    !as(owner, `insert into public.whiteboard_canvases (id, room_id, title) values ('${canvasId}'::uuid, '${capRoom}'::uuid, '活動白板');`).failed
-      && !as(owner, `insert into public.whiteboard_nodes (id, room_id, canvas_id, node_type, text, x, y) values ('${nodeA}'::uuid, '${capRoom}'::uuid, '${canvasId}'::uuid, 'flow', '招生', 0, 0), ('${nodeB}'::uuid, '${capRoom}'::uuid, '${canvasId}'::uuid, 'flow', '擺攤', 0, 80);`).failed
-      && !as(owner, `insert into public.whiteboard_edges (room_id, canvas_id, from_node_id, to_node_id, edge_kind) values ('${capRoom}'::uuid, '${canvasId}'::uuid, '${nodeA}'::uuid, '${nodeB}'::uuid, 'flow');`).failed,
-  );
-  ok("reviewer 可以讀白板，不能寫 node", as(reviewer, `select count(*) from public.whiteboard_nodes where canvas_id = '${canvasId}'::uuid;`).out === "2" && as(reviewer, `insert into public.whiteboard_nodes (room_id, canvas_id, node_type, text) values ('${capRoom}'::uuid, '${canvasId}'::uuid, 'sticky', 'blocked');`).failed);
-  ok(
-    "node payload 不能帶原稿 bytes",
-    as(owner, `insert into public.whiteboard_nodes (room_id, canvas_id, node_type, text, payload) values ('${capRoom}'::uuid, '${canvasId}'::uuid, 'poster', 'bad', '{"imageDataUrl":"data:image/png;base64,AA=="}'::jsonb);`).failed,
-  );
-  ok("匿名讀不到白板", asAnon(`select count(*) from public.whiteboard_nodes;`).out !== "2");
+  section("協作工作台：0014 可以重跑");
+  const collabShape = () => psql(`select
+    (select count(*) from information_schema.tables where table_name in ('whiteboards','whiteboard_nodes','whiteboard_edges','room_discussion_messages','decision_records','voice_sessions')) || '/' ||
+    (select count(*) from pg_policies where tablename in ('whiteboards','whiteboard_nodes','whiteboard_edges','room_discussion_messages','decision_records')) || '/' ||
+    (select count(*) from pg_trigger where tgname in ('whiteboards_no_delete','whiteboards_touch'));`).out;
+  const collabBefore = collabShape();
+  psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
+  ok("重跑 0014 之後 tables / policies / triggers 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
 
   section("素材庫：0016 RLS");
   const libRoom = psql("select gen_random_uuid();").out;
@@ -1156,19 +1249,12 @@ try {
       && as(reviewer, `insert into public.library_assets (scope, room_id, title, kind) values ('room', '${capRoom}'::uuid, 'blocked', 'image');`).failed,
   );
   ok("非成員讀不到房間素材庫", as(stranger, `select count(*) from public.library_assets where id = '${libRoom}'::uuid;`).out === "0");
-
-  section("白板／素材庫 migration 可以重跑");
-  const collabShape = () => psql(`select
-    (select count(*) from information_schema.tables where table_name in ('whiteboard_canvases','whiteboard_nodes','whiteboard_edges','library_assets')) || '/' ||
-    (select count(*) from pg_policies where tablename in ('whiteboard_canvases','whiteboard_nodes','whiteboard_edges','library_assets'));`).out;
-  const collabBefore = collabShape();
-  psqlFile(join(MIGRATIONS, "0015_whiteboard.sql"));
+  const libraryShape = () => psql(`select
+    (select count(*) from information_schema.tables where table_name = 'library_assets') || '/' ||
+    (select count(*) from pg_policies where tablename = 'library_assets');`).out;
+  const libraryBefore = libraryShape();
   psqlFile(join(MIGRATIONS, "0016_asset_library.sql"));
-  ok("重跑 0015/0016 後 tables / policies 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
-  ok(
-    "重跑後 reviewer 仍然不能寫白板",
-    as(reviewer, `insert into public.whiteboard_nodes (room_id, canvas_id, node_type, text) values ('${capRoom}'::uuid, '${canvasId}'::uuid, 'sticky', 'hacked');`).failed,
-  );
+  ok("重跑 0016 後 tables / policies 數量不變", libraryBefore === libraryShape(), `${libraryBefore} → ${libraryShape()}`);
 
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {

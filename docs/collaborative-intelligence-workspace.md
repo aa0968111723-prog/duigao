@@ -30,8 +30,8 @@ Feature flags:
 - `src/ai/*` — understanding, version awareness, retrieval, apply-back
 - `src/collaboration/*` — node+edge graph, discussion tabs, library search
 - `src/features/collaboration/DiscussionWorkspace.tsx`
-- `supabase/migrations/0014_asset_intelligence.sql`
-- `supabase/migrations/0015_whiteboard.sql`
+- `supabase/migrations/0014_collaboration_workspace.sql`
+- `supabase/migrations/0015_asset_intelligence.sql`
 - `supabase/migrations/0016_asset_library.sql`
 - `scripts/tests/asset-intelligence.test.ts`
 - `scripts/tests/collaboration.test.ts`

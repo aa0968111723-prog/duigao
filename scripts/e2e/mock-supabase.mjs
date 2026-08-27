@@ -45,6 +45,10 @@ const tables = {
   share_previews: [],
   // 同房多分支 1.0
   room_branches: [], plan_documents: [], content_relations: [], room_polls: [], room_poll_votes: [],
+  whiteboards: [], whiteboard_nodes: [], whiteboard_edges: [],
+  room_discussion_messages: [], room_discussion_supports: [], decision_records: [],
+  voice_sessions: [], voice_session_participants: [], presentation_state: [],
+  collaboration_audit_events: [],
   // 影片對稿 2.0 (PR #32)
   version_review_briefs: [], video_reactions: [], version_verdicts: [],
   version_review_progress: [],
@@ -58,6 +62,9 @@ const tables = {
 const CONFLICT_KEYS = {
   plan_documents: ["branch_id"],
   room_poll_votes: ["poll_id", "user_id"],
+  whiteboard_nodes: ["id"],
+  room_discussion_supports: ["message_id", "user_id"],
+  presentation_state: ["room_id"],
   version_review_briefs: ["version_id"],
   version_verdicts: ["version_id", "user_id"],
   version_review_progress: ["version_id", "user_id"],
@@ -368,6 +375,22 @@ export const server = http.createServer(async (req, res) => {
         });
       return json(res, 200, summaries);
     }
+    if (fn === "get_whiteboard_context" || fn === "get_selected_board_context") {
+      const uid = userOf(req);
+      const board = tables.whiteboards.find((item) => item.id === body.p_whiteboard_id);
+      if (!uid || !board || !isMember(board.room_id, uid)) return json(res, 200, null);
+      const nodes = tables.whiteboard_nodes.filter((node) => node.whiteboard_id === board.id);
+      const selected = Array.isArray(body.p_node_ids) ? nodes.filter((node) => body.p_node_ids.includes(node.id)) : nodes;
+      if (fn === "get_selected_board_context") {
+        return json(res, 200, { whiteboardId: board.id, roomId: board.room_id, nodes: selected });
+      }
+      return json(res, 200, {
+        whiteboard: { id: board.id, roomId: board.room_id, title: board.title, description: board.description },
+        nodes,
+        edges: tables.whiteboard_edges.filter((edge) => edge.whiteboard_id === board.id),
+        linkedEntities: nodes.filter((node) => node.linked_entity_id).map((node) => ({ nodeId: node.id, entityType: node.linked_entity_type, entityId: node.linked_entity_id })),
+      });
+    }
 
     const uid = userOf(req);
     if (!uid) return json(res, 401, { message: "auth required" });
@@ -480,6 +503,14 @@ export const server = http.createServer(async (req, res) => {
         const keys = CONFLICT_KEYS[table];
         const existing = keys ? tables[table].find((r) => keys.every((k) => r[k] === filled[k])) : null;
         if (existing && upsert) {
+          if (table === "whiteboard_nodes") {
+            const incoming = Number(filled.version ?? existing.version ?? 1);
+            const current = Number(existing.version ?? 1);
+            if (incoming !== current && incoming < current) {
+              return json(res, 409, { message: "stale-write", hint: "這則內容剛被別人改過，請重新載入。" });
+            }
+            filled.version = current + 1;
+          }
           const before = { ...existing };
           Object.assign(existing, filled, { updated_at: now() });
           // The progress trigger: a rewind must never lower the high-water mark.
@@ -526,6 +557,14 @@ export const server = http.createServer(async (req, res) => {
       // `updated_at` moves on every write, exactly like the SQL trigger — the
       // client derives its cache-busting `?v=` from it.
       for (const row of rows) {
+        if (table === "whiteboard_nodes" && patch.version != null) {
+          const incoming = Number(patch.version);
+          const current = Number(row.version ?? 1);
+          if (incoming !== current && incoming < current) {
+            return json(res, 409, { message: "stale-write", hint: "這則內容剛被別人改過，請重新載入。" });
+          }
+          patch.version = current + 1;
+        }
         const before = { ...row };
         Object.assign(row, patch, { updated_at: now() });
         if (table === "comments") applyCommentStatus(row, before);

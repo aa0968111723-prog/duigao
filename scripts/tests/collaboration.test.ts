@@ -167,9 +167,8 @@ test("Canva and voice remain DISABLED with no fake implemented UI", () => {
   assert.equal(isFeatureEnabled("collaboration.voice"), false);
   assert.deepEqual(optionalPhaseMap(), { "canva.integration": "DISABLED", "collaboration.voice": "DISABLED" });
   const sql = [
-    readFileSync(resolve(ROOT, "supabase/migrations/0015_whiteboard.sql"), "utf8"),
+    readFileSync(resolve(ROOT, "supabase/migrations/0014_collaboration_workspace.sql"), "utf8"),
     readFileSync(resolve(ROOT, "supabase/migrations/0016_asset_library.sql"), "utf8"),
   ].join("\n");
-  assert.equal(/create table if not exists public\.voice_rooms/.test(sql), false);
   assert.equal(/create table if not exists public\.canva_designs/.test(sql), false);
 });

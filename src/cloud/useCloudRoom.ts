@@ -82,6 +82,20 @@ import { signedVideoUrl } from "./videoAssets";
 import { subscribeRoom, type Unsubscribe } from "./roomSync";
 import type { SyncStatus } from "./types";
 import { mergeRoomBranch } from "../lib/roomBranches";
+import {
+  insertDecision,
+  insertDiscussion,
+  insertEdge,
+  insertWhiteboard,
+  loadWhiteboardGraph,
+  setAllowBoardEdit as repoSetAllowBoardEdit,
+  setDiscussionSupport as repoSetDiscussionSupport,
+  updateDecision as repoUpdateDecision,
+  updateWhiteboard as repoUpdateWhiteboard,
+  upsertNode as repoUpsertNode,
+  deleteNode as repoDeleteNode,
+} from "./collaborationRepository";
+import { decideNodeWriteRetry } from "../features/collaboration/offline";
 
 export type CloudWrites = {
   setTitle: (title: string) => void;
@@ -99,6 +113,16 @@ export type CloudWrites = {
   deleteRelation: (relationId: string) => void;
   createPoll: (poll: RoomPoll) => void;
   votePoll: (vote: PollVote) => void;
+  insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => void;
+  setDiscussionSupport?: (messageId: string, add: boolean) => void;
+  createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
+  updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
+  upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false>;
+  deleteNode?: (id: string) => Promise<boolean>;
+  createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
+  createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
+  updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
+  setAllowBoardEdit?: (allow: boolean) => void;
   toggleSupport: (commentId: string, add: boolean) => void;
   insertReply: (reply: import("../lib/types").CommentReply) => void;
   setProposalPref: (versionId: string, choice: string) => void;
@@ -350,6 +374,22 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
     }
   }, [supabase, onSnapshot, reloadReview]);
 
+  const loadWhiteboard = useCallback(async (whiteboardId: string): Promise<boolean> => {
+    const rid = boundRef.current;
+    if (!supabase || !rid) return false;
+    try {
+      const graph = await loadWhiteboardGraph(supabase, rid, whiteboardId);
+      const current = roomRef.current;
+      if (!current) return false;
+      const otherNodes = (current.whiteboardNodes ?? []).filter((node) => node.whiteboardId !== whiteboardId);
+      const otherEdges = (current.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId !== whiteboardId);
+      onSnapshot({ ...current, whiteboardNodes: [...otherNodes, ...graph.nodes], whiteboardEdges: [...otherEdges, ...graph.edges] });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [supabase, onSnapshot]);
+
   const scheduleReload = useCallback(() => {
     if (reloadTimer.current) window.clearTimeout(reloadTimer.current);
     reloadTimer.current = window.setTimeout(() => void reload(), 200);
@@ -410,6 +450,37 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
         pending.current.push(task);
         setStatus("offline-pending");
         throw err;
+      }
+    },
+    [supabase],
+  );
+
+  /**
+   * Awaitable node write. Failures are NOT pushed to the in-memory `pending`
+   * queue — IndexedDB is the only retry owner, so a later successful edit
+   * cannot be overwritten by a stale captured closure.
+   */
+  const writeAck = useCallback(
+    async <T>(task: () => Promise<T>): Promise<T | false> => {
+      if (!supabase || !boundRef.current) return false;
+      setStatus("syncing");
+      try {
+        const value = await task();
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+        return value;
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return false;
+        }
+        const retry = decideNodeWriteRetry("failed");
+        if (retry.queueMemory) {
+          pending.current.push(async () => {
+            await task();
+          });
+        }
+        setStatus("offline-pending");
+        return false;
       }
     },
     [supabase],
@@ -860,6 +931,19 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
     deleteRelation: (relationId) => run(() => deleteRelation(supabase!, boundRef.current!, relationId)),
     createPoll: (poll) => run(() => insertPoll(supabase!, poll)),
     votePoll: (vote) => run(() => votePoll(supabase!, vote)),
+    insertDiscussion: (message) => run(() => insertDiscussion(supabase!, message)),
+    setDiscussionSupport: (messageId, add) => run(() => repoSetDiscussionSupport(supabase!, boundRef.current!, messageId, add)),
+    createWhiteboard: (board) => run(() => insertWhiteboard(supabase!, board)),
+    updateWhiteboard: (board) => run(() => repoUpdateWhiteboard(supabase!, board)),
+    upsertNode: (node) => writeAck(() => repoUpsertNode(supabase!, { ...node, roomId: boundRef.current! })),
+    deleteNode: (id) => writeAck(async () => {
+      await repoDeleteNode(supabase!, boundRef.current!, id);
+      return true;
+    }),
+    createEdge: (edge) => run(() => insertEdge(supabase!, edge)),
+    createDecision: (decision) => run(() => insertDecision(supabase!, decision)),
+    updateDecision: (decision) => run(() => repoUpdateDecision(supabase!, decision)),
+    setAllowBoardEdit: (allow) => run(() => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),
     toggleSupport: (commentId, add) => run(() => setSupport(supabase!, boundRef.current!, commentId, add)),
     insertReply: (reply) => run(() => repoInsertReply(supabase!, boundRef.current!, reply)),
     setProposalPref: (versionId, choice) => run(() => setPreference(supabase!, boundRef.current!, versionId, choice)),
@@ -880,6 +964,7 @@ export function useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSn
     ensureCloudRoom,
     forgetCloudRoom,
     loadBranch,
+    loadWhiteboard,
     uploadVideo,
     refreshVideoUrl,
     retry,

@@ -62,6 +62,33 @@
       ]
     },
     {
+      "name": "Collaboration workspace",
+      "path": [
+        "src/features/collaboration",
+        "src/features/whiteboard",
+        "src/features/room-discussion"
+      ],
+      "responsibility": "Room-layer discussion, multi-whiteboard nodes/edges, decisions, and mobile board UX.",
+      "dependsOn": [
+        "Multi-branch project room",
+        "Discussion",
+        "Cloud layer"
+      ]
+    },
+    {
+      "name": "Asset intelligence",
+      "path": [
+        "src/ai",
+        "src/lib/assetIntelligence.ts",
+        "src/cloud/assetIntelligence.ts"
+      ],
+      "responsibility": "Understand room assets and retrieve a bounded Room Context slice.",
+      "dependsOn": [
+        "Multi-branch project room",
+        "Cloud layer"
+      ]
+    },
+    {
       "name": "Discussion",
       "path": [
         "src/features/discussion"
@@ -69,29 +96,6 @@
       "responsibility": "Shared pin comments and discussion cards.",
       "dependsOn": [
         "Cloud layer"
-      ]
-    },
-    {
-      "name": "Asset intelligence",
-      "path": [
-        "src/ai"
-      ],
-      "responsibility": "Understand room posters, videos, plans and versions; retrieve a Room Context slice for tku-zen-agent.",
-      "dependsOn": [
-        "Multi-branch project room",
-        "Cloud layer"
-      ]
-    },
-    {
-      "name": "Discussion whiteboard",
-      "path": [
-        "src/collaboration",
-        "src/features/collaboration"
-      ],
-      "responsibility": "Mobile discussion shell, one node+edge whiteboard, and content-based library search.",
-      "dependsOn": [
-        "Asset intelligence",
-        "Multi-branch project room"
       ]
     },
     {

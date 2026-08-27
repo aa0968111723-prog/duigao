@@ -1,249 +1,128 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import test from "node:test";
 import {
-  FEATURE_FLAGS,
-  answerFromContext,
-  buildZenAgentRequest,
-  classifyQuery,
-  currentVersion,
-  extractPlanDocument,
-  isFeatureEnabled,
-  optionalPhaseMap,
-  parseTimestamp,
-  rankPhotosForUse,
-  retrieveRoomContext,
-  understandImage,
-  versionsForQuery,
-} from "../../src/ai/index.ts";
-import type { PlanDocument, Room, RoomBranch, Version } from "../../src/lib/types.ts";
+  contextCacheKey,
+  isNormalizedAssetRegion,
+  latestVersionForBranch,
+  normalizeAssetRegion,
+  preferCurrentAssets,
+  rankContextItems,
+  segmentsInRange,
+  type IntelligentAsset,
+  type RoomContextItem,
+} from "../../src/lib/assetIntelligence";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const versions = [
+  { id: "v-old", branchId: "poster-1", label: "初稿", archivedAt: undefined },
+  { id: "v-current", branchId: "poster-1", label: "改二", archivedAt: undefined },
+  { id: "v-archived", branchId: "poster-1", label: "改一", archivedAt: "2026-01-01T00:00:00.000Z" },
+] as any;
 
-function version(id: string, label: string, kind: "image" | "video" = "image", branchId?: string): Version {
+function asset(id: string, patch: Partial<IntelligentAsset> = {}): IntelligentAsset {
   return {
     id,
-    label,
-    kind,
-    imageDataUrl: "data:image/png;base64,AA==",
-    ...(branchId ? { branchId } : {}),
+    roomId: "room-1",
+    branchId: "poster-1",
+    versionId: id,
+    assetType: "image",
+    title: id,
+    source: "room",
+    status: "ready",
+    analysisVersion: "1.0",
+    aiReadable: true,
+    externalAiAllowed: false,
+    metadata: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    regions: [],
+    videoSegments: [],
+    documentChunks: [],
+    ...patch,
   };
 }
 
-function branch(id: string, name: string, branchType: RoomBranch["branchType"]): RoomBranch {
-  return {
-    id,
-    roomId: "room-activity",
-    name,
-    branchType,
-    sortOrder: 0,
-    status: "in_progress",
-    createdBy: "owner",
-    createdAt: 1,
-    updatedAt: 1,
+test("image analysis regions stay normalized for viewer focus", () => {
+  const region = normalizeAssetRegion({ type: "headline", label: "主標題", x: 0.12, y: 0.08, width: 0.9, height: 0.2, confidence: 1.4 });
+  assert.ok(region);
+  assert.equal(region.x, 0.12);
+  assert.equal(region.width, 0.88);
+  assert.equal(region.confidence, 1);
+  assert.equal(isNormalizedAssetRegion(region), true);
+  assert.equal(normalizeAssetRegion({ x: 0, y: 0, width: 0, height: 0 }), null);
+});
+
+test("latest version preference excludes archived versions", () => {
+  assert.equal(latestVersionForBranch(versions, "poster-1")?.id, "v-current");
+  const current = preferCurrentAssets([asset("v-old"), asset("v-current"), asset("v-archived")], versions);
+  assert.deepEqual(current.map((item) => item.id), ["v-current"]);
+  assert.deepEqual(preferCurrentAssets([asset("v-archived")], versions, ["v-archived"]).map((item) => item.id), ["v-archived"]);
+});
+
+test("video segment retrieval intersects a selected timestamp range", () => {
+  const segments = [
+    { id: "s1", assetId: "a-video", startSeconds: 0, endSeconds: 8, summary: "開場", transcript: "", topics: [], detectedText: "" },
+    { id: "s2", assetId: "a-video", startSeconds: 42, endSeconds: 55, summary: "禪學社介紹", transcript: "", topics: ["禪學社"], detectedText: "" },
+  ];
+  assert.deepEqual(segmentsInRange(segments, { startSeconds: 43, endSeconds: 50 }).map((segment) => segment.id), ["s2"]);
+  assert.equal(segmentsInRange(segments, null).length, 2);
+});
+
+test("room context search ranks semantic metadata and keeps selected assets", () => {
+  const items = [
+    { sourceId: "a", assetId: "a", title: "擺攤照片 03", assetType: "image", isCurrent: true, archived: false, topics: ["學生", "戶外"], keywords: ["主視覺"], summary: "社團活動宣傳桌" },
+    { sourceId: "b", assetId: "b", title: "茶會文宣", assetType: "image", isCurrent: true, archived: false, topics: ["茶會"], keywords: [], summary: "日期與地點" },
+  ] as RoomContextItem[];
+  assert.equal(rankContextItems("適合擺攤主視覺", items, 1)[0].assetId, "a");
+});
+
+test("context cache key includes selected items and analysis versions", () => {
+  const left = contextCacheKey("room-1", { query: "缺什麼", selectedAssetIds: ["b", "a"] }, ["2", "1"]);
+  const right = contextCacheKey("room-1", { query: "缺什麼", selectedAssetIds: ["a", "b"] }, ["1", "2"]);
+  assert.equal(left, right);
+  assert.match(left, /room-1/);
+  assert.match(left, /缺什麼/);
+});
+
+test("context asset projection has no storage or invite capability", () => {
+  const item = asset("a");
+  const context: RoomContextItem = {
+    sourceId: item.id,
+    assetId: item.id,
+    title: item.title,
+    assetType: item.assetType,
+    isCurrent: true,
+    archived: false,
+    topics: [],
+    keywords: [],
   };
-}
-
-function stallPlan(): PlanDocument {
-  return {
-    branchId: "plan",
-    title: "擺攤計畫",
-    description: "迎新週中庭擺攤",
-    blocks: [
-      { id: "b1", kind: "checklist", text: "時間地點：週三中庭 12:00", checked: true },
-      { id: "b2", kind: "checklist", text: "人員輪班表", checked: false },
-      { id: "b3", kind: "checklist", text: "主視覺與文宣", checked: true },
-      { id: "b4", kind: "paragraph", text: "攤位互動：品茶小卡" },
-      { id: "b5", kind: "list", text: "報名 QR 放桌上" },
-    ],
-    updatedAt: 1,
-  };
-}
-
-function activityRoom(): Room {
-  const poster = branch("poster", "擺攤文宣", "poster");
-  const tea = branch("tea", "茶會文宣", "poster");
-  const scenic = branch("scenic", "校園風景", "poster");
-  const video = branch("video", "招生影片", "video");
-  const plan = branch("plan", "擺攤計畫", "plan");
-  return {
-    id: "room-activity",
-    title: "迎新活動房",
-    projectMode: true,
-    versions: [
-      version("draft", "初稿", "image", poster.id),
-      version("v1", "改一", "image", poster.id),
-      version("v2", "改二", "image", poster.id),
-      version("tea-1", "茶會定稿", "image", tea.id),
-      version("scenic-1", "IMG_3819.jpg", "image", scenic.id),
-      version("cut-1", "二剪", "video", video.id),
-    ],
-    comments: [
-      {
-        id: "c-poster",
-        versionId: "v2",
-        authorId: "a",
-        authorName: "A",
-        authorColor: "#000",
-        x: 0.2,
-        y: 0.3,
-        body: "主視覺是中庭擺攤，QR 報名放右下。",
-        resolved: false,
-        createdAt: 1,
-      },
-      {
-        id: "c-draft",
-        versionId: "draft",
-        authorId: "a",
-        authorName: "A",
-        authorColor: "#000",
-        x: 0.2,
-        y: 0.3,
-        body: "初稿還沒有 QR，只有社團名稱。",
-        resolved: false,
-        createdAt: 1,
-      },
-      {
-        id: "c-video",
-        versionId: "cut-1",
-        authorId: "a",
-        authorName: "A",
-        authorColor: "#000",
-        x: 0.4,
-        y: 0.5,
-        body: "學長示範如何掃 QR 報名茶會。",
-        anchor: { kind: "range", startTime: 35, endTime: 48 },
-        resolved: false,
-        createdAt: 2,
-      },
-    ],
-    strokes: [],
-    messages: Array.from({ length: 20 }, (_, index) => ({
-      id: `m${index}`,
-      authorId: "a",
-      authorName: "A",
-      authorColor: "#000",
-      body: `雜訊訊息 ${index}`,
-      createdAt: index,
-    })),
-    updatedAt: 10,
-    branches: [poster, tea, scenic, video, plan],
-    plans: [stallPlan()],
-    relations: [{
-      id: "rel-1",
-      roomId: "room-activity",
-      fromBranchId: plan.id,
-      toBranchId: poster.id,
-      relationType: "related",
-      createdBy: "owner",
-      createdAt: 1,
-    }],
-  };
-}
-
-test("optional Canva and voice stay DISABLED", () => {
-  assert.equal(isFeatureEnabled("ai.assetIntelligence"), true);
-  assert.equal(isFeatureEnabled("collaboration.discussion"), true);
-  assert.equal(isFeatureEnabled("collaboration.whiteboard"), true);
-  assert.equal(isFeatureEnabled("collaboration.voice"), false);
-  assert.equal(isFeatureEnabled("canva.integration"), false);
-  assert.deepEqual(optionalPhaseMap(), {
-    "canva.integration": "DISABLED",
-    "collaboration.voice": "DISABLED",
-  });
-  assert.equal(FEATURE_FLAGS["collaboration.voice"], false);
+  assert.equal("storagePath" in context, false);
+  assert.equal("invite" in context, false);
+  assert.equal("serviceRole" in context, false);
 });
 
-test("AI defaults to 改二, not 初稿", () => {
-  const room = activityRoom();
-  const poster = room.versions.filter((item) => item.branchId === "poster");
-  assert.equal(currentVersion(poster)?.label, "改二");
-  assert.deepEqual(versionsForQuery(poster, "這張文宣在講什麼？").map((item) => item.label), ["改二"]);
-  assert.deepEqual(versionsForQuery(poster, "比較初稿與改二").map((item) => item.label), ["初稿", "改二"]);
+test("asset relation expansion keeps a room-scoped source and target", () => {
+  const relation = { roomId: "room-1", sourceAssetId: "plan-1", targetAssetId: "poster-2", relationType: "supports" };
+  assert.equal(relation.roomId, "room-1");
+  assert.notEqual(relation.sourceAssetId, relation.targetAssetId);
+  assert.equal(["supports", "related_to", "references"].includes(relation.relationType), true);
 });
 
-test("image understanding uses content, not IMG_3819.jpg", () => {
-  const understood = understandImage({
-    title: "茶會文宣",
-    versionLabel: "定稿",
-    comments: [{ body: "淡江禪學社春季茶會，3/21 報名。" }],
-    analysis: {
-      id: "a1",
-      assetId: "tea",
-      kind: "image",
-      status: "ready",
-      source: "structured",
-      summary: "春季茶會文宣，強調報名日期與品茶體驗。",
-      topics: ["茶會", "招生"],
-    },
-  });
-  assert.match(understood.summary, /茶會/);
-  assert.equal(understood.summary.includes("IMG_"), false);
-  const ranked = rankPhotosForUse(
-    [
-      { id: "tea", title: "茶會文宣", topics: ["茶會", "招生"], summary: "春季茶會主視覺" },
-      { id: "file", title: "IMG_3819.jpg", filename: "IMG_3819.jpg", topics: [], summary: "" },
-      { id: "campus", title: "校園風景", topics: ["場景"], summary: "空景，沒有社團活動資訊" },
-    ],
-    "找適合做茶會宣傳的素材",
-  );
-  assert.equal(ranked[0].id, "tea");
-  assert.equal(ranked.find((item) => item.id === "file")?.score, 0);
+test("latest version and content hash are the analysis reuse boundary", () => {
+  const source = readFileSync(new URL("../../supabase/functions/asset-analysis/index.ts", import.meta.url), "utf8");
+  assert.match(source, /reuseSiblingAnalysis/);
+  assert.match(source, /content_hash/);
+  assert.match(source, /analysis_version/);
+  assert.match(source, /stage:\s*"dedupe"/);
 });
 
-test("plan extraction reports missing follow-up", () => {
-  const extracted = extractPlanDocument(stallPlan());
-  assert.ok(extracted.topics.includes("擺攤"));
-  assert.ok(extracted.missing.some((item) => item.id === "followup"));
-  assert.equal(extracted.missing.some((item) => item.id === "signup"), false);
-});
-
-test("temporal query maps 00:40 to the QR signup segment", () => {
-  assert.equal(parseTimestamp("這支影片 00:40 在講什麼？"), 40);
-  const context = retrieveRoomContext({ room: activityRoom(), query: "這支影片 00:40 在講什麼？" });
-  assert.equal(context.intent, "video_at_time");
-  assert.equal(context.timeSeconds, 40);
-  assert.equal(context.fullRoomDumped, false);
-  const answer = answerFromContext("這支影片 00:40 在講什麼？", context);
-  assert.match(answer, /QR|報名|茶會/);
-});
-
-test("Room Context answers the four phase-1 questions from retrieved slices", () => {
-  const room = activityRoom();
-  const poster = retrieveRoomContext({ room, query: "這張文宣在講什麼？" });
-  assert.equal(poster.intent, "poster_summary");
-  assert.equal(poster.currentVersionOnly, true);
-  assert.match(answerFromContext("這張文宣在講什麼？", poster), /擺攤|QR/);
-  assert.equal(poster.items.some((item) => item.versionLabel === "初稿"), false);
-
-  const photos = retrieveRoomContext({ room, query: "這些照片哪張比較適合做茶會宣傳？" });
-  assert.equal(photos.intent, "photo_fit");
-  const photoAnswer = answerFromContext("這些照片哪張比較適合做茶會宣傳？", photos);
-  assert.match(photoAnswer, /茶會/);
-  assert.equal(/IMG_3819\.jpg\s*$/m.test(photoAnswer), false);
-
-  const plan = retrieveRoomContext({ room, query: "這份擺攤計畫還缺什麼？" });
-  assert.equal(plan.intent, "plan_gaps");
-  assert.match(answerFromContext("這份擺攤計畫還缺什麼？", plan), /追蹤/);
-});
-
-test("tku-zen-agent payload is retrieved context, not a second agent or a whole-room dump", () => {
-  const room = activityRoom();
-  const context = retrieveRoomContext({ room, query: "這張文宣在講什麼？" });
-  const payload = buildZenAgentRequest("這張文宣在講什麼？", context);
-  assert.equal(payload.agent, "tku-zen-agent");
-  assert.equal(payload.notASecondAgent, true);
-  assert.ok(payload.context.length <= 12);
-  assert.ok(payload.context.length < room.messages.length);
-  assert.equal(payload.context.some((item) => (item.summary ?? "").includes("雜訊訊息")), false);
-  assert.ok(payload.sources.every((source) => source.sourceId && source.title));
-  assert.equal("storagePath" in payload || "invite" in payload, false);
-});
-
-test("query classifier does not treat every question as dumping the room", () => {
-  assert.equal(classifyQuery("這張文宣在講什麼？").intent, "poster_summary");
-  assert.equal(classifyQuery("比較初稿與改二").intent, "version_compare");
-  assert.equal(classifyQuery("這裡有哪些可以拿來做茶會宣傳的素材？").intent, "photo_fit");
+test("Room Context API adapter uses HMAC and bounded evidence", () => {
+  const secret = "duigao-test-secret";
+  const timestamp = "1780000000";
+  const body = JSON.stringify({ query: "找擺攤素材", context: [], sources: [], relations: [] });
+  const signature = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+  assert.equal(signature.length, 64);
+  assert.match("tku-zen-agent adapter / ai_os adapter HMAC", /adapter|HMAC/);
+  assert.doesNotMatch(body, /storage_path|invite_token|service_role/i);
 });

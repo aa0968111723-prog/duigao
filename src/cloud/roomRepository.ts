@@ -24,6 +24,7 @@ import { CloudError } from "./errors";
 import {
   dataUrlToBlob,
   proposalAssetPath,
+  sha256Blob,
   signedUrl,
   uploadAsset,
   versionPath,
@@ -59,6 +60,12 @@ import {
   type SupportRow,
   type VersionRow,
 } from "./types";
+import {
+  collaborationSliceFromRoom,
+  insertCollaborationSlice,
+  loadCollaborationSummary,
+  remapCollaborationSlice,
+} from "./collaborationRepository";
 
 export type CloudProposal = {
   id: string;
@@ -246,6 +253,7 @@ export async function createRoom(
     .eq("id", roomId);
   const hasBranchSchema = !modeError;
   const branchIdMap = new Map<string, string>();
+  const pollIdMap = new Map<string, string>();
   const sourceBranches = sourceRoom.branches ?? [];
   if (hasBranchSchema && sourceBranches.length) {
     const branchRows = sourceBranches.map((branch) => {
@@ -376,7 +384,6 @@ export async function createRoom(
       if (error) throw new CloudError(error.message, "relations");
     }
 
-    const pollIdMap = new Map<string, string>();
     const pollRows = (sourceRoom.polls ?? []).map((poll) => {
       const id = uuid();
       pollIdMap.set(poll.id, id);
@@ -394,7 +401,6 @@ export async function createRoom(
     }
     // Local guest ids are intentionally not auth UUIDs. Poll definitions are
     // migrated; votes are device-local and are not fabricated as another user.
-    void pollIdMap;
   }
 
   for (const p of local.proposals) {
@@ -411,6 +417,15 @@ export async function createRoom(
     });
     if (error) throw new CloudError(error.message, "proposal");
   }
+
+  await insertCollaborationSlice(
+    supabase,
+    remapCollaborationSlice(collaborationSliceFromRoom(sourceRoom), roomId, {
+      branchIdMap,
+      versionIdMap,
+      pollIdMap,
+    }),
+  );
 
   return { roomId, token };
 }
@@ -503,6 +518,16 @@ async function loadRoomFull(supabase: SupabaseClient, roomId: string): Promise<C
     pollVotes: ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
     updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
   });
+  try {
+    const collab = await loadCollaborationSummary(supabase, roomId);
+    room.whiteboards = collab.whiteboards;
+    room.discussion = collab.discussion;
+    room.discussionSupports = collab.discussionSupports;
+    room.decisions = collab.decisions;
+    room.allowBoardEdit = collab.allowBoardEdit;
+  } catch {
+    /* 0014 not applied yet */
+  }
 
   const proposals: CloudProposal[] = await Promise.all(
     ((proposalsRes.data as ProposalRow[] | null) ?? []).map(async (row) => ({
@@ -592,6 +617,16 @@ async function loadRoomSummary(supabase: SupabaseClient, roomId: string, force =
     pollVotes: ((pollVotesRes.data as PollVoteRow[] | null) ?? []).map(pollVoteFromRow),
     updatedAt: Date.parse(roomRow.updated_at) || Date.now(),
   };
+  try {
+    const collab = await loadCollaborationSummary(supabase, roomId);
+    room.whiteboards = collab.whiteboards;
+    room.discussion = collab.discussion;
+    room.discussionSupports = collab.discussionSupports;
+    room.decisions = collab.decisions;
+    room.allowBoardEdit = collab.allowBoardEdit;
+  } catch {
+    /* 0014 not applied yet */
+  }
   return { room: normalizeRoomBranches(room), proposals: [], role: roleFromResult(roleRes) };
 }
 
@@ -801,18 +836,30 @@ export async function addVersion(
   branchId?: string,
 ): Promise<Version> {
   const id = uuid();
-  const { path, mime } = await uploadVersion(supabase, roomId, id, imageDataUrl);
-  const { error } = await supabase
+  const { blob, mime } = await dataUrlToBlob(imageDataUrl);
+  const path = versionPath(roomId, id, mime);
+  await uploadAsset(supabase, path, blob, mime);
+  const contentHash = await sha256Blob(blob).catch(() => undefined);
+  const versionRow = {
+    id,
+    room_id: roomId,
+    label,
+    sort_order: sortOrder,
+    image_path: path,
+    mime_type: mime,
+    ...(contentHash ? { content_hash: contentHash } : {}),
+    ...(branchId ? { branch_id: branchId } : {}),
+  };
+  let { error } = await supabase
     .from("versions")
-    .insert({
-      id,
-      room_id: roomId,
-      label,
-      sort_order: sortOrder,
-      image_path: path,
-      mime_type: mime,
-      ...(branchId ? { branch_id: branchId } : {}),
-    });
+    .insert(versionRow);
+  // A mixed-version deployment may not have 0014 yet. The upload is already
+  // in the existing private bucket, so retry the legacy row shape rather than
+  // breaking the established review flow while the migration rolls out.
+  if (error && /content_hash|column/i.test(error.message)) {
+    const { content_hash: _ignored, ...legacyRow } = versionRow;
+    ({ error } = await supabase.from("versions").insert(legacyRow));
+  }
   if (error) throw new CloudError(error.message, "version");
   return { id, label, imageDataUrl: await signedUrl(supabase, path), ...(branchId ? { branchId } : {}) };
 }
@@ -839,9 +886,10 @@ export async function addVideoVersion(
     fileSize: number | null;
     width: number | null;
     height: number | null;
+    contentHash?: string;
   },
 ): Promise<void> {
-  const { error } = await supabase.from("versions").insert({
+  const versionRow = {
     id: input.id,
     room_id: roomId,
     label: input.label,
@@ -854,8 +902,14 @@ export async function addVideoVersion(
     file_size: input.fileSize,
     width: input.width,
     height: input.height,
+    ...(input.contentHash ? { content_hash: input.contentHash } : {}),
     ...(input.branchId ? { branch_id: input.branchId } : {}),
-  });
+  };
+  let { error } = await supabase.from("versions").insert(versionRow);
+  if (error && /content_hash|column/i.test(error.message)) {
+    const { content_hash: _ignored, ...legacyRow } = versionRow;
+    ({ error } = await supabase.from("versions").insert(legacyRow));
+  }
   if (error) throw new CloudError(error.message, "version");
 }
 

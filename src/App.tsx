@@ -33,6 +33,17 @@ import { roomCode, uid } from "./lib/id";
 import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
+import { getSupabase } from "./cloud/client";
+import {
+  askRoomContext,
+  enqueueAssetAnalysis,
+  listIntelligentAssets,
+  retryAssetAnalysis,
+  setAssetAiPolicy,
+  setHumanAssetMetadata,
+  subscribeAssetAnalysis,
+  type AssetIntelligenceSnapshot,
+} from "./cloud/assetIntelligence";
 import { addRoomTarget, readRoomLink } from "./cloud/invite";
 import { type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
@@ -58,7 +69,27 @@ import { VIDEO_ACCEPT, acceptVideoFile } from "./features/video-review/media";
 import { anchorLabel, anchorStart } from "./features/video-review/anchors";
 import { isUploadCancelled } from "./cloud/videoRoom";
 import { MultiBranchRoom, type MultiBranchRoomApi } from "./features/multi-room/MultiBranchRoom";
+import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
+import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
+import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
+import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
+import { adoptPersistedNode, stampPersistedNode } from "./features/collaboration/nodes";
+import { collectBoardEditors, stampWriter } from "./features/collaboration/presence";
+import {
+  applyPendingCloudWrites,
+  clearPendingEdit,
+  decideNodeWriteRetry,
+  isBrowserOnline,
+  isCloudWriteAcknowledged,
+  listPendingEdits,
+  loadBoardSnapshot,
+  queuePendingEdit,
+  reconcileNodes,
+  saveBoardSnapshot,
+} from "./features/collaboration/offline";
 import "./usability.css";
+import "./features/whiteboard/whiteboard.css";
+import "./features/room-discussion/discussion.css";
 
 const EMPTY_FORM: PinForm = { body: "", suggestion: "", type: "文字", priority: "一般" };
 const COACH_FLAG = "coach.firstPin";
@@ -143,6 +174,9 @@ export function App() {
   const [room, setRoom] = useState<Room | null>(null);
   /** Project rooms stay at the room shell until a poster/video branch opens. */
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
+  const [activeWhiteboardId, setActiveWhiteboardId] = useState<string | null>(null);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(() => initialView(null));
   const [tool, setTool] = useState<Tool>("pan");
@@ -159,6 +193,13 @@ export function App() {
   const [coachSeen, setCoachSeen] = useState<boolean>(() => loadFlag(COACH_FLAG));
   const [undoCount, setUndoCount] = useState(0);
   const [videoUpload, setVideoUpload] = useState<VideoUploadState>({ state: "idle" });
+  const [assetIntelligence, setAssetIntelligence] = useState<AssetIntelligenceSnapshot | null>(null);
+  const [aiSheetOpen, setAiSheetOpen] = useState(false);
+  const [aiSelectedAssetIds, setAiSelectedAssetIds] = useState<string[]>([]);
+  const [aiResponse, setAiResponse] = useState<RoomContextResponse | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiFocus, setAiFocus] = useState<RoomContextFocus | null>(null);
   /** Cancels an upload in flight. Held in a ref so leaving the room can call it. */
   const videoCancelRef = useRef<(() => void) | null>(null);
 
@@ -168,6 +209,8 @@ export function App() {
   isMobileRef.current = isMobile;
   const collabRef = useRef<Collab | null>(null);
   const roomRef = useRef<Room | null>(null);
+  const lastAckedNodeVersion = useRef(new Map<string, number>());
+  const nodePersistChain = useRef(new Map<string, Promise<void>>());
   const viewRef = useRef<ViewState>(view);
   const saveSeq = useRef(0);
   const busy = useRef<Set<string>>(new Set());
@@ -249,9 +292,40 @@ export function App() {
 
   const applyRemoteRoom = useCallback((next: Room) => {
     const normalized = normalizeRoomBranches(next);
-    setRoom(normalized);
+    setRoom((current) => {
+      const incomingNodes = normalized.whiteboardNodes ?? [];
+      const currentNodes = current?.whiteboardNodes ?? [];
+      const incomingEdges = normalized.whiteboardEdges ?? [];
+      const currentEdges = current?.whiteboardEdges ?? [];
+      const whiteboardNodes = incomingNodes.length === 0 && currentNodes.length
+        ? currentNodes
+        : incomingNodes.length && currentNodes.length
+          ? reconcileNodes(currentNodes, incomingNodes, [])
+          : incomingNodes.length
+            ? incomingNodes
+            : currentNodes;
+      const whiteboardEdges = incomingEdges.length === 0 && currentEdges.length
+        ? currentEdges
+        : incomingEdges.length
+          ? incomingEdges
+          : currentEdges;
+      for (const node of whiteboardNodes) {
+        const incoming = node.version ?? 1;
+        const known = lastAckedNodeVersion.current.get(node.id) ?? 0;
+        if (incoming > known) lastAckedNodeVersion.current.set(node.id, incoming);
+      }
+      return {
+        ...normalized,
+        whiteboardNodes,
+        whiteboardEdges,
+      };
+    });
     if (roomLink.kind === "cloud" && roomLink.branchId && normalized.branches?.some((branch) => branch.id === roomLink.branchId)) {
       setActiveBranchId(roomLink.branchId);
+    }
+    if (roomLink.kind === "cloud" && roomLink.whiteboardId) {
+      setActiveWhiteboardId(roomLink.whiteboardId);
+      setFocusNodeId(roomLink.nodeId ?? null);
     }
     setView((v) => {
       const ids = normalized.versions.map((x) => x.id);
@@ -271,6 +345,171 @@ export function App() {
   const cloud = useCloudRoom({ guest, room, activeBranchId, isGuestSession, onSnapshot: applyRemoteRoom, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
+
+  // Intelligence is a separate, bounded slice. It never gates the existing
+  // room/review load, and a branch workspace only asks for that branch's
+  // metadata. Binary media continues to come from the existing review paths.
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!room || !cloud.boundRoomId || !supabase) {
+      setAssetIntelligence(null);
+      return;
+    }
+    let cancelled = false;
+    const branchId = activeBranchId ?? undefined;
+    void listIntelligentAssets(supabase, room.id, {
+      branchId,
+      branches: room.branches,
+      versions: room.versions,
+      limit: branchId ? 80 : 160,
+    })
+      .then((snapshot) => {
+        if (cancelled) return;
+        setAssetIntelligence(snapshot);
+        // The database trigger is the durable queue; this small kick starts
+        // only a few bounded jobs when a room/branch is opened. It never
+        // downloads media into the room page and repeated kicks are idempotent
+        // because the edge function reuses the queued job.
+        void Promise.allSettled(
+          snapshot.jobs
+            .filter((job) => job.status === "queued")
+            .slice(0, 3)
+            .map((job) => enqueueAssetAnalysis(supabase, job.assetId, job.tier)),
+        );
+      })
+      .catch((error) => {
+        // A mixed-version deployment may not have migration 0014 yet. The
+        // review room remains fully usable; only the optional AI surface stays
+        // empty until the migration/functions are deployed.
+        if (!cancelled) {
+          setAssetIntelligence({ assets: [], jobs: [], relations: [] });
+          console.warn("[asset-intelligence] unavailable:", error instanceof Error ? error.message : error);
+        }
+      });
+    const unsubscribe = subscribeAssetAnalysis(supabase, room.id, ({ assetId, status, progress }) => {
+      setAssetIntelligence((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          assets: current.assets.map((asset) => asset.id === assetId ? { ...asset, status } : asset),
+          jobs: current.jobs.map((job) => {
+            if (job.assetId !== assetId) return job;
+            const jobStatus = status === "processing" ? "processing" : status === "failed" ? "failed" : status === "ready" || status === "partial" ? "completed" : job.status;
+            return { ...job, status: jobStatus, progress: progress ?? (jobStatus === "completed" ? 100 : job.progress) };
+          }),
+        };
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [activeBranchId, cloud.boundRoomId, room?.branches, room?.id, room?.versions]);
+
+  const openAi = useCallback((assetId?: string) => {
+    setAiSelectedAssetIds(assetId ? [assetId] : []);
+    setAiResponse(null);
+    setAiError(null);
+    setAiSheetOpen(true);
+  }, []);
+
+  const focusAi = useCallback((focus: RoomContextFocus) => {
+    const current = roomRef.current;
+    if (!current) return;
+    setAiFocus(focus);
+    setAiSheetOpen(false);
+    const branch = focus.branchId ? branchForId(current, focus.branchId) : undefined;
+    if (branch) setActiveBranchId(branch.id);
+    const applyVersion = () => {
+      if (!focus.versionId) return;
+      setView((previous) => ({ ...previous, versionId: focus.versionId!, compareMode: "single" }));
+    };
+    if (branch && (branch.branchType === "poster" || branch.branchType === "video") && cloudRef.current.boundRoomId) {
+      setLoadingBranchId(branch.id);
+      void cloudRef.current.loadBranch(branch.id).finally(() => {
+        setLoadingBranchId((value) => (value === branch.id ? null : value));
+        applyVersion();
+      });
+    } else {
+      applyVersion();
+    }
+  }, []);
+
+  const askAi = useCallback(async (request: RoomContextRequest): Promise<RoomContextResponse> => {
+    const current = roomRef.current;
+    const supabase = getSupabase();
+    if (!current || !supabase || !cloudRef.current.boundRoomId) {
+      const error = new Error("房間 AI 尚未連線，請先完成雲端房間設定。");
+      setAiError(error.message);
+      throw error;
+    }
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const response = await askRoomContext(
+        supabase,
+        current.id,
+        request,
+        // Policy and updatedAt are part of the cache identity too. A cached
+        // answer must not survive an owner turning an asset's AI readability
+        // off, even when the analysis model/version itself did not change.
+        (assetIntelligence?.assets ?? []).map((asset) => `${asset.id}:${asset.analysisVersion}:${asset.updatedAt}:${asset.aiReadable}:${asset.externalAiAllowed}`),
+      );
+      setAiResponse(response);
+      return response;
+    } catch (error) {
+      const message = error instanceof Error && /外部|permission|blocked/i.test(error.message)
+        ? "這次提問包含禁止送到外部 AI 的素材。"
+        : "房間 AI 暫時沒有回應，請稍後再試。";
+      setAiError(message);
+      throw error;
+    } finally {
+      setAiLoading(false);
+    }
+  }, [assetIntelligence?.assets]);
+
+  const retryAi = useCallback((assetId: string) => {
+    const supabase = getSupabase();
+    if (!supabase || !cloudRef.current.canManageMedia) return;
+    void retryAssetAnalysis(supabase, assetId).then(() => showToast("已重新排入素材理解", { tone: "success" })).catch(() => showToast("目前無法重新分析，請稍後再試", { tone: "error" }));
+  }, [showToast]);
+
+  const updateAiPolicy = useCallback(async (assetId: string, patch: { aiReadable: boolean; externalAiAllowed: boolean }) => {
+    const supabase = getSupabase();
+    if (!supabase || !cloudRef.current.canManageMedia) throw new Error("沒有修改素材 AI 權限的權限");
+    await setAssetAiPolicy(supabase, { assetId, ...patch });
+    const updatedAt = new Date().toISOString();
+    setAssetIntelligence((current) => current ? {
+      ...current,
+      assets: current.assets.map((asset) => asset.id === assetId
+        ? { ...asset, updatedAt, aiReadable: patch.aiReadable, externalAiAllowed: patch.aiReadable ? patch.externalAiAllowed : false }
+        : asset),
+    } : current);
+    showToast(patch.aiReadable ? "已開啟素材 AI 理解" : "已關閉素材 AI 理解", { tone: "success" });
+  }, [showToast]);
+
+  const updateHumanMetadata = useCallback(async (assetId: string, input: { title?: string; summary?: string; tags?: string[] }) => {
+    const supabase = getSupabase();
+    const current = assetIntelligence?.assets.find((asset) => asset.id === assetId);
+    if (!supabase || !cloudRef.current.canManageMedia || !current) throw new Error("沒有修改素材標記的權限");
+    await setHumanAssetMetadata(supabase, { assetId, roomId: current.roomId, ...input });
+    const updatedAt = new Date().toISOString();
+    setAssetIntelligence((snapshot) => snapshot ? {
+      ...snapshot,
+      assets: snapshot.assets.map((asset) => asset.id === assetId ? {
+        ...asset,
+        human: {
+          assetId,
+          title: input.title?.trim() || undefined,
+          summary: input.summary?.trim() || undefined,
+          tags: (input.tags ?? []).map((tag) => tag.trim()).filter(Boolean).slice(0, 30),
+          structuredData: asset.human?.structuredData ?? {},
+          updatedAt,
+        },
+      } : asset),
+    } : snapshot);
+    showToast("已保存人工素材標記", { tone: "success" });
+  }, [assetIntelligence?.assets, showToast]);
 
   // A branch/version deep-link can select the branch while the first cloud
   // snapshot is still being reduced to a summary. Hydrate that target just as
@@ -434,7 +673,16 @@ export function App() {
     setRoom(next);
     setView(initialView(next));
     trackSave(next);
-  }, [clearUndo, trackSave]);
+    // A project room is a cloud collaboration surface from the moment it is
+    // created.  This also lets the Asset Intelligence slice start its bounded
+    // metadata load before the first branch is added; binary media still stays
+    // lazy in the existing review workspaces.
+    if (isCloudConfigured) {
+      void cloudRef.current.ensureCloudRoom(next).catch(() => {
+        showToast("活動房雲端建立失敗，請確認連線後再試一次。", { tone: "error" });
+      });
+    }
+  }, [clearUndo, showToast, trackSave]);
 
   const addImageFiles = useCallback(
     async (files: FileList | null, forcedBranchId?: string, roomOverride?: Room) => {
@@ -679,6 +927,15 @@ export function App() {
     async (type: BranchType, name: string, files: FileList | null) => {
       const current = roomRef.current;
       if (!current || !guest) return;
+      if (isCloudConfigured && !cloudRef.current.boundRoomId) {
+        try {
+          const cloudRoom = await cloudRef.current.ensureCloudRoom(current);
+          if (!cloudRoom) throw new Error("cloud-room-failed");
+        } catch {
+          showToast("活動房尚未連線，內容暫時沒有送出。請稍後再試。", { tone: "error" });
+          return;
+        }
+      }
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者可以查看、留言與投票，但不能新增內容。", { tone: "error" });
         return;
@@ -824,6 +1081,312 @@ export function App() {
     },
     [updateRoom],
   );
+
+  const sendDiscussion = useCallback(
+    (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => {
+      if (!guest) return;
+      const body = (input?.body ?? chatInput).trim();
+      if (!body && !input?.kind) return;
+      const message: DiscussionMessage = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        authorId: cloud.userId ?? guest.id,
+        authorName: guest.name,
+        authorColor: guest.color,
+        kind: input?.kind ?? "text",
+        body: body || (input?.payload?.title ?? ""),
+        payload: input?.payload ?? {},
+        replyToId: input?.replyToId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      updateRoom((r) => ({ ...r, discussion: [...(r.discussion ?? []), message] }));
+      cloudRef.current.writes.insertDiscussion?.(message);
+      setChatInput("");
+    },
+    [chatInput, cloud.userId, guest, updateRoom],
+  );
+
+  const supportDiscussion = useCallback(
+    (messageId: string, add: boolean) => {
+      const userId = cloud.userId ?? guest?.id;
+      if (!userId) return;
+      updateRoom((r) => ({
+        ...r,
+        discussionSupports: add
+          ? [...(r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)), { messageId, roomId: r.id, userId }]
+          : (r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)),
+      }));
+      cloudRef.current.writes.setDiscussionSupport?.(messageId, add);
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
+  const createWhiteboard = useCallback(
+    (title: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能建立白板。", { tone: "error" });
+        return;
+      }
+      const board: Whiteboard = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        title,
+        description: "",
+        allowEdit: false,
+        createdBy: cloud.userId ?? guest?.id ?? "local",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        version: 1,
+      };
+      updateRoom((r) => ({ ...r, whiteboards: [board, ...(r.whiteboards ?? [])] }));
+      cloudRef.current.writes.createWhiteboard?.(board);
+      setActiveWhiteboardId(board.id);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const archiveWhiteboard = useCallback(
+    (id: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能封存整塊白板。", { tone: "error" });
+        return;
+      }
+      updateRoom((r) => ({
+        ...r,
+        whiteboards: (r.whiteboards ?? []).map((board) => board.id === id ? { ...board, archivedAt: Date.now(), updatedAt: Date.now() } : board),
+      }));
+      const board = roomRef.current?.whiteboards?.find((item) => item.id === id);
+      if (board) cloudRef.current.writes.updateWhiteboard?.({ ...board, archivedAt: Date.now() });
+      if (activeWhiteboardId === id) setActiveWhiteboardId(null);
+    },
+    [activeWhiteboardId, cloud.boundRoomId, cloud.canManageMedia, showToast, updateRoom],
+  );
+
+  const upsertNodes = useCallback(
+    (nodes: WhiteboardNode[], persist: "now" | "end" = "now") => {
+      const writer = { id: cloud.userId ?? guest?.id ?? "local", name: guest?.name ?? "我" };
+      const existingById = new Map((roomRef.current?.whiteboardNodes ?? []).map((node) => [node.id, node]));
+      const stamped = nodes.map((node) => {
+        const lastAcked = lastAckedNodeVersion.current.get(node.id) ?? existingById.get(node.id)?.version;
+        return stampPersistedNode(stampWriter(node, writer), lastAcked);
+      });
+      updateRoom((r) => {
+        const byId = new Map((r.whiteboardNodes ?? []).map((node) => [node.id, node]));
+        for (const node of stamped) byId.set(node.id, node);
+        return { ...r, whiteboardNodes: [...byId.values()] };
+      });
+      void persist;
+      const roomId = roomRef.current?.id ?? stamped[0]?.roomId ?? "";
+      const persistCloud = async (node: WhiteboardNode) => {
+        const prev = nodePersistChain.current.get(node.id) ?? Promise.resolve();
+        const next = prev.catch(() => undefined).then(async () => {
+          const latest = roomRef.current?.whiteboardNodes?.find((item) => item.id === node.id) ?? node;
+          const acked = lastAckedNodeVersion.current.get(latest.id) ?? latest.version ?? 1;
+          const toWrite = stampPersistedNode(latest, acked);
+          const result = await cloudRef.current.writes.upsertNode?.(toWrite);
+          if (isCloudWriteAcknowledged(result)) {
+            if (result && typeof result === "object") {
+              lastAckedNodeVersion.current.set(result.id, result.version ?? acked);
+              updateRoom((r) => ({
+                ...r,
+                whiteboardNodes: (r.whiteboardNodes ?? []).map((item) => item.id === result.id ? adoptPersistedNode(item, result) : item),
+              }));
+            }
+            await clearPendingEdit(`node:${node.id}`);
+            return;
+          }
+          const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
+          if (retry.queueDurable && cloudRef.current.active) {
+            await queuePendingEdit({
+              id: `node:${node.id}`,
+              roomId,
+              kind: "node",
+              op: "upsert",
+              payload: toWrite,
+              createdAt: Date.now(),
+            });
+          }
+        });
+        nodePersistChain.current.set(node.id, next);
+        await next;
+      };
+      if (isBrowserOnline()) {
+        stamped.forEach((node) => void persistCloud(node));
+      } else {
+        stamped.forEach((node) => {
+          void queuePendingEdit({
+            id: `node:${node.id}`,
+            roomId,
+            kind: "node",
+            op: "upsert",
+            payload: node,
+            createdAt: Date.now(),
+          });
+        });
+      }
+      const current = roomRef.current;
+      const board = current?.whiteboards?.find((item) => item.id === stamped[0]?.whiteboardId);
+      if (current && board) {
+        void saveBoardSnapshot({
+          whiteboardId: board.id,
+          roomId: current.id,
+          whiteboard: board,
+          nodes: [...(current.whiteboardNodes ?? []).filter((node) => node.whiteboardId !== board.id), ...stamped],
+          edges: current.whiteboardEdges ?? [],
+        });
+      }
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
+  const upsertNode = useCallback(
+    (node: WhiteboardNode) => upsertNodes([node]),
+    [upsertNodes],
+  );
+
+  const deleteNode = useCallback(
+    (id: string) => {
+      updateRoom((r) => ({
+        ...r,
+        whiteboardNodes: (r.whiteboardNodes ?? []).filter((node) => node.id !== id),
+        whiteboardEdges: (r.whiteboardEdges ?? []).filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id),
+      }));
+      const persistDelete = async () => {
+        const result = await cloudRef.current.writes.deleteNode?.(id);
+        if (isCloudWriteAcknowledged(result)) {
+          await clearPendingEdit(`node-del:${id}`);
+          return;
+        }
+        const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
+        if (retry.queueDurable && cloudRef.current.active) {
+          await queuePendingEdit({
+            id: `node-del:${id}`,
+            roomId: roomRef.current?.id ?? "",
+            kind: "node",
+            op: "delete",
+            payload: { id },
+            createdAt: Date.now(),
+          });
+        }
+      };
+      if (isBrowserOnline()) {
+        void persistDelete();
+        return;
+      }
+      void queuePendingEdit({
+        id: `node-del:${id}`,
+        roomId: roomRef.current?.id ?? "",
+        kind: "node",
+        op: "delete",
+        payload: { id },
+        createdAt: Date.now(),
+      });
+    },
+    [updateRoom],
+  );
+
+  const createEdge = useCallback(
+    (edge: WhiteboardEdge) => {
+      updateRoom((r) => ({ ...r, whiteboardEdges: [...(r.whiteboardEdges ?? []), edge] }));
+      cloudRef.current.writes.createEdge?.(edge);
+    },
+    [updateRoom],
+  );
+
+  const shareNodeToDiscussion = useCallback(
+    (node: WhiteboardNode) => {
+      const board = roomRef.current?.whiteboards?.find((item) => item.id === node.whiteboardId);
+      sendDiscussion({
+        kind: "node",
+        body: node.content.text || node.content.title || "看這個節點",
+        payload: discussionPayloadFromNode(node, board?.title),
+      });
+    },
+    [sendDiscussion],
+  );
+
+  const addMessageToBoard = useCallback(
+    (message: DiscussionMessage, whiteboardId: string) => {
+      const node = stickyFromDiscussion(message, whiteboardId, cloud.userId ?? guest?.id ?? "local", {
+        x: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 4) * 24,
+        y: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 5) * 24,
+      });
+      upsertNode(node);
+      setActiveWhiteboardId(whiteboardId);
+      setFocusNodeId(node.id);
+    },
+    [cloud.userId, guest, upsertNode],
+  );
+
+  const createDecision = useCallback(
+    (title: string, source?: { type: "poll"; id: string }, status: "pending" | "decided" = "pending") => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能建立決策紀錄。", { tone: "error" });
+        return;
+      }
+      const decision = {
+        id: crypto.randomUUID(),
+        roomId: roomRef.current?.id ?? "",
+        title,
+        body: "",
+        status,
+        sourceType: source ? "poll" as const : "manual" as const,
+        sourceId: source?.id,
+        createdBy: cloud.userId ?? guest?.id ?? "local",
+        finalizedAt: status === "decided" ? Date.now() : undefined,
+        finalizedBy: status === "decided" ? cloud.userId ?? guest?.id : undefined,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        version: 1,
+      };
+      updateRoom((r) => ({ ...r, decisions: [decision, ...(r.decisions ?? [])] }));
+      cloudRef.current.writes.createDecision?.(decision);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const finalizeDecision = useCallback(
+    (id: string) => {
+      if (cloud.boundRoomId && !cloud.canManageMedia) {
+        showToast("檢視者不能標示決策。", { tone: "error" });
+        return;
+      }
+      updateRoom((r) => ({
+        ...r,
+        decisions: (r.decisions ?? []).map((item) => item.id === id ? { ...item, status: "decided", finalizedAt: Date.now(), finalizedBy: cloud.userId ?? guest?.id, updatedAt: Date.now() } : item),
+      }));
+      const decision = roomRef.current?.decisions?.find((item) => item.id === id);
+      if (decision) cloudRef.current.writes.updateDecision?.({ ...decision, status: "decided", finalizedAt: Date.now() });
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
+  );
+
+  const toggleAllowBoardEdit = useCallback(() => {
+    if (cloud.role && cloud.role !== "owner") {
+      showToast("只有房主能開放大家一起編輯。", { tone: "error" });
+      return;
+    }
+    updateRoom((r) => ({ ...r, allowBoardEdit: !r.allowBoardEdit }));
+    cloudRef.current.writes.setAllowBoardEdit?.(!(roomRef.current?.allowBoardEdit));
+  }, [cloud.role, showToast, updateRoom]);
+
+  useEffect(() => {
+    const flushPendingBoardEdits = () => {
+      const current = roomRef.current;
+      if (!current || !isBrowserOnline()) return;
+      void listPendingEdits(current.id).then(async (pending) => {
+        const { acknowledged } = await applyPendingCloudWrites(pending, {
+          upsertNode: cloudRef.current.writes.upsertNode,
+          deleteNode: cloudRef.current.writes.deleteNode,
+        });
+        for (const id of acknowledged) await clearPendingEdit(id);
+      });
+    };
+    window.addEventListener("online", flushPendingBoardEdits);
+    flushPendingBoardEdits();
+    return () => window.removeEventListener("online", flushPendingBoardEdits);
+  }, [room?.id]);
 
   /**
    * File one piece of video feedback: same comment, same discussion, same cloud
@@ -1276,7 +1839,9 @@ export function App() {
             res.url,
             activeBranchId
               ? { branchId: activeBranchId, versionId: viewRef.current.versionId || undefined }
-              : undefined,
+              : activeWhiteboardId
+                ? { whiteboardId: activeWhiteboardId, nodeId: focusNodeId || undefined }
+                : undefined,
           );
           setShareState({ kind: "ready", url: appUrl, appUrl, preview: { status: "building" }, card: null });
           withPreviewTimeout(cloudRef.current.preview.ensure({ versionId: viewRef.current.versionId }))
@@ -1299,14 +1864,16 @@ export function App() {
           `${location.origin}${location.pathname}#room=${current.id}`,
           activeBranchId
             ? { branchId: activeBranchId, versionId: viewRef.current.versionId || undefined }
-            : undefined,
+            : activeWhiteboardId
+              ? { whiteboardId: activeWhiteboardId, nodeId: focusNodeId || undefined }
+              : undefined,
         ),
       });
       return;
     }
     // Deployed without VITE_SUPABASE_* — there is no permanent link to give.
     setShareState({ kind: "unavailable" });
-  }, [activeBranchId, isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
+  }, [activeBranchId, activeWhiteboardId, focusNodeId, isLegacyLink, startHosting, applyPreview, failPreview, withPreviewTimeout]);
 
   /** 顯示文宣縮圖 / 顯示影片封面 toggle in the share sheet's 連結預覽 block. */
   const setPreviewThumbnail = useCallback(
@@ -1533,6 +2100,12 @@ export function App() {
         markCoachSeen,
         showToast,
         openShare,
+        ai: {
+          assets: assetIntelligence?.assets ?? [],
+          open: openAi,
+          focusTarget: aiFocus,
+        },
+        openAtSeconds,
         ...(video ? { video } : {}),
         goHome: () => {
           videoCancelRef.current?.();
@@ -1542,6 +2115,7 @@ export function App() {
           if (activeBranchId && roomRef.current) {
             setActiveBranchId(null);
             setLoadingBranchId(null);
+            setOpenAtSeconds(undefined);
             setView(initialView(roomRef.current));
           } else {
             clearUndo();
@@ -1579,6 +2153,15 @@ export function App() {
     );
   }
 
+  const boardEditors = collectBoardEditors(
+    room?.whiteboardNodes ?? [],
+    { id: cloud.userId ?? guest?.id ?? "local", name: guest?.name ?? "我" },
+    { whiteboardId: activeWhiteboardId ?? undefined },
+  ).map((editor) => ({
+    ...editor,
+    whiteboardTitle: room?.whiteboards?.find((board) => board.id === (editor.whiteboardId ?? activeWhiteboardId))?.title,
+  }));
+
   const projectApi: MultiBranchRoomApi | null = room?.projectMode
     ? {
         room: normalizedRoom ?? room,
@@ -1588,10 +2171,11 @@ export function App() {
         canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
         activeBranchId,
         loadingBranchId,
-        onOpenBranch: (branchId) => {
+        onOpenBranch: (branchId, opts) => {
           const target = roomRef.current ? branchForId(roomRef.current, branchId) : undefined;
           if (!target) return;
           setActiveBranchId(branchId);
+          setOpenAtSeconds(opts?.startTime);
           if (target.branchType === "poster" || target.branchType === "video") {
             setView(initialView(roomForBranch(roomRef.current!, branchId)));
           }
@@ -1605,6 +2189,7 @@ export function App() {
         onBackToRoom: () => {
           setActiveBranchId(null);
           setLoadingBranchId(null);
+          setOpenAtSeconds(undefined);
           if (roomRef.current) setView(initialView(roomRef.current));
         },
         onCreateContent: createProjectContent,
@@ -1617,8 +2202,54 @@ export function App() {
         onVotePoll: voteProjectPoll,
         chatInput,
         setChatInput,
-        sendChat,
+        sendChat: () => sendDiscussion(),
+        onSendDiscussion: sendDiscussion,
+        onSupportDiscussion: supportDiscussion,
+        onCreateWhiteboard: createWhiteboard,
+        onArchiveWhiteboard: archiveWhiteboard,
+        onOpenWhiteboard: (id) => {
+          setActiveWhiteboardId(id);
+          if (!id) setFocusNodeId(null);
+          if (!id) return;
+          void cloudRef.current.loadWhiteboard?.(id);
+          void loadBoardSnapshot(id).then((snap) => {
+            if (!snap) return;
+            setRoom((current) => {
+              if (!current) return current;
+              const existing = (current.whiteboardNodes ?? []).filter((node) => node.whiteboardId === id);
+              if (existing.length) {
+                return {
+                  ...current,
+                  whiteboardNodes: reconcileNodes(existing, snap.nodes, []),
+                };
+              }
+              return {
+                ...current,
+                whiteboardNodes: [...(current.whiteboardNodes ?? []), ...snap.nodes],
+                whiteboardEdges: [
+                  ...(current.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId !== id),
+                  ...snap.edges,
+                ],
+              };
+            });
+          });
+        },
+        onFocusNode: setFocusNodeId,
+        onUpsertNode: upsertNode,
+        onUpsertNodes: upsertNodes,
+        onDeleteNode: deleteNode,
+        onCreateEdge: createEdge,
+        onShareNodeToDiscussion: shareNodeToDiscussion,
+        onAddMessageToBoard: addMessageToBoard,
+        onCreateDecision: createDecision,
+        onFinalizeDecision: finalizeDecision,
+        onToggleAllowBoardEdit: toggleAllowBoardEdit,
+        activeWhiteboardId,
+        focusNodeId,
+        online: cloud.online || peerCount,
+        editors: boardEditors,
         onShare: openShare,
+        onOpenAi: openAi,
         onGoHome: () => {
           clearUndo();
           setActiveBranchId(null);
@@ -1641,6 +2272,23 @@ export function App() {
     return (
       <>
         <MultiBranchRoom api={projectApi!} />
+        {isCloudConfigured && <AssetAiFab project onClick={() => openAi()} />}
+        {aiSheetOpen && room && <RoomAiSheet
+          roomTitle={room.title}
+          assets={assetIntelligence?.assets ?? []}
+          jobs={assetIntelligence?.jobs ?? []}
+          selectedAssetIds={aiSelectedAssetIds}
+          response={aiResponse}
+          loading={aiLoading}
+          error={aiError}
+          onAsk={askAi}
+          onClose={() => setAiSheetOpen(false)}
+          onFocus={(citation) => citation.assetId && focusAi({ assetId: citation.assetId, branchId: citation.branchId, versionId: citation.versionId, locator: citation.locator })}
+          onRetryAnalysis={retryAi}
+          onUpdatePolicy={updateAiPolicy}
+          onUpdateHumanMetadata={updateHumanMetadata}
+          canManage={cloud.canManageMedia}
+        />}
         <ToastStack toasts={toasts} onDismiss={dismiss} />
       </>
     );
@@ -1788,6 +2436,24 @@ export function App() {
         }}
         cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
       />
+
+      {isCloudConfigured && <AssetAiFab onClick={() => openAi()} />}
+      {aiSheetOpen && room && <RoomAiSheet
+        roomTitle={room.title}
+        assets={assetIntelligence?.assets ?? []}
+        jobs={assetIntelligence?.jobs ?? []}
+        selectedAssetIds={aiSelectedAssetIds}
+        response={aiResponse}
+        loading={aiLoading}
+        error={aiError}
+        onAsk={askAi}
+        onClose={() => setAiSheetOpen(false)}
+        onFocus={(citation) => citation.assetId && focusAi({ assetId: citation.assetId, branchId: citation.branchId, versionId: citation.versionId, locator: citation.locator })}
+        onRetryAnalysis={retryAi}
+        onUpdatePolicy={updateAiPolicy}
+        onUpdateHumanMetadata={updateHumanMetadata}
+        canManage={cloud.canManageMedia}
+      />}
 
       {shareOpen && room && (
         <ShareSheet
