@@ -15,7 +15,7 @@
     "test:video": "node scripts/e2e/video-flow.mjs",
     "test:review-viewer": "node scripts/e2e/review-viewer.mjs",
     "test:viewer-geometry": "tsx --test scripts/tests/review-viewer-geometry.test.ts",
-    "test:asset-intelligence": "tsx --test scripts/tests/asset-intelligence.test.ts scripts/tests/ai-proposals.test.ts",
+    "test:asset-intelligence": "tsx --test scripts/tests/asset-intelligence.test.ts scripts/tests/ai-proposals.test.ts scripts/tests/room-context-strip.test.ts",
     "test:asset-intelligence-e2e": "node scripts/e2e/asset-intelligence.mjs",
     "test:multi-branch": "tsx --test scripts/tests/multi-branch.test.ts",
     "test:collaboration": "tsx --test scripts/tests/collaboration-workspace.test.ts scripts/tests/collaboration.test.ts",

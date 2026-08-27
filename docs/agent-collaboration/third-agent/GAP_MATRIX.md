@@ -138,3 +138,18 @@ Status key: OPEN / FIXED_THIS_PR / BLOCKED / PHYSICAL_DEVICE_PENDING
 - status: PHYSICAL_DEVICE_PENDING
 - commit: —
 - test: AUTOMATED_VERIFIED for 390×844 Android Chrome emulation after this PR’s AI sheet path
+
+## TA-010
+
+- severity: P2 (privacy leak if metadata is copied into context)
+- area: Room Context secret strip
+- claim: `stripSecrets` prevents storage paths from reaching tku-zen-agent
+- actual evidence: 0015 writes `poster_storage_path` into asset metadata; FORBIDDEN_KEYS listed `storage_path` only
+- reproduction: pass `{ poster_storage_path, image_path, video_path }` through `stripSecrets`
+- affected users: any room that asks AI after video/image analysis
+- root cause: key denylist missed 0015 aliases
+- recommended fix: add path keys + regex
+- release blocker: no (no signed URL in Room Context today if those keys stay in structured_data)
+- status: FIXED_THIS_PR
+- commit: this branch
+- test: `scripts/tests/room-context-strip.test.ts`
