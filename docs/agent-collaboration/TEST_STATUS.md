@@ -28,3 +28,14 @@
 - 所有瀏覽器 E2E 打本機 mock-supabase，hosted Supabase 未驗（見 BLOCKERS UNVERIFIED_PRODUCTION_STATE）。
 - 真機矩陣（Safari Range seek、iPhone HEVC、LINE in-app 首播手勢）— harness 自己聲明需真機。
 - feature-map 的 implemented 判定是字串存在證據（agent-feature-scan classifyFeature），非行為證據 — room-ai-context/asset-analysis 因此標成 implemented，但 audit 顯示 actions UI 斷頭（PR-04 目標）。
+
+## 快照 — PR-02c Grok round 修復後（2026-08-28，本機 wt）
+
+| Gate | 結果 |
+|---|---|
+| test:collaboration | 47/47（新增：護盾不推進 ack、echo 護盾、replaceBoardGraph） |
+| test:collaboration-e2e | 34/34（兩分頁塊收緊：rooms GET=0 且 whiteboard_nodes GET=0） |
+| test:multi-branch / -e2e | 9/9、21/21 |
+| test:agent / asset-intelligence / review-viewer | 16/16、15/15、27/27 |
+| agent:gate | PASS |
+| test:video | 157/158 — check 23 本機環境性（pre-fix 基底 384389a 同簽名失敗，A/B 已做），CI 為準 |

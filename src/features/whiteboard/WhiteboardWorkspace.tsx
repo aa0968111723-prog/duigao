@@ -35,6 +35,8 @@ export type WhiteboardApi = {
   focusNodeId?: string | null;
   activeBoardId?: string | null;
   onOpenBoard: (id: string | null) => void;
+  /** 拖曳中的節點 ids（null=沒在拖）：遠端 row-patch 對這些節點讓路。 */
+  onDragState?: (ids: string[] | null) => void;
   onCreateBoard: (title: string) => void;
   onArchiveBoard: (id: string) => void;
   onRenameBoard: (id: string, title: string) => void;
@@ -387,6 +389,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     drag.current.last = world;
     const moved = moveNodes(liveNodes, drag.current.ids, dx, dy);
     setPreviewNodes(moved);
+    api.onDragState?.(drag.current?.ids ?? null);
     const now = performance.now();
     if (now - lastBroadcast.current > BROADCAST_THROTTLE_MS) lastBroadcast.current = now;
   };
@@ -408,6 +411,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       setPreviewNodes(null);
     }
     drag.current = null;
+    api.onDragState?.(null);
   };
 
   const onDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {

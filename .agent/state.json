@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T20:15:56.000Z",
+  "generatedAt": "2026-08-27T21:03:04.000Z",
   "git": {
-    "branch": "feat/stale-write-conflict-02b",
-    "sha": "4c112f4ecf4d0395f35a8c21cd66215b77c74bde",
-    "mainSha": "0eeb39ca46df5419a9ce787af49a89795fee14c2",
+    "branch": "feat/board-realtime-rowpatch-02c",
+    "sha": "384389af8e5227b30c09357bfccd8927d03f0a07",
+    "mainSha": "0d278a781e5fa33a9fa74c9bff3d128daa810573",
     "dirty": true
   },
   "project": {
@@ -34,16 +34,7 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": [
-        {
-          "baseRefName": "main",
-          "headRefName": "feat/stale-write-conflict-02b",
-          "isDraft": false,
-          "number": 51,
-          "title": "PR-02b: stale-write 衝突分支 — drop+refetch，殭屍佇列終結（audit F10）",
-          "url": "https://github.com/aa0968111723-prog/duigao/pull/51"
-        }
-      ]
+      "items": []
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",

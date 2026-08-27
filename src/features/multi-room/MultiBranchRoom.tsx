@@ -89,6 +89,8 @@ export type MultiBranchRoomApi = {
   /** 各訊息送出狀態；配合 onRetryDiscussion 呈現「未送出 · 重試」。 */
   discussionSendStates?: Record<string, "sending" | "failed">;
   onRetryDiscussion?: (messageId: string) => void;
+  /** 白板拖曳護盾（PR-02c）：拖曳中節點的遠端增量讓路。 */
+  onBoardDragState?: (ids: string[] | null) => void;
   /** 討論附件（PR-01b）；App 持有上傳與簽名。 */
   onAttachDiscussion?: (files: File[]) => void;
   attachBusy?: boolean;
@@ -614,6 +616,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     focusNodeId: api.focusNodeId,
                     activeBoardId: api.activeWhiteboardId,
                     onOpenBoard: api.onOpenWhiteboard,
+                    onDragState: api.onBoardDragState,
                     onCreateBoard: api.onCreateWhiteboard,
                     onArchiveBoard: api.onArchiveWhiteboard,
                     onRenameBoard: () => undefined,

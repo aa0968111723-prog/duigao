@@ -79,6 +79,111 @@ export async function applyPendingCloudWrites(
   return { acknowledged, retained, dropped };
 }
 
+export type BoardPatchInput =
+  | { type: "node-upsert"; node: WhiteboardNode }
+  | { type: "node-delete"; id: string }
+  | { type: "edge-insert"; edge: WhiteboardEdge }
+  | { type: "edge-delete"; id: string };
+
+/**
+ * 白板即時增量的合併規則（PR-02c，純函式）：
+ * - node-upsert 只接受「嚴格更新的 version」（> max(acked, local)）—
+ *   自己的 echo（version == 剛 ack 的值）與亂序舊事件都被擋下；
+ *   ack 水位無條件推到最高，本地下一筆寫才不會 409。
+ * - 拖曳中的節點讓路（拖曳結束的 persist 走 OCC；輸了由 02b 衝突路徑收）。
+ * - edge 無版本欄位：insert 以 id 去重、delete 以 id 移除。
+ */
+export function applyBoardPatches(
+  nodes: WhiteboardNode[],
+  edges: WhiteboardEdge[],
+  acked: Map<string, number>,
+  patches: BoardPatchInput[],
+  /** 讓路集合：拖曳中 ∪ persist in-flight 的節點 id。 */
+  shieldedIds: ReadonlySet<string> | null,
+): { nodes: WhiteboardNode[]; edges: WhiteboardEdge[]; changed: boolean } {
+  let nextNodes = nodes;
+  let nextEdges = edges;
+  for (const patch of patches) {
+    if (patch.type === "node-upsert") {
+      const incoming = patch.node;
+      if (shieldedIds?.has(incoming.id)) {
+        // 讓路且「不推進 ack」（Grok pr02c F1）：若推進，拖曳/打字結束的
+        // persist 會 stamp 到遠端版本 → 等版本被接受 → 本地舊 content
+        // 靜默蓋掉別人的編輯，02b 的 409→drop+refetch 永遠走不到。
+        // 不推進，讓 persist 用舊 acked 去撞 409，衝突路徑誠實接手。
+        // 同一守則也擋自己的 WAL echo（HTTP ack 前 version=acked+1 —
+        // Grok pr02c F2）：in-flight 的節點在自己的 ack 落地前不接受
+        // 任何 inbound 覆蓋。
+        continue;
+      }
+      const ackedVersion = acked.get(incoming.id) ?? 0;
+      const local = nextNodes.find((item) => item.id === incoming.id);
+      const localVersion = local?.version ?? 0;
+      const incomingVersion = incoming.version ?? 1;
+      if (incomingVersion > Math.max(ackedVersion, localVersion)) {
+        nextNodes = local
+          ? nextNodes.map((item) => (item.id === incoming.id ? incoming : item))
+          : [...nextNodes, incoming];
+      }
+      if (incomingVersion > ackedVersion) acked.set(incoming.id, incomingVersion);
+    } else if (patch.type === "node-delete") {
+      if (nextNodes.some((item) => item.id === patch.id)) {
+        nextNodes = nextNodes.filter((item) => item.id !== patch.id);
+      }
+    } else if (patch.type === "edge-insert") {
+      if (!nextEdges.some((item) => item.id === patch.edge.id)) nextEdges = [...nextEdges, patch.edge];
+    } else if (nextEdges.some((item) => item.id === patch.id)) {
+      nextEdges = nextEdges.filter((item) => item.id !== patch.id);
+    }
+  }
+  return { nodes: nextNodes, edges: nextEdges, changed: nextNodes !== nodes || nextEdges !== edges };
+}
+
+/**
+ * 板級整替（純函式，Grok pr02c F3）：該板以雲端 graph 為準 —
+ * 遠端已刪的節點消失、acked 水位同步（缺席者清除、在席者設為其 version），
+ * 其他板不動。in-flight/拖曳中的節點例外保留（其 persist 結果由 OCC 決）。
+ */
+export function replaceBoardGraph(
+  nodes: WhiteboardNode[],
+  edges: WhiteboardEdge[],
+  acked: Map<string, number>,
+  whiteboardId: string,
+  graph: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] },
+  shieldedIds: ReadonlySet<string> | null,
+): { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] } {
+  const incomingIds = new Set(graph.nodes.map((node) => node.id));
+  const keptLocal = nodes.filter(
+    (node) => node.whiteboardId !== whiteboardId || (shieldedIds?.has(node.id) && !incomingIds.has(node.id)),
+  );
+  const shieldPreserved = new Map(
+    nodes
+      .filter((node) => node.whiteboardId === whiteboardId && shieldedIds?.has(node.id))
+      .map((node) => [node.id, node]),
+  );
+  const nextNodes = [
+    ...keptLocal,
+    ...graph.nodes.map((node) => shieldPreserved.get(node.id) ?? node),
+  ];
+  const nextEdges = [
+    ...edges.filter((edge) => edge.whiteboardId !== whiteboardId),
+    ...graph.edges,
+  ];
+  // acked 同步：該板缺席者清除；在席者推到雲端 version（護盾中不推 —
+  // 讓 in-flight persist 的 OCC 結果決定）。
+  for (const node of nodes) {
+    if (node.whiteboardId === whiteboardId && !incomingIds.has(node.id) && !shieldedIds?.has(node.id)) {
+      acked.delete(node.id);
+    }
+  }
+  for (const node of graph.nodes) {
+    if (shieldedIds?.has(node.id)) continue;
+    const current = acked.get(node.id) ?? 0;
+    if ((node.version ?? 1) > current) acked.set(node.id, node.version ?? 1);
+  }
+  return { nodes: nextNodes, edges: nextEdges };
+}
+
 const DB_NAME = "duigao-collaboration";
 const DB_VERSION = 1;
 const SNAPSHOTS = "board_snapshots";
