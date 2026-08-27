@@ -25,6 +25,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:agent
+      - run: npm run test:asset-intelligence
       - run: npm run agent:context
       - run: npm run agent:gate
 
