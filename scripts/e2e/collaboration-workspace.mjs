@@ -115,25 +115,15 @@ async function recordWebm(page, seconds = 1.1) {
   }, seconds), "base64");
 }
 
-async function backToRoom(page) {
-  if (await page.locator("button.m-home").count()) {
-    await page.locator("button.m-home").click();
-  } else if (await page.locator(".project-back-button").count()) {
-    await page.locator(".project-back-button").click();
-  }
-  await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 15000 });
-  await page.waitForSelector(".project-tabs", { timeout: 10000 });
-}
-
 async function fillEditing(page, text) {
   const box = page.locator("textarea.wb-node-text");
-  await box.waitFor({ timeout: 5000 });
+  await box.waitFor({ timeout: 8000 });
   await box.fill(text);
 }
 
 async function searchNode(page, name) {
   await page.getByTestId("whiteboard-search").click();
-  await page.getByLabel("搜尋節點").fill(name);
+  await page.getByRole("textbox", { name: "搜尋節點" }).fill(name);
   await page.getByRole("button", { name, exact: true }).first().click();
 }
 
@@ -183,26 +173,30 @@ try {
 
     await chooseCreate(page, "擺攤計畫", "plan");
     await page.waitForSelector('[data-testid="plan-editor"]', { timeout: 10000 });
-    await backToRoom(page);
+    await page.locator(".project-back-button").click({ force: true });
+    await page.waitForSelector(".project-tabs", { timeout: 10000 });
 
     await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
     await chooseCreate(page, "擺攤文宣", "poster", { name: "booth.png", mimeType: "image/png", buffer: TINY_PNG });
-    await page.waitForSelector(".m-stage-area .stage, img.stage-img, [data-testid='multi-branch-room']", { timeout: 20000 });
-    await backToRoom(page);
+    await page.waitForSelector("img.stage-img", { timeout: 20000 });
+    await page.waitForFunction(() => document.querySelector("img.stage-img")?.naturalWidth > 0, null, { timeout: 20000 });
+    await page.locator("button.m-home").click();
+    await page.waitForSelector(".project-tabs", { timeout: 15000 });
 
     const videoBytes = await recordWebm(page);
     await page.locator('.project-tabs button').filter({ hasText: "內容" }).click();
     await chooseCreate(page, "招生影片", "video", { name: "admission.webm", mimeType: "video/webm", buffer: videoBytes });
-    await page.waitForSelector("video.v-video, [data-testid='multi-branch-room']", { timeout: 90000 });
-    await backToRoom(page);
+    await page.waitForSelector("video.v-video", { timeout: 90000 });
+    await page.locator("button.m-home").click();
+    await page.waitForSelector(".project-tabs", { timeout: 15000 });
 
     await page.locator('.project-tabs button').filter({ hasText: "討論" }).click();
-    await page.getByRole("button", { name: "對話" }).click();
+    await page.getByRole("button", { name: "對話", exact: true }).click();
     await page.getByLabel("房間討論").fill("先把招生流程攤在白板上");
     await page.getByRole("button", { name: "送出" }).click();
     check("房間討論可送出文字", (await page.getByTestId("discussion-feed").innerText()).includes("先把招生流程攤在白板上"));
 
-    await page.getByRole("button", { name: "白板" }).click();
+    await page.getByRole("button", { name: "白板", exact: true }).click();
     await page.getByLabel("白板名稱").fill("招生規劃");
     await page.getByRole("button", { name: "建立白板" }).click();
     await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 10000 });
@@ -225,8 +219,10 @@ try {
       await page.getByTestId("wb-next-step").click();
       await fillEditing(page, step);
     }
-    check("擺攤可自動長出流程下一步", (await page.locator("[data-node-type='flow']").count()) >= 5);
-    check("流程邊線會一起建立", (await page.locator("[data-testid^='wb-edge-']").count()) >= 5);
+    const flowCount = Number(await page.getByTestId("wb-stats").getAttribute("data-flow"));
+    const edgeCount = Number(await page.getByTestId("wb-stats").getAttribute("data-edges"));
+    check("擺攤可自動長出流程下一步", flowCount >= 5, `flow=${flowCount}`);
+    check("流程邊線會一起建立", edgeCount >= 5, `edges=${edgeCount}`);
 
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
@@ -263,27 +259,34 @@ try {
     await canvas.dispatchEvent("pointerup", { pointerId: 12 });
     check("雙指可 pinch zoom", true);
 
-    const target = page.locator("[data-node-type='mindmap'], [data-node-type='flow']").first();
-    const hit = await target.boundingBox();
+    await searchNode(page, "招生");
+    const focused = page.locator("[data-node-type='mindmap']").filter({ hasText: "招生" }).first();
+    const hit = await focused.boundingBox();
     if (hit) {
-      await canvas.dispatchEvent("pointerdown", { clientX: hit.x + 12, clientY: hit.y + 12, pointerId: 31 });
-      await page.waitForTimeout(500);
+      await page.evaluate(({ x, y }) => {
+        const el = document.querySelector("[data-testid='wb-canvas']");
+        if (!el) return;
+        el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 31, pointerType: "touch" }));
+      }, { x: hit.x + hit.width / 2, y: hit.y + hit.height / 2 });
+      await page.waitForTimeout(550);
       check("長按進入多選", await page.getByTestId("wb-multiselect").count() === 1);
       if (await page.getByTestId("wb-multiselect").count()) await page.getByRole("button", { name: "完成" }).click();
-      await canvas.dispatchEvent("pointerup", { pointerId: 31 });
+      await page.evaluate(() => {
+        document.querySelector("[data-testid='wb-canvas']")?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 31, pointerType: "touch" }));
+      });
     } else {
-      check("長按進入多選", false, "找不到節點可長按");
+      check("長按進入多選", false, "找不到招生節點可長按");
     }
 
     await page.getByTestId("whiteboard-arrange").click();
     check("整理按鈕可按", true);
 
     await page.getByRole("button", { name: "分享至討論", exact: false }).first().click().catch(() => undefined);
-    await page.getByRole("button", { name: "對話" }).click();
+    await page.getByRole("button", { name: "對話", exact: true }).click();
     check("討論與白板互相連得起來", (await page.getByTestId("discussion-feed").innerText()).length > 0);
     check("決策區看得到已決定", (await page.getByTestId("decision-area").innerText()).includes("採用 B 版"));
 
-    await page.getByRole("button", { name: "語音" }).click();
+    await page.getByRole("button", { name: "語音", exact: true }).click();
     check("語音是架構邊界而不是半成品 MVP", (await page.getByTestId("voice-boundary").innerText()).includes("語音"));
 
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });

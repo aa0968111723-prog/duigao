@@ -284,7 +284,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     if (target?.closest("textarea, input, button, a")) return;
     const point = { x: event.clientX, y: event.clientY };
     pointers.current.set(event.pointerId, point);
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* programmatic pointer events (tests / some WebViews) cannot capture */
+    }
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       pinch.current = { distance: Math.hypot(a.x - b.x, a.y - b.y), zoom: camera.zoom };
@@ -452,6 +456,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       <div className="wb-toolbar">
         <button type="button" className="project-back-button" onClick={() => api.onOpenBoard(null)} aria-label="回到白板列表">‹</button>
         <h2>{board.title}</h2>
+        <span hidden data-testid="wb-stats" data-nodes={nodes.length} data-edges={edges.length} data-flow={nodes.filter((node) => node.nodeType === "flow").length} data-mindmap={nodes.filter((node) => node.nodeType === "mindmap").length} />
       </div>
       <div
         ref={wrapRef}
@@ -517,6 +522,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 api.onCreateEdge(next.edge);
                 setSelected([next.node.id]);
                 setEditingId(next.node.id);
+                setCamera(focusCamera(next.node, viewport, camera.zoom));
                 setMultiSelect(false);
               }}>+ 下一步</button>
             )}
@@ -527,6 +533,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 api.onCreateEdge(next.edge);
                 setSelected([next.node.id]);
                 setEditingId(next.node.id);
+                setCamera(focusCamera(next.node, viewport, camera.zoom));
                 setMultiSelect(false);
               }}>+ 子項目</button>
             )}

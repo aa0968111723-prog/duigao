@@ -159,13 +159,13 @@ export function addMindmapChild(
 
 export function nodeSearchText(node: WhiteboardNode): string {
   const { text, title, subtitle, filename, pollQuestion, sourceLabel } = node.content;
-  return [text, title, subtitle, filename, pollQuestion, sourceLabel, node.nodeType].filter(Boolean).join(" ").toLowerCase();
+  return [text, title, subtitle, filename, pollQuestion, sourceLabel].filter(Boolean).join(" ");
 }
 
 export function findNodes(nodes: WhiteboardNode[], query: string): WhiteboardNode[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return nodes;
-  return nodes.filter((node) => nodeSearchText(node).includes(needle));
+  return nodes.filter((node) => `${nodeSearchText(node)} ${node.nodeType}`.toLowerCase().includes(needle));
 }
 
 export function formatTimestamp(seconds?: number): string {
