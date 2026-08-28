@@ -1,0 +1,77 @@
+{
+  "verdict": "MUST_FIX",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "claim": "pinch 的 scale 是「相對起手距離的絕對比」，卻乘在當下 camera.zoom 上；兩指各一次 pointermove 就連乘兩次，縮放會指數失控，ADR-013 錨點漂移 <8px 與雙指平移檢查點不可能過。",
+      "evidence": "gestures.ts:101-105 pinch 起手只記一次 distance，且 zoom 恆為 0；move 分支（157-166）scale=distance/pinch.distance，接著 next.pinch 仍寫回舊 distance，move 的 zoom 參數完全沒用。WhiteboardWorkspace.tsx:488-498 卻做 clampZoom(current.zoom * effect.scale)。兩指同時動＝連續兩個 pinch-zoom effect，第二次 functional setCamera 拿到已乘過的 zoom 再乘同一套絕對 scale。單元測試「缺陷3」只 assert midDelta>0，不檢查 scale 是否增量、也不跑 runEffects。三指落下（gestures.ts:112）只把 pointer 塞進 Map、mode 仍 pinch；抬起其中一指時 Map.values() 前兩名跳號，中點/距離會跳。pointercancel 被接到 onCanvasPointerUp（WhiteboardWorkspace.tsx:908）：pinch 中一指 cancel 會把殘指改成 pan，不是卡死，但也不回滾。",
+      "repro": "開板 zoom=1，兩指距離 100px 起 pinch；拉到 120px（應 1.2x）再拉到 140px（應 1.4x）。實作：第一次 zoom=1.2，第二次 1.2*(140/100)=1.68，之後迅速撞 MAX_ZOOM=2.4，錨點內容滑走遠大於 8px。再加第三指再放開其中一指，畫面再跳一次。",
+      "blocks_release": true
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "claim": "點兩下節點進編輯在真實呼叫路徑是死的。begin-drag 回填把 mode 設成 drag 且 dragLast 非 null，up 的 tap/double-tap 條件同一GPoint(next.dragLast, null)永遠不成立；單元測試沒餵 begin-drag，是假綠。drag 後不會誤發 tap（brief 問的方向相反）。",
+      "evidence": "wireflow 與 registry.tsx:8-10 寫明「點兩下才進編輯」。down 先發 hit-test（gestures.ts:115），runEffects 對可編輯節點立刻 gestureReducer(begin-drag)（WhiteboardWorkspace.tsx:447-452），dragLast=world。up（gestures.ts:201）要 (mode==idle) || (mode==drag && sameGPoint(dragLast,null)) || mode==pan 才發 tap/double-tap；begin-drag 永遠寫 dragLast，sameGPoint(..., null) 等價於死碼。位移超過 slop 會長按取消，tap 整段不跑，所以 drag 後不會誤發 tap。whiteboard-gestures.test.ts:92-107 的「缺陷4」只 down+up、從不 begin-drag，mode 停在 idle，測試必綠、產品必黑。空白處 begin-pan，雙擊空白建便利貼仍通。",
+      "repro": "可編輯便利貼上 300ms/24px 內點兩下：每次 down 都 begin-drag，up 發 commit-drag 不發 double-tap，節點不進編輯（只能靠情境列「編輯」）。同一測試檔的純 down/up 仍然 PASS。",
+      "blocks_release": true
+    },
+    {
+      "id": "F3",
+      "severity": "high",
+      "claim": "endEdit 把 record()/nextOpId()/onEmitOperation 放進 setEditingId 的 updater；這不是純函式。React Strict Mode（main.tsx）會雙呼 updater，一次編輯 session 入兩筆相同 undo 並 emit 兩個 op。undo 的 upsert 不會再 record（不是無限迴圈），但文字 undo 粒度被複製。",
+      "evidence": "WhiteboardWorkspace.tsx:392-401：先把 editStartNode.current=null，再在 setEditingId(current=>{ if(start && current===start.id) record(nodeUpdateDraft(nextOpId(), start, now)); return null })。record（294-298）是 setHistory(pushHistory)+onEmitOperation。React 文件明示 Strict Mode 會把 updater 跑兩次以抓 side effect；兩次都看到同一個 start 與同一個 current。runUndo（644-647）走 undoStep→executors.upsert→api.onUpsertNode，App.tsx:1761-1763 的 upsertNode 只 stamp/persist，不呼叫 record，故不會迴圈；重複入帳只發生在 session end。",
+      "repro": "npm run dev（StrictMode）開板、雙擊或按編輯改一字、點空白結束編輯。history.undo 長度 2、雲端 operations 兩列同一 field_mask；復原要按兩次，第一次看起來沒動。",
+      "blocks_release": true
+    },
+    {
+      "id": "F4",
+      "severity": "high",
+      "claim": "拖曳 preview 用 render 當下的 previewNodes 做增量，且 commit 先清 preview、persist 還 debounce 120ms，每次放手節點必先跳回起點。runEffects 連兩次 move-nodes 若還沒 re-render，第二次覆蓋第一次，最後入帳的 after 也是舊值。",
+      "evidence": "move-nodes（WhiteboardWorkspace.tsx:478-483）moveNodes(previewNodes ?? liveNodes, ...) 然後 setPreviewNodes(moved)，不是 functional update、也沒用 dragStartNodes 算總位移。pointermove 是 continuous event，同框多個 move 都讀同一份舊 preview，只留下最後一小段 dx。commit-drag（523-538）const source = previewNodes ?? liveNodes（同樣可能少最後幾段），persistNodes 是 setTimeout(api.onUpsertNodes, DRAG_PERSIST_MS=120)（379-385, canvas.ts:102），緊接著 setPreviewNodes(null)。liveNodes 回到尚未 upsert 的 api.nodes＝拖曳起點。ADR-013 檢查點 2「pinch↔drag 零節點跳動」在每次普通 drag commit 就已經跳。",
+      "repro": "單指按節點拖一段再放手：節點瞬間回到按下位置，約 120ms 後才跳到（可能少最後幾次 move 的）終點。高頻觸控下終點還會短一截；undo 的 after 與畫面上最後看到的位置不一致。",
+      "blocks_release": true
+    },
+    {
+      "id": "F5",
+      "severity": "medium",
+      "claim": "Focus history 層用 pushState + 非同步 history.back()，sheet 的 popstate 看的是 render 後才更新的 sheetRef；連按兩次 back 會把第二次當成「sheet 還開著」吃掉。effect 依賴 board?.id，切板或重跑時 cleanup 的 back 會打進新 listener，誤 onOpenBoard(null)。UI 返回鈕不設 poppingRef，只靠 cleanup back。",
+      "evidence": "WhiteboardWorkspace.tsx:305-338：進 Focus 無條件 pushState({layer:'board-focus'})，deps=[focused, board?.id]。onPop 若 sheetRef.current 為真則 setSheet(null)+再 pushState。sheetRef 只在 render 時賦值（304 行），兩次 popstate 若發生在同一次 commit 前，第二次仍走 sheet 分支。cleanup：非 poppingRef 就 history.back()（非同步 popstate）。UI ‹（883 行）只 api.onOpenBoard(null)，不設 poppingRef；若使用者已經用系統 back（poppingRef true）路徑是對的，但切到另一塊板時 focused 仍 true、board.id 變，cleanup back + 新 effect 再 push，延遲 popstate 會當成使用者要退板。wireflow 疊加規則 1 要求「恰一層」。",
+      "repro": "開板→開「更多」sheet→Android back 連按兩下：sheet 會關，但第二次 back 被 re-push 吃掉，人還在 Focus，要第三下才回列表。或：同一 Workspace 實例把 activeBoardId 從 A 換成 B（不經 null），cleanup 的 popstate 把剛打開的 B 關掉。",
+      "blocks_release": true
+    },
+    {
+      "id": "F6",
+      "severity": "high",
+      "claim": "鍵盤避讓 effect 依賴只有 [editingId, keyboardInset]，camera/viewport/liveNodes 被 eslint-disable 排除。鍵盤彈出後若使用者手動平移（或 inset 分階段變大），不會再把節點抬到鍵盤上緣之上；且 inset=innerHeight-visualViewport.height，兩者一起被鍵盤壓小時 inset=0，整段避讓不跑。ADR-013 檢查點 5 沒有自動化，真機表也還是空白。",
+      "evidence": "WhiteboardWorkspace.tsx:290-291, 366-377：screenBottom 用閉包裡的 camera 算，再用 setCamera(current => current.y - (screenBottom-limit))。camera 不在 deps：鍵盤已開時使用者把節點拖回鍵盤下，effect 不重跑。keyboardInset 在 Android Chrome 常見「layout viewport 跟著視覺視窗一起縮小」時為 0，開頭就 return。whiteboard.css 的 .wb-focus 不用 --kb，沒有 CSS 後備。wireflow 偏差 4 把這項推給 rounds/wb02/real-device-checklist.md，該表五格全空。",
+      "repro": "點畫布下半部便利貼進編輯，等鍵盤。iOS：若先自動上移再手動把畫面拖回來，節點可以停在鍵盤底下且不會被拉回。Android：若 innerHeight 已縮小，看不到任何 camera 平移，節點被 canvas overflow 裁切。",
+      "blocks_release": true
+    },
+    {
+      "id": "F7",
+      "severity": "medium",
+      "claim": "e2e「畫布≥75%」只量 [data-testid=wb-canvas] 的元素盒。工具列若改成 absolute 疊回 canvas 內，canvas 變大、斷言仍綠，與 test-plan「focus 層減頂/底工具列聯集」相反。視覺 12 張的節點排序本身穩定（created_at+id，沒用到每次 uuid 的 board id），假綠點在面積公式而不是排序。",
+      "evidence": "rounds/wb00/test-plan.md:28-29 要求有效畫布=focus rect 減工具列與疊加物。collaboration-workspace.mjs:218-229 卻 canvas.getBoundingClientRect() 面積 / innerWidth*innerHeight，註解還寫死「工具列在 flex 流內」。目前 whiteboard.css:76-85 canvas 是 flex:1、工具列 flex:none，數字碰巧對；.wb-focus-bottom 一旦 position:absolute，canvas 吃滿視窗，≥75% 必過、可視區卻掉到 75% 以下。board-visual.mjs:114 宣告固定 boardId 卻 void 掉，改用 UI 建立的 uuid；節點 created_at=1700000000000+i*1000、id 序號（128-147），paintOrder 三鍵是 z/createdAt/id（order.ts:13-18），與 board uuid 無關，排序穩。",
+      "repro": "把 .wb-focus-bottom 改成 absolute; bottom:0; 再跑 test:collaboration-e2e：canvasPct 接近 100，檢查仍 PASS，但底欄蓋住畫布。視覺基準重跑不因 board id 重抽而亂序。",
+      "blocks_release": false
+    },
+    {
+      "id": "F8",
+      "severity": "medium",
+      "claim": "文字每鍵 onUpsertNode(\"now\") 但 op/undo 只在 session end 記一筆；undo/redo 對 content.text 走 applyMasked + 當前 acked version，OCC 不會 409，中間別人改的字被靜默蓋掉。異欄位（例如別人改字、你 undo 移動）會保留，同欄位不會「可見衝突」。",
+      "evidence": "NodeView onChangeText（WhiteboardWorkspace.tsx:936）每字 upsert now；endEdit 才 nodeUpdateDraft(start, now)（398）。history.ts:57-60 undo 的 node-update：findNode 取現況，applyMasked(current, mask, after) 後 executors.upsert。applyMasked（operations.ts:172-196）只寫 mask 內欄位、version 不動；upsertNodes（App.tsx:1661-1664, 1680-1681）再用 lastAcked stamp，衝突 toast 只在 result===\"conflict\"（1694-1710）。同欄位 undo 帶的是最新 version，寫入成功。白板手勢測試「缺陷 undo」只證明 move 的 mask 不吃掉 B 的 text（whiteboard-gestures.test.ts:136-148），沒測 text session 的 undo。",
+      "repro": "A 編完「hello」→「hellp」並結束 session。B 把同一張改成「world」且已 ack。A 按復原：畫面與雲端變回「hello」，沒有「被別人改過」toast；再 redo 變「hellp」，B 的字消失。",
+      "blocks_release": false
+    },
+    {
+      "id": "F9",
+      "severity": "medium",
+      "claim": "wireflow 要求切「對話」tab 時白板 keep-mounted + display:none 並在再顯示時手動 measure；實作是三元卸載，且對話鈕強制 onOpenWhiteboard(null)。‹ 回列表因 hooks 在 early return 之前而意外保住 camera，不是實作了 keep-mounted。舊 .wb-shell/.wb-toolbar/.wb-canvas-wrap 仍在 CSS 但 TSX 已不用；BoardList 留在 680px pane 與 wireflow 一致，不是漏改。",
+      "evidence": "wireflow.md:8-12, 99-102。MultiBranchRoom.tsx:886-889：對話 onClick 設 chat 並 onOpenWhiteboard(null)；discussPane===\"board\" ? WhiteboardWorkspace : RoomDiscussion，切走即 unmount。WhiteboardWorkspace 在 hooks 之後 if (!board) return <BoardList/>（727），同一實例 ‹ 回列表 camera/history 還在；切對話就把實例拆掉。whiteboard.css:1-11 的 .wb-shell/.wb-toolbar/.wb-canvas-wrap 無 TSX 引用；列表走 .wb-list 在 project-room-main（styles.css:1042 min(680px)），符合「開板才跳出 680 欄」。",
+      "repro": "開板平移/選取 → ‹ 回列表再點同一張：camera 還在（early return）。回列表後按「對話」再「白板」再點卡：camera 回到 {24,24,1}。",
+      "blocks_release": false
+    }
+  ]
+}

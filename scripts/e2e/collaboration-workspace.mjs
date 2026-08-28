@@ -216,14 +216,24 @@ try {
 
     // ---- WB02 Focus Mode 驗收（Grok wb00 F8 的防假綠斷言）----------
     {
-      // 有效畫布面積：canvas 元素本身（工具列在 flex 流內、不疊在 canvas 上）
+      // 有效畫布面積（Grok wb02 F7）：canvas 矩形扣掉疊在其上的 chrome
+      // 交集（頂欄/底欄/編輯行）。現在是純 flex 佈局、交集為 0；日後若改
+      // overlay 疊在 canvas 上，這條會誠實掉下去而不是假綠。
       const metrics = await page.evaluate(() => {
-        const canvas = document.querySelector('[data-testid="wb-canvas"]');
-        const rect = canvas.getBoundingClientRect();
+        const canvas = document.querySelector('[data-testid="wb-canvas"]').getBoundingClientRect();
+        let overlap = 0;
+        for (const el of document.querySelectorAll(".wb-focus-top, .wb-focus-bottom, .wb-editing-line")) {
+          const r = el.getBoundingClientRect();
+          const w = Math.max(0, Math.min(canvas.right, r.right) - Math.max(canvas.left, r.left));
+          const h = Math.max(0, Math.min(canvas.bottom, r.bottom) - Math.max(canvas.top, r.top));
+          overlap += w * h;
+        }
+        const effective = canvas.width * canvas.height - overlap;
         return {
-          canvasArea: rect.width * rect.height,
+          canvasArea: Math.round(canvas.width * canvas.height),
+          chromeOverlap: Math.round(overlap),
           viewportArea: window.innerWidth * window.innerHeight,
-          canvasPct: Math.round((rect.width * rect.height) / (window.innerWidth * window.innerHeight) * 100),
+          canvasPct: Math.round(effective / (window.innerWidth * window.innerHeight) * 100),
         };
       });
       check(`Focus Mode：有效畫布 ≥75% 視窗（實測 ${metrics.canvasPct}%）`, metrics.canvasPct >= 75, JSON.stringify(metrics));

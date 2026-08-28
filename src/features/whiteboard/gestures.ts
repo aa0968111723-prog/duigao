@@ -158,11 +158,13 @@ export function gestureReducer(
         const [a, b] = [...next.pointers.values()];
         const distance = Math.hypot(a.x - b.x, a.y - b.y);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        // 雙指平移（缺陷 3）：中點位移是平移量，縮放比是 zoom 量 — 分開回報
+        // 增量語意（Grok wb02 F1）：scale 是「相對上一次 move」的比值，
+        // 呼叫端乘在當下 zoom 上 — 乘法鏈收斂於總距離比。若以「相對起手」
+        // 的絕對比乘當下 zoom，每個 move 連乘一次會指數失控（實抓）。
         const midDelta = { x: mid.x - next.pinch.mid.x, y: mid.y - next.pinch.mid.y };
         const scale = next.pinch.distance > 0 ? distance / next.pinch.distance : 1;
         effects.push({ kind: "pinch-zoom", mid, scale, midDelta });
-        next.pinch = { distance: next.pinch.distance, zoom: next.pinch.zoom, mid };
+        next.pinch = { distance, zoom: next.pinch.zoom, mid };
         return { state: next, effects };
       }
 
@@ -194,23 +196,27 @@ export function gestureReducer(
 
     case "up": {
       next.pointers.delete(input.pointerId);
+      // tap 判定（Grok wb02 F2 修正）：up 時長按仍 armed ＝ 位移未超過
+      // slop 且未到長按時限 — 這就是一次 tap，**與 mode 無關**（drag/pan
+      // 起手但手指沒真的動也算）。原本的 mode 條件讓節點上的雙擊永遠
+      // 走不到（begin-drag 已把 dragLast 設非 null）。
+      const wasTap = next.longPress !== null && input.time < next.longPress.deadline;
       if (next.longPress) {
         next.longPress = null;
         effects.push({ kind: "long-press-cancelled" });
-        // 短按（未觸發長按、未拖）＝tap：偵測 pointer 雙擊（缺陷 4）
-        if (next.mode === "idle" || (next.mode === "drag" && sameGPoint(next.dragLast, null)) || next.mode === "pan") {
-          const lastTap = next.lastTap;
-          if (
-            lastTap &&
-            input.time - lastTap.time <= DOUBLE_TAP_MS &&
-            Math.hypot(input.point.x - lastTap.at.x, input.point.y - lastTap.at.y) <= DOUBLE_TAP_SLOP
-          ) {
-            next.lastTap = null;
-            effects.push({ kind: "double-tap", screen: input.point });
-          } else {
-            next.lastTap = { at: input.point, time: input.time };
-            effects.push({ kind: "tap", screen: input.point });
-          }
+      }
+      if (wasTap) {
+        const lastTap = next.lastTap;
+        if (
+          lastTap &&
+          input.time - lastTap.time <= DOUBLE_TAP_MS &&
+          Math.hypot(input.point.x - lastTap.at.x, input.point.y - lastTap.at.y) <= DOUBLE_TAP_SLOP
+        ) {
+          next.lastTap = null;
+          effects.push({ kind: "double-tap", screen: input.point });
+        } else {
+          next.lastTap = { at: input.point, time: input.time };
+          effects.push({ kind: "tap", screen: input.point });
         }
       }
       if (next.mode === "pinch") {
@@ -246,11 +252,6 @@ export function gestureReducer(
   return { state: next, effects };
 }
 
-function sameGPoint(a: GPoint | null, b: GPoint | null): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return a.x === b.x && a.y === b.y;
-}
 
 /** 套索命中：射線法點在多邊形內（節點中心點計）。 */
 export function lassoHits(

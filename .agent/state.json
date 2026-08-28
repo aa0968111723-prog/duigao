@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T10:03:30.000Z",
+  "generatedAt": "2026-08-28T10:37:23.000Z",
   "git": {
     "branch": "agent/wb02-focus-mode",
-    "sha": "9424d4498654f355b45a6db70df1ef4f6f001b6b",
+    "sha": "d5f6c0f8e1b953016c12005da30756e887c188ef",
     "mainSha": "4b971103cead57419087af9508e763f7df88d86d",
     "dirty": true
   },

@@ -127,3 +127,11 @@ reduced-motion 時關 camera 動畫；焦點環可見；橫向可用（工具列
    互動屬 WB03。
 6. **content overlay 的 history 第二層**（疊加規則 3）：overlay 開啟點
    在 App 層，WB03 佈線。
+7. **keep-mounted 未實作**（Grok wb02 F9 誠實化）：本節上方寫的
+   「切對話 tab 時 display:none 不 unmount ＋ re-show 重量測」在 WB02
+   **沒有做到** — tab 切換走 App 的 `onOpenWhiteboard(null)`，workspace
+   直接 unmount，camera/選取狀態回到預設。原因：tab 語意在 App 層，
+   keep-mounted 需要 App 容器改構（超出 PR-02 最小侵入邊界）。行為上
+   「切對話＝關板」，回白板 tab 進板清單。keep-mounted＋re-measure
+   排 WB03；舊 `.wb-shell`/`.wb-toolbar`/`.wb-canvas-wrap`/`.wb-bottom`
+   死 CSS 已隨本輪移除。

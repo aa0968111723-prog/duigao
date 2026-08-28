@@ -89,7 +89,7 @@ test("缺陷3：雙指平移 — 中點位移以 midDelta 回報（zoom 不變�
   assert.ok(total > 0, `中點位移必須回報（total=${total}）`);
 });
 
-test("缺陷4：pointer 雙擊 — 300ms/24px 內兩次 tap 發 double-tap", () => {
+test("缺陷4：pointer 雙擊 — 300ms/24px 內兩次 tap 發 double-tap（空白處）", () => {
   let state = initialGestureState();
   const tap = (time: number) => {
     state = gestureReducer(state, { type: "down", pointerId: 1, point: { x: 60, y: 60 }, time }).state;
@@ -104,6 +104,47 @@ test("缺陷4：pointer 雙擊 — 300ms/24px 內兩次 tap 發 double-tap", () 
   // 超時的第三次：回到單 tap
   const third = tap(1000);
   assert.ok(third.some((effect) => effect.kind === "tap") && !third.some((effect) => effect.kind === "double-tap"));
+});
+
+test("Grok F2：節點上（begin-drag 回填）沒真的拖 — 雙擊仍要到達（原測試假綠反例）", () => {
+  let state = initialGestureState();
+  const tapOnNode = (time: number) => {
+    state = gestureReducer(state, { type: "down", pointerId: 1, point: { x: 60, y: 60 }, time }).state;
+    // hit-test 命中節點後元件回填 begin-drag（真實路徑；原測試漏了這步才假綠）
+    state = gestureReducer(state, { type: "begin-drag", ids: ["n1"], world: { x: 36, y: 36 } }).state;
+    const out = gestureReducer(state, { type: "up", pointerId: 1, point: { x: 60, y: 60 }, time: time + 40 });
+    state = out.state;
+    return out.effects;
+  };
+  const first = tapOnNode(0);
+  assert.ok(first.some((effect) => effect.kind === "tap"), "drag 起手但未位移＝tap");
+  const second = tapOnNode(150);
+  assert.ok(second.some((effect) => effect.kind === "double-tap"), "節點上的第二次 tap 必須發 double-tap（進入編輯的入口）");
+  // 真的拖了（超過 slop）就不是 tap：不得誤發
+  state = gestureReducer(state, { type: "down", pointerId: 1, point: { x: 60, y: 60 }, time: 2000 }).state;
+  state = gestureReducer(state, { type: "begin-drag", ids: ["n1"], world: { x: 36, y: 36 } }).state;
+  state = gestureReducer(state, { type: "move", pointerId: 1, point: { x: 60 + LONG_PRESS_SLOP + 4, y: 60 }, time: 2050, zoom: 1 }).state;
+  const dragged = gestureReducer(state, { type: "up", pointerId: 1, point: { x: 60 + LONG_PRESS_SLOP + 4, y: 60 }, time: 2100 });
+  state = dragged.state;
+  assert.ok(!dragged.effects.some((effect) => effect.kind === "tap"), "位移超過 slop 不得算 tap");
+  assert.ok(dragged.effects.some((effect) => effect.kind === "commit-drag"));
+});
+
+test("Grok F1：pinch scale 是增量比 — 距離不變的 move 回報 1，不重複回報總比", () => {
+  let state = initialGestureState();
+  state = gestureReducer(state, { type: "down", pointerId: 1, point: { x: 100, y: 100 }, time: 0 }).state;
+  state = gestureReducer(state, { type: "down", pointerId: 2, point: { x: 200, y: 100 }, time: 5 }).state; // 起手距離 100
+  // 第一次 move：距離 100→200，scale=2
+  let out = gestureReducer(state, { type: "move", pointerId: 2, point: { x: 300, y: 100 }, time: 10, zoom: 1 });
+  state = out.state;
+  const first = out.effects.find((effect) => effect.kind === "pinch-zoom");
+  assert.ok(first && first.kind === "pinch-zoom" && Math.abs(first.scale - 2) < 1e-9, "第一次 move：scale=2");
+  // 第二次 move：兩指沒再動（距離仍 200）— 增量比必須是 1。
+  // 舊實作回報「相對起手的絕對比」2，呼叫端乘當下 zoom → 指數失控（Grok 實抓）。
+  out = gestureReducer(state, { type: "move", pointerId: 2, point: { x: 300, y: 100 }, time: 20, zoom: 1 });
+  const second = out.effects.find((effect) => effect.kind === "pinch-zoom");
+  assert.ok(second && second.kind === "pinch-zoom" && Math.abs(second.scale - 1) < 1e-9,
+    `距離未變的 move 必須回報 scale=1（實得 ${second && second.kind === "pinch-zoom" ? second.scale : "無效果"}）`);
 });
 
 test("三鍵全序：paint 與 hit 同一把尺 — z 高者蓋住且先命中", () => {
@@ -166,6 +207,23 @@ test("undo/redo：move 的 undo 只回位置、redo 復原；上限 50", () => {
     capped = pushHistory(capped, nodeUpdateDraft(`op-c${i}`, before, after)!);
   }
   assert.equal(capped.undo.length, HISTORY_LIMIT);
+});
+
+test("Grok F8：undo 的欄位已被別人改走（drift）→ conflict-drift 誠實跳過，不蓋字", () => {
+  const before = node("n9", { content: { text: "我打的字" } });
+  const after = node("n9", { x: 0, y: 0, content: { text: "我改完的字" } });
+  const stack = pushHistory(emptyHistory(), nodeUpdateDraft("op-d1", before, after)!);
+  // 同事在我 undo 之前又改了同一欄位
+  const store = new Map<string, WhiteboardNode>([["n9", { ...after, content: { text: "同事後來改的字" } }]]);
+  const executors = {
+    upsert: (item: WhiteboardNode) => { store.set(item.id, item); },
+    softDelete: (id: string) => { store.delete(id); },
+    recreate: () => undefined,
+    findNode: (id: string) => store.get(id),
+  };
+  const result = undoStep(stack, executors, "op-d2");
+  assert.equal(result.skipped, "conflict-drift", "欄位 drift 必須誠實跳過");
+  assert.equal(store.get("n9")!.content.text, "同事後來改的字", "不得靜默蓋掉別人的字");
 });
 
 test("registry：全部 DB 詞彙都有 renderer 或 fallback；fallback 誠實標注", () => {

@@ -15,6 +15,22 @@
 import type { WhiteboardNode } from "../collaboration/types";
 import { applyMasked, inverseDraft, type OperationDraft } from "../collaboration/operations";
 
+function readMasked(node: WhiteboardNode, path: string): unknown {
+  if (path.startsWith("content.")) {
+    const content = node.content as Record<string, unknown> | undefined;
+    return content?.[path.slice("content.".length)];
+  }
+  return (node as unknown as Record<string, unknown>)[path];
+}
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a === "object" && typeof b === "object") {
+    try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+  }
+  return false;
+}
+
 export type HistoryStack = {
   undo: OperationDraft[];
   redo: OperationDraft[];
@@ -47,8 +63,8 @@ export type HistoryExecutors = {
 export type HistoryStepResult = {
   stack: HistoryStack;
   applied: OperationDraft | null;
-  /** 節點已不在（被別人刪/來源消失）→ 誠實跳過，呼叫端給提示。 */
-  skipped?: "missing-node" | "unsupported";
+  /** 節點不在／欄位已被別人改走（drift）／型別不支援 → 誠實跳過＋提示。 */
+  skipped?: "missing-node" | "unsupported" | "conflict-drift";
 };
 
 function execute(draft: OperationDraft, executors: HistoryExecutors): HistoryStepResult["skipped"] | null {
@@ -57,6 +73,14 @@ function execute(draft: OperationDraft, executors: HistoryExecutors): HistorySte
     case "node-move": {
       const current = executors.findNode(draft.entityId);
       if (!current) return "missing-node";
+      // drift 防護（Grok wb02 F8）：undo/redo 只在「欄位還是這個 op 產出
+      // 的值」時套用 — 期間別人改過（current ≠ draft.before）就誠實跳過，
+      // 不靜默蓋掉別人的字。OCC 擋不住這種（acked version 是新的）。
+      const expected = draft.before;
+      for (const path of draft.fieldMask) {
+        const now = readMasked(current, path);
+        if (path in expected && !valuesEqual(now, expected[path])) return "conflict-drift";
+      }
       executors.upsert(applyMasked(current, draft.fieldMask, draft.after));
       return null;
     }

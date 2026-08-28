@@ -22,7 +22,7 @@ import { canEditBoard } from "../collaboration/permissions";
 import { formatEditorLine } from "../collaboration/presence";
 import type { NodeType, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardFrame, WhiteboardNode } from "../collaboration/types";
 import { nodeCreateDraft, nodeDeleteDraft, nodeUpdateDraft, applyMasked, type OperationDraft } from "../collaboration/operations";
-import { DRAG_PERSIST_MS, fitCamera, focusCamera, marqueeHits, screenToWorld, visibleNodes, zoomAt, clampZoom, type Camera } from "./canvas";
+import { fitCamera, focusCamera, marqueeHits, screenToWorld, visibleNodes, zoomAt, clampZoom, type Camera } from "./canvas";
 import { paintOrder, hitTest } from "./order";
 import {
   gestureReducer,
@@ -262,7 +262,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [camera, setCamera] = useState<Camera>({ x: 24, y: 24, zoom: 1 });
   const [selected, setSelected] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<Sheet>(null);
+  const [sheet, setSheetState] = useState<Sheet>(null);
+  // F5：popstate handler 要同步讀 sheet — ref 隨 setter 同步更新
+  const sheetRef = useRef<Sheet>(null);
+  const setSheet = useCallback((next: Sheet) => { sheetRef.current = next; setSheetState(next); }, []);
   const [search, setSearch] = useState("");
   const [viewport, setViewport] = useState({ width: 360, height: 520 });
   const [marquee, setMarquee] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
@@ -276,6 +279,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [videoEnd, setVideoEnd] = useState("");
   const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan" | "asset">("all");
   const [previewNodes, setPreviewNodes] = useState<WhiteboardNode[] | null>(null);
+  // F4：拖曳 preview 的同步事實來源 — render 閉包的 previewNodes 在
+  // 同批 pointermove 之間是舊值，增量會疊在過期基準上（節點抖動/丟步）
+  const previewRef = useRef<WhiteboardNode[] | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const [history, setHistory] = useState<HistoryStack>(emptyHistory());
@@ -298,23 +304,31 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   }, [api]);
 
   // ---- Focus 進出通知＋history 層（wireflow 疊加規則 1/2/5） ----
+  // 只鍵在 focused（Grok wb02 F5）：若鍵 board?.id，切板時 cleanup 的
+  // history.back() 是非同步的，會打進「新 effect 已掛上的 listener」，
+  // 誤觸 onOpenBoard(null) 把剛開的板關掉。切板期間 focused 不變，
+  // 這一層 history 就原地保留。
   const focused = Boolean(board);
   const poppingRef = useRef(false);
-  const sheetRef = useRef<Sheet>(null);
-  sheetRef.current = sheet;
+  const pushedRef = useRef(false);
+  const apiRef = useRef(api);
+  apiRef.current = api;
   useEffect(() => {
-    api.onFocusChange?.(focused);
+    apiRef.current.onFocusChange?.(focused);
     if (!focused) return;
     // 進 Focus：恰一層 history；back = 先關 sheet、再退出白板
+    pushedRef.current = true;
     window.history.pushState({ layer: "board-focus" }, "");
     const onPop = () => {
+      pushedRef.current = false;
       if (sheetRef.current) {
         setSheet(null);
+        pushedRef.current = true;
         window.history.pushState({ layer: "board-focus" }, "");
         return;
       }
       poppingRef.current = true;
-      api.onOpenBoard(null);
+      apiRef.current.onOpenBoard(null);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -329,13 +343,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     return () => {
       window.removeEventListener("popstate", onPop);
       window.removeEventListener("keydown", onKey);
-      api.onFocusChange?.(false);
-      // UI 返回（非 back 手勢）離開：吃掉自己 push 的那層，保持疊乾淨
-      if (!poppingRef.current) window.history.back();
+      apiRef.current.onFocusChange?.(false);
+      // 非 back 路徑離開（封存板、房間層直接切走）：吃掉自己 push 的那層。
+      // pushedRef 記帳 — 已被 pop 消耗就不補 back，避免多退一層。
+      if (pushedRef.current && !poppingRef.current) window.history.back();
+      pushedRef.current = false;
       poppingRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused, board?.id]);
+  }, [focused, setSheet]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -364,8 +379,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const hits = search.trim() ? findNodes(liveNodes, search) : [];
 
   // ---- 鍵盤避讓（audit §2 [major]）：編輯節點必須在鍵盤上緣之上 ----
+  // deps 含 camera/viewport/liveNodes（Grok wb02 F6）：Android 是 resize
+  // 模式 — inset≈0 但 canvas 高度（viewport.height）本身縮了，靠
+  // ResizeObserver 餵進來的新 viewport 觸發重算；iOS 是 overlay 模式 —
+  // inset>0 由 visualViewport 算出。位移後條件收斂（screenBottom==limit）
+  // 不迴圈。
   useEffect(() => {
-    if (!editingId || keyboardInset <= 0) return;
+    if (!editingId || viewport.height <= 0) return;
     const node = liveNodes.find((item) => item.id === editingId);
     if (!node) return;
     const screenBottom = (node.y + node.height) * camera.zoom + camera.y;
@@ -373,34 +393,28 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     if (screenBottom > limit) {
       setCamera((current) => ({ ...current, y: current.y - (screenBottom - limit) }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingId, keyboardInset]);
-
-  const persistSoon = useRef<number | null>(null);
-  const persistNodes = useCallback((next: WhiteboardNode[]) => {
-    if (persistSoon.current) window.clearTimeout(persistSoon.current);
-    persistSoon.current = window.setTimeout(() => {
-      api.onUpsertNodes(next);
-    }, DRAG_PERSIST_MS);
-  }, [api]);
+  }, [editingId, keyboardInset, camera, viewport, liveNodes]);
 
   // ---- 編輯 session：進出各記一次，session 結束才入 op/undo ----
+  // record 不進 setState updater（Grok wb02 F3）：React 在 StrictMode 會
+  // 雙呼 updater 驗證純度，副作用放裡面＝一次編輯入兩筆 undo、發兩個 op。
+  const editingIdRef = useRef<string | null>(null);
   const beginEdit = useCallback((node: WhiteboardNode) => {
     editStartNode.current = node;
+    editingIdRef.current = node.id;
     setEditingId(node.id);
   }, []);
   const endEdit = useCallback(() => {
     const start = editStartNode.current;
+    const current = editingIdRef.current;
     editStartNode.current = null;
-    setEditingId((current) => {
-      if (start && current === start.id) {
-        const now = (previewNodes ?? nodes).find((item) => item.id === start.id);
-        if (now) record(nodeUpdateDraft(nextOpId(), start, now));
-      }
-      return null;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, previewNodes, record]);
+    editingIdRef.current = null;
+    setEditingId(null);
+    if (start && current === start.id) {
+      const now = (previewRef.current ?? nodes).find((item) => item.id === start.id);
+      if (now) record(nodeUpdateDraft(nextOpId(), start, now));
+    }
+  }, [nodes, record]);
 
   // ---- 手勢效果執行 ----
   const runEffects = (effects: GestureEffect[], event: ReactPointerEvent<HTMLDivElement>) => {
@@ -471,13 +485,16 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           break;
         }
         case "cancel-drag":
+          previewRef.current = null;
           setPreviewNodes(null);
           dragStartNodes.current = null;
           api.onDragState?.(null);
           break;
         case "move-nodes": {
           if (!canEdit || !gesture.current.dragIds.length) break;
-          const moved = moveNodes(previewNodes ?? liveNodes, gesture.current.dragIds, effect.dxWorld, effect.dyWorld);
+          const base = previewRef.current ?? liveNodes;
+          const moved = moveNodes(base, gesture.current.dragIds, effect.dxWorld, effect.dyWorld);
+          previewRef.current = moved;
           setPreviewNodes(moved);
           api.onDragState?.(gesture.current.dragIds);
           break;
@@ -521,17 +538,25 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           });
           break;
         case "commit-drag": {
-          const source = previewNodes ?? liveNodes;
+          // 放手即入房態（Grok wb02 F4）：原本走 120ms debounce，preview 先
+          // 清、房態還沒更新 → 每次放手節點跳回起點再彈回。onUpsertNodes
+          // 的樂觀更新是同步的，同一個 handler 內清 preview 不會閃。
+          const source = previewRef.current ?? liveNodes;
           const ids = gesture.current.dragIds.length ? gesture.current.dragIds : [...(dragStartNodes.current?.keys() ?? [])];
-          const movedNodes = source.filter((node) => ids.includes(node.id));
+          const movedNodes = source.filter((node) => {
+            if (!ids.includes(node.id)) return false;
+            const before = dragStartNodes.current?.get(node.id);
+            return !before || before.x !== node.x || before.y !== node.y;
+          });
           if (movedNodes.length) {
-            persistNodes(movedNodes);
+            api.onUpsertNodes(movedNodes);
             // undo/op：每個實際移動的節點一筆 move draft
             for (const node of movedNodes) {
               const before = dragStartNodes.current?.get(node.id);
               if (before) record(nodeUpdateDraft(nextOpId(), before, node));
             }
           }
+          previewRef.current = null;
           setPreviewNodes(null);
           dragStartNodes.current = null;
           api.onDragState?.(null);
@@ -641,15 +666,26 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     api.onUpsertNode({ ...node, locked: !node.locked }, "now");
   };
 
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | null>(null);
+  const showNotice = (text: string) => {
+    setNotice(text);
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 2600);
+  };
+  const skippedText = (skipped: string) =>
+    skipped === "conflict-drift" ? "已跳過：這步之後被其他人改過" : skipped === "missing-node" ? "已跳過：節點已不存在" : "已跳過：不支援的操作";
   const runUndo = () => {
     const result = undoStep(historyRef.current, executors, nextOpId());
     setHistory(result.stack);
     if (result.applied) api.onEmitOperation?.(result.applied);
+    if (result.skipped) showNotice(skippedText(result.skipped));
   };
   const runRedo = () => {
     const result = redoStep(historyRef.current, executors, nextOpId());
     setHistory(result.stack);
     if (result.applied) api.onEmitOperation?.(result.applied);
+    if (result.skipped) showNotice(skippedText(result.skipped));
   };
   const executors = {
     upsert: (node: WhiteboardNode) => api.onUpsertNode(node, "now" as const),
@@ -880,7 +916,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   return createPortal(
     <div className="wb-focus" data-testid="whiteboard-workspace">
       <header className="wb-focus-top">
-        <button type="button" className="project-back-button" onClick={() => api.onOpenBoard(null)} aria-label="回到白板列表">‹</button>
+        <button type="button" className="project-back-button" onClick={() => window.history.back()} aria-label="回到白板列表">‹</button>
         {renaming && api.canManageBoards ? (
           <form className="wb-rename" onSubmit={(event) => { event.preventDefault(); if (renameDraft.trim()) api.onRenameBoard(board.id, renameDraft.trim()); setRenaming(false); }}>
             <input autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} aria-label="白板名稱" />
@@ -960,6 +996,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             <button type="button" onClick={() => setMultiSelect(false)}>完成</button>
           </div>
         )}
+        {notice && <div className="wb-notice" data-testid="wb-notice">{notice}</div>}
         {connectMode && (
           <div className="wb-connect-hint" data-testid="wb-connect-hint">
             <span>{connectFrom ? "點另一個節點完成連線" : "點第一個節點"}</span>
