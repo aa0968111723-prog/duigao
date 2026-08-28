@@ -35,6 +35,7 @@ import {
 import { emptyHistory, pushHistory, redoStep, undoStep, type HistoryStack } from "./history";
 import { historyLayers } from "../../lib/historyLayers";
 import { normalizeStroke, thinStroke, type StrokePoint } from "./freehand";
+import { initialPenState, penDown, penUp, shouldRejectPointer, type PointerKind } from "./pen";
 import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
 import { rendererFor } from "./registry";
 import "./whiteboard.css";
@@ -84,6 +85,9 @@ export type WhiteboardApi = {
   onOpenDiscussionMessage?: (messageId: string) => void;
   /** WB04：開著這塊板的其他人（具名在場）。 */
   boardPeople?: { userId: string; name: string }[];
+  /** WB05 平板 Split View：討論側欄是否收合、以及切換它。 */
+  railCollapsed?: boolean;
+  onToggleRail?: () => void;
   /** WB04 版本歷史：未提供＝不顯示入口（本機房沒有快照表）。 */
   /** 本機正在拖/縮的 frame id（遠端事件對它讓路）。 */
   onFrameDragState?: (id: string | null) => void;
@@ -305,6 +309,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const strokeDownRef = useRef<{ pointerId: number; point: { x: number; y: number }; time: number } | null>(null);
   // S1：第一指的**當前**螢幕座標 — 轉 pinch 回放要用它，不是起筆點
   const strokeScreenRef = useRef<{ x: number; y: number } | null>(null);
+  /** 觸控筆狀態（掌拒）— 純函式在 pen.ts，這裡只存。 */
+  const penRef = useRef(initialPenState());
   // ---- WB03：frame 選取/拖曳/縮放 ----
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [framePreview, setFramePreview] = useState<WhiteboardFrame | null>(null);
@@ -697,6 +703,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     if (discard || !points || !board) return;
     const normalized = normalizeStroke(thinStroke(points, 2.5 / camera.zoom));
     if (!normalized) return; // 誤觸（單點）不成節點
+    const pressureContent = normalized.pressures.length ? { pressures: normalized.pressures } : {};
     const node: WhiteboardNode = {
       id: nextOpId(),
       whiteboardId: board.id,
@@ -706,7 +713,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       y: normalized.y,
       width: normalized.width,
       height: normalized.height,
-      content: { points: normalized.points, color: "#e8c27a", strokeWidth: 3 },
+      content: { points: normalized.points, color: "#e8c27a", strokeWidth: 3, ...pressureContent },
       createdBy: "local",
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -719,17 +726,23 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     if (target?.closest("textarea, input, button, a")) return;
+    const kind = (event.pointerType || "mouse") as PointerKind;
+    // 掌拒（WB05）：筆在畫的時候，手掌落在畫布上不得中斷筆畫。
+    if (shouldRejectPointer(penRef.current, kind, performance.now())) return;
+    if (kind === "pen") penRef.current = penDown(penRef.current, event.pointerId);
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
       /* programmatic pointer events cannot capture */
     }
-    if (drawMode && canEdit) {
+    // 筆優先：不必先切繪圖工具 — 筆就是畫，手指才是平移/選取
+    // （Freeform／Notability 的慣例，使用者不用學）。
+    if ((drawMode || kind === "pen") && canEdit) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
       if (strokePointerRef.current === null) {
         strokePointerRef.current = event.pointerId;
-        const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+        const world = { ...screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top), pressure: kind === "pen" ? event.pressure : undefined };
         strokeRef.current = [world];
         setStrokePreview([world]);
         strokeDownRef.current = { pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() };
@@ -758,11 +771,16 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     feed({ type: "down", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const kind = (event.pointerType || "mouse") as PointerKind;
+    if (shouldRejectPointer(penRef.current, kind, performance.now())) return;
     if (strokePointerRef.current === event.pointerId && strokeRef.current) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
       strokeScreenRef.current = { x: event.clientX, y: event.clientY };
-      const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+      const world: StrokePoint = {
+        ...screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top),
+        pressure: kind === "pen" ? event.pressure : undefined,
+      };
       const last = strokeRef.current[strokeRef.current.length - 1];
       // 螢幕 2px 以下抖動不收（世界距離 × zoom）
       if (Math.hypot(world.x - last.x, world.y - last.y) * camera.zoom < 2) return;
@@ -773,6 +791,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     feed({ type: "move", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now(), zoom: camera.zoom }, event);
   };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const kind = (event.pointerType || "mouse") as PointerKind;
+    if (kind === "pen") penRef.current = penUp(penRef.current, event.pointerId, performance.now());
+    else if (shouldRejectPointer(penRef.current, kind, performance.now())) return;
     if (strokePointerRef.current === event.pointerId) {
       finalizeStroke(event.type === "pointercancel");
       return;
@@ -1312,7 +1333,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   // ---- Focus Mode：portal 到 body 的 fixed 全屏層（wireflow §9） ----
   return createPortal(
-    <div className="wb-focus" data-testid="whiteboard-workspace">
+    <div className={`wb-focus${api.railCollapsed ? " is-rail-collapsed" : ""}`} data-testid="whiteboard-workspace">
       <header className="wb-focus-top">
         <button type="button" className="project-back-button" onClick={() => window.history.back()} aria-label="回到白板列表">‹</button>
         {renaming && api.canManageBoards ? (
@@ -1332,6 +1353,16 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         </span>
         <button type="button" onClick={runUndo} disabled={!history.undo.length} aria-label="復原" data-testid="wb-undo">↺</button>
         <button type="button" onClick={runRedo} disabled={!history.redo.length} aria-label="重做" data-testid="wb-redo">↻</button>
+        {api.onToggleRail && (
+          <button
+            type="button"
+            className="wb-rail-toggle"
+            data-testid="wb-rail-toggle"
+            aria-label={api.railCollapsed ? "顯示討論" : "收起討論"}
+            aria-pressed={!api.railCollapsed}
+            onClick={api.onToggleRail}
+          >{api.railCollapsed ? "☰ 討論" : "☰"}</button>
+        )}
         <button type="button" onClick={() => setSheet("more")} aria-label="更多" data-testid="whiteboard-more">⋯</button>
         <span hidden data-testid="wb-stats" data-nodes={nodes.length} data-edges={edges.length} data-flow={nodes.filter((node) => node.nodeType === "flow").length} data-mindmap={nodes.filter((node) => node.nodeType === "mindmap").length} />
       </header>

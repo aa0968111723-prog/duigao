@@ -969,6 +969,94 @@ try {
   } finally {
     await context.close();
   }
+
+  // ---- WB05：平板（1024×768 橫向）Split View ＋ 觸控筆 ----------------
+  {
+    const tablet = await browser.newContext({
+      viewport: { width: 1024, height: 768 },
+      hasTouch: true,
+      userAgent: "Mozilla/5.0 (Macintosh) e2e-tablet",
+    });
+    const page = await tablet.newPage();
+    try {
+      await page.goto(APP, { waitUntil: "domcontentloaded" });
+      await page.fill("input.text-input", "平板使用者");
+      await page.click("button.btn-primary");
+      await page.getByRole("button", { name: "建立活動房" }).click();
+      await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
+      await page.getByRole("button", { name: "白板", exact: true }).click();
+      await page.getByLabel("白板名稱").fill("平板板");
+      await page.getByRole("button", { name: "建立白板" }).click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+
+      // Split View：討論欄與畫布同時看得見，且不重疊
+      await page.waitForSelector('[data-testid="wb-side-rail"]', { timeout: 8000 });
+      const layout = await page.evaluate(() => {
+        const rail = document.querySelector('[data-testid="wb-side-rail"]');
+        const focus = document.querySelector('[data-testid="whiteboard-workspace"]');
+        const railBox = rail.getBoundingClientRect();
+        const focusBox = focus.getBoundingClientRect();
+        return {
+          railVisible: railBox.width > 0 && getComputedStyle(rail).display !== "none",
+          railHasFeed: Boolean(rail.querySelector('[data-testid="discussion-feed"]')),
+          overlap: Math.max(0, Math.min(railBox.right, focusBox.right) - Math.max(railBox.left, focusBox.left)),
+          focusLeft: Math.round(focusBox.left),
+          railWidth: Math.round(railBox.width),
+        };
+      });
+      check("平板：討論欄與白板並列（Split View）", layout.railVisible && layout.railHasFeed, JSON.stringify(layout));
+      check("平板：兩者不重疊（畫布真的讓出左側）", layout.overlap === 0 && layout.focusLeft >= layout.railWidth - 1, JSON.stringify(layout));
+
+      // 工具列在平板轉成右側直欄（不是底部橫列）
+      const toolbar = await page.evaluate(() => {
+        const bar = document.querySelector(".wb-focus-bottom");
+        const box = bar.getBoundingClientRect();
+        return { vertical: box.height > box.width, right: Math.round(window.innerWidth - box.right) };
+      });
+      check("平板：工具列轉右側直欄", toolbar.vertical && toolbar.right < 40, JSON.stringify(toolbar));
+
+      // 收合側欄 → 畫布佔滿
+      await page.getByTestId("wb-rail-toggle").click();
+      await page.waitForTimeout(150);
+      const collapsed = await page.evaluate(() => {
+        const rail = document.querySelector('[data-testid="wb-side-rail"]');
+        const focus = document.querySelector('[data-testid="whiteboard-workspace"]');
+        return {
+          railHidden: !rail || getComputedStyle(rail).display === "none",
+          focusLeft: Math.round(focus.getBoundingClientRect().left),
+        };
+      });
+      check("平板：討論欄可收合，畫布補滿", collapsed.railHidden && collapsed.focusLeft === 0, JSON.stringify(collapsed));
+      await page.getByTestId("wb-rail-toggle").click();
+
+      // 觸控筆：不用切繪圖工具，筆下去就畫；手掌（touch）不得中斷
+      const canvas = page.getByTestId("wb-canvas");
+      const box = await canvas.boundingBox();
+      const pen = (type, x, y, extra = {}) => canvas.dispatchEvent(type, {
+        clientX: box.x + x, clientY: box.y + y, pointerId: 101, pointerType: "pen", pressure: 0.8, isPrimary: true, ...extra,
+      });
+      await pen("pointerdown", 200, 200);
+      await pen("pointermove", 260, 240, { pressure: 0.9 });
+      // 手掌落下（touch）：必須被丟掉，不得把筆畫變成 pinch
+      await canvas.dispatchEvent("pointerdown", { clientX: box.x + 320, clientY: box.y + 320, pointerId: 102, pointerType: "touch" });
+      await canvas.dispatchEvent("pointermove", { clientX: box.x + 360, clientY: box.y + 360, pointerId: 102, pointerType: "touch" });
+      await pen("pointermove", 320, 210, { pressure: 0.4 });
+      await pen("pointerup", 320, 210, { pressure: 0 });
+      await canvas.dispatchEvent("pointerup", { clientX: box.x + 360, clientY: box.y + 360, pointerId: 102, pointerType: "touch" });
+      await page.waitForFunction(() => document.querySelectorAll("[data-node-type='freehand']").length >= 1, null, { timeout: 8000 });
+      check("平板：筆不用切工具就能畫（筆優先）", true);
+      const strokeInfo = await page.evaluate(() => {
+        const svg = document.querySelector("[data-node-type='freehand'] svg");
+        const lines = svg.querySelectorAll("line");
+        const widths = [...lines].map((line) => Number(line.getAttribute("stroke-width")));
+        return { segments: lines.length, distinctWidths: new Set(widths).size };
+      });
+      check("平板：壓感畫成逐段線寬（不是單一粗細）", strokeInfo.segments >= 2 && strokeInfo.distinctWidths >= 2, JSON.stringify(strokeInfo));
+      check("平板：手掌沒有把筆畫打斷成多個節點（掌拒）", (await page.locator("[data-node-type='freehand']").count()) === 1);
+    } finally {
+      await tablet.close();
+    }
+  }
 } finally {
   await browser?.close();
   mock?.close();

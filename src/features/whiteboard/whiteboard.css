@@ -134,3 +134,78 @@
 
 /* WB04：板上在場者（人數旁的小標，非游標流） */
 .wb-online em { font-style: normal; margin-left: 6px; padding: 2px 6px; border-radius: 999px; background: var(--raise); color: var(--ink-dim); font-size: 11px; }
+
+/* ---- WB05 平板（≥900px 且非粗指標手機）：Split View ＋ 側欄工具列 ----
+   手機維持原樣（全螢幕、底部工具列）。平板橫向的畫布夠寬，把討論擺在
+   左邊比「切 tab 來回跳」有用得多 —— 白板的價值就是把討論視覺化，兩者
+   本來就該同時看得到。 */
+:root { --wb-rail-w: 0px; }
+
+@media (min-width: 900px) {
+  :root { --wb-rail-w: 340px; }
+  /* Focus 層讓出左側給討論欄（欄本身由 MultiBranchRoom 渲染） */
+  .wb-focus { left: var(--wb-rail-w); }
+  .wb-focus.is-rail-collapsed { left: 0; }
+
+  /* 工具列轉右側直欄：拇指在平板上構不到底部中央，側欄比較好按 */
+  .wb-focus-bottom {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    flex-direction: column;
+    width: 92px;
+    max-height: 78vh;
+    padding: 8px;
+    border: 1px solid var(--line-soft);
+    border-radius: 18px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .wb-focus-bottom button { flex: 0 0 auto; width: 100%; }
+  /* 情境列（選取節點/區塊時）維持底部橫列 — 它是「對這個東西做什麼」，
+     擺在內容附近比擺側邊直覺 */
+  .wb-focus-bottom.wb-context-bar {
+    position: static;
+    transform: none;
+    flex-direction: row;
+    width: auto;
+    max-height: none;
+    border: 0;
+    border-top: 1px solid var(--line-soft);
+    border-radius: 0;
+  }
+}
+
+/* 討論側欄（平板）：與 Focus 同層、固定在左側 */
+.wb-side-rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--wb-rail-w);
+  z-index: var(--z-board-focus);
+  display: none;
+  flex-direction: column;
+  background: #12100e;
+  border-right: 1px solid var(--line-soft);
+  overflow: hidden;
+}
+@media (min-width: 900px) {
+  .wb-side-rail { display: flex; }
+  .wb-side-rail.is-collapsed { display: none; }
+}
+.wb-side-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 4px 10px;
+  padding-top: calc(4px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--line-soft);
+}
+.wb-side-rail-head strong { flex: 1; font-size: 14px; }
+.wb-side-rail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* 收合鈕（在 Focus 頂欄）只在平板出現 */
+.wb-rail-toggle { display: none; }
+@media (min-width: 900px) { .wb-rail-toggle { display: inline-flex; } }
