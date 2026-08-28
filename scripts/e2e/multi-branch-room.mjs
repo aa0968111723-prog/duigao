@@ -384,6 +384,12 @@ try {
       ).then(() => true).catch(() => false);
       const errText = await page.locator(".project-sheet-error").innerText().catch(() => "");
       check("沒有成品時的文案可照做（先在 CUTOS 按輸出）", noExportShown && errText.includes("先在 CUTOS 按輸出"), errText.slice(0, 60));
+      // 連按重試不增生分支（Grok 07 F4）：沿用同一條
+      const branchesBefore = rows.room_branches.filter((row) => row.name === "沒有成品的專案").length;
+      await page.getByRole("button", { name: "匯入", exact: true }).click();
+      await page.waitForFunction(() => !document.querySelector(".project-sheet")?.textContent?.includes("匯入中"), null, { timeout: 30000 });
+      const branchesAfter = rows.room_branches.filter((row) => row.name === "沒有成品的專案").length;
+      check("重試沿用同一條分支，不增生", branchesBefore === 1 && branchesAfter === 1, `before=${branchesBefore} after=${branchesAfter}`);
       faults.cutosOutputProjectId = "cutos-demo";
       await page.locator(".project-sheet-close").click();
     }
