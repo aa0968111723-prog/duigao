@@ -1492,19 +1492,36 @@ try {
   // 檢查要驗的東西：用失敗卡的「重新選一支影片」重試（沿用同一間房，
   // armed room id 不變），直到 versions POST 真的吃到注入為止。
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    await Q.waitForFunction(
-      () => document.querySelector(".onboard-card")?.textContent?.includes("失敗") ?? false,
-      null,
-      { timeout: 60000 },
-    );
+    // 等不到失敗卡有兩種樣子，而且兩種都是「注入沒吃到」——正是這個迴圈存在的理由：
+    //   a) 失敗卡出現但 fault 沒被消耗（上傳在注入點之前就死了）
+    //   b) 失敗卡永遠不會出現（注入沒打中，上傳其實成功了）
+    // (b) 以前會讓 waitForFunction 直接 throw，整支測試當場死掉，自我修復沒機會跑。
+    // 逾時改成走同一條重試路徑；四輪都沒吃到就落到下面的斷言，帶真實診斷失敗。
+    let sawFailureCard = true;
+    try {
+      await Q.waitForFunction(
+        () => document.querySelector(".onboard-card")?.textContent?.includes("失敗") ?? false,
+        null,
+        { timeout: 60000 },
+      );
+    } catch {
+      sawFailureCard = false;
+    }
     if (faults.versionInsertRoomId === null && !faults.versionInsertNextRoom) break; // 注入已觸發
     if (attempt === 3) break; // 讓下面的斷言用真實狀態失敗，帶診斷訊息
     // 重試可能拿到新的 cloud room（ensureCloudRoom 階段死掉時房間沒綁成）：
     // 先重新武裝，讓「下一個 create_room」重新成為注入目標。
     faults.versionInsertRoomId = null;
     faults.versionInsertNextRoom = true;
-    const retryZone = Q.locator(".onboard-card input[type=file]").first();
-    await retryZone.setInputFiles({ name: "metadata-fails.webm", mimeType: "video/webm", buffer: SHORT });
+    if (sawFailureCard) {
+      const retryZone = Q.locator(".onboard-card input[type=file]").first();
+      await retryZone.setInputFiles({ name: "metadata-fails.webm", mimeType: "video/webm", buffer: SHORT });
+    } else {
+      // 沒有失敗卡可以按：回首頁，重走一次和上面同樣的完整上傳。
+      await Q.click(".onboard-card .btn:has-text('回首頁')").catch(() => undefined);
+      await Q.waitForSelector(".home-picks", { timeout: 30000 }).catch(() => undefined);
+      await uploadVideo(Q, SHORT, "metadata-fails.webm").catch(() => undefined);
+    }
   }
   // Deterministic wait: poll for the observable end state (fault consumed,
   // retry landed, no orphans) instead of guessing a settle delay.
