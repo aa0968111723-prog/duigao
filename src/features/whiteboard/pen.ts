@@ -50,9 +50,16 @@ export function penUp(state: PenState, pointerId: number, now: number): PenState
   return { penPointerId: null, penUpAt: now };
 }
 
-/** 筆壓 → 線寬。0/undefined（不支援壓感的筆）退回基準寬度。 */
+/**
+ * 筆壓 → 線寬。
+ *
+ * `undefined`＝這個輸入沒有壓感資料（手指／滑鼠）→ 基準寬度。
+ * `0`＝**壓得最輕**，不是「沒有資料」—— 把 0 當沒資料會讓起收筆的漸細
+ * 反過來變最粗（自審 N8 實抓）。Pointer Events 規格：不支援壓感的筆在
+ * 按下時回報 0.5，所以 0 一定是真實的最小壓力。
+ */
 export function widthForPressure(base: number, pressure: number | undefined): number {
-  if (typeof pressure !== "number" || !Number.isFinite(pressure) || pressure <= 0) return base;
+  if (typeof pressure !== "number" || !Number.isFinite(pressure)) return base;
   // 0.35×～1.6× 之間：太細會看不見，太粗在小節點上糊成一團
   const clamped = Math.min(1, Math.max(0, pressure));
   return Number((base * (0.35 + clamped * 1.25)).toFixed(3));

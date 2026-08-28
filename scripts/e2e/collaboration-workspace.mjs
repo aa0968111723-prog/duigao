@@ -1027,7 +1027,28 @@ try {
         };
       });
       check("平板：討論欄可收合，畫布補滿", collapsed.railHidden && collapsed.focusLeft === 0, JSON.stringify(collapsed));
+      // F5：收合不得讓畫布視角跳掉 — 量畫面中心對應的世界座標
+      const centerWorld = () => page.evaluate(() => {
+        const layer = document.querySelector(".wb-layer");
+        const canvas = document.querySelector('[data-testid="wb-canvas"]');
+        const style = layer.getAttribute("style") ?? "";
+        const t = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(([\d.]+)\)/.exec(style);
+        const box = canvas.getBoundingClientRect();
+        const [, tx, ty, scale] = t.map(Number);
+        return {
+          x: (box.width / 2 - tx) / scale,
+          y: (box.height / 2 - ty) / scale,
+        };
+      });
+      const afterCollapse = await centerWorld();
       await page.getByTestId("wb-rail-toggle").click();
+      await page.waitForTimeout(200);
+      const afterExpand = await centerWorld();
+      check(
+        "平板：收合/展開側欄不會讓畫布跳掉（F5）",
+        Math.abs(afterExpand.x - afterCollapse.x) < 12 && Math.abs(afterExpand.y - afterCollapse.y) < 12,
+        JSON.stringify({ afterCollapse, afterExpand }),
+      );
 
       // 觸控筆：不用切繪圖工具，筆下去就畫；手掌（touch）不得中斷
       const canvas = page.getByTestId("wb-canvas");
@@ -1035,6 +1056,11 @@ try {
       const pen = (type, x, y, extra = {}) => canvas.dispatchEvent(type, {
         clientX: box.x + x, clientY: box.y + y, pointerId: 101, pointerType: "pen", pressure: 0.8, isPrimary: true, ...extra,
       });
+      const zoomNow = () => page.evaluate(() => {
+        const style = document.querySelector(".wb-layer")?.getAttribute("style") ?? "";
+        return Number(/scale\(([\d.]+)\)/.exec(style)?.[1] ?? 1);
+      });
+      const penZoomBefore = await zoomNow();
       await pen("pointerdown", 200, 200);
       await pen("pointermove", 260, 240, { pressure: 0.9 });
       // 手掌落下（touch）：必須被丟掉，不得把筆畫變成 pinch
@@ -1044,6 +1070,7 @@ try {
       await pen("pointerup", 320, 210, { pressure: 0 });
       await canvas.dispatchEvent("pointerup", { clientX: box.x + 360, clientY: box.y + 360, pointerId: 102, pointerType: "touch" });
       await page.waitForFunction(() => document.querySelectorAll("[data-node-type='freehand']").length >= 1, null, { timeout: 8000 });
+      const penZoomAfter = await zoomNow();
       check("平板：筆不用切工具就能畫（筆優先）", true);
       const strokeInfo = await page.evaluate(() => {
         const svg = document.querySelector("[data-node-type='freehand'] svg");
@@ -1052,9 +1079,110 @@ try {
         return { segments: lines.length, distinctWidths: new Set(widths).size };
       });
       check("平板：壓感畫成逐段線寬（不是單一粗細）", strokeInfo.segments >= 2 && strokeInfo.distinctWidths >= 2, JSON.stringify(strokeInfo));
+      // N9：這條原本拿掉掌拒也會綠（筆畫路徑與手指路徑各走各的）。真正
+      // 會變的是「手掌有沒有被當成第二指去縮放畫面」——驗 zoom 沒被動到，
+      // 以及筆畫的段數沒有因為中途被打斷而變少。
       check("平板：手掌沒有把筆畫打斷成多個節點（掌拒）", (await page.locator("[data-node-type='freehand']").count()) === 1);
+      check(
+        "平板：手掌沒有被當成第二指縮放畫面（掌拒真的有作用）",
+        Math.abs(penZoomAfter - penZoomBefore) < 0.01,
+        `${penZoomBefore}→${penZoomAfter}`,
+      );
+
+      // F1 反例：手指**先**按著（已進手勢狀態機）→ 筆寫 → 手指抬起。
+      // 掌拒若連已追蹤 pointer 的 up 一起吞掉，該 pointer 永遠留在 map，
+      // 下一次單指按下就被當第二指進 pinch → 畫面暴縮。
+      {
+        const zoomOf = () => page.evaluate(() => {
+          const style = document.querySelector(".wb-layer")?.getAttribute("style") ?? "";
+          return Number(/scale\(([\d.]+)\)/.exec(style)?.[1] ?? 1);
+        });
+        await canvas.dispatchEvent("pointerdown", { clientX: box.x + 120, clientY: box.y + 500, pointerId: 201, pointerType: "touch" });
+        await canvas.dispatchEvent("pointermove", { clientX: box.x + 150, clientY: box.y + 510, pointerId: 201, pointerType: "touch" });
+        const pen2 = (type, x, y, extra = {}) => canvas.dispatchEvent(type, {
+          clientX: box.x + x, clientY: box.y + y, pointerId: 202, pointerType: "pen", pressure: 0.7, isPrimary: true, ...extra,
+        });
+        await pen2("pointerdown", 400, 500);
+        await pen2("pointermove", 460, 540);
+        await pen2("pointerup", 460, 540, { pressure: 0 });
+        // 手指在筆之後才抬起（掌拒寬限期內）
+        await canvas.dispatchEvent("pointerup", { clientX: box.x + 150, clientY: box.y + 510, pointerId: 201, pointerType: "touch" });
+        await page.waitForTimeout(320); // 過掌拒寬限期
+        const zoomBefore = await zoomOf();
+        await canvas.dispatchEvent("pointerdown", { clientX: box.x + 200, clientY: box.y + 560, pointerId: 203, pointerType: "touch" });
+        await canvas.dispatchEvent("pointermove", { clientX: box.x + 280, clientY: box.y + 600, pointerId: 203, pointerType: "touch" });
+        await canvas.dispatchEvent("pointerup", { clientX: box.x + 280, clientY: box.y + 600, pointerId: 203, pointerType: "touch" });
+        await page.waitForTimeout(150);
+        const zoomAfter = await zoomOf();
+        check("平板：手指先按、筆後寫 — 之後單指仍是平移不是 pinch（F1）", Math.abs(zoomAfter - zoomBefore) < 0.01, `${zoomBefore}→${zoomAfter}`);
+      }
+
+      // N1 反例：工具列選了別的工具時，筆要聽話 —— 否則觸控筆永遠只能畫，
+      // 選不到、拖不動、編輯不了任何節點（平板使用者沒有第二種指標可退回）
+      {
+        const strokesBefore = await page.locator("[data-node-type='freehand']").count();
+        await page.getByTestId("wb-tool-select").click(); // off → marquee
+        const nodeBox = await page.locator(".wb-node").first().boundingBox();
+        await canvas.dispatchEvent("pointerdown", {
+          clientX: nodeBox.x + 20, clientY: nodeBox.y + 16, pointerId: 210, pointerType: "pen", pressure: 0.6, isPrimary: true,
+        });
+        await canvas.dispatchEvent("pointerup", {
+          clientX: nodeBox.x + 20, clientY: nodeBox.y + 16, pointerId: 210, pointerType: "pen", pressure: 0,
+        });
+        await page.waitForTimeout(200);
+        check("平板：選了工具時筆不會亂畫（N1）", (await page.locator("[data-node-type='freehand']").count()) === strokesBefore);
+        check("平板：筆選得到節點（情境列出現）", (await page.getByTestId("wb-node-actions").count()) === 1);
+        await dismissSelection(page);
+        await page.getByTestId("wb-tool-select").click(); // marquee → lasso
+        await page.getByTestId("wb-tool-select").click(); // lasso → off
+      }
+
+      // F2：側欄的討論要能自己捲（feed 有自己的捲軸，不靠整頁捲）
+      const railScroll = await page.evaluate(() => {
+        const feed = document.querySelector('[data-testid="wb-side-rail"] [data-testid="discussion-feed"]');
+        if (!feed) return null;
+        return { overflowY: getComputedStyle(feed).overflowY, canScroll: feed.clientHeight > 0 };
+      });
+      check("平板：側欄討論可自己捲動（F2）", Boolean(railScroll && railScroll.overflowY === "auto" && railScroll.canScroll), JSON.stringify(railScroll));
     } finally {
       await tablet.close();
+    }
+  }
+
+  // ---- WB05/F3：手機橫向（926×428）不得誤判成平板 ----------------------
+  {
+    const landscape = await browser.newContext({
+      viewport: { width: 926, height: 428 },
+      isMobile: true,
+      hasTouch: true,
+      userAgent: ANDROID_UA,
+    });
+    const page = await landscape.newPage();
+    try {
+      await page.goto(APP, { waitUntil: "domcontentloaded" });
+      await page.fill("input.text-input", "橫向手機");
+      await page.click("button.btn-primary");
+      await page.getByRole("button", { name: "建立活動房" }).click();
+      await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
+      await page.getByRole("button", { name: "白板", exact: true }).click();
+      await page.getByLabel("白板名稱").fill("橫向板");
+      await page.getByRole("button", { name: "建立白板" }).click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      const layout = await page.evaluate(() => {
+        const rail = document.querySelector('[data-testid="wb-side-rail"]');
+        const focus = document.querySelector('[data-testid="whiteboard-workspace"]');
+        const bar = document.querySelector(".wb-focus-bottom");
+        const barBox = bar.getBoundingClientRect();
+        return {
+          railShown: Boolean(rail) && getComputedStyle(rail).display !== "none",
+          focusLeft: Math.round(focus.getBoundingClientRect().left),
+          toolbarVertical: barBox.height > barBox.width,
+        };
+      });
+      check("手機橫向不進 Split View（F3：寬 926px 但高只有 428px）", !layout.railShown && layout.focusLeft === 0, JSON.stringify(layout));
+      check("手機橫向的工具列維持底部橫列", !layout.toolbarVertical, JSON.stringify(layout));
+    } finally {
+      await landscape.close();
     }
   }
 } finally {

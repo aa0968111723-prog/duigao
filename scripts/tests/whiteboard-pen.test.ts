@@ -36,12 +36,15 @@ test("penUp 只認得自己那支筆的 pointerId", () => {
   assert.equal(penUp(state, 7, 500).penPointerId, null);
 });
 
-test("壓感：不支援壓感的筆退回基準寬度，不會變成 0 寬看不見", () => {
-  assert.equal(widthForPressure(3, undefined), 3);
-  assert.equal(widthForPressure(3, 0), 3, "pressure=0 是「沒有壓感資料」，不是「不要畫」");
+test("壓感：沒有壓感資料退回基準寬；pressure=0 是「最輕」不是「沒資料」", () => {
+  assert.equal(widthForPressure(3, undefined), 3, "手指／滑鼠沒有壓感 → 基準寬");
+  // 規格：不支援壓感的筆按下時回報 0.5，所以 0 一定是真實的最小壓力。
+  // 把 0 當「沒資料」會讓起收筆的漸細**反過來變最粗**（自審 N8）。
+  assert.ok(widthForPressure(3, 0) < widthForPressure(3, 0.5), "最輕必須比中等細");
+  assert.ok(widthForPressure(3, 0) > 0, "但不得細到看不見");
   assert.ok(widthForPressure(3, 1) > widthForPressure(3, 0.2), "壓得重要比較粗");
   assert.ok(widthForPressure(3, 1) <= 3 * 1.6);
-  assert.ok(widthForPressure(3, 0.01) >= 3 * 0.35);
+  assert.ok(widthForPressure(3, 0) >= 3 * 0.35);
 });
 
 test("segmentWidths：每段取相鄰兩點平均，長度是點數減一", () => {

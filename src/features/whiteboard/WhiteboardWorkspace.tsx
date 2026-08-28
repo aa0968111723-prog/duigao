@@ -35,7 +35,7 @@ import {
 import { emptyHistory, pushHistory, redoStep, undoStep, type HistoryStack } from "./history";
 import { historyLayers } from "../../lib/historyLayers";
 import { normalizeStroke, thinStroke, type StrokePoint } from "./freehand";
-import { initialPenState, penDown, penUp, shouldRejectPointer, type PointerKind } from "./pen";
+import { initialPenState, penDown, penUp, segmentWidths, shouldRejectPointer, type PointerKind } from "./pen";
 import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
 import { rendererFor } from "./registry";
 import "./whiteboard.css";
@@ -85,8 +85,9 @@ export type WhiteboardApi = {
   onOpenDiscussionMessage?: (messageId: string) => void;
   /** WB04：開著這塊板的其他人（具名在場）。 */
   boardPeople?: { userId: string; name: string }[];
-  /** WB05 平板 Split View：討論側欄是否收合、以及切換它。 */
-  railCollapsed?: boolean;
+  /** WB05 平板 Split View：側欄此刻是否真的掛著（掛載由上層以 JS 判定，
+   *  與 CSS 斷點同源 — 只靠 CSS 隱藏會讓手機也掛一份討論面板）。 */
+  railVisible?: boolean;
   onToggleRail?: () => void;
   /** WB04 版本歷史：未提供＝不顯示入口（本機房沒有快照表）。 */
   /** 本機正在拖/縮的 frame id（遠端事件對它讓路）。 */
@@ -393,6 +394,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     // Escape 不自己監聽（S12）：協調器的單一 handler 會派給棧頂層 —
     // 這層的 onBack 已經處理「先關 sheet、再退板」的階梯。
     return () => {
+      // 離開 Focus 時清掉筆狀態（N2）：元件不卸載，殘留的 penPointerId 會
+      // 讓重開板後所有手指被永久掌拒。
+      penRef.current = initialPenState();
+      strokePointerRef.current = null;
+      strokeRef.current = null;
+      strokeDownRef.current = null;
+      strokeScreenRef.current = null;
       apiRef.current.onFocusChange?.(false);
       remove(poppingRef.current);
       poppingRef.current = false;
@@ -402,12 +410,41 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const measure = () => setViewport({ width: el.clientWidth, height: el.clientHeight });
+    const measure = () => {
+      measuredWidthRef.current = el.clientWidth;
+      setViewport({ width: el.clientWidth, height: el.clientHeight });
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
   }, [board?.id]);
+
+  /**
+   * 側欄開合的 camera 補償（F5）：畫布寬度變了，把**畫面中心**的內容留在
+   * 原地 —— 不補償的話收起討論欄時整個畫布往左跳一個側欄的寬度。
+   *
+   * 刻意只在「使用者切換側欄」時做，不掛在 ResizeObserver 上：掛載期間
+   * 的量測序列（0 → 全寬 → 讓出側欄後的寬）也會被當成變化，開板的初始
+   * 視角就變成競態的產物（視覺基準會抖）。
+   */
+  const measuredWidthRef = useRef(0);
+  const railRef = useRef(api.railVisible);
+  useEffect(() => {
+    if (railRef.current === api.railVisible) return;
+    railRef.current = api.railVisible;
+    const el = wrapRef.current;
+    if (!el) return;
+    const before = measuredWidthRef.current;
+    const raf = requestAnimationFrame(() => {
+      const after = el.clientWidth;
+      measuredWidthRef.current = after;
+      if (before > 0 && after > 0 && after !== before) {
+        setCamera((current) => ({ ...current, x: current.x + (after - before) / 2 }));
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [api.railVisible]);
 
   // camera memory：開板還原、關板/切板時存（cameraRef 取最新值）
   const cameraRef = useRef(camera);
@@ -693,6 +730,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   // ---- 繪圖（WB03）：單指直接收筆畫、繞過 reducer；第二指落下＝取消
   // 筆畫並把兩個 down 補進 reducer（轉 pinch 縮放）。 ----
+  /** pointerType 正規化（N7）：未知/缺值當滑鼠處理，不硬轉型別。 */
+  const pointerKind = (event: { pointerType?: string }): PointerKind =>
+    event.pointerType === "pen" ? "pen" : event.pointerType === "touch" ? "touch" : "mouse";
+
   const finalizeStroke = (discard: boolean) => {
     const points = strokeRef.current;
     strokeRef.current = null;
@@ -726,20 +767,35 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     if (target?.closest("textarea, input, button, a")) return;
-    const kind = (event.pointerType || "mouse") as PointerKind;
+    const kind = pointerKind(event);
     // 掌拒（WB05）：筆在畫的時候，手掌落在畫布上不得中斷筆畫。
-    if (shouldRejectPointer(penRef.current, kind, performance.now())) return;
+    // 只擋**新**的 touch — 已經在手勢狀態機裡的 pointer 一律放行，
+    // 否則它的 up 被吞掉、永遠留在 pointers map，下一次單指按下就被
+    // 當成第二指直接進 pinch（Grok wb05 F1 實抓：先用手指按著再拿筆寫）。
+    if (!gesture.current.pointers.has(event.pointerId) && shouldRejectPointer(penRef.current, kind, performance.now())) return;
     if (kind === "pen") penRef.current = penDown(penRef.current, event.pointerId);
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
       /* programmatic pointer events cannot capture */
     }
-    // 筆優先：不必先切繪圖工具 — 筆就是畫，手指才是平移/選取
-    // （Freeform／Notability 的慣例，使用者不用學）。
-    if ((drawMode || kind === "pen") && canEdit) {
+    // 筆優先（N1 修正）：筆預設就是畫，**但工具列選了別的工具時筆要聽話**。
+    // 原本無條件短路，等於觸控筆再也選不到節點、拖不動、雙擊編輯不了、
+    // 連線與框選全滅 —— 平板使用者沒有第二種指標可以退回。
+    const penDraws = kind === "pen" && selectTool === "off" && !connectMode;
+    if ((drawMode || penDraws) && canEdit) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
+      // 第二支筆：忽略（不打斷第一支正在寫的字，N4）
+      if (kind === "pen" && strokePointerRef.current !== null && strokePointerRef.current !== event.pointerId
+          && penRef.current.penPointerId !== null && penRef.current.penPointerId !== event.pointerId) {
+        return;
+      }
+      // 手指起的筆畫遇到筆落下（N3）：手指那筆作廢，讓筆接手 —— 不作廢的話
+      // 筆會被當成第二個 pointer 進 pinch，畫面暴縮。
+      if (kind === "pen" && strokePointerRef.current !== null && strokePointerRef.current !== event.pointerId) {
+        finalizeStroke(true);
+      }
       if (strokePointerRef.current === null) {
         strokePointerRef.current = event.pointerId;
         const world = { ...screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top), pressure: kind === "pen" ? event.pressure : undefined };
@@ -771,8 +827,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     feed({ type: "down", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const kind = (event.pointerType || "mouse") as PointerKind;
-    if (shouldRejectPointer(penRef.current, kind, performance.now())) return;
+    const kind = pointerKind(event);
+    if (!gesture.current.pointers.has(event.pointerId) && shouldRejectPointer(penRef.current, kind, performance.now())) return;
     if (strokePointerRef.current === event.pointerId && strokeRef.current) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -791,9 +847,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     feed({ type: "move", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now(), zoom: camera.zoom }, event);
   };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const kind = (event.pointerType || "mouse") as PointerKind;
+    const kind = pointerKind(event);
     if (kind === "pen") penRef.current = penUp(penRef.current, event.pointerId, performance.now());
-    else if (shouldRejectPointer(penRef.current, kind, performance.now())) return;
+    // up 永遠要讓已追蹤的 pointer 通過（見 down 的註解）
+    else if (!gesture.current.pointers.has(event.pointerId) && shouldRejectPointer(penRef.current, kind, performance.now())) return;
     if (strokePointerRef.current === event.pointerId) {
       finalizeStroke(event.type === "pointercancel");
       return;
@@ -804,9 +861,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   // ---- frame 拖曳/縮放（WB03）：把手自帶 handler＋pointer capture，
   // stopPropagation 不進畫布手勢 reducer。成員判定凍結在起拖。 ----
   const beginFrameDrag = (event: ReactPointerEvent<HTMLDivElement>, frame: WhiteboardFrame, mode: "move" | "resize") => {
-    // S4/S5：繪圖模式（筆要落在 frame 帶上）與唯讀者（把手＝平移死區）
-    // 都不攔 — 不 stopPropagation，事件冒泡回畫布走筆畫/平移。
-    if (drawMode || !canEdit) return;
+    // 繪圖模式、**觸控筆**（筆優先不開 drawMode — Grok wb05 F4）與唯讀者
+    // （把手＝平移死區）都不攔 — 不 stopPropagation，事件冒泡回畫布走
+    // 筆畫/平移。
+    if (drawMode || event.pointerType === "pen" || !canEdit) return;
+    // 掌拒也要管到把手（N6）：筆在寫的時候手掌壓在標題帶上，原本會把整個
+    // 區塊連同成員節點拖走。
+    if (shouldRejectPointer(penRef.current, pointerKind(event), performance.now())) return;
     // S3：已有進行中的 frame session 時，第二指不得覆寫（先到先贏）
     if (frameDragRef.current) return;
     event.stopPropagation();
@@ -1333,7 +1394,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   // ---- Focus Mode：portal 到 body 的 fixed 全屏層（wireflow §9） ----
   return createPortal(
-    <div className={`wb-focus${api.railCollapsed ? " is-rail-collapsed" : ""}`} data-testid="whiteboard-workspace">
+    <div className={`wb-focus${api.railVisible ? " is-rail-open" : ""}`} data-testid="whiteboard-workspace">
       <header className="wb-focus-top">
         <button type="button" className="project-back-button" onClick={() => window.history.back()} aria-label="回到白板列表">‹</button>
         {renaming && api.canManageBoards ? (
@@ -1358,10 +1419,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             type="button"
             className="wb-rail-toggle"
             data-testid="wb-rail-toggle"
-            aria-label={api.railCollapsed ? "顯示討論" : "收起討論"}
-            aria-pressed={!api.railCollapsed}
+            aria-label={api.railVisible ? "收起討論" : "顯示討論"}
+            aria-pressed={Boolean(api.railVisible)}
             onClick={api.onToggleRail}
-          >{api.railCollapsed ? "☰ 討論" : "☰"}</button>
+          >{api.railVisible ? "☰" : "☰ 討論"}</button>
         )}
         <button type="button" onClick={() => setSheet("more")} aria-label="更多" data-testid="whiteboard-more">⋯</button>
         <span hidden data-testid="wb-stats" data-nodes={nodes.length} data-edges={edges.length} data-flow={nodes.filter((node) => node.nodeType === "flow").length} data-mindmap={nodes.filter((node) => node.nodeType === "mindmap").length} />
@@ -1369,6 +1430,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
       {api.editors[0] ? <div className="wb-editing-line">{formatEditorLine(api.editors[0], board.title)}</div> : null}
 
+      <div className="wb-focus-main">
       <div
         ref={wrapRef}
         className="wb-focus-canvas"
@@ -1449,8 +1511,23 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             </svg>
           )}
           {strokePreview && strokePreview.length > 1 && (
-            <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
-              <polyline points={strokePreview.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#e8c27a" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" data-testid="wb-stroke-preview" />
+            <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }} data-testid="wb-stroke-preview">
+              {/* 預覽也要逐段線寬（Grok wb05 F6）：畫的時候固定粗細、抬筆
+                  才變粗細不一，線條會「跳」一下 */}
+              {strokePreview.some((point) => typeof point.pressure === "number")
+                ? segmentWidths(strokePreview.map((point) => point.pressure), 3).map((width, index) => (
+                    <line
+                      key={index}
+                      x1={strokePreview[index].x}
+                      y1={strokePreview[index].y}
+                      x2={strokePreview[index + 1].x}
+                      y2={strokePreview[index + 1].y}
+                      stroke="#e8c27a"
+                      strokeWidth={width}
+                      strokeLinecap="round"
+                    />
+                  ))
+                : <polyline points={strokePreview.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#e8c27a" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />}
             </svg>
           )}
         </div>
@@ -1470,7 +1547,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         )}
       </div>
 
-      {/* 底部：frame 情境列 / 節點情境列 / 主工具列（wireflow §11） */}
+      {/* 底部：frame 情境列 / 節點情境列 / 主工具列（wireflow §11）
+          平板時 .wb-focus-main 讓它變成右側的一欄，而不是浮在畫布上 */}
       {selectedFrameId && frames.some((frame) => frame.id === selectedFrameId) && canEdit && !multiSelect ? (
         <nav className="wb-focus-bottom wb-context-bar" aria-label="區塊動作" data-testid="wb-frame-actions">
           {frameRenaming ? (
@@ -1589,6 +1667,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         </nav>
       )}
 
+      </div>
       {sheetLayer}
     </div>,
     document.body,

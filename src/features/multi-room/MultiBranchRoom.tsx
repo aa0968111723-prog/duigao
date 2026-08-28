@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { historyLayers } from "../../lib/historyLayers";
+import { useIsTabletUp } from "../../hooks/useIsTabletUp";
 import { emptyPlan, shouldAdoptRemotePlan } from "./planDraft";
 import type {
   BranchStatus,
@@ -748,12 +749,19 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const [boardFocused, setBoardFocused] = useState(false);
   // 平板 Split View 的討論側欄是否收起（手機用不到 — CSS 斷點控制顯示）
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const tabletUp = useIsTabletUp();
+  /** 側欄此刻是否真的要掛（與 CSS 斷點同源，避免中間影格與手機多掛一份）。 */
+  const railVisible = tabletUp && !railCollapsed;
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
   // WB03「打開來源訊息」：關板→切對話→捲動到訊息＋1.6s 高亮。訊息元素
   // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
   const openDiscussionMessage = (messageId: string) => {
-    api.onOpenWhiteboard(null);
-    setDiscussPane("chat");
+    // Split View（平板）：討論就在左邊側欄，關掉白板反而把使用者正在看的
+    // 東西收走（自審 N13）。只有手機的「切 tab」語意才需要關板。
+    if (!railVisible) {
+      api.onOpenWhiteboard(null);
+      setDiscussPane("chat");
+    }
     const started = performance.now();
     const seek = () => {
       const el = document.querySelector(`[data-testid="discussion-${messageId}"]`);
@@ -1016,8 +1024,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     online: api.online,
                     editors: api.editors,
                     boardPeople: api.boardPeople,
-                    railCollapsed,
-                    onToggleRail: () => setRailCollapsed((current) => !current),
+                    railVisible,
+                    onToggleRail: tabletUp ? () => setRailCollapsed((current) => !current) : undefined,
                     onFrameDragState: api.onFrameDragState,
                     onSnapshotBoard: api.onSnapshotBoard,
                     onListVersions: api.onListVersions,
@@ -1150,8 +1158,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       {pollOpen && <PollSheet onClose={() => setPollOpen(false)} onCreate={createPoll} />}
       {/* WB05 平板 Split View：白板全螢幕時，左側常駐討論欄。手機由 CSS
           斷點隱藏（display:none），行為與之前完全一樣。 */}
-      {boardFocused && (
-        <aside className={`wb-side-rail${railCollapsed ? " is-collapsed" : ""}`} data-testid="wb-side-rail" aria-label="討論">
+      {boardFocused && railVisible && (
+        <aside className="wb-side-rail" data-testid="wb-side-rail" aria-label="討論">
           <div className="wb-side-rail-head">
             <strong>討論</strong>
             <button type="button" onClick={() => setRailCollapsed(true)} aria-label="收起討論">✕</button>

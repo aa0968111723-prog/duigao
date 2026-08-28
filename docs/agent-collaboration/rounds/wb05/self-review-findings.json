@@ -1,0 +1,216 @@
+{
+ "source": "Claude 自審 workflow（3 面向找缺陷＋懷疑者對抗驗證）",
+ "note": "驗證階段被帳戶配額中斷前完成 29 條：12 條存活、17 條被反駁。存活項與 Grok 的 6 條合併裁決見 claude-adjudication.md。",
+ "findings": [
+  {
+   "title": "掌拒吞掉手指的 pointerup，gestureReducer 的 pointers 永久殘留 → 之後每一次單指都變 pinch",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 796,
+   "claim": "onCanvasPointerUp 第 796 行對 touch 做 `else if (shouldRejectPointer(...)) return;`，在 feed({type:\"up\"}) 之前就 return。但 pointerdown 只在「筆已經按下」時才拒絕 touch，所以先落下的手掌／手指是被**收下**的（進了 gestureReducer 的 pointers map），而它的 pointerup 卻在筆按下期間或抬筆後 250ms 寬限期內被丟掉。gestures.ts 的 pointers map 只有 \"up\" 會刪（case \"up\" 第 200 行 next.pointers.delete），沒有任何逾時或清場，WhiteboardWorkspace 也沒有在切板／unmount 時重建 gesture.current。操作序列：①手掌／小指先靠在畫布上（touch down 被接受，hit-test → begin-pan）→ ②觸控筆落下開始寫字 → ③手掌在筆還在寫、或抬筆後 250ms 內離開螢幕（這是實體上最常見的順序）→ ④筆抬起。錯誤行為：那個手掌的 pointerId 永遠留在 pointers map 裡，之後任何一根手指落下都讓 pointers.size===2 → 進 pinch 模式，以一個「不會動的幽靈手指」當第二錨點，單指平移完全失效、輕輕一滑就依距離比暴縮暴放；抬起後 mode 回 \"pan\" 但幽靈還在，下一次又進 pinch，永久復發（換板也不會好，元件不卸載）。附帶損害：若被吞掉的那根手指當時是 mode===\"drag\"，commit-drag 效果永遠不會發，previewNodes 不回滾、api.onDragState 一直停在該節點 id → 節點本地停在拖到的位置但從沒寫回房態，其他成員那邊該節點永遠顯示「某某正在拖」的鎖。WB05 自己的 e2e（collaboration-workspace.mjs 的平板段）只測了「筆先、手掌後」的順序，剛好避開這條路徑。",
+   "severity": "high"
+  },
+  {
+   "title": "penRef / strokePointerRef 在關板後殘留：元件不卸載，重開板後所有手指被永久拒絕",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 313,
+   "claim": "penRef（第 313 行）只在 onCanvasPointerUp/PointerCancel 收到**同一個 pointerId 的筆事件**時才會被 penUp 清掉，沒有 unmount cleanup、沒有 board?.id 變動時的重置、也沒有 lostpointercapture handler。而第 1091 行 `if (!board) return <BoardList api={api} />;` 是在所有 hook 之後才 return —— 關板／切板時 WhiteboardWorkspace **不會卸載**，畫布 div 被拔掉但 penRef、strokePointerRef、strokeRef、strokeDownRef、gesture.current 全部原封不動留著。操作序列：①用筆在畫布上落筆開始寫（penRef.penPointerId = 7，strokePointerRef = 7）→ ②筆還在玻璃上時另一隻手點頂欄的「‹」返回鈕、或 WB05 新增的側欄 ✕／側欄裡的訊息連結、或別的成員把這塊板 archive 掉（board 變 null）→ ③畫布 div 消失，筆的 pointerup 送不到 onCanvasPointerUp → penUp 從未執行 → ④重新打開任何一塊板。錯誤行為：penPointerId 仍是 7，shouldRejectPointer 對 **每一個 touch 事件**（down/move/up 三個 handler 都擋）永遠回 true → 平移、縮放、點選、長按全死，只剩滑鼠與筆能用，非重新進房或重整不能恢復。同一次殘留還讓 strokePointerRef 停在 7：重開板後的第一筆會走到第 752 行「第二指」分支，finalizeStroke(true) 丟掉這一筆，並把上一塊板的 strokeDownRef 座標當成幽靈手指補進 gestureReducer → 手勢狀態機直接卡在 pinch。",
+   "severity": "high"
+  },
+  {
+   "title": "drawMode 開著時掌拒完全失效且反向傷害：手掌先落＝起筆畫，筆一落下就丟掉它並把筆當成 pinch 的第二指",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 740,
+   "claim": "第 740 行的條件是 `(drawMode || kind === \"pen\") && canEdit`，也就是 drawMode 開著時 **touch 也會起筆畫**；而 shouldRejectPointer 只在 penPointerId 已經非 null 時才擋 touch，物理上手掌永遠比筆先接觸螢幕，所以掌拒對「手掌先落」這個唯一真正會發生的順序沒有任何作用。操作序列：①點下方工具列的繪圖工具（drawMode = true，這是唯一能用手指畫的模式，且它是黏著狀態）→ ②手掌／掌側先靠上畫布（strokePointerRef 被手掌佔走，開始收一條垃圾筆畫）→ ③觸控筆落下寫字。錯誤行為：筆走第 752 行「第二指」分支 → finalizeStroke(true) 把畫面上已經出現的筆畫直接丟掉，並把手掌 replay 進 reducer、再 feed 筆的 down → pointers.size===2 進 pinch；接下來筆每一次 pointermove 都不是 strokePointerRef（第 776 行不成立）而落到第 791 行 feed(move) → pinch-zoom。使用者眼中：一開始畫得出來的線在筆碰到的瞬間消失，之後整塊白板隨著寫字的筆劃瘋狂縮放平移，一個字都寫不出來。收尾時手掌的 pointerup 又被第 796 行吞掉，把上一條「pointers 永久殘留」的傷害也一起觸發。",
+   "severity": "high"
+  },
+  {
+   "title": "兩支筆同時：第二支筆丟掉第一支正在寫的筆畫，並把兩支筆變成 pinch",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 758,
+   "claim": "起筆的守門是 `if (strokePointerRef.current === null)`（第 743 行），全域只允許一條筆畫；kind===\"pen\" 也不例外，第二支筆同樣落到第 752 行的「第二指＝取消筆畫轉 pinch」分支。另外 PenState 只有一個 penPointerId（pen.ts:44 penDown 直接覆寫），追蹤不了兩支筆。操作序列：平板放在桌上兩人共用（WB05 的正是這個場景）——①A 用筆開始畫線 → ②B 的筆落下。錯誤行為：A 畫到一半的線被 finalizeStroke(true) 整條丟掉（不是留下已畫的部分），兩支筆被當成雙指 pinch，兩人各自移動筆就是在縮放平移畫布，誰都畫不出東西；B 的筆先抬起時 penUp 會把 penPointerId 清成 null，此時 A 的筆還壓在螢幕上但掌拒已經解除，A 的手掌立刻能觸發平移。",
+   "severity": "medium"
+  },
+  {
+   "title": "掌拒把進行中 pan/drag 的 pointermove 丟掉卻不更新 dragLast → 寬限期結束時畫面/節點跳掉整段位移",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 775,
+   "claim": "onCanvasPointerMove 第 775 行對 touch 直接 return，既沒 feed 也沒有把 gesture 的 dragLast/pointers 座標同步過去。gestures.ts 的 pan 效果是 `dx = point - dragLast`（第 184 行）、drag 是 `point - previous`（第 189 行），兩者都是「相對上一次收到的 move」的增量。操作序列：①用一根手指按住空白處開始平移畫布（或按住節點開始拖）→ ②另一隻手的筆在螢幕上輕點一下就抬起（或只是筆尖不小心碰到）→ ③手指在這段被拒絕的期間（筆按下的時間 ＋ 250ms 寬限期）繼續滑了 200px → ④寬限期一過，手指的下一個 pointermove 被接受。錯誤行為：這一個 move 一次算出 200px 的 dx/dy，畫布（或被拖的節點）瞬間跳一整段，不是接續而是彈射；拖節點時這個跳躍會直接寫進 previewNodes 並在放手時 commit 成真實座標。",
+   "severity": "medium"
+  },
+  {
+   "title": "筆落在 frame 標題帶／縮放把手上會拖 frame 而不是畫，而且那次拖曳全程沒有掌拒",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 809,
+   "claim": "beginFrameDrag 第 809 行只對 `drawMode || !canEdit` 放行不攔（WB03 的 S4：「繪圖模式（筆要落在 frame 帶上）不攔」），WB05 新增的「筆優先」沒有一併加進這個豁免。.wb-frame-handle 是每個 frame 頂端 left:0/right:0/min-height:30px 的整條帶子，永遠存在。操作序列：①保持繪圖工具關閉（WB05 宣稱筆不用切工具）→ ②用筆從 frame 的標題帶上開始寫字，或一筆橫跨 frame 上緣。錯誤行為：beginFrameDrag 收下事件並 event.stopPropagation()，React 的父層 onCanvasPointerDown 完全不執行 → 筆不但畫不出線，還把整個 frame（連同框內所有節點）拖走，放手就 commit 成真實位移＋一筆 undo。第二層問題：因為 onCanvasPointerDown 沒跑到，第 732 行的 penDown 也沒跑到 → 這段用筆拖 frame 的期間 penPointerId 是 null，掌拒完全沒武裝，此時落在畫布上的手掌會同時起一個 pan/pinch 手勢跟 frame 拖曳打架。",
+   "severity": "medium"
+  },
+  {
+   "title": "筆優先短路在 hit-test 之前：連線模式、框選、套索、拖節點、雙擊編輯用筆全部做不到",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 740,
+   "claim": "第 740 行成立時整個 handler 在第 750 行 return，永遠不會走到第 771 行的 feed(down)，而 connectMode／selectTool／節點選取／begin-drag／雙擊編輯全部掛在 gestureReducer 的 hit-test 效果裡（runEffects 第 508-570 行）。也就是說 canEdit 的使用者只要用筆碰畫布，就一定只會產生筆畫，連使用者**明確切換過的模式**都被無視。操作序列：①用手指選一個節點 → 點「連線」（setConnectMode(true)，第 1503 行）→ ②畫面上出現「取消」的連線提示列 → ③用筆點第二個節點想完成連線。錯誤行為：筆走筆畫分支，單點的筆畫在 normalizeStroke 因為不足 2 點回 null（第 705 行）→ 什麼都沒發生、沒有任何回饋，連線模式一直亮著，使用者以為點沒中而反覆點，每次都只是丟掉一個點。同樣地：框選／套索工具開著時用筆拖只會畫線不會框選；筆無法點選或拖動任何節點，也無法雙擊便利貼進入編輯 —— 平板上以筆為主要工具的人拿不到選取／情境列（刪除、連線、換色）任何一個入口，必須換手指。",
+   "severity": "medium"
+  },
+  {
+   "title": "pointerType 缺值時整條 WB05 筆的路徑靜默退化，`as PointerKind` 把它藏起來",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 729,
+   "claim": "三個 handler 都用 `const kind = (event.pointerType || \"mouse\") as PointerKind;`（729/774/794 行）。pointerType 在部分瀏覽器／WebView 對觸控筆回空字串或非標準值（舊 WebKit、部分 Android WebView 與注入式測試環境），`|| \"mouse\"` 會把它變成 mouse，而 `as PointerKind` 讓 TypeScript 完全看不到這個窟窿，程式裡也沒有任何能力偵測或退路（例如改看 event.pressure / width / height）。操作序列：①在會回空 pointerType 的瀏覽器上用觸控筆在畫布上寫字。錯誤行為：kind===\"pen\" 永遠不成立 → 筆優先失效（不切繪圖工具就畫不出東西）、pressure 永遠不收（第 745/782 行寫入 undefined，normalizeStroke 產出空 pressures，粗細變化整個消失）、penDown 永遠不執行 → 掌拒永遠不武裝，手掌一碰就把筆畫轉成 pinch。而且因為被歸類成 mouse，shouldRejectPointer 對它永遠回 false，使用者拿到的是完全的 WB04 行為卻沒有任何提示，也沒有 e2e 能抓到（e2e 自己 dispatch 時明寫 pointerType:\"pen\"）。",
+   "severity": "medium"
+  },
+  {
+   "title": "widthForPressure 把 pressure=0 當成「沒有壓感」→ 最輕的接觸畫成最粗，起收筆的漸細反而變粗",
+   "file": "src/features/whiteboard/pen.ts",
+   "line": 55,
+   "claim": "第 55 行 `if (... || pressure <= 0) return base;` 把 0 當作缺資料的哨兵。但 Pointer Events 規格裡「硬體不支援壓感」在按下狀態的值是 **0.5**（這條路徑已經被正常映射成 0.975×base），0 在接觸狀態代表的是「最輕的接觸」。加上 normalizeStroke（freehand.ts:63）用 `typeof point.pressure === \"number\"` 判斷有無壓感，0 會被當成有效值原樣存進 content.pressures。操作序列：①用支援壓感的筆很輕地起筆、寫完再輕輕收筆（Apple Pencil／S-Pen 在接觸與離開的前後幾個 sample 常常回報 0，抬筆前的最後一個 pointermove 也是）。錯誤行為：pressure 0.01 的一段是 0.36×base（最細），pressure 0.0 的一段直接跳回 1.0×base（比 0.5 中等力道的 0.975×base 還粗）——越寫越輕的線在最輕的地方突然變成全粗，起筆與收筆的自然漸細變成兩個粗頭，且 0.0→0.01 之間有 2.75 倍的不連續。segmentWidths 取相鄰平均只有在連續兩點都是 0 時才會踩到，但那正是起筆／收筆的那一段。",
+   "severity": "medium"
+  },
+  {
+   "title": "落筆預覽是固定 3px，放開瞬間才換成逐段線寬 —— 筆一離開螢幕線的粗細就變了",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 1453,
+   "claim": "寫字過程中畫的是第 1453 行的 polyline，strokeWidth 寫死 3、不看 strokePreview 裡已經收好的 pressure；筆放開後 finalizeStroke 建出節點，registry.tsx 才改用 segmentWidths 逐段 <line> 渲染（0.35×～1.6×base）。操作序列：①用觸控筆用力寫一個字，或一筆之內由重到輕。錯誤行為：寫的當下看到的是均勻的 3px 細線，手一離開螢幕整條線立刻換成粗細變化的樣子（用力段變 4.8px、輕的段變 1.05px），位置沒動但形狀跳一次；使用者無法在下筆時預期力道會畫出多粗，WB05 主打的壓感在真正需要回饋的那一刻是看不見的。順帶：逐段 <line> 只有 strokeLinecap 沒有 strokeLinejoin，轉折處與預覽的 polyline 接法也不一樣。",
+   "severity": "medium"
+  },
+  {
+   "title": "筆優先讓觸控筆再也選不到、拖不動、編輯不了任何節點（WB02/WB03 的既有互動對筆全滅）",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 740,
+   "claim": "`if ((drawMode || kind === \"pen\") && canEdit)` 讓 pen 的 pointerdown 一律進筆畫分支並 `return`，永遠不會走到底下的 `feed({type:\"down\"})`。而 WhiteboardWorkspace 的**所有**既有互動都掛在 gestureReducer 的 hit-test 效果上（runEffects 的 `case \"hit-test\"`，第 508–570 行）：選取、拖節點、雙擊進編輯、長按多選、marquee/lasso 框選、connectMode 連線、空白處平移。這些現在對筆全部不可達，而且沒有任何「切回選取模式」的逃生口 —— 關掉繪圖工具也沒用，因為條件是 `drawMode || kind === \"pen\"`。操作序列：iPad 只拿 Apple Pencil（手不碰螢幕）→ 用筆點一個既有便利貼 → 錯誤行為：不會選取，而是在便利貼上留一個點（若位移 <2px 連節點都不成，等於什麼都沒發生）；再用筆雙擊該節點 → 不進編輯，畫出兩個點；用筆按住空白處 450ms → 不出「新增」選單，畫出一坨墨；開連線模式後用筆點第一個節點 → 連線永遠建立不了，連線提示條卡在「點第一個節點」；選 marquee/lasso 工具後用筆框選 → 只會畫線。design.md 只說「手指維持既有語意」，但沒承認代價是「筆完全失去既有語意」，而平板使用者常常是筆在手上、手不碰螢幕。",
+   "severity": "high"
+  },
+  {
+   "title": "掌拒吞掉手掌的 pointerup，在 gesture reducer 留下永久幽靈指 —— 之後單指觸控全部被當成 pinch",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 796,
+   "claim": "`onCanvasPointerUp` 對 touch 的處理是 `else if (shouldRejectPointer(...)) return;` —— 在筆按下期間（或抬筆後 250ms 寬限期內）直接 return，**up 事件從不餵給 reducer**。但如果手掌是在筆之前落下的（自然書寫就是這個順序：先放手掌、再下筆），那個 touch 的 pointerdown 已經被 `feed({type:\"down\"})` 收進 `gesture.current.pointers`（gestures.ts:92）。gestures.ts 的 up 分支有 `if (!next.pointers.has(id)) return` 的對稱防護，但那只擋「從未進 map」的 pointer，擋不住「進了 map 卻永遠等不到 up」。penRef/gesture 都是 ref，沒有任何逾時或清理。操作序列：平板橫放 → 手掌先靠在畫布上（pointers={102}，進 begin-pan）→ 下筆寫字（penDown）→ 寫完整隻手一起離開螢幕，手掌的 pointerup 落在抬筆後 250ms 寬限期內 → 被 return 吞掉 → 錯誤行為：102 永遠留在 pointers map。接下來單指想平移，pointerdown 讓 `pointers.size === 2` → reducer 直接進 pinch（gestures.ts:93），不發 hit-test、不 arm 長按 → 畫布用一根手指就亂縮放、點節點不再選取、長按不出選單；手指抬起後 `pointers.size` 回到 1（幽靈指還在）、mode 設成 pan 且 dragLast 是手掌當年的舊座標 —— 下一次觸控又是 pinch，永久循環，只有離開白板重掛 WhiteboardWorkspace 才會復原。",
+   "severity": "high"
+  },
+  {
+   "title": "e2e 的「掌拒」檢查在拿掉掌拒後同樣會綠 —— 這章唯一的掌拒斷言驗不到任何東西",
+   "file": "scripts/e2e/collaboration-workspace.mjs",
+   "line": 1055,
+   "claim": "`check(\"平板：手掌沒有把筆畫打斷成多個節點（掌拒）\", count === 1)` 無法區分有無掌拒。把 WhiteboardWorkspace 的三處 shouldRejectPointer 全部刪掉重跑同一段：pen 的 pointerdown 進筆畫分支、strokePointerRef=101；手掌的 pointerdown 是 touch 且 e2e **從未點過繪圖工具**（drawMode=false），所以 `(drawMode || kind===\"pen\")` 為 false，不進筆畫分支、不會呼叫 finalizeStroke(true)，只是被 feed 進 reducer 變成 pan；筆的 pointerup 照常 finalize → freehand 節點數仍然是 1，檢查照樣 PASS。掌拒真正保護的那條路徑（drawMode 開著時第二指落下會 `finalizeStroke(true)` 把整筆丟掉）在這段 e2e 裡從頭到尾沒被走到。真正該被斷言的損害是「手掌 pan 讓 camera 在筆畫中途移動，screenToWorld 算出的後半段世界座標整段位移、筆畫變形」——這個檢查完全看不到。同一段裡 1047 行的 `check(\"平板：筆不用切工具就能畫（筆優先）\", true)` 更是寫死 true 的常綠斷言（真正的驗證只靠前面 waitForFunction 拋例外，而例外會讓腳本在印出 checks 統計前就掛掉，失敗訊號變成 stack trace 而不是 FAIL 行）。",
+   "severity": "high"
+  },
+  {
+   "title": "frame 把手完全不受掌拒與筆優先管轄：筆在區塊帶上畫不了、手掌落在區塊帶上會拖走整個區塊和成員節點",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 809,
+   "claim": "`beginFrameDrag` 自己 stopPropagation 且早退條件是 `if (drawMode || !canEdit) return;` —— 這個豁免（S4 註解寫明「繪圖模式：筆要落在 frame 帶上」）只認 drawMode，不認 pointerType。WB05 讓筆在 drawMode=false 時也要畫，於是豁免對筆失效。而且 beginFrameDrag 完全沒有呼叫 shouldRejectPointer。操作序列 A：平板上白板有一個區塊（frame）→ 不切繪圖工具、直接用筆在區塊的標題帶上寫字 → 錯誤行為：事件被把手吃掉並 stopPropagation，畫布的 onCanvasPointerDown 根本收不到，筆一滑就把整個區塊連同框內所有成員節點拖走（beginFrameDrag 的 members 快照），完全沒有出墨。操作序列 B：用筆在區塊內寫字，手掌落在區塊標題帶上 → 錯誤行為：掌拒對 frame 把手無效，手掌直接起一個 frame move session，手掌一動整個區塊和成員節點跟著跑；等到手掌抬起，onFramePointerUp 會把移動後的 frame 與節點寫進房態並記進 undo 棧 —— 這是資料層的損害，不只是視覺抖動。",
+   "severity": "high"
+  },
+  {
+   "title": "收合／展開側欄不補償 camera，畫布內容橫向跳 340px（真機驗收第 13 項的通過標準已經先天不成立）",
+   "file": "src/features/whiteboard/whiteboard.css",
+   "line": 147,
+   "claim": "`.wb-focus { left: var(--wb-rail-w) }` ↔ `.is-rail-collapsed { left: 0 }` 把整個 Focus 層左緣搬動 340px，wrapRef 的 ResizeObserver 會把新的 viewport 餵進來（第 403–407 行），但 camera.x/camera.y 是「世界原點相對畫布左上角的螢幕位移」，沒有任何地方把 340px 的寬度變化補回 camera.x。操作序列：平板橫向開白板 → 把某個節點對齊到畫面正中央 → 按頂欄 ☰ 收合討論欄 → 錯誤行為：畫布左緣往左移 340px，但世界座標仍錨在畫布左上角，剛才置中的節點瞬間往左跳 340px（1024 寬螢幕的三分之一），使用者正在看的東西直接離開視野；再按 ☰ 展開又往右跳回來。real-device-addendum.md 第 13 項的通過標準明寫「畫布視角不因收合而跳掉」，實作沒做這件事，e2e 的收合檢查只驗 `focus.left === 0`（1024–1032 行）完全不看 camera，所以這條已知會被真機打回的行為在 CI 是綠的。",
+   "severity": "high"
+  },
+  {
+   "title": "手機路徑並非「完全不變」：開白板時仍會掛載一份完整的隱藏 RoomDiscussion，而三張手機基準圖在原理上驗不到它",
+   "file": "src/features/multi-room/MultiBranchRoom.tsx",
+   "line": 1153,
+   "claim": "`{boardFocused && (<aside className=\"wb-side-rail\" …>{renderDiscussion(\"chat\")}</aside>)}` 只由 boardFocused 這個 JS 狀態控制，沒有任何寬度條件；<900px 只是 CSS `display:none`（whiteboard.css:205–207）。操作序列：390px 手機 → 開任何一塊白板 → 錯誤行為：React 真的掛載一份完整 RoomDiscussion（整份訊息串、決定區、投票、語音 dock、附件卡）進 DOM，只是看不見；房間討論每收到一則新訊息，這棵隱藏樹就跟著 reconcile 一次，在正在手寫的手機上白白吃 render 成本，而且 `data-testid=\"discussion-feed\"`／`room-discussion`／`discussion-<id>`／`voice-dock` 這些 testid 在開板期間仍存在於 DOM（MultiBranchRoom 的 openDiscussionMessage 第 759 行就是用全域 `document.querySelector` 撈 `discussion-<id>`，正好是會撈到隱藏副本的那種寫法）。更關鍵的是 design.md 用「390／412／768 三個尺寸完全未動＝證明手機路徑沒被碰到」當證據 —— 這個推論無效：新增的 DOM 是 display:none，對 pixelmatch 而言天生不可見，基準圖不變是這種改動的必然結果，不是它安全的證據。",
+   "severity": "medium"
+  },
+  {
+   "title": "逐段 <line> 讓一筆手寫變成數百個 SVG 元素，且每個平移／縮放影格都重新協調",
+   "file": "src/features/whiteboard/registry.tsx",
+   "line": 104,
+   "claim": "有壓感時 freehand 從 1 個 `<path>` 變成 `points.length - 1` 個 `<line>`。抽點門檻是 `2.5 / camera.zoom` 世界距離（≈螢幕 2px），120Hz 的 Apple Pencil 寫三行字很容易留下 200–600 個點，也就是單一節點 200–600 個帶不同 stroke-width 的 `<line>`。而 WhiteboardWorkspace 的 renderNodes memo 相依是 `[liveNodes, camera, viewport]`（第 458 行），平移／縮放的每一個影格都會重算可見節點並重新 render 節點元件，registry 的 renderer 也跟著重跑。操作序列：平板上用筆寫滿一頁筆記（例如 20 筆手寫）→ 兩指平移或縮放 → 錯誤行為：每個影格要協調上萬個 `<line>`，平移／pinch 在平板上明顯掉影格，而這正好是本輪主打的使用情境。舊的無壓感筆畫（WB03 存的節點沒有 pressures）走 `<path>` 分支不受影響，所以問題只會隨著使用者開始用筆而逐步浮現，e2e 只畫了一筆三個點完全量不到。",
+   "severity": "medium"
+  },
+  {
+   "title": "斷點沒有 pointer:coarse 條件（註解宣稱有），所有 ≥900px 的桌機瀏覽器都被改成 Split View ＋右側直欄工具列，且沒有任何基準圖覆蓋桌機寬度",
+   "file": "src/features/whiteboard/whiteboard.css",
+   "line": 144,
+   "claim": "CSS 區塊的註解寫「WB05 平板（≥900px 且非粗指標手機）」，但實際的媒體查詢只有 `@media (min-width: 900px)`，沒有 `(pointer: coarse)` 或 `(hover: none)`。`.wb-rail-toggle` 的顯示條件也一樣（第 211 行），而 `onToggleRail` 從 MultiBranchRoom 無條件傳入，所以按鈕在桌機一定渲染。操作序列：1440px 桌機 Chrome 開白板 → 錯誤行為：左側憑空多出 340px 常駐討論欄、畫布被推到 left:340px、原本橫在底部的工具列變成貼右邊、寬 92px、`max-height:78vh` 的浮動直欄（whiteboard.css:151–165）。board-visual.mjs 的 SIZES 只有 390/412/768/1024（第 34–39 行），最寬的 tablet-1024 是 1024×1366，沒有任何桌機寬度（1280/1440）的基準圖 —— 桌機這條被改動的路徑在視覺回歸矩陣裡是空的，本輪只重切了兩張 tablet-1024 就宣告視覺影響已盤點。",
+   "severity": "medium"
+  },
+  {
+   "title": "筆畫預覽是固定 3px 折線，放手才變成逐段線寬 —— 每寫完一筆墨跡粗細都會跳一次",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 1453,
+   "claim": "`strokePreview` 仍然是 `<polyline … strokeWidth={3}>`，完全沒有讀 `point.pressure`（雖然 pressure 已經存進 strokeRef 的每個點了）。只有 finalizeStroke 之後、registry 拿到 content.pressures 才畫得出粗細變化。操作序列：平板上用 Apple Pencil 由輕到重畫一條長線 → 錯誤行為：畫的當下線是均勻 3px（跟手指畫的一模一樣，看不到任何壓感回饋），手一離開螢幕整條線瞬間換成 0.35×～1.6× 的粗細變化 —— 每一筆結束都閃一下、跟預期的墨跡不一致。real-device-addendum 第 12 項「由輕到重畫一條長線／線條粗細看得出變化」在寫的過程中是不成立的，只有寫完才成立，人類驗收時很容易判成 FAIL。",
+   "severity": "medium"
+  },
+  {
+   "title": "唯讀成員（canEdit=false）握著筆時也會觸發掌拒，白白鎖死觸控平移／縮放",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 732,
+   "claim": "`if (kind === \"pen\") penRef.current = penDown(...)` 在 `canEdit` 檢查（第 740 行）之前無條件執行，penUp 同理。所以掌拒狀態機對「根本不會畫任何東西的人」也照開。操作序列：沒有編輯權的成員（allowBoardEdit 關閉）在平板上看白板 → 手上拿著筆，筆尖碰到螢幕想平移 → 這一下走 `feed(down)` 變成 pan（正常）→ 但同時 penDown 已經設好 → 另一隻手想同時 pinch 縮放 → 錯誤行為：所有 touch 被 shouldRejectPointer 丟掉，pinch 完全沒反應，筆抬起後還要再等 250ms；使用者得到的是「拿著筆就不能用手縮放」，而且完全沒有換到任何好處（唯讀者本來就畫不出東西）。",
+   "severity": "low"
+  },
+  {
+   "title": "板↔對話切換的中間 commit 會同時掛兩份 RoomDiscussion，既有 e2e 的 strict-mode 定位器可能解析到 2 個元素",
+   "file": "src/features/multi-room/MultiBranchRoom.tsx",
+   "line": 1153,
+   "claim": "boardFocused 由 WhiteboardWorkspace 的 useEffect cleanup 回寫（WhiteboardWorkspace.tsx:396），而 effect cleanup 跑在 commit 之後。從白板切回對話時：先有一個 render 是 `discussPane===\"chat\"`（主槽渲染 renderDiscussion()）但 boardFocused 仍為 true（側欄也渲染 renderDiscussion(\"chat\")）→ 這個 commit 裡 `data-testid=\"room-discussion\"`／`discussion-feed`／`discussion-<id>`／`decision-<id>`／`voice-dock`／`voice-join` 全部各有兩份，之後 setBoardFocused(false) 才把側欄拆掉。操作序列：白板節點上點「打開來源訊息」或按頂欄返回 → 立刻對討論串下斷言 → 錯誤行為：Playwright strict mode 的 `page.getByTestId(\"discussion-feed\").innerText()`（collaboration-workspace.mjs:535、887、920）與 `getByTestId(\"voice-join\")`（multi-branch-room.mjs:582）會拋 \"resolved to 2 elements\"；MultiBranchRoom 自己的 openDiscussionMessage 用 `document.querySelector` 撈第一個相符元素，目前靠 `<main>` 在 `<aside>` 之前的 DOM 順序僥倖撈對，是隱性相依而不是有意的保證。",
+   "severity": "low"
+  },
+  {
+   "title": "開板／關板的第一個影格，畫布已經讓出 340px 但側欄還沒渲染，留下一條空白帶",
+   "file": "src/features/multi-room/MultiBranchRoom.tsx",
+   "line": 1066,
+   "claim": "`.wb-focus { left: var(--wb-rail-w) }` 在 ≥900px 是無條件生效的（只看 is-rail-collapsed），但左邊那 340px 要不要有東西，取決於 boardFocused 這個由 onFocusChange 在 useEffect 裡回寫的 state。操作序列：1024px 平板從白板列表點進一塊板 → 錯誤行為：第一個 commit 裡 `.wb-focus` 已經是 left:340px，但 `boardFocused` 還是 false、`<aside>` 尚未渲染 → 有一個影格是「白板右縮、左邊 340px 直接露出底下的房間討論殼」，下一次 commit 才被側欄補上；退出白板時反向再閃一次。同理，若之後有人在別處掛載 WhiteboardWorkspace（目前只有 MultiBranchRoom 一處），這 340px 會變成永久的死帶，因為位移寫在 CSS、補位寫在另一個元件。",
+   "severity": "low"
+  },
+  {
+   "title": "Split View 討論側欄沒有捲動容器 — 訊息超過欄高就永遠看不到，且捲不動",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\features\\whiteboard\\whiteboard.css",
+   "line": 181,
+   "severity": "high",
+   "claim": "操作序列：iPad 1024×768 橫向 → 進一個討論串已有 8 則以上訊息的房 → 點「白板」開一塊板進 Focus（Split View，左側 340px 討論欄）→ 用手指在側欄上下滑。錯誤行為：完全沒有捲動反應，側欄永遠停在討論串最舊的那幾則；新進來的訊息、決策區、composer 全部被裁在欄外，Split View「一邊討論一邊畫」的整個目的失效。原因：整條鏈上沒有任何 overflow-y:auto — .wb-side-rail 是 position:fixed + overflow:hidden（whiteboard.css:181-193），.wb-side-rail-body 只有 flex:1;min-height:0（whiteboard.css:208），.rd-shell 只有 flex:1;min-height:0（discussion.css:1），.rd-feed 是沒有 min-height:0 的 column flex item（discussion.css:5），min-height:auto 讓它不會被壓縮，內容直接溢出後被 .wb-side-rail 的 overflow:hidden 切掉；overflow:hidden 產生的 scroll container 不接受滾輪/觸控捲動。另外 .rd-feed 還帶著 padding-bottom:88px（是給根畫面 fixed composer dock 留的位），在側欄裡是純浪費高度。RoomDiscussion 全檔沒有任何 useEffect，也沒有自動捲到底的行為可以救。e2e（scripts/e2e/collaboration-workspace.mjs 的平板段）是「建房→立刻建板」，討論串是空的，只量了 railBox/focusBox 幾何，量不到這個。"
+  },
+  {
+   "title": "平板主工具列改成浮動直欄後覆蓋畫布右緣，底下的節點點不到也拖不動",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\features\\whiteboard\\whiteboard.css",
+   "line": 151,
+   "severity": "medium",
+   "claim": "操作序列：平板橫向 → 開白板 → 建一張便利貼 → 把它拖到畫布右緣、垂直方向大約螢幕正中間（工具列直欄所在的位置）→ 放開 → 再去點它。錯誤行為：點擊落在 .wb-focus-bottom 的按鈕上而不是節點上 — 例如打到「繪圖」就直接進繪圖模式、打到「連線」就進連線模式；節點既選不到也拖不出來，只能先縮放/平移把它移出那條帶才救得回來。原因：@media (min-width:900px) 把 .wb-focus-bottom 從流內底部橫列改成 position:absolute;right:10px;top:50%;transform:translateY(-50%);width:92px（whiteboard.css:151-164），它是 .wb-focus-canvas 的後續兄弟且同為 positioned、z-index auto，所以恆定蓋在畫布上；佔掉 x 從 viewportWidth-102 到 viewportWidth-10、垂直約螢幕中央 ±162px 的一整條，畫布的 pointer 事件永遠拿不到那塊。手機版是流內元素（畫布 flex:1 讓開），所以這個重疊是 WB05 才引入的。"
+  },
+  {
+   "title": "收合／展開討論欄時 camera 不補償寬度差，畫面內容整片跳 340px",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\features\\whiteboard\\WhiteboardWorkspace.tsx",
+   "line": 403,
+   "severity": "medium",
+   "claim": "操作序列：平板橫向 Split View → 在白板上把某個節點平移到畫布正中央對齊 → 按頂欄的「☰」收起討論欄 → 再按一次展開。錯誤行為：收起時 .wb-focus 的 left 從 340px 變 0（whiteboard.css:147-148），畫布往左長出 340px，但 camera.x 完全沒動，所以世界內容相對螢幕瞬間往左跳 340px — 剛剛對準中央的節點跑到偏右 1/3；展開又跳回去。連續開合等於每次都把使用者的視角甩掉一次。原因：ResizeObserver（WhiteboardWorkspace.tsx:403-410）只把新的 clientWidth/clientHeight 寫進 viewport state 供 focusCamera/visibleNodes/鍵盤避讓使用，沒有任何一段把 camera.x 依寬度差做補償。（focusNodeId 那條有 appliedFocusRef 記帳，所以不會被 viewport 變動重新拉焦點 — 那層防守是有效的；問題純粹在缺補償。）"
+  },
+  {
+   "title": "Split View 只看寬度不看指標型態，大螢幕手機橫向會進 Split View，且 900–920 這段與 mobile.css 手機橫向條款同時成立",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\features\\whiteboard\\whiteboard.css",
+   "line": 144,
+   "severity": "medium",
+   "claim": "操作序列：Galaxy S23 Ultra（橫向 CSS viewport 915×412，pointer:coarse）或同級大螢幕 Android 手機 → 轉橫向 → 開白板。錯誤行為：進入 Split View — 340px 討論欄吃掉 37% 的螢幕寬（畫布只剩 575px）、主工具列變成右側浮動直欄、頂欄多出 .wb-rail-toggle；同時 mobile.css:7 的手機橫向條款（orientation:landscape and max-height:520 and max-width:920 and pointer:coarse）在 915px 也成立，於是手機殼規則（.project-room 100dvh、.rd-composer fixed dock 等）與平板 Split View 規則同時套用，版面兩套混在一起。原因：whiteboard.css:138-141 的註解寫的是「≥900px 且非粗指標手機」，但實際的 @media (min-width:900px)（whiteboard.css:144、194、211）沒有任何 pointer / hover / max-height 條件，只有寬度。已知設計決策排除的是「768 直向不進 Split View」，涵蓋不到手機橫向 ≥900 這一類。"
+  },
+  {
+   "title": "「打開來源訊息」在 Split View 會把整塊白板關掉 — 但訊息本來就在左邊側欄看得到",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\features\\multi-room\\MultiBranchRoom.tsx",
+   "line": 754,
+   "severity": "medium",
+   "claim": "操作序列：平板橫向 Split View → 從討論側欄把一則訊息「加入白板」→ 在畫布上選取那個節點 → 底部情境列點「打開來源訊息」。錯誤行為：白板整個退出 Focus 模式、側欄跟著卸載、回到全螢幕對話頁，剛才的 camera 視角、選取、繪圖工具狀態全部丟掉 — 而那則來源訊息在動作發生前就已經顯示在左側討論欄裡，正確行為只需要在側欄裡捲到它並高亮。原因：openDiscussionMessage（MultiBranchRoom.tsx:754-769）無條件執行 api.onOpenWhiteboard(null) + setDiscussPane(\"chat\")，這是 WB03 手機 tab 模型的邏輯，WB05 加側欄時沒有為「討論已經同時可見」的情況分岔。附帶：期間 querySelector('[data-testid=\"discussion-<id>\"]') 在 main 與 aside 都渲染訊息的那一個 commit 會有兩個同 testid 節點（只是文件順序讓它剛好抓到可見的那份，是巧合不是設計）。"
+  },
+  {
+   "title": "白板 sheet 以整個 viewport 置中而非以畫布置中，左半壓在討論欄上",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\styles.css",
+   "line": 1130,
+   "severity": "low",
+   "claim": "操作序列：1024px 寬平板橫向 Split View（側欄展開）→ 白板 Focus 頂欄點「⋯」（或工具列的「素材」「更多」、更多裡的「搜尋節點」「版本」）。錯誤行為：sheet 以 viewport 置中出現在 x=172..852，跨過 x=340 的側欄／畫布分界，左邊 168px 壓在討論欄上；相對它真正所屬的畫布（340..1024，中心 682）整片偏左 170px，看起來像掛錯面板。原因：.project-scrim 是 position:fixed;inset:0;z-index:80（styles.css:1130），雖然 JSX 掛在 .wb-focus 裡，但 .wb-focus 沒有 transform，fixed 仍以 viewport 定位，所以 scrim 是整個螢幕寬；.project-sheet 用 width:min(680px,100%);margin:0 auto（styles.css:1131）依 scrim 置中。WB05 把 .wb-focus 的 left 推到 340px（whiteboard.css:147）之後，sheet 與它的宿主層不再同一個座標系。"
+  },
+  {
+   "title": "側欄在所有寬度都掛載，手機只是被 display:none 藏起 — 開白板就多掛一份完整 RoomDiscussion",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\features\\multi-room\\MultiBranchRoom.tsx",
+   "line": 1153,
+   "severity": "low",
+   "claim": "操作序列：手機（<900px）→ 開任一塊白板進 Focus → 檢查 DOM。錯誤行為：document.querySelectorAll('[data-testid=\"room-discussion\"]').length 由 0 變 1，而且那一份是看不見的（.wb-side-rail 在 <900px 是 display:none，whiteboard.css:188）；連帶 discussion-feed、voice-dock/voice-join/voice-mute、decision-area、attachment-card、以及一個綁在共用 api.chatInput/setChatInput 上的 composer input 全都進了 DOM。任何用 testid 或 querySelector（非 visible 過濾）抓討論元素的腳本，在白板開著時會抓到這份隱藏節點；Playwright 若同時存在兩份還會 strict mode 衝突。原因：MultiBranchRoom.tsx:1153 的守衛只有 {boardFocused && ...}，沒有 viewport 條件，整份 RoomDiscussion 靠 CSS 藏而不是不渲染 — 這直接推翻該處註解宣稱的「手機由 CSS 斷點隱藏，行為與之前完全一樣」。"
+  },
+  {
+   "title": "進板第一格畫面左側 340px 是空的 — .wb-focus 先讓位，側欄晚一格才掛上",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\features\\whiteboard\\WhiteboardWorkspace.tsx",
+   "line": 377,
+   "severity": "low",
+   "claim": "操作序列：平板橫向 → 用深連結（activeWhiteboardId 已帶入）或從討論卡直接開一塊板。錯誤行為：第一次 paint 時 .wb-focus 已經套上 left:340px 讓出左欄，但 .wb-side-rail 還沒渲染，左側 340px 露出底下的房間殼（entry chips / 討論串），下一格才被側欄蓋掉 — 開板時左邊閃一下別的畫面。原因：.wb-focus 的 left:var(--wb-rail-w) 在 ≥900px 是無條件套用（whiteboard.css:147），與側欄是否存在無關；而側欄的 boardFocused 要等 WhiteboardWorkspace 的 useEffect 呼叫 apiRef.current.onFocusChange?.(focused)（WhiteboardWorkspace.tsx:377）→ MultiBranchRoom setBoardFocused(true)（MultiBranchRoom.tsx:1065-1066）之後才為真，effect 在 paint 之後才跑，中間必然有一格不同步。"
+  }
+ ]
+}
