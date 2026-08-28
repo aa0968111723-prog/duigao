@@ -8,12 +8,21 @@
 
 ## 目前 phase
 
-PR-05 Canva 已合併（#69＋Grok pr05 四 blocking 全修）；share-preview
-真人 302 修復（#68＋#70 — 平台把 *.supabase.co 的 HTML 強制 text/plain，
-使用者真機回報）。正式環境：migrations 0011–**0020**、六支 edge
-functions（share-preview v2 / canva-bridge 新增，皆已部署驗證），前端
-Zeabur 自動部署 https://duigao-k7q2.zeabur.app。殘餘：使用者設 Dashboard
-secrets（CANVA_*、LIVEKIT_*、TKU_*）後真機驗收；見 BLOCKERS。
+**正式站已由真瀏覽器驗收通過**（2026-08-28）：語音 dock、Canva 匯入入口
+在 https://duigao-k7q2.zeabur.app 實際渲染，主控台零錯誤。
+
+這一輪抓到並修掉兩個「伺服器端全綠、使用者卻用不到」的缺陷：
+- **#73 CORS 預檢**（根因）：voice-token / canva-bridge / cutos-bridge 的
+  allow-headers 漏了 supabase-js 必送的 x-client-info/apikey，瀏覽器在預檢
+  就擋掉 → 三支函式的瀏覽器 POST 次數是 **0**（edge logs 佐證），所有入口
+  誠實隱藏。curl 不做預檢所以探針一路綠；e2e 的 mock 在路由到函式前就自行
+  回應 OPTIONS 所以也測不到。新增 `test:edge-cors`（對真實 handler 發預檢、
+  變異驗證過）掛進 build 與 agent-release-gate 兩條 CI。
+- **#74 素材智慧 room id**：以 boundRoomId 當閘門卻傳 room.id（本地短碼）
+  → 每次建房 22P02 400。
+
+同時 loadEdgeHandler 補上 `../_shared/*.ts` 支援 — 此前 room-ai-context 與
+asset-analysis **在 harness 裡根本載不起來**，等於從未被測試執行過。
 
 ## 已合併（時序）
 
