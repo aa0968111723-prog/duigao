@@ -1,7 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import type { PlanDocument, Room, RoomBranch, RoomPoll } from "../../lib/types";
 import { anchorFromNode, openTarget } from "../../lib/contextAnchor";
-import { branchSummary, branchTypeLabel, latestBranchVersion } from "../../lib/roomBranches";
+import { branchSummary, latestBranchVersion } from "../../lib/roomBranches";
+import { useViewport } from "../../hooks/useViewport";
 import {
   addFlowNextStep,
   addMindmapChild,
@@ -16,10 +18,22 @@ import {
   parseTimestamp,
 } from "../collaboration/nodes";
 import { arrangeBoard } from "../collaboration/layout";
-import { canEditBoard, stickyTextInputProps } from "../collaboration/permissions";
+import { canEditBoard } from "../collaboration/permissions";
 import { formatEditorLine } from "../collaboration/presence";
-import type { NodeType, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardNode } from "../collaboration/types";
-import { BROADCAST_THROTTLE_MS, DRAG_PERSIST_MS, LONG_PRESS_MS, fitCamera, focusCamera, marqueeHits, nodeHit, screenToWorld, visibleNodes, zoomAt, type Camera } from "./canvas";
+import type { NodeType, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardFrame, WhiteboardNode } from "../collaboration/types";
+import { nodeCreateDraft, nodeDeleteDraft, nodeUpdateDraft, applyMasked, type OperationDraft } from "../collaboration/operations";
+import { fitCamera, focusCamera, marqueeHits, screenToWorld, visibleNodes, zoomAt, clampZoom, type Camera } from "./canvas";
+import { paintOrder, hitTest } from "./order";
+import {
+  gestureReducer,
+  initialGestureState,
+  lassoHits,
+  LONG_PRESS_MS,
+  type GestureEffect,
+  type GestureState,
+} from "./gestures";
+import { emptyHistory, pushHistory, redoStep, undoStep, type HistoryStack } from "./history";
+import { rendererFor } from "./registry";
 import "./whiteboard.css";
 
 export type WhiteboardApi = {
@@ -52,9 +66,17 @@ export type WhiteboardApi = {
   onToggleAllowEdit: () => void;
   allowBoardEdit: boolean;
   canToggleOpenEdit: boolean;
+  // ---- WB02 新增（皆 optional：舊掛載點不破） ----
+  /** 空間容器（0022）。未提供＝不渲染 frames 層。 */
+  frames?: WhiteboardFrame[];
+  onCreateFrame?: (frame: WhiteboardFrame) => void;
+  /** Focus Mode 進出（App 據此抑制 AssetAiFab — wireflow 疊加規則）。 */
+  onFocusChange?: (focused: boolean) => void;
+  /** 操作事件入帳（0023，best-effort — 失敗只損 undo 粒度不擋操作）。 */
+  onEmitOperation?: (draft: OperationDraft) => void;
 };
 
-type Sheet = "add" | "search" | "content" | "more" | "create-board" | "poll" | "video-range" | null;
+type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | null;
 
 const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
@@ -78,70 +100,37 @@ const NodeView = memo(function NodeView({
   selected,
   editing,
   canEdit,
+  connectSource,
   onChangeText,
 }: {
   node: WhiteboardNode;
   selected: boolean;
   editing: boolean;
   canEdit: boolean;
+  connectSource: boolean;
   onChangeText: (text: string) => void;
 }) {
-  const content = node.content;
-  const className = `wb-node wb-node-${node.nodeType} ${selected ? "is-selected" : ""} ${editing ? "is-editing" : ""}`;
-  const style = { left: node.x, top: node.y, width: node.width, height: node.height };
-  if (node.nodeType === "text" || (editing && (node.nodeType === "flow" || node.nodeType === "mindmap"))) {
-    const textProps = stickyTextInputProps(canEdit, onChangeText);
-    return (
-      <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type={node.nodeType}>
-        <textarea
-          className="wb-node-text"
-          value={content.text ?? ""}
-          placeholder={node.nodeType === "text" ? "直接打字…" : "步驟"}
-          readOnly={textProps.readOnly}
-          onChange={textProps.onChange}
-          onPointerDown={(event) => event.stopPropagation()}
-          autoFocus={editing && canEdit}
-        />
-      </div>
-    );
-  }
-  if (node.nodeType === "room_content" || node.nodeType === "image") {
-    return (
-      <div className={`${className} wb-node-content`} style={style} data-testid={`wb-node-${node.id}`} data-node-type={node.nodeType}>
-        {content.thumbnailUrl
-          ? <img className="wb-thumb" src={content.thumbnailUrl} alt="" />
-          : <span className="wb-thumb-fallback" aria-hidden>{content.mediaKind === "video" ? "▶" : content.mediaKind === "plan" ? "☷" : "▧"}</span>}
-        <span className="wb-card-copy">
-          <strong>{content.title ?? "房間內容"}</strong>
-          <small>
-            {content.versionLabel ? `${content.versionLabel}` : ""}
-            {content.openCommentCount ? ` · ${content.openCommentCount} 則待處理` : ""}
-            {content.startTime != null ? ` · ${formatVideoRange(content.startTime, content.endTime)}` : ""}
-            {content.subtitle ? ` · ${content.subtitle}` : ""}
-          </small>
-        </span>
-      </div>
-    );
-  }
-  if (node.nodeType === "poll") {
-    return (
-      <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type="poll">
-        <strong>{content.pollQuestion ?? content.title ?? "投票"}</strong>
-        <small>{content.voteCount ?? 0} 人已投</small>
-      </div>
-    );
-  }
-  if (node.nodeType === "decision") {
-    return (
-      <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type="decision">
-        <strong>✓ {content.text ?? content.title ?? "已決定"}</strong>
-        {content.sourceLabel ? <small>{content.sourceLabel}</small> : null}
-      </div>
-    );
-  }
+  const Renderer = rendererFor(node.nodeType);
+  const className = [
+    "wb-node",
+    `wb-node-${node.nodeType}`,
+    node.nodeType === "room_content" || node.nodeType === "image" ? "wb-node-content" : "",
+    selected ? "is-selected" : "",
+    editing ? "is-editing" : "",
+    node.locked ? "is-locked" : "",
+    connectSource ? "is-connect-source" : "",
+  ].filter(Boolean).join(" ");
+  const style = {
+    left: node.x,
+    top: node.y,
+    width: node.width,
+    height: node.height,
+    ...(node.rotation ? { transform: `rotate(${node.rotation}deg)` } : {}),
+  };
   return (
     <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type={node.nodeType}>
-      {content.text || content.title || node.nodeType}
+      {node.locked ? <span className="wb-lock-badge" aria-label="已鎖定">🔒</span> : null}
+      <Renderer node={node} editing={editing} canEdit={canEdit} onChangeText={onChangeText} />
     </div>
   );
 });
@@ -252,30 +241,116 @@ function BoardList({ api }: { api: WhiteboardApi }) {
   );
 }
 
+let opSeq = 0;
+function nextOpId(): string {
+  // op_id 需要 uuid（DB 欄位）：crypto.randomUUID 到處都有（secure context）
+  try {
+    return crypto.randomUUID();
+  } catch {
+    opSeq += 1;
+    return `00000000-0000-4000-8000-${String(opSeq).padStart(12, "0")}`;
+  }
+}
+
 export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const board = api.boards.find((item) => item.id === api.activeBoardId && !item.archivedAt) ?? null;
   const canEdit = board ? canEditBoard(api.roleAllowsEdit ? "editor" : "reviewer", api.allowBoardEdit, board) && api.canEdit : false;
   const nodes = useMemo(() => api.nodes.filter((node) => node.whiteboardId === board?.id), [api.nodes, board?.id]);
   const edges = useMemo(() => api.edges.filter((edge) => edge.whiteboardId === board?.id), [api.edges, board?.id]);
+  const frames = useMemo(() => (api.frames ?? []).filter((frame) => frame.whiteboardId === board?.id), [api.frames, board?.id]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [camera, setCamera] = useState<Camera>({ x: 24, y: 24, zoom: 1 });
   const [selected, setSelected] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<Sheet>(null);
+  const [sheet, setSheetState] = useState<Sheet>(null);
+  // F5：popstate handler 要同步讀 sheet — ref 隨 setter 同步更新
+  const sheetRef = useRef<Sheet>(null);
+  const setSheet = useCallback((next: Sheet) => { sheetRef.current = next; setSheetState(next); }, []);
   const [search, setSearch] = useState("");
   const [viewport, setViewport] = useState({ width: 360, height: 520 });
   const [marquee, setMarquee] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
+  const [lassoPath, setLassoPath] = useState<{ x: number; y: number }[] | null>(null);
   const [multiSelect, setMultiSelect] = useState(false);
+  const [selectTool, setSelectTool] = useState<"off" | "marquee" | "lasso">("off");
+  const [connectFrom, setConnectFrom] = useState<string | null>(null);
+  const [connectMode, setConnectMode] = useState(false);
   const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
   const [videoStart, setVideoStart] = useState("00:40");
   const [videoEnd, setVideoEnd] = useState("");
   const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan" | "asset">("all");
   const [previewNodes, setPreviewNodes] = useState<WhiteboardNode[] | null>(null);
-  const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ distance: number; zoom: number } | null>(null);
-  const drag = useRef<{ ids: string[]; origin: { x: number; y: number }; last: { x: number; y: number } } | null>(null);
-  const longPress = useRef<number | null>(null);
-  const lastBroadcast = useRef(0);
+  // F4：拖曳 preview 的同步事實來源 — render 閉包的 previewNodes 在
+  // 同批 pointermove 之間是舊值，增量會疊在過期基準上（節點抖動/丟步）
+  const previewRef = useRef<WhiteboardNode[] | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [history, setHistory] = useState<HistoryStack>(emptyHistory());
+
+  const gesture = useRef<GestureState>(initialGestureState());
+  const longPressTimer = useRef<number | null>(null);
+  const dragStartNodes = useRef<Map<string, WhiteboardNode> | null>(null);
+  const editStartNode = useRef<WhiteboardNode | null>(null);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  const usableHeight = useViewport();
+  const keyboardInset = Math.max(0, (typeof window !== "undefined" ? window.innerHeight : 0) - usableHeight);
+
+  // ---- op 入帳＋undo 疊（同一入口，best-effort） ----
+  const record = useCallback((draft: OperationDraft | null) => {
+    if (!draft) return;
+    setHistory((current) => pushHistory(current, draft));
+    api.onEmitOperation?.(draft);
+  }, [api]);
+
+  // ---- Focus 進出通知＋history 層（wireflow 疊加規則 1/2/5） ----
+  // 只鍵在 focused（Grok wb02 F5）：若鍵 board?.id，切板時 cleanup 的
+  // history.back() 是非同步的，會打進「新 effect 已掛上的 listener」，
+  // 誤觸 onOpenBoard(null) 把剛開的板關掉。切板期間 focused 不變，
+  // 這一層 history 就原地保留。
+  const focused = Boolean(board);
+  const poppingRef = useRef(false);
+  const pushedRef = useRef(false);
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  useEffect(() => {
+    apiRef.current.onFocusChange?.(focused);
+    if (!focused) return;
+    // 進 Focus：恰一層 history；back = 先關 sheet、再退出白板
+    pushedRef.current = true;
+    window.history.pushState({ layer: "board-focus" }, "");
+    const onPop = () => {
+      pushedRef.current = false;
+      if (sheetRef.current) {
+        setSheet(null);
+        pushedRef.current = true;
+        window.history.pushState({ layer: "board-focus" }, "");
+        return;
+      }
+      poppingRef.current = true;
+      apiRef.current.onOpenBoard(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (sheetRef.current) {
+        setSheet(null);
+        return;
+      }
+      window.history.back();
+    };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("keydown", onKey);
+      apiRef.current.onFocusChange?.(false);
+      // 非 back 路徑離開（封存板、房間層直接切走）：吃掉自己 push 的那層。
+      // pushedRef 記帳 — 已被 pop 消耗就不補 back，避免多退一層。
+      if (pushedRef.current && !poppingRef.current) window.history.back();
+      pushedRef.current = false;
+      poppingRef.current = false;
+    };
+  }, [focused, setSheet]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -296,138 +371,260 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   }, [api.focusNodeId, nodes, viewport]);
 
   const liveNodes = previewNodes ?? nodes;
-  const rendered = useMemo(() => visibleNodes(liveNodes, camera, viewport), [liveNodes, camera, viewport]);
+  const rendered = useMemo(
+    () => paintOrder(visibleNodes(liveNodes.filter((node) => !node.deletedAt), camera, viewport)),
+    [liveNodes, camera, viewport],
+  );
+  const orderedFrames = useMemo(() => paintOrder(frames), [frames]);
   const hits = search.trim() ? findNodes(liveNodes, search) : [];
 
-  const persistSoon = useRef<number | null>(null);
-  const persistNodes = useCallback((next: WhiteboardNode[]) => {
-    if (persistSoon.current) window.clearTimeout(persistSoon.current);
-    persistSoon.current = window.setTimeout(() => {
-      api.onUpsertNodes(next);
-    }, DRAG_PERSIST_MS);
-  }, [api]);
+  // ---- 鍵盤避讓（audit §2 [major]）：編輯節點必須在鍵盤上緣之上 ----
+  // deps 含 camera/viewport/liveNodes（Grok wb02 F6）：Android 是 resize
+  // 模式 — inset≈0 但 canvas 高度（viewport.height）本身縮了，靠
+  // ResizeObserver 餵進來的新 viewport 觸發重算；iOS 是 overlay 模式 —
+  // inset>0 由 visualViewport 算出。位移後條件收斂（screenBottom==limit）
+  // 不迴圈。
+  useEffect(() => {
+    if (!editingId || viewport.height <= 0) return;
+    const node = liveNodes.find((item) => item.id === editingId);
+    if (!node) return;
+    const screenBottom = (node.y + node.height) * camera.zoom + camera.y;
+    const limit = viewport.height - keyboardInset - 72; // 72 = 情境列餘裕
+    if (screenBottom > limit) {
+      setCamera((current) => ({ ...current, y: current.y - (screenBottom - limit) }));
+    }
+  }, [editingId, keyboardInset, camera, viewport, liveNodes]);
+
+  // ---- 編輯 session：進出各記一次，session 結束才入 op/undo ----
+  // record 不進 setState updater（Grok wb02 F3）：React 在 StrictMode 會
+  // 雙呼 updater 驗證純度，副作用放裡面＝一次編輯入兩筆 undo、發兩個 op。
+  const editingIdRef = useRef<string | null>(null);
+  const beginEdit = useCallback((node: WhiteboardNode) => {
+    editStartNode.current = node;
+    editingIdRef.current = node.id;
+    setEditingId(node.id);
+  }, []);
+  const endEdit = useCallback(() => {
+    const start = editStartNode.current;
+    const current = editingIdRef.current;
+    editStartNode.current = null;
+    editingIdRef.current = null;
+    setEditingId(null);
+    if (start && current === start.id) {
+      const now = (previewRef.current ?? nodes).find((item) => item.id === start.id);
+      if (now) record(nodeUpdateDraft(nextOpId(), start, now));
+    }
+  }, [nodes, record]);
+
+  // ---- 手勢效果執行 ----
+  const runEffects = (effects: GestureEffect[], event: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    for (const effect of effects) {
+      switch (effect.kind) {
+        case "hit-test": {
+          const world = screenToWorld(camera, effect.screen.x - rect.left, effect.screen.y - rect.top);
+          const hit = hitTest(liveNodes.filter((node) => !node.deletedAt), world.x, world.y);
+          if (hit) {
+            if (connectMode) {
+              if (!connectFrom) setConnectFrom(hit.id);
+              else if (connectFrom !== hit.id) {
+                const edge: WhiteboardEdge = {
+                  id: nextOpId(),
+                  whiteboardId: board!.id,
+                  roomId: board!.roomId,
+                  sourceNodeId: connectFrom,
+                  targetNodeId: hit.id,
+                  edgeType: "default",
+                  label: "",
+                  createdAt: Date.now(),
+                  sourceHandle: "auto",
+                  targetHandle: "auto",
+                };
+                api.onCreateEdge(edge);
+                setConnectFrom(null);
+                setConnectMode(false);
+              }
+              gesture.current = { ...gesture.current, mode: "idle" };
+              break;
+            }
+            if (multiSelect || event.shiftKey) {
+              setSelected((current) => current.includes(hit.id) ? current.filter((id) => id !== hit.id) : [...current, hit.id]);
+              endEdit();
+              gesture.current = gestureReducer(gesture.current, { type: "begin-pan", point: effect.screen }).state;
+              gesture.current = { ...gesture.current, mode: "idle" };
+              break;
+            }
+            const nextSelected = selected.includes(hit.id) ? selected : [hit.id];
+            setSelected(nextSelected);
+            if (editingId !== hit.id) endEdit();
+            if (canEdit && !hit.locked) {
+              const world2 = screenToWorld(camera, effect.screen.x - rect.left, effect.screen.y - rect.top);
+              dragStartNodes.current = new Map(
+                liveNodes.filter((node) => nextSelected.includes(node.id)).map((node) => [node.id, node]),
+              );
+              gesture.current = gestureReducer(gesture.current, { type: "begin-drag", ids: nextSelected, world: world2 }).state;
+            } else {
+              gesture.current = { ...gesture.current, mode: "idle" };
+            }
+            break;
+          }
+          // 空白處：工具態決定 框選/套索/平移
+          endEdit();
+          setSelected([]);
+          const world3 = screenToWorld(camera, effect.screen.x - rect.left, effect.screen.y - rect.top);
+          if (selectTool === "marquee") {
+            gesture.current = gestureReducer(gesture.current, { type: "begin-marquee", world: world3 }).state;
+            setMarquee({ a: world3, b: world3 });
+          } else if (selectTool === "lasso") {
+            gesture.current = gestureReducer(gesture.current, { type: "begin-lasso", world: world3 }).state;
+            setLassoPath([world3]);
+          } else {
+            gesture.current = gestureReducer(gesture.current, { type: "begin-pan", point: effect.screen }).state;
+          }
+          break;
+        }
+        case "cancel-drag":
+          previewRef.current = null;
+          setPreviewNodes(null);
+          dragStartNodes.current = null;
+          api.onDragState?.(null);
+          break;
+        case "move-nodes": {
+          if (!canEdit || !gesture.current.dragIds.length) break;
+          const base = previewRef.current ?? liveNodes;
+          const moved = moveNodes(base, gesture.current.dragIds, effect.dxWorld, effect.dyWorld);
+          previewRef.current = moved;
+          setPreviewNodes(moved);
+          api.onDragState?.(gesture.current.dragIds);
+          break;
+        }
+        case "pan":
+          setCamera((current) => ({ ...current, x: current.x + effect.dx, y: current.y + effect.dy }));
+          break;
+        case "pinch-zoom": {
+          // 縮放（中點錨定）＋雙指平移（中點位移）— gestures 缺陷 3 的修補
+          setCamera((current) => {
+            const zoomed = zoomAt(
+              current,
+              effect.mid.x - rect.left,
+              effect.mid.y - rect.top,
+              clampZoom(current.zoom * effect.scale),
+            );
+            return { ...zoomed, x: zoomed.x + effect.midDelta.x, y: zoomed.y + effect.midDelta.y };
+          });
+          break;
+        }
+        case "marquee-update": {
+          const world = screenToWorld(camera, effect.b.x - rect.left, effect.b.y - rect.top);
+          setMarquee((current) => (current ? { ...current, b: world } : current));
+          break;
+        }
+        case "marquee-commit":
+          setMarquee((current) => {
+            if (current) setSelected(marqueeHits(liveNodes, current.a, current.b));
+            return null;
+          });
+          break;
+        case "lasso-update": {
+          const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+          setLassoPath((current) => (current ? [...current, world] : current));
+          break;
+        }
+        case "lasso-commit":
+          setLassoPath((current) => {
+            if (current) setSelected(lassoHits(liveNodes, current));
+            return null;
+          });
+          break;
+        case "commit-drag": {
+          // 放手即入房態（Grok wb02 F4）：原本走 120ms debounce，preview 先
+          // 清、房態還沒更新 → 每次放手節點跳回起點再彈回。onUpsertNodes
+          // 的樂觀更新是同步的，同一個 handler 內清 preview 不會閃。
+          const source = previewRef.current ?? liveNodes;
+          const ids = gesture.current.dragIds.length ? gesture.current.dragIds : [...(dragStartNodes.current?.keys() ?? [])];
+          const movedNodes = source.filter((node) => {
+            if (!ids.includes(node.id)) return false;
+            const before = dragStartNodes.current?.get(node.id);
+            return !before || before.x !== node.x || before.y !== node.y;
+          });
+          if (movedNodes.length) {
+            api.onUpsertNodes(movedNodes);
+            // undo/op：每個實際移動的節點一筆 move draft
+            for (const node of movedNodes) {
+              const before = dragStartNodes.current?.get(node.id);
+              if (before) record(nodeUpdateDraft(nextOpId(), before, node));
+            }
+          }
+          previewRef.current = null;
+          setPreviewNodes(null);
+          dragStartNodes.current = null;
+          api.onDragState?.(null);
+          break;
+        }
+        case "long-press-armed":
+          if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
+          longPressTimer.current = window.setTimeout(() => {
+            const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+            const hit = hitTest(liveNodes.filter((node) => !node.deletedAt), world.x, world.y);
+            if (hit) {
+              setMultiSelect(true);
+              setSelected((current) => Array.from(new Set([...current, hit.id])));
+            } else {
+              // 長按空白 = 新增選單（wireflow；原實作是死碼）
+              setSheet("add");
+            }
+          }, LONG_PRESS_MS);
+          break;
+        case "long-press-cancelled":
+          if (longPressTimer.current) {
+            window.clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+          }
+          break;
+        case "double-tap": {
+          const world = screenToWorld(camera, effect.screen.x - rect.left, effect.screen.y - rect.top);
+          const hit = hitTest(liveNodes.filter((node) => !node.deletedAt), world.x, world.y);
+          if (hit) {
+            if (canEdit && !hit.locked) beginEdit(hit);
+            setCamera(focusCamera(hit, viewport, camera.zoom * 1.12));
+          } else if (canEdit) {
+            // 點兩下空白 = 快速便利貼（wireflow）
+            addAt(world, "text");
+          }
+          break;
+        }
+        case "tap":
+          break;
+      }
+    }
+  };
+
+  const feed = (input: Parameters<typeof gestureReducer>[1], event: ReactPointerEvent<HTMLDivElement>) => {
+    const out = gestureReducer(gesture.current, input);
+    gesture.current = out.state;
+    runEffects(out.effects, event);
+  };
 
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     if (target?.closest("textarea, input, button, a")) return;
-    const point = { x: event.clientX, y: event.clientY };
-    pointers.current.set(event.pointerId, point);
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
-      /* programmatic pointer events (tests / some WebViews) cannot capture */
+      /* programmatic pointer events cannot capture */
     }
-    if (pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()];
-      pinch.current = { distance: Math.hypot(a.x - b.x, a.y - b.y), zoom: camera.zoom };
-      if (longPress.current) window.clearTimeout(longPress.current);
-      return;
-    }
-    const rect = wrapRef.current!.getBoundingClientRect();
-    const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
-    const hit = nodeHit(liveNodes, world.x, world.y);
-    if (hit) {
-      if (multiSelect || event.shiftKey) {
-        setSelected((current) => current.includes(hit.id) ? current.filter((id) => id !== hit.id) : [...current, hit.id]);
-        setEditingId(null);
-        return;
-      }
-      const nextSelected = selected.includes(hit.id) ? selected : [hit.id];
-      setSelected(nextSelected);
-      setEditingId(null);
-      drag.current = { ids: nextSelected, origin: world, last: world };
-      longPress.current = window.setTimeout(() => {
-        setMultiSelect(true);
-        setSelected((current) => Array.from(new Set([...current, hit.id])));
-      }, LONG_PRESS_MS);
-      return;
-    }
-    if (event.shiftKey && !api.isMobile) {
-      setMarquee({ a: world, b: world });
-      return;
-    }
-    setSelected([]);
-    setEditingId(null);
-    drag.current = { ids: [], origin: world, last: { x: event.clientX, y: event.clientY } };
-    longPress.current = window.setTimeout(() => {
-      setSelected([]);
-    }, LONG_PRESS_MS);
+    feed({ type: "down", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
   };
-
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pointers.current.size === 2 && pinch.current) {
-      const [a, b] = [...pointers.current.values()];
-      const distance = Math.hypot(a.x - b.x, a.y - b.y);
-      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const rect = wrapRef.current!.getBoundingClientRect();
-      setCamera((current) => zoomAt(current, mid.x - rect.left, mid.y - rect.top, pinch.current!.zoom * (distance / pinch.current!.distance)));
-      return;
-    }
-    if (marquee) {
-      const rect = wrapRef.current!.getBoundingClientRect();
-      const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
-      setMarquee({ ...marquee, b: world });
-      return;
-    }
-    if (!drag.current) return;
-    if (longPress.current) {
-      window.clearTimeout(longPress.current);
-      longPress.current = null;
-    }
-    if (!drag.current.ids.length) {
-      const dx = event.clientX - drag.current.last.x;
-      const dy = event.clientY - drag.current.last.y;
-      drag.current.last = { x: event.clientX, y: event.clientY };
-      setCamera((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
-      return;
-    }
-    if (!canEdit) return;
-    const rect = wrapRef.current!.getBoundingClientRect();
-    const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
-    const dx = world.x - drag.current.last.x;
-    const dy = world.y - drag.current.last.y;
-    drag.current.last = world;
-    const moved = moveNodes(liveNodes, drag.current.ids, dx, dy);
-    setPreviewNodes(moved);
-    api.onDragState?.(drag.current?.ids ?? null);
-    const now = performance.now();
-    if (now - lastBroadcast.current > BROADCAST_THROTTLE_MS) lastBroadcast.current = now;
+    feed({ type: "move", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now(), zoom: camera.zoom }, event);
   };
-
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-    pointers.current.delete(event.pointerId);
-    if (pointers.current.size < 2) pinch.current = null;
-    if (longPress.current) {
-      window.clearTimeout(longPress.current);
-      longPress.current = null;
-    }
-    if (marquee) {
-      setSelected(marqueeHits(liveNodes, marquee.a, marquee.b));
-      setMarquee(null);
-    }
-    if (drag.current?.ids.length) {
-      const source = previewNodes ?? liveNodes;
-      persistNodes(source.filter((node) => drag.current!.ids.includes(node.id)));
-      setPreviewNodes(null);
-    }
-    drag.current = null;
-    api.onDragState?.(null);
+    feed({ type: "up", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
   };
 
-  const onDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    const rect = wrapRef.current!.getBoundingClientRect();
-    const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
-    const hit = nodeHit(liveNodes, world.x, world.y);
-    if (hit) {
-      if (canEdit) setEditingId(hit.id);
-      setCamera(focusCamera(hit, viewport, camera.zoom * 1.12));
-    }
-  };
-
-  const addAtView = (type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId">) => {
+  const addAt = (world: { x: number; y: number }, type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId">) => {
     if (!board || !canEdit) return;
-    const world = screenToWorld(camera, viewport.width / 2, viewport.height / 2);
     const node = type === "text"
       ? createSticky({ whiteboardId: board.id, roomId: board.roomId, createdBy: "local", x: world.x - 90, y: world.y - 48 })
       : {
@@ -441,10 +638,78 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       node.content = content ?? node.content;
     }
     api.onUpsertNode(node, "now");
+    record(nodeCreateDraft(nextOpId(), node));
     setSelected([node.id]);
-    setEditingId(node.id);
+    beginEdit(node);
     setSheet(null);
     return node;
+  };
+
+  const addAtView = (type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId">) =>
+    addAt(screenToWorld(camera, viewport.width / 2, viewport.height / 2), type, content, linked);
+
+  const deleteSelected = () => {
+    for (const id of selected) {
+      const node = liveNodes.find((item) => item.id === id);
+      if (node && !node.locked) {
+        record(nodeDeleteDraft(nextOpId(), node));
+        api.onDeleteNode(id);
+      }
+    }
+    setSelected([]);
+  };
+
+  const toggleLock = () => {
+    const node = liveNodes.find((item) => item.id === selected[0]);
+    if (!node) return;
+    api.onUpsertNode(applyNodePatch(node, {}), "now");
+    api.onUpsertNode({ ...node, locked: !node.locked }, "now");
+  };
+
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | null>(null);
+  const showNotice = (text: string) => {
+    setNotice(text);
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 2600);
+  };
+  const skippedText = (skipped: string) =>
+    skipped === "conflict-drift" ? "已跳過：這步之後被其他人改過" : skipped === "missing-node" ? "已跳過：節點已不存在" : "已跳過：不支援的操作";
+  const runUndo = () => {
+    const result = undoStep(historyRef.current, executors, nextOpId());
+    setHistory(result.stack);
+    if (result.applied) api.onEmitOperation?.(result.applied);
+    if (result.skipped) showNotice(skippedText(result.skipped));
+  };
+  const runRedo = () => {
+    const result = redoStep(historyRef.current, executors, nextOpId());
+    setHistory(result.stack);
+    if (result.applied) api.onEmitOperation?.(result.applied);
+    if (result.skipped) showNotice(skippedText(result.skipped));
+  };
+  const executors = {
+    upsert: (node: WhiteboardNode) => api.onUpsertNode(node, "now" as const),
+    softDelete: (id: string) => api.onDeleteNode(id),
+    recreate: (draft: OperationDraft) => {
+      if (!board) return;
+      const base: WhiteboardNode = {
+        id: draft.entityId,
+        whiteboardId: board.id,
+        roomId: board.roomId,
+        nodeType: "text",
+        x: 0,
+        y: 0,
+        width: 180,
+        height: 96,
+        content: {},
+        createdBy: "local",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        version: 1,
+      };
+      api.onUpsertNode(applyMasked(base, draft.fieldMask, draft.after), "now");
+    },
+    findNode: (id: string) => liveNodes.find((item) => item.id === id),
   };
 
   const placeBranch = (branch: RoomBranch, range?: { startTime?: number; endTime?: number }) => {
@@ -497,133 +762,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   if (!board) return <BoardList api={api} />;
 
-  return (
-    <div className="wb-shell" data-testid="whiteboard-workspace">
-      <div className="wb-toolbar">
-        <button type="button" className="project-back-button" onClick={() => api.onOpenBoard(null)} aria-label="回到白板列表">‹</button>
-        <h2>{board.title}</h2>
-        <span hidden data-testid="wb-stats" data-nodes={nodes.length} data-edges={edges.length} data-flow={nodes.filter((node) => node.nodeType === "flow").length} data-mindmap={nodes.filter((node) => node.nodeType === "mindmap").length} />
-      </div>
-      <div
-        ref={wrapRef}
-        className="wb-canvas-wrap"
-        data-testid="wb-canvas"
-        data-multi-select={multiSelect ? "true" : "false"}
-        onPointerDown={onCanvasPointerDown}
-        onPointerMove={onCanvasPointerMove}
-        onPointerUp={onCanvasPointerUp}
-        onPointerCancel={onCanvasPointerUp}
-        onDoubleClick={onDoubleClick}
-      >
-        <div className="wb-presence" data-testid="wb-presence">
-          <span>{api.online > 0 ? `${api.online} 人在線` : "只有你"}</span>
-          {api.editors[0] ? <span>{formatEditorLine(api.editors[0], board.title)}</span> : null}
-        </div>
-        <div className="wb-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
-          <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
-            {edges.map((edge) => {
-              const source = liveNodes.find((node) => node.id === edge.sourceNodeId);
-              const target = liveNodes.find((node) => node.id === edge.targetNodeId);
-              if (!source || !target) return null;
-              const x1 = source.x + source.width / 2;
-              const y1 = source.y + source.height / 2;
-              const x2 = target.x + target.width / 2;
-              const y2 = target.y + target.height / 2;
-              return <line key={edge.id} x1={x1} y1={y1} x2={x2} y2={y2} stroke={edge.edgeType === "mindmap" ? "#8a7ab0" : edge.edgeType === "flow" ? "#6aa0b8" : "#7d7469"} strokeWidth={2} data-testid={`wb-edge-${edge.id}`} />;
-            })}
-          </svg>
-          {rendered.map((node) => (
-            <NodeView
-              key={node.id}
-              node={node}
-              selected={selected.includes(node.id)}
-              editing={editingId === node.id}
-              canEdit={canEdit}
-              onChangeText={(text) => api.onUpsertNode(applyNodePatch(node, { content: { ...node.content, text } }), "now")}
-            />
-          ))}
-          {marquee && (
-            <div
-              className="wb-marquee"
-              style={{
-                left: Math.min(marquee.a.x, marquee.b.x),
-                top: Math.min(marquee.a.y, marquee.b.y),
-                width: Math.abs(marquee.b.x - marquee.a.x),
-                height: Math.abs(marquee.b.y - marquee.a.y),
-              }}
-            />
-          )}
-        </div>
-        {multiSelect && (
-          <div className="wb-multiselect" data-testid="wb-multiselect">
-            <span>已選 {selected.length} 個</span>
-            <button type="button" onClick={() => setMultiSelect(false)}>完成</button>
-          </div>
-        )}
-        {selectedNode && canEdit && (
-          <div className="wb-node-actions" data-testid="wb-node-actions">
-            {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
-              <button type="button" data-testid="wb-next-step" onClick={() => {
-                const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
-                api.onUpsertNode(next.node, "now");
-                api.onCreateEdge(next.edge);
-                setSelected([next.node.id]);
-                setEditingId(next.node.id);
-                setCamera(focusCamera(next.node, viewport, camera.zoom));
-                setMultiSelect(false);
-              }}>+ 下一步</button>
-            )}
-            {(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
-              <button type="button" data-testid="wb-add-child" onClick={() => {
-                const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
-                api.onUpsertNode(next.node, "now");
-                api.onCreateEdge(next.edge);
-                setSelected([next.node.id]);
-                setEditingId(next.node.id);
-                setCamera(focusCamera(next.node, viewport, camera.zoom));
-                setMultiSelect(false);
-              }}>+ 子項目</button>
-            )}
-            {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
-              <button type="button" onClick={() => {
-                // 導航走 ContextAnchor 契約（PR-02d）。version link 的 asset
-                // 卡沒有 content 導航面（契約誠實回 none）— 保留舊呼叫，
-                // 行為中立；收斂這條屬於後續的行為決策，不屬於本 PR。
-                const target = openTarget(anchorFromNode(selectedNode));
-                if (target.surface === "content") {
-                  api.onOpenContent(target.branchId, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime });
-                } else {
-                  api.onOpenContent(selectedNode.linkedEntityId!, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime });
-                }
-              }}>打開內容</button>
-            )}
-            <button type="button" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
-            {selected.length > 1 && (
-              <>
-                <button type="button" onClick={() => {
-                  const grouped = groupSelected(nodes, selected, "local");
-                  if (!grouped) return;
-                  api.onUpsertNode(grouped.group, "now");
-                  api.onUpsertNodes(grouped.nodes);
-                }}>群組</button>
-                <button type="button" onClick={() => createRelationEdges(board.id, board.roomId, selected).forEach(api.onCreateEdge)}>建立關係</button>
-              </>
-            )}
-            <button type="button" onClick={() => { selected.forEach(api.onDeleteNode); setSelected([]); }}>刪除</button>
-          </div>
-        )}
-        <nav className="wb-bottom" aria-label="白板工具">
-          <button type="button" data-testid="whiteboard-add" onClick={() => setSheet("add")} disabled={!canEdit}><span>＋</span>+</button>
-          <button type="button" data-testid="whiteboard-search" onClick={() => setSheet("search")}><span>⌕</span>搜尋</button>
-          <button type="button" data-testid="whiteboard-arrange" onClick={() => {
-            const next = arrangeBoard(nodes, edges);
-            api.onUpsertNodes(next);
-            setCamera(fitCamera(next, viewport));
-          }} disabled={!canEdit}><span>⊞</span>整理</button>
-          <button type="button" data-testid="whiteboard-more" onClick={() => setSheet("more")}><span>⋯</span>更多</button>
-        </nav>
-      </div>
-
+  const sheetLayer = (
+    <>
       {sheet === "add" && (
         <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
           <section className="project-sheet" role="dialog" aria-label="新增到白板">
@@ -681,6 +821,36 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           <section className="project-sheet" role="dialog" aria-label="更多">
             <div className="wb-sheet wb-more">
               <h3>更多</h3>
+              <button type="button" className="wb-card" data-testid="whiteboard-search" onClick={() => setSheet("search")}>搜尋節點</button>
+              <button type="button" className="wb-card" data-testid="whiteboard-arrange" disabled={!canEdit} onClick={() => {
+                const next = arrangeBoard(nodes, edges);
+                api.onUpsertNodes(next);
+                setCamera(fitCamera(next, viewport));
+                setSheet(null);
+              }}>整理排列</button>
+              {canEdit && api.onCreateFrame && (
+                <button type="button" className="wb-card" data-testid="wb-create-frame" onClick={() => {
+                  const world = screenToWorld(camera, viewport.width / 2, viewport.height / 2);
+                  api.onCreateFrame!({
+                    id: nextOpId(),
+                    whiteboardId: board.id,
+                    roomId: board.roomId,
+                    title: "新區塊",
+                    x: world.x - 240,
+                    y: world.y - 160,
+                    width: 480,
+                    height: 320,
+                    kind: "frame",
+                    style: {},
+                    zIndex: -1,
+                    createdBy: "local",
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    version: 1,
+                  });
+                  setSheet(null);
+                }}>新增區塊（Frame）</button>
+              )}
               {api.canManageBoards && <button type="button" className="wb-card" onClick={() => { api.onArchiveBoard(board.id); api.onOpenBoard(null); setSheet(null); }}>封存這塊白板</button>}
               {api.canToggleOpenEdit && (
                 <button type="button" className="wb-card" onClick={() => { api.onToggleAllowEdit(); setSheet(null); }}>
@@ -690,11 +860,6 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               <button type="button" className="wb-card" onClick={() => setSheet("poll")}>放入既有投票</button>
               {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-create-poll" onClick={() => { const id = api.onCreatePoll("主視覺要不要換？", ["要，換成 B 版", "先維持 A 版"]); if (id) addAtView("poll", { pollQuestion: "主視覺要不要換？", voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) }); setSheet(null); }}>＋投票</button>}
               {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-write-decision" onClick={() => { api.onCreateDecision("已決定：採用 B 版", undefined, "decided"); addAtView("decision", { text: "已決定：採用 B 版", sourceLabel: "決策區" }); setSheet(null); }}>寫下決策</button>}
-              {polls.map((poll) => (
-                <button type="button" className="wb-card" key={poll.id} onClick={() => { addAtView("poll", { pollQuestion: poll.question, voteCount: (api.room.pollVotes ?? []).filter((vote) => vote.pollId === poll.id).length }, { linkedEntityType: "poll", linkedEntityId: poll.id }); }}>
-                  {poll.question}
-                </button>
-              ))}
             </div>
             <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
           </section>
@@ -744,6 +909,178 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           </section>
         </div>
       )}
-    </div>
+    </>
+  );
+
+  // ---- Focus Mode：portal 到 body 的 fixed 全屏層（wireflow §9） ----
+  return createPortal(
+    <div className="wb-focus" data-testid="whiteboard-workspace">
+      <header className="wb-focus-top">
+        <button type="button" className="project-back-button" onClick={() => window.history.back()} aria-label="回到白板列表">‹</button>
+        {renaming && api.canManageBoards ? (
+          <form className="wb-rename" onSubmit={(event) => { event.preventDefault(); if (renameDraft.trim()) api.onRenameBoard(board.id, renameDraft.trim()); setRenaming(false); }}>
+            <input autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} aria-label="白板名稱" />
+          </form>
+        ) : (
+          <h2 onClick={() => { if (api.canManageBoards) { setRenameDraft(board.title); setRenaming(true); } }}>{board.title}</h2>
+        )}
+        <span className="wb-online" data-testid="wb-presence">{api.online > 0 ? `${api.online}` : "1"} 人</span>
+        <button type="button" onClick={runUndo} disabled={!history.undo.length} aria-label="復原" data-testid="wb-undo">↺</button>
+        <button type="button" onClick={runRedo} disabled={!history.redo.length} aria-label="重做" data-testid="wb-redo">↻</button>
+        <button type="button" onClick={() => setSheet("more")} aria-label="更多" data-testid="whiteboard-more">⋯</button>
+        <span hidden data-testid="wb-stats" data-nodes={nodes.length} data-edges={edges.length} data-flow={nodes.filter((node) => node.nodeType === "flow").length} data-mindmap={nodes.filter((node) => node.nodeType === "mindmap").length} />
+      </header>
+
+      {api.editors[0] ? <div className="wb-editing-line">{formatEditorLine(api.editors[0], board.title)}</div> : null}
+
+      <div
+        ref={wrapRef}
+        className="wb-focus-canvas"
+        data-testid="wb-canvas"
+        data-multi-select={multiSelect ? "true" : "false"}
+        onPointerDown={onCanvasPointerDown}
+        onPointerMove={onCanvasPointerMove}
+        onPointerUp={onCanvasPointerUp}
+        onPointerCancel={onCanvasPointerUp}
+      >
+        <div className="wb-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
+          {orderedFrames.map((frame) => (
+            <div key={frame.id} className={`wb-frame wb-frame-${frame.kind}`} style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }} data-testid={`wb-frame-${frame.id}`}>
+              <span className="wb-frame-title">{frame.title}</span>
+            </div>
+          ))}
+          <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
+            {edges.map((edge) => {
+              const source = liveNodes.find((node) => node.id === edge.sourceNodeId);
+              const target = liveNodes.find((node) => node.id === edge.targetNodeId);
+              if (!source || !target || source.deletedAt || target.deletedAt) return null;
+              const x1 = source.x + source.width / 2;
+              const y1 = source.y + source.height / 2;
+              const x2 = target.x + target.width / 2;
+              const y2 = target.y + target.height / 2;
+              return <line key={edge.id} x1={x1} y1={y1} x2={x2} y2={y2} stroke={edge.edgeType === "mindmap" ? "#8a7ab0" : edge.edgeType === "flow" ? "#6aa0b8" : "#7d7469"} strokeWidth={2} data-testid={`wb-edge-${edge.id}`} />;
+            })}
+          </svg>
+          {rendered.map((node) => (
+            <NodeView
+              key={node.id}
+              node={node}
+              selected={selected.includes(node.id)}
+              editing={editingId === node.id}
+              canEdit={canEdit}
+              connectSource={connectFrom === node.id}
+              onChangeText={(text) => api.onUpsertNode(applyNodePatch(node, { content: { ...node.content, text } }), "now")}
+            />
+          ))}
+          {marquee && (
+            <div
+              className="wb-marquee"
+              style={{
+                left: Math.min(marquee.a.x, marquee.b.x),
+                top: Math.min(marquee.a.y, marquee.b.y),
+                width: Math.abs(marquee.b.x - marquee.a.x),
+                height: Math.abs(marquee.b.y - marquee.a.y),
+              }}
+            />
+          )}
+          {lassoPath && lassoPath.length > 1 && (
+            <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
+              <polyline points={lassoPath.map((point) => `${point.x},${point.y}`).join(" ")} fill="rgba(196,92,74,0.08)" stroke="#c45c4a" strokeDasharray="6 4" strokeWidth={1.5} />
+            </svg>
+          )}
+        </div>
+
+        {multiSelect && (
+          <div className="wb-multiselect" data-testid="wb-multiselect">
+            <span>已選 {selected.length} 個</span>
+            <button type="button" onClick={() => setMultiSelect(false)}>完成</button>
+          </div>
+        )}
+        {notice && <div className="wb-notice" data-testid="wb-notice">{notice}</div>}
+        {connectMode && (
+          <div className="wb-connect-hint" data-testid="wb-connect-hint">
+            <span>{connectFrom ? "點另一個節點完成連線" : "點第一個節點"}</span>
+            <button type="button" onClick={() => { setConnectMode(false); setConnectFrom(null); }}>取消</button>
+          </div>
+        )}
+      </div>
+
+      {/* 底部：情境工具列（選取節點）或主工具列（三態，wireflow §11） */}
+      {selectedNode && canEdit && !multiSelect ? (
+        <nav className="wb-focus-bottom wb-context-bar" aria-label="節點動作" data-testid="wb-node-actions">
+          <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
+          <button type="button" onClick={() => { setConnectMode(true); setConnectFrom(selectedNode.id); }}>連線</button>
+          {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
+            <button type="button" data-testid="wb-next-step" onClick={() => {
+              const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
+              api.onUpsertNode(next.node, "now");
+              api.onCreateEdge(next.edge);
+              record(nodeCreateDraft(nextOpId(), next.node));
+              setSelected([next.node.id]);
+              beginEdit(next.node);
+              setCamera(focusCamera(next.node, viewport, camera.zoom));
+            }}>+ 下一步</button>
+          )}
+          {(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
+            <button type="button" data-testid="wb-add-child" onClick={() => {
+              const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
+              api.onUpsertNode(next.node, "now");
+              api.onCreateEdge(next.edge);
+              record(nodeCreateDraft(nextOpId(), next.node));
+              setSelected([next.node.id]);
+              beginEdit(next.node);
+              setCamera(focusCamera(next.node, viewport, camera.zoom));
+            }}>+ 子項目</button>
+          )}
+          {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
+            <button type="button" onClick={() => {
+              const target = openTarget(anchorFromNode(selectedNode));
+              if (target.surface === "content") {
+                api.onOpenContent(target.branchId, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime });
+              } else {
+                api.onOpenContent(selectedNode.linkedEntityId!, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime });
+              }
+            }}>打開內容</button>
+          )}
+          <button type="button" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
+          {selected.length > 1 && (
+            <>
+              <button type="button" onClick={() => {
+                const grouped = groupSelected(nodes, selected, "local");
+                if (!grouped) return;
+                api.onUpsertNode(grouped.group, "now");
+                api.onUpsertNodes(grouped.nodes);
+              }}>群組</button>
+              <button type="button" onClick={() => createRelationEdges(board.id, board.roomId, selected).forEach(api.onCreateEdge)}>建立關係</button>
+            </>
+          )}
+          <button type="button" data-testid="wb-lock" onClick={toggleLock}>{selectedNode.locked ? "解鎖" : "鎖定"}</button>
+          <button type="button" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
+          <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
+        </nav>
+      ) : (
+        <nav className="wb-focus-bottom" aria-label="白板工具">
+          <button
+            type="button"
+            className={selectTool !== "off" ? "is-active" : ""}
+            data-testid="wb-tool-select"
+            onClick={() => setSelectTool((current) => (current === "off" ? "marquee" : current === "marquee" ? "lasso" : "off"))}
+          ><span>▣</span>{selectTool === "lasso" ? "套索" : selectTool === "marquee" ? "框選" : "選取"}</button>
+          <button type="button" data-testid="wb-tool-sticky" disabled={!canEdit} onClick={() => addAtView("text")}><span>📝</span>便利貼</button>
+          <button
+            type="button"
+            className={connectMode ? "is-active" : ""}
+            data-testid="wb-tool-connect"
+            disabled={!canEdit}
+            onClick={() => { setConnectMode((current) => !current); setConnectFrom(null); }}
+          ><span>↦</span>連線</button>
+          <button type="button" data-testid="wb-tool-material" onClick={() => { setContentKind("all"); setSheet("content"); }}><span>▤</span>素材</button>
+          <button type="button" data-testid="whiteboard-add" onClick={() => setSheet("add")} disabled={!canEdit}><span>＋</span>更多</button>
+        </nav>
+      )}
+
+      {sheetLayer}
+    </div>,
+    document.body,
   );
 }

@@ -187,9 +187,15 @@ try {
   await page.getByLabel("關閉 AI").click();
   await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 8000 });
   await page.waitForFunction(() => Number(document.querySelector("[data-testid=wb-stats]")?.getAttribute("data-nodes") || 0) >= 1, null, { timeout: 8000 });
+  // WB02：非編輯節點是靜態層 — 讀 textContent 而非 textarea value
   const nodeValue = await page.locator('[data-testid^="wb-node-"] textarea').first().inputValue().catch(() => "");
   const nodeLabel = await page.locator('[data-testid^="wb-node-"]').first().innerText().catch(() => "");
   check("白板出現套用後的 production 節點", nodeValue.includes("擺攤主視覺") || nodeLabel.includes("擺攤主視覺"));
+  // WB02 Focus Mode：殼 tabs 在全屏層之下 — 先退出白板
+  if (await page.locator(".wb-focus").count()) {
+    await page.locator(".wb-focus-top .project-back-button").click();
+    await page.waitForSelector(".wb-list", { timeout: 10000 });
+  }
   await page.getByRole("button", { name: "對話" }).click();
   check("討論看得到套用後的留言", (await page.locator("body").innerText()).includes("這張適合當擺攤紀錄"));
   await page.screenshot({ path: join(tempRoot, "asset-intelligence-android.png"), fullPage: false });

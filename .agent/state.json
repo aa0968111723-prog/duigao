@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T05:52:16.000Z",
+  "generatedAt": "2026-08-28T10:37:23.000Z",
   "git": {
-    "branch": "agent/wb01-canonical-schema",
-    "sha": "d4c26fb8f0229d05a05af48055b24008c79cd621",
-    "mainSha": "1d30c6791ddf6b3cb771712e5639130754700a60",
+    "branch": "agent/wb02-focus-mode",
+    "sha": "d5f6c0f8e1b953016c12005da30756e887c188ef",
+    "mainSha": "4b971103cead57419087af9508e763f7df88d86d",
     "dirty": true
   },
   "project": {
@@ -1026,7 +1026,8 @@
       "npm run test:share-e2e",
       "npm run test:share-preview",
       "npm run test:video",
-      "npm run test:viewer-geometry"
+      "npm run test:viewer-geometry",
+      "npm run test:visual"
     ],
     "buildCommands": [
       "npm run build",

@@ -29,6 +29,9 @@ export type OperationDraft = {
 const MASKABLE_FIELDS = new Set([
   "x", "y", "width", "height", "rotation", "zIndex", "locked", "frameId",
   "linkedEntityType", "linkedEntityId", "parentGroupId", "sourceVersionId",
+  // 型別轉換是使用者動作（flow→mindmap 等既有路徑），且 delete 的 undo
+  // 重建需要它（WB02 history 執行端）。
+  "nodeType",
 ]);
 
 /** 內容值可能是陣列/物件（如 groupIds）：以結構相等比較，避免每次新參照誤報。 */
