@@ -1,0 +1,175 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700&display=swap">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; background: #0f0e0c; font-family: "Noto Sans TC", "PingFang TC", "Hiragino Sans CJK TC", system-ui, sans-serif; }
+    a { color: #E4841D; text-decoration: none; }
+    a:hover { color: #E99E13; }
+  </style>
+</helmet>
+
+<div style="width: 1280px; min-height: 1360px; background: #0f0e0c; color: #f4efe6; padding: 56px; display: flex; flex-direction: column; gap: 46px;">
+
+  <div style="display: flex; align-items: center; gap: 40px;">
+    <div style="flex: none; width: 420px; border-radius: 20px; overflow: hidden; background: #F7F2EF; box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);">
+      <img src="aios-logo.jpg" alt="AiOS" style="display: block; width: 100%; height: auto;">
+    </div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+      <div style="font-family: 'Noto Serif TC', 'Songti TC', serif; font-size: 44px; font-weight: 600; letter-spacing: 3px; line-height: 1.2;">對稿 Duigao</div>
+      <div style="font-size: 16px; color: #b6ada0; letter-spacing: 1px;">設計看板 · AiOS 品牌基地</div>
+      <div style="height: 1px; background: #2a2622;"></div>
+      <div style="font-size: 14px; line-height: 1.9; color: #7d7469;">手機優先的文宣／影片對稿協作工具。海報是主畫面，討論比編輯更快。<br>這塊看板把 AiOS 的紙感光譜接到 對稿 既有的暖調暗色底盤上。</div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 16px;">
+    <div style="font-size: 12px; letter-spacing: 2px; color: #7d7469;">光譜 — 八色各有職務，沒有裝飾色</div>
+    <div style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 12px;">
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 96px; border-radius: 14px; background: #BC1A1F;"></div>
+        <div style="font-size: 12px; color: #b6ada0; letter-spacing: 0.4px;">#BC1A1F</div>
+        <div style="font-size: 12px; color: #7d7469;">緊急 · 高優先</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 96px; border-radius: 14px; background: #C83624;"></div>
+        <div style="font-size: 12px; color: #b6ada0; letter-spacing: 0.4px;">#C83624</div>
+        <div style="font-size: 12px; color: #7d7469;">修改點 · 進行中</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 96px; border-radius: 14px; background: #D85E2A;"></div>
+        <div style="font-size: 12px; color: #b6ada0; letter-spacing: 0.4px;">#D85E2A</div>
+        <div style="font-size: 12px; color: #7d7469;">文案</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 96px; border-radius: 14px; background: #E4841D;"></div>
+        <div style="font-size: 12px; color: #b6ada0; letter-spacing: 0.4px;">#E4841D</div>
+        <div style="font-size: 12px; color: #7d7469;">文宣 · 海報</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 96px; border-radius: 14px; background: #E99E13;"></div>
+        <div style="font-size: 12px; color: #b6ada0; letter-spacing: 0.4px;">#E99E13</div>
+        <div style="font-size: 12px; color: #7d7469;">待處理</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 96px; border-radius: 14px; background: #8DB52E;"></div>
+        <div style="font-size: 12px; color: #b6ada0; letter-spacing: 0.4px;">#8DB52E</div>
+        <div style="font-size: 12px; color: #7d7469;">企劃</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 96px; border-radius: 14px; background: #109958;"></div>
+        <div style="font-size: 12px; color: #b6ada0; letter-spacing: 0.4px;">#109958</div>
+        <div style="font-size: 12px; color: #7d7469;">已完成</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="height: 96px; border-radius: 14px; background: #11978D;"></div>
+        <div style="font-size: 12px; color: #b6ada0; letter-spacing: 0.4px;">#11978D</div>
+        <div style="font-size: 12px; color: #7d7469;">影片</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 20px; align-items: stretch;">
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid #2a2622; border-radius: 20px; background: #141210;">
+      <div style="font-size: 12px; letter-spacing: 2px; color: #7d7469;">接點 — 光譜不是換掉重點色，是把它接長</div>
+      <div style="display: flex; align-items: center; gap: 0;">
+        <div style="flex: 1; height: 64px; border-radius: 14px 0 0 14px; background: #C83624;"></div>
+        <div style="flex: 1; height: 78px; background: #c45c4a; box-shadow: 0 0 0 2px #f4efe6; border-radius: 4px; z-index: 1;"></div>
+        <div style="flex: 1; height: 64px; border-radius: 0 14px 14px 0; background: #D85E2A;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: #7d7469;">
+        <span>#C83624</span>
+        <span style="color: #f4efe6;">#c45c4a — 現有 --accent</span>
+        <span>#D85E2A</span>
+      </div>
+      <div style="font-size: 13.5px; line-height: 1.85; color: #b6ada0;">app 現有的赤陶重點色正好落在光譜的紅與橙紅之間。既有畫面一個像素都不用改，光譜只是把它往兩側展開成分類色。</div>
+    </div>
+
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid #2a2622; border-radius: 20px; background: #141210;">
+      <div style="font-size: 12px; letter-spacing: 2px; color: #7d7469;">底盤 — 沿用 src/styles.css，不動</div>
+      <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px;">
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 52px; border-radius: 10px; background: #0f0e0c; border: 1px solid #2a2622;"></div>
+          <div style="font-size: 11px; color: #7d7469;">--bg</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 52px; border-radius: 10px; background: #141210; border: 1px solid #2a2622;"></div>
+          <div style="font-size: 11px; color: #7d7469;">--bg-2</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 52px; border-radius: 10px; background: #1b1815; border: 1px solid #2a2622;"></div>
+          <div style="font-size: 11px; color: #7d7469;">--panel</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 52px; border-radius: 10px; background: #221e1a; border: 1px solid #2a2622;"></div>
+          <div style="font-size: 11px; color: #7d7469;">--raise</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 52px; border-radius: 10px; background: #2a2622;"></div>
+          <div style="font-size: 11px; color: #7d7469;">--line</div>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 52px; border-radius: 10px; background: #f4efe6;"></div>
+          <div style="font-size: 11px; color: #7d7469;">--ink · #f4efe6</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 52px; border-radius: 10px; background: #b6ada0;"></div>
+          <div style="font-size: 11px; color: #7d7469;">--ink-dim</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 52px; border-radius: 10px; background: #7d7469;"></div>
+          <div style="font-size: 11px; color: #7d7469;">--ink-faint</div>
+        </div>
+      </div>
+      <div style="font-size: 13.5px; line-height: 1.85; color: #b6ada0;">紙感光譜是前景，暖調暗底是背景。原稿在暗底上最乾淨，這點不變。</div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 18px;">
+    <div style="font-size: 12px; letter-spacing: 2px; color: #7d7469;">字級 — Noto Serif TC 只給標題，其餘一律 Noto Sans TC</div>
+    <div style="display: flex; flex-direction: column; gap: 14px; padding: 26px 28px; border: 1px solid #2a2622; border-radius: 20px; background: #141210;">
+      <div style="display: flex; align-items: baseline; gap: 20px;">
+        <div style="flex: none; width: 210px; font-size: 12px; color: #7d7469;">Serif 28 / +2px</div>
+        <div style="font-family: 'Noto Serif TC', 'Songti TC', serif; font-size: 28px; font-weight: 600; letter-spacing: 2px;">春季說明會文宣</div>
+      </div>
+      <div style="height: 1px; background: #2a2622;"></div>
+      <div style="display: flex; align-items: baseline; gap: 20px;">
+        <div style="flex: none; width: 210px; font-size: 12px; color: #7d7469;">Sans 18 / 600</div>
+        <div style="font-size: 18px; font-weight: 600;">待修改 4 項</div>
+      </div>
+      <div style="height: 1px; background: #2a2622;"></div>
+      <div style="display: flex; align-items: baseline; gap: 20px;">
+        <div style="flex: none; width: 210px; font-size: 12px; color: #7d7469;">Sans 15 — 修改點內文</div>
+        <div style="font-size: 15px; line-height: 1.5;">日期的字太小，站遠一點看不到</div>
+      </div>
+      <div style="height: 1px; background: #2a2622;"></div>
+      <div style="display: flex; align-items: baseline; gap: 20px;">
+        <div style="flex: none; width: 210px; font-size: 12px; color: #7d7469;">Sans 13.5 — 註記</div>
+        <div style="font-size: 13.5px; color: #b6ada0;">尚未同步，已保存在這台裝置</div>
+      </div>
+      <div style="height: 1px; background: #2a2622;"></div>
+      <div style="display: flex; align-items: baseline; gap: 20px;">
+        <div style="flex: none; width: 210px; font-size: 12px; color: #7d7469;">Sans 12 — meta</div>
+        <div style="font-size: 12px; color: #7d7469;">阿哲 · 3 分鐘前 · 初稿</div>
+      </div>
+      <div style="height: 1px; background: #2a2622;"></div>
+      <div style="display: flex; align-items: baseline; gap: 20px;">
+        <div style="flex: none; width: 210px; font-size: 12px; color: #7d7469;">Sans 11 — 工具列</div>
+        <div style="font-size: 11px; color: #7d7469;">修改點</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
