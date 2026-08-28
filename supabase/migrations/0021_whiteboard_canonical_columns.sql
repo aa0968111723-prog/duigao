@@ -58,8 +58,9 @@ exception when duplicate_object then null;
 end $$;
 
 -- linked_entity_type/id 成對（audit 缺口）：NOT VALID → 清理 → VALIDATE。
--- 既有資料經 client 寫入一律成對（nodeRowPayload 同送兩欄），清理查詢
--- 預期為 0；若非 0，validate 會擋下並迫使人工檢視 — 這是刻意的。
+-- 清理 UPDATE 會把半截 link 正規化為雙 null（半截 link 本來就不可導航，
+-- 資訊量為零）；VALIDATE 隨後證明全表乾淨。註：因為先清理，validate
+-- 不會失敗 — 它的角色是證明，不是守門（Grok wb01 F8 修正原註解）。
 do $$
 begin
   alter table public.whiteboard_nodes
@@ -89,6 +90,9 @@ create index if not exists idx_whiteboard_nodes_parent_group
   on public.whiteboard_nodes (parent_group_id) where parent_group_id is not null;
 
 -- group 環防護（Grok wb00 F4：FK 不防 A↔B）。深度上限 32。
+-- 誠實記錄（Grok wb01 F8）：兩個「並發」update 在 READ COMMITTED 下各自
+-- 看不到對方，理論上仍可拼出環 — 防護目標是 client bug/一般誤用，不是
+-- serializable 級保證；讀側的深度上限（32）保證即使成環也不會無窮迴圈。
 create or replace function public.guard_group_cycle()
 returns trigger
 language plpgsql
@@ -266,3 +270,40 @@ $$;
 
 revoke all on function public.get_whiteboard_context(uuid) from public;
 grant execute on function public.get_whiteboard_context(uuid) to authenticated;
+
+-- 第二條 AI 讀路（Grok wb01 F3 抓漏）：選取節點的 context 同樣不讀墓碑。
+-- 逐字沿 0014:386-415，僅 where 加 deleted_at 過濾。
+create or replace function public.get_selected_board_context(p_whiteboard_id uuid, p_node_ids uuid[])
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select case
+    when w.id is null then null
+    else jsonb_build_object(
+      'whiteboardId', w.id,
+      'roomId', w.room_id,
+      'nodes', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'id', n.id,
+          'nodeType', n.node_type,
+          'content', n.content,
+          'linkedEntityType', n.linked_entity_type,
+          'linkedEntityId', n.linked_entity_id
+        ) order by n.created_at)
+        from public.whiteboard_nodes n
+        where n.whiteboard_id = w.id
+          and n.id = any(p_node_ids)
+          and n.deleted_at is null
+      ), '[]'::jsonb)
+    )
+  end
+  from public.whiteboards w
+  where w.id = p_whiteboard_id
+    and public.is_room_member(w.room_id);
+$$;
+
+revoke all on function public.get_selected_board_context(uuid, uuid[]) from public;
+grant execute on function public.get_selected_board_context(uuid, uuid[]) to authenticated;

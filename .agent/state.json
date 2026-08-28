@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T05:23:53.000Z",
+  "generatedAt": "2026-08-28T05:52:16.000Z",
   "git": {
     "branch": "agent/wb01-canonical-schema",
-    "sha": "5ca25e4382a0580cdb2df957f0e61e8b86bf635e",
+    "sha": "d4c26fb8f0229d05a05af48055b24008c79cd621",
     "mainSha": "1d30c6791ddf6b3cb771712e5639130754700a60",
     "dirty": true
   },

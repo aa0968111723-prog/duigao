@@ -515,7 +515,7 @@ export const server = http.createServer(async (req, res) => {
       const uid = userOf(req);
       const board = tables.whiteboards.find((item) => item.id === body.p_whiteboard_id);
       if (!uid || !board || !isMember(board.room_id, uid)) return json(res, 200, null);
-      const nodes = tables.whiteboard_nodes.filter((node) => node.whiteboard_id === board.id);
+      const nodes = tables.whiteboard_nodes.filter((node) => node.whiteboard_id === board.id && !node.deleted_at);
       const selected = Array.isArray(body.p_node_ids) ? nodes.filter((node) => body.p_node_ids.includes(node.id)) : nodes;
       if (fn === "get_selected_board_context") {
         return json(res, 200, { whiteboardId: board.id, roomId: board.room_id, nodes: selected });

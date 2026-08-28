@@ -1717,11 +1717,11 @@ export function App() {
 
   const deleteNode = useCallback(
     (id: string) => {
-      // tombstone（0021）：刪除是帶版本的 update，走 touch trigger 的 OCC。
-      // 版本取「畫面上這一列」＝最後 ack 的值；離線刪除撞上線上編輯時
-      // stale-write → conflict，ADR-011 的缺口在此關閉。
+      // tombstone（0021）：刪除是帶版本的 update，走 touch trigger 的 OCC —
+      // ADR-011 的缺口在此關閉。版本簿記與 upsert 同源（Grok wb01 F2）：
+      // 執行時刻在 persist chain 內讀 lastAcked，讓「先改後刪」的 in-flight
+      // upsert 先完成、其 ack 推進 lastAcked，刪除才不會拿過期版本白撞。
       const target = (roomRef.current?.whiteboardNodes ?? []).find((node) => node.id === id);
-      const version = target?.version ?? 1;
       const targetBoardId = target?.whiteboardId ?? null;
       updateRoom((r) => ({
         ...r,
@@ -1729,7 +1729,14 @@ export function App() {
         whiteboardEdges: (r.whiteboardEdges ?? []).filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id),
       }));
       const persistDelete = async () => {
-        const result = await cloudRef.current.writes.deleteNode?.(id, version);
+        // 排進該節點的 persist chain（與 upsert 同一條）：前面的編輯先落地
+        const prev = nodePersistChain.current.get(id) ?? Promise.resolve();
+        const chained = prev.catch(() => undefined).then(async () => {
+          const version = lastAckedNodeVersion.current.get(id) ?? target?.version ?? 1;
+          return cloudRef.current.writes.deleteNode?.(id, version);
+        });
+        nodePersistChain.current.set(id, chained.then(() => undefined, () => undefined));
+        const result = await chained;
         if (isCloudWriteAcknowledged(result)) {
           await clearPendingEdit(`node-del:${id}`);
           return;
@@ -1751,12 +1758,15 @@ export function App() {
         }
         const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
         if (retry.queueDurable && cloudRef.current.active) {
+          // 刪除取代同節點的未送編輯（Grok wb01 F2：佇列同存 upsert+delete
+          // 時 upsert 先重放會把伺服器版本推過刪除帶的版本 → 刪除丟失）
+          await clearPendingEdit(`node:${id}`);
           await queuePendingEdit({
             id: `node-del:${id}`,
             roomId: roomRef.current?.id ?? "",
             kind: "node",
             op: "delete",
-            payload: { id, version },
+            payload: { id, version: lastAckedNodeVersion.current.get(id) ?? target?.version ?? 1 },
             createdAt: Date.now(),
           });
         }
@@ -1765,12 +1775,13 @@ export function App() {
         void persistDelete();
         return;
       }
+      void clearPendingEdit(`node:${id}`);
       void queuePendingEdit({
         id: `node-del:${id}`,
         roomId: roomRef.current?.id ?? "",
         kind: "node",
         op: "delete",
-        payload: { id, version },
+        payload: { id, version: lastAckedNodeVersion.current.get(id) ?? target?.version ?? 1 },
         createdAt: Date.now(),
       });
     },
@@ -2812,7 +2823,11 @@ export function App() {
           setActiveWhiteboardId(id);
           if (!id) setFocusNodeId(null);
           if (!id) return;
-          void cloudRef.current.loadWhiteboard?.(id);
+          // 順序刻意是「先快照、後雲端」（Grok wb01 F1）：兩者並發時雲端
+          // 整替可能先落地，快照的過期活列（沒有 deletedAt 的舊列）接著以
+          // 「remote 沒有這列」的路徑把已刪節點救回畫面。序列化後，雲端
+          // replaceBoardGraph（整替＋墓碑過濾）永遠是最後一手；離線時
+          // loadWhiteboard 失敗、快照仍在 — 離線體驗不變。
           void loadBoardSnapshot(id).then((snap) => {
             if (!snap) return;
             setRoom((current) => {
@@ -2833,6 +2848,8 @@ export function App() {
                 ],
               };
             });
+          }).finally(() => {
+            void cloudRef.current.loadWhiteboard?.(id);
           });
         },
         onFocusNode: setFocusNodeId,

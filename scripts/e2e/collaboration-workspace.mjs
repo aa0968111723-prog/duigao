@@ -440,6 +440,39 @@ try {
           const fullReloads = requestLog.filter((line) => line.startsWith("GET /rest/v1/rooms?select=*")).length;
           const boardFetches = requestLog.filter((line) => line.includes("GET /rest/v1/whiteboard_nodes")).length;
           check("row-patch 取代整房 reload（rooms 快照 GET=0 且板 GET=0）", fullReloads === 0 && boardFetches === 0, `fullReloads=${fullReloads} boardFetches=${boardFetches}`);
+          // ---- WB01 tombstone：軟刪同步＋殭屍防護（Grok wb01 F1/F4）----
+          // A 刪掉那張便利貼：B 不重開要看到它消失（tombstone UPDATE →
+          // row-patch 的 delete 轉換 — 復活路徑的第一防線）
+          {
+            // 點節點邊框環（textarea 會吃掉點擊 — audit §2 的已知行為），
+            // 讓節點進入 selected 態、動作列出現
+            await page.locator(".wb-node").last().click({ position: { x: 5, y: 5 }, force: true });
+            await page.getByRole("button", { name: "刪除", exact: true }).click();
+            await B.waitForFunction(
+              () => ![...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("跨分頁增量")),
+              null,
+              { timeout: 20000 },
+            );
+            check("tombstone：B 不重開就看到 A 刪掉的節點消失", true);
+            // DB 斷言：列還在（soft），deleted_at 非空 — 不是硬刪
+            const row = rows.whiteboard_nodes.find((r) => r.content && String(r.content.text ?? "").includes("跨分頁增量"));
+            check("tombstone：DB 列仍在且 deleted_at 已標（軟刪不是硬刪）", Boolean(row && row.deleted_at), JSON.stringify({ found: Boolean(row), deleted: row?.deleted_at ?? null }).slice(0, 80));
+
+            // 殭屍防護（F1 的真反例）：B 的 IndexedDB 快照裡還有這個節點
+            // （刪除前存的）。B 離開板再重開 — 「先快照後雲端整替」的序列
+            // 必須讓墓碑贏，節點不得回到畫面。
+            await B.locator(".wb-toolbar .project-back-button").click().catch(() => undefined);
+            await B.waitForSelector(".wb-list", { timeout: 15000 }).catch(() => undefined);
+            await B.locator(".wb-card").first().click({ force: true });
+            await B.waitForSelector('[data-testid="wb-canvas"]', { timeout: 20000 });
+            // 給快照→雲端序列一個完整落地窗
+            await B.waitForFunction(
+              () => ![...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("跨分頁增量")),
+              null,
+              { timeout: 20000 },
+            );
+            check("tombstone：B 重開板後殭屍不復活（快照→雲端序列生效）", true);
+          }
         } finally {
           await ctxB.close();
         }

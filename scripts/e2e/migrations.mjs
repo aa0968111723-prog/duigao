@@ -1539,6 +1539,17 @@ try {
   const ctxAfter = as(owner, `select public.get_whiteboard_context('${collabBoard}'::uuid)::text;`).out;
   ok("get_whiteboard_context 不含墓碑節點", !ctxAfter.includes(tombNode));
   ok("get_whiteboard_context 仍含活節點", ctxAfter.includes(collabNode));
+  // 第二條 AI 讀路（Grok wb01 F3 抓漏的 get_selected_board_context）
+  const selCtx = as(owner, `select public.get_selected_board_context('${collabBoard}'::uuid, array['${tombNode}','${collabNode}']::uuid[])::text;`).out;
+  ok("get_selected_board_context 不含墓碑節點", !selCtx.includes(tombNode));
+  ok("get_selected_board_context 仍含活節點", selCtx.includes(collabNode));
+  // frames 真的在 realtime publication 裡（Grok wb01 F4：shape 沒量到）
+  ok(
+    "whiteboard_frames 已加入 supabase_realtime publication",
+    psql(`select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'whiteboard_frames';`).out === "1",
+  );
+  // 0024 snapshot CHECK：缺 edges 陣列被拒（設計如此 — Grok wb01 F8c 記錄）
+  ok("快照缺 edges 陣列被 CHECK 擋下", as(owner, `insert into public.whiteboard_versions (id, whiteboard_id, room_id, snapshot, created_by) values (gen_random_uuid(), '${collabBoard}'::uuid, '${capRoom}'::uuid, '{"nodes":[]}'::jsonb, '${owner}'::uuid);`).failed);
 
   // (e) group 環防護（Grok wb00 F4：FK 不防 A↔B）
   const cycA = psql("select gen_random_uuid();").out;

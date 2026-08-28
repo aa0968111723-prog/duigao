@@ -59,7 +59,7 @@ test("nodeUpdateDraft：move-only 归類 node-move；before/after 只含 mask �
   assert.equal(nodeUpdateDraft("op-2", before, node()), null);
 });
 
-test("inverse round-trip：undo 再 redo 回到原狀；create↔delete 翻轉", () => {
+test("inverse round-trip：update/move 的 undo 再 redo 回到原狀；create↔delete 只翻型別（執行層在 WB02/04）", () => {
   const before = node();
   const after = node({ x: 100, content: { text: "茶會" } });
   const draft = nodeUpdateDraft("op-1", before, after)!;
@@ -68,8 +68,31 @@ test("inverse round-trip：undo 再 redo 回到原狀；create↔delete 翻轉",
   assert.deepEqual(undo.after, draft.before);
   const redo = inverseDraft(undo, "op-3");
   assert.deepEqual(redo.after, draft.after);
-  assert.equal(inverseDraft(nodeCreateDraft("op-4", before), "op-5").opType, "node-delete");
-  assert.equal(inverseDraft(nodeDeleteDraft("op-6", before), "op-7").opType, "node-create");
+  // create/delete 的 inverse 是「事實描述」：opType 翻轉＋before/after 對調。
+  // 它們的**執行**需要 softDeleteNode / upsertNode（WB01 刻意不佈線）—
+  // 這裡只驗描述正確，不宣稱 applyMasked 能執行它們（Grok wb01 F5）。
+  const createInverse = inverseDraft(nodeCreateDraft("op-4", before), "op-5");
+  assert.equal(createInverse.opType, "node-delete");
+  assert.deepEqual(createInverse.after, {});
+  const deleteInverse = inverseDraft(nodeDeleteDraft("op-6", before), "op-7");
+  assert.equal(deleteInverse.opType, "node-create");
+  // delete 的 before（=inverse 的 after）帶著重建所需的 masked 欄位
+  assert.equal(deleteInverse.after["content.text"], "招生");
+});
+
+test("diffMask：content 內非原始值（陣列）以結構相等比較，不因新參照誤報（F6）", () => {
+  const a = node({ content: { text: "同", groupIds: ["g1", "g2"] } as never });
+  const b = node({ content: { text: "同", groupIds: ["g1", "g2"] } as never });
+  assert.deepEqual(diffMask(a, b), []);
+  const c = node({ content: { text: "同", groupIds: ["g1"] } as never });
+  assert.deepEqual(diffMask(a, c), ["content.groupIds"]);
+});
+
+test("applyMasked：頂層必填數值缺值時保留現值，不產生 NaN 節點（F6）", () => {
+  const current = node({ x: 50 });
+  const out = applyMasked(current, ["x", "frameId"], {});
+  assert.equal(out.x, 50);
+  assert.equal(out.frameId, undefined);
 });
 
 test("applyMasked：只動 mask 內欄位 — B 的並發修改不被 A 的 undo 吃掉（F2 repro）", () => {

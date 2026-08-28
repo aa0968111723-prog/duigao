@@ -31,6 +31,20 @@ const MASKABLE_FIELDS = new Set([
   "linkedEntityType", "linkedEntityId", "parentGroupId", "sourceVersionId",
 ]);
 
+/** 內容值可能是陣列/物件（如 groupIds）：以結構相等比較，避免每次新參照誤報。 */
+function valueEquals(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a === "object" && typeof b === "object") {
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 function readPath(node: Record<string, unknown>, path: string): unknown {
   if (path.startsWith("content.")) {
     const content = node.content;
@@ -54,7 +68,7 @@ export function maskedValues(node: WhiteboardNode, mask: string[]): Record<strin
 export function diffMask(before: WhiteboardNode, after: WhiteboardNode): string[] {
   const mask: string[] = [];
   for (const field of MASKABLE_FIELDS) {
-    if (readPath(before as never, field) !== readPath(after as never, field)) mask.push(field);
+    if (!valueEquals(readPath(before as never, field), readPath(after as never, field))) mask.push(field);
   }
   const keys = new Set([
     ...Object.keys(before.content ?? {}),
@@ -62,7 +76,7 @@ export function diffMask(before: WhiteboardNode, after: WhiteboardNode): string[
   ]);
   for (const key of keys) {
     const path = `content.${key}`;
-    if (readPath(before as never, path) !== readPath(after as never, path)) mask.push(path);
+    if (!valueEquals(readPath(before as never, path), readPath(after as never, path))) mask.push(path);
   }
   return mask;
 }
@@ -115,6 +129,11 @@ export function nodeDeleteDraft(opId: string, node: WhiteboardNode): OperationDr
 /**
  * 反操作：before/after 對調、mask 不變。node-create ↔ node-delete。
  * 新 opId 由呼叫端給（undo 本身也是一個入帳的操作）。
+ *
+ * 誠實邊界（Grok wb01 F5）：本層只產「事實描述」。update/move 的 undo
+ * 可直接以 applyMasked 執行；**create 的 undo（=delete）與 delete 的
+ * undo（=create）需要執行層**分別呼叫 softDeleteNode / upsertNode（後者
+ * 用 before 的 masked 欄位重建列）— WB01 不佈線執行層，WB02/WB04 接。
  */
 export function inverseDraft(op: WhiteboardOperation | OperationDraft, newOpId: string): OperationDraft {
   const flipped: Record<WhiteboardOpType, WhiteboardOpType> = {
@@ -161,8 +180,11 @@ export function applyMasked(
       if (path in values) content[key] = values[path];
       else delete content[key];
     } else if (MASKABLE_FIELDS.has(path)) {
+      // 頂層欄位缺值＝「當時是 undefined」→ 還原為 undefined（optional 欄）
+      // 但 x/y/width/height 是必填數值 — 缺值時保留現值，不製造 NaN 節點
+      // （Grok wb01 F6：undefined 與缺 key 的語意在此統一）。
       if (path in values) next[path] = values[path];
-      else delete next[path];
+      else if (!["x", "y", "width", "height"].includes(path)) delete next[path];
     }
     // mask 外的路徑靜默忽略 — 壞資料不放大
   }

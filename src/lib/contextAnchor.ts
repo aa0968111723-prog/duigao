@@ -225,6 +225,11 @@ export function entityAnchor(entityType: string, entityId: string): ContextAncho
  * （純文字/附件卡沒有錨）。
  */
 export function anchorFromDiscussion(payload: DiscussionPayload): ContextAnchor | null {
+  // 優先權（Grok wb01 F7）：whiteboardId 維持最高 — 既有 board-node 生產者
+  // 的 payload 永不被新臂遮蔽；messageId 只在沒有板參照時生效。
+  if (payload.whiteboardId) {
+    return { type: "board-node", whiteboardId: payload.whiteboardId, nodeId: payload.nodeId };
+  }
   if (payload.messageId) {
     return { type: "message", messageId: payload.messageId };
   }

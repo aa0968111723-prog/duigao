@@ -9,11 +9,13 @@ create table if not exists public.whiteboard_versions (
   whiteboard_id uuid not null,
   room_id uuid not null references public.rooms(id) on delete cascade,
   label text not null default '' check (char_length(label) <= 120),
+  -- coalesce 必要：缺鍵時 jsonb_typeof(snapshot->'x') 是 SQL NULL，裸比較
+  -- 讓 CHECK 三值邏輯放行 — WB01 探針實抓到這個洞。
   snapshot jsonb not null check (
     jsonb_typeof(snapshot) = 'object'
-    and jsonb_typeof(snapshot->'nodes') = 'array'
-    and jsonb_typeof(snapshot->'edges') = 'array'
-    and jsonb_array_length(snapshot->'nodes') <= 2000
+    and coalesce(jsonb_typeof(snapshot->'nodes') = 'array', false)
+    and coalesce(jsonb_typeof(snapshot->'edges') = 'array', false)
+    and coalesce(jsonb_array_length(snapshot->'nodes') <= 2000, false)
   ),
   created_by uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default now(),

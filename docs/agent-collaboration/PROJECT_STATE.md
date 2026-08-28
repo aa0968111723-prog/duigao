@@ -35,8 +35,12 @@ production。**
   ADR-014（entity-level OCC＋append-only operations）、
   rounds/wb00/{wireflow,migration-plan,test-plan,parallel-agents-conflict-report}。
   不宣稱任何功能完成。
-- 序列：WB01 canonical schema（0021–0024）→ WB02 手機 Focus Mode →
-  WB03 雙向連結 → WB04 Realtime/presence → WB05 平板/Pencil → WB06 AI。
+- PR-WB01（進行中，疊於 wb00 分支）：0021–0024 migrations（探針
+  277/277）＋tombstone 資料層（六讀路 client 半、ADR-011 關閉）＋
+  operations 純函式層（op_id 冪等＋field_mask undo）＋anchor
+  message/plan-section 臂。本機全綠矩陣（unit 150、e2e 全套）。
+- 序列：WB02 手機 Focus Mode → WB03 雙向連結 → WB04 Realtime/presence
+  → WB05 平板/Pencil → WB06 AI。
 - 平行衝突：open PR #71 動 MultiBranchRoom/RoomDiscussion/App.tsx，
   與 WB02 重疊 — 開工前重查（rounds/wb00/parallel-agents-conflict-report.md）。
 

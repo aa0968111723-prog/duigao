@@ -343,7 +343,12 @@ test("plan-section 臂：round-trip、node link 到 plan、openTarget 到 conten
   assert.deepEqual(anchorFromDiscussion(bare), { type: "entity", entityType: "branch", entityId: "br-1" });
 });
 
-test("messageId 優先權：payload 同時有 messageId 與 branchId 時讀成 message 臂", () => {
+test("優先權（F7）：whiteboardId 永遠壓過 messageId — 既有 board-node 生產者不被新臂遮蔽", () => {
+  assert.deepEqual(
+    anchorFromDiscussion({ whiteboardId: "b-1", nodeId: "n-1", messageId: "m-9" }),
+    { type: "board-node", whiteboardId: "b-1", nodeId: "n-1" },
+  );
+  // 無板參照時 messageId 才生效（壓過 branchId）
   assert.deepEqual(
     anchorFromDiscussion({ messageId: "m-9", branchId: "br-1" }),
     { type: "message", messageId: "m-9" },
