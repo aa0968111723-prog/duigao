@@ -50,6 +50,30 @@ type Props = {
   children?: ReactNode;
 };
 
+/**
+ * 一份與 `<input>` 完全脫鉤的 FileList。
+ *
+ * 這是 DataTransfer 不能用時的替代品，而不是「退回原本那個 FileList」——
+ * input 給的 FileList 是活的：onChange 一結束就 `input.value = ""`，那個物件
+ * 當場變成空的。CreateSheet 會把選取放進 state 一直留到按「建立」，拿到活的
+ * 那份等於什麼都沒選到，舊 WebView 上建立文宣／影片就永遠做不成。
+ *
+ * 消費端只用 length、索引、item() 與展開／for..of，這四件事這裡都給足。
+ */
+export function staticFileList(files: File[]): FileList {
+  // 快照：呼叫端之後怎麼動它的陣列都與這份清單無關。
+  const snapshot = [...files];
+  const list: Record<PropertyKey, unknown> = {
+    length: snapshot.length,
+    item: (index: number) => snapshot[index] ?? null,
+    [Symbol.iterator]: () => snapshot[Symbol.iterator](),
+  };
+  snapshot.forEach((file, index) => {
+    list[index] = file;
+  });
+  return list as unknown as FileList;
+}
+
 function filterBySize(
   files: FileList | null,
   maxBytes: number | undefined,
@@ -71,13 +95,9 @@ function filterBySize(
   } catch {
     // 舊 WebView／被鎖住的 in-app 瀏覽器沒有可用的 DataTransfer 建構子。
     // 以前這裡會直接把例外丟進 onChange handler，整批檔案無聲蒸發 —
-    // 使用者只看到「選完檔案什麼都沒發生」。沒有被過濾掉任何東西時，原本
-    // 那個 live FileList 就是正確答案（呼叫端當場就會用掉它）。
-    if (kept.length === files.length) return files;
-    // 有東西被擋下來又重建不了，寧可什麼都不送，也不能把超過上限的檔案
-    // 混回去 — 但一定要說出來。
-    onReject?.("這個瀏覽器沒辦法處理這次的選取，請改用手機的預設瀏覽器再試一次。");
-    return null;
+    // 使用者只看到「選完檔案什麼都沒發生」。改用自己做的靜態清單，脫鉤這
+    // 件事就還在：把 input 的活 FileList 交出去，reset 之後它就空了。
+    return staticFileList(kept);
   }
 }
 

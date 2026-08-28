@@ -207,3 +207,37 @@ test("uuid(): 沒有 crypto.randomUUID 也要給出合法 v4，且絕不丟例�
   for (let i = 0; i < 200; i += 1) seen.add(uuid());
   assert.equal(seen.size, 200);
 });
+
+// -------------------------------------------------------- intake fallback --
+// UniversalIntake 在沒有 DataTransfer 建構子的瀏覽器（舊 Android WebView、
+// 被鎖住的 in-app 瀏覽器）改用自己做的靜態清單。重點不是「有東西回傳」，
+// 而是那份清單與 <input> 脫鉤：onChange 收尾會 input.value = ""，input 給的
+// FileList 是活的，當場會變空 — CreateSheet 把選取留到按「建立」才用，拿到
+// 活的那份等於什麼都沒選到。
+
+test("staticFileList(): 像 FileList，而且不會被 input 清空", async () => {
+  const { staticFileList } = await import("../../src/components/UniversalIntake.tsx");
+  const a = new File(["a"], "a.webm", { type: "video/webm" });
+  const b = new File(["bb"], "b.png", { type: "image/png" });
+
+  const list = staticFileList([a, b]);
+  assert.equal(list.length, 2);
+  assert.equal(list[0], a);
+  assert.equal(list[1], b);
+  assert.equal(list.item(0), a);
+  assert.equal(list.item(5), null);
+  assert.deepEqual([...list], [a, b]);
+  assert.deepEqual(Array.from(list), [a, b]);
+  assert.equal(list[0]?.name, "a.webm");
+
+  // 這份清單是快照，不是視圖：來源被清空（input reset 在瀏覽器裡就是這件
+  // 事）之後，已經交出去的選取仍然完整 — CreateSheet 要留到按「建立」才用。
+  const source = [a, b];
+  const held = staticFileList(source);
+  source.length = 0;
+  assert.equal(held.length, 2);
+  assert.deepEqual([...held], [a, b]);
+  assert.equal(held.item(1), b);
+
+  assert.equal(staticFileList([]).length, 0);
+});
