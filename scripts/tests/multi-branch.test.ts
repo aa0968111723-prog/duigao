@@ -162,3 +162,48 @@ test("summary lazy plans never clobber local blocks; full rows win by updatedAt"
   assert.equal(mergedFull.plans?.[0].blocks.length, 0);
   void mergedLazy;
 });
+
+// ---------------------------------------------------------------- uuid ----
+// 上傳路徑用它產生 versions.id。舊 WebView（Android WebView < 92、iOS
+// 15.0–15.3）與任何非 https 的頁面都沒有 crypto.randomUUID；以前那一行直接
+// 丟例外，而且丟在 try 之外 — 上傳鎖再也放不掉，按鈕從此完全沒反應。
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test("uuid(): 沒有 crypto.randomUUID 也要給出合法 v4，且絕不丟例外", async () => {
+  const { uuid } = await import("../../src/lib/id.ts");
+  const real = globalThis.crypto;
+
+  assert.match(uuid(), UUID_V4, "有 randomUUID 時走原生");
+
+  // 只剩 getRandomValues（Chrome 60–91 / Safari 11–15.3 的形狀）
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { getRandomValues: (arr: Uint8Array) => real.getRandomValues(arr) },
+  });
+  const noRandomUUID = uuid();
+  assert.match(noRandomUUID, UUID_V4);
+
+  // randomUUID 存在但被鎖住（部分 in-app 瀏覽器）：不能讓例外逃出去
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: {
+      randomUUID: () => {
+        throw new Error("blocked by embedder");
+      },
+      getRandomValues: (arr: Uint8Array) => real.getRandomValues(arr),
+    },
+  });
+  assert.match(uuid(), UUID_V4);
+
+  // 連 crypto 都沒有（極舊 WebView / 非安全脈絡）
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+  assert.match(uuid(), UUID_V4);
+
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: real });
+
+  // 同一顆瀏覽器連續要 200 個 id 不可以撞號 — 撞號等於覆蓋別人的版本列。
+  const seen = new Set<string>();
+  for (let i = 0; i < 200; i += 1) seen.add(uuid());
+  assert.equal(seen.size, 200);
+});

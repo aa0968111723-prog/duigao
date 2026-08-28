@@ -64,9 +64,21 @@ function filterBySize(
   // 一律以 DataTransfer 物化：input 的 FileList 是 live 的，reset input
   // 之後就變空。呼叫端（如 CreateSheet）要能把選取「持有」到 submit，
   // 必須與 input 解耦。
-  const dt = new DataTransfer();
-  for (const file of kept) dt.items.add(file);
-  return dt.files;
+  try {
+    const dt = new DataTransfer();
+    for (const file of kept) dt.items.add(file);
+    return dt.files;
+  } catch {
+    // 舊 WebView／被鎖住的 in-app 瀏覽器沒有可用的 DataTransfer 建構子。
+    // 以前這裡會直接把例外丟進 onChange handler，整批檔案無聲蒸發 —
+    // 使用者只看到「選完檔案什麼都沒發生」。沒有被過濾掉任何東西時，原本
+    // 那個 live FileList 就是正確答案（呼叫端當場就會用掉它）。
+    if (kept.length === files.length) return files;
+    // 有東西被擋下來又重建不了，寧可什麼都不送，也不能把超過上限的檔案
+    // 混回去 — 但一定要說出來。
+    onReject?.("這個瀏覽器沒辦法處理這次的選取，請改用手機的預設瀏覽器再試一次。");
+    return null;
+  }
 }
 
 export const UniversalIntake = forwardRef<IntakeHandle, Props>(function UniversalIntake(
@@ -84,8 +96,14 @@ export const UniversalIntake = forwardRef<IntakeHandle, Props>(function Universa
   }), [camera]);
 
   const handle = (files: FileList | null) => {
-    const kept = filterBySize(files, "maxBytes" in spec ? spec.maxBytes : undefined, onReject);
-    if (kept) onFiles(kept);
+    // 收件層丟出來的例外會被 React 的事件系統吞掉，畫面上什麼都不會發生。
+    // 檔案入口最不能有的就是「靜靜失敗」。
+    try {
+      const kept = filterBySize(files, "maxBytes" in spec ? spec.maxBytes : undefined, onReject);
+      if (kept) onFiles(kept);
+    } catch {
+      onReject?.("讀取這個檔案時出了問題，請再選一次。");
+    }
   };
 
   const inputs = (

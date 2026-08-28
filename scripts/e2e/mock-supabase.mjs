@@ -125,6 +125,14 @@ export const faults = {
   previewDelete: false,
   /** Next video upload into room-assets fails, for testing the retry path. */
   videoUpload: false,
+  /**
+   * Hold every video upload this long before answering.
+   *
+   * A real cut on a phone takes tens of seconds; the mock answers instantly,
+   * so "is the upload visible while it runs" is untestable without a way to
+   * make the run last longer than one paint.
+   */
+  videoUploadDelayMs: 0,
   /** Next createSignedUrl fails, for the "row landed, signing did not" case. */
   sign: false,
   /** 下一個 create_room 的房：branch POST 失敗一次（PR-01c 半路死亡）。 */
@@ -799,6 +807,9 @@ export const server = http.createServer(async (req, res) => {
       // retry reuses the room it already created or quietly makes a second one.
       if (bucket === "room-assets" && faults.videoUpload && path.includes("/videos/")) {
         return json(res, 500, { message: "injected video upload failure" });
+      }
+      if (bucket === "room-assets" && faults.videoUploadDelayMs > 0 && path.includes("/videos/")) {
+        await new Promise((r) => setTimeout(r, faults.videoUploadDelayMs));
       }
       const ct = String(req.headers["content-type"] || "image/png");
       // storage-js uploads through FormData in browsers; keep only the file part.

@@ -275,8 +275,57 @@ try {
     const videoSheet = page.getByTestId("create-content-sheet");
     await videoSheet.locator('input:not([type="file"])').first().fill("招生影片");
     await videoSheet.locator('input[type="file"]').setInputFiles({ name: "admission.webm", mimeType: "video/webm", buffer: videoBytes });
+    // 上傳期間活動房必須有東西在動。這條檢查存在的原因是它曾經整個沒有：
+    // App 的上傳進度畫面排在活動房殼的 return 之後，專案房永遠走不到，
+    // 使用者選完檔案看到的是一個完全靜止的畫面（上傳其實正在跑）。
+    faults.videoUploadDelayMs = 8000;
     await videoSheet.locator("button.project-submit").click();
+    {
+      let statusText = "";
+      try {
+        await page.waitForSelector('[data-testid="project-upload-status"]', { timeout: 20000 });
+        statusText = await page.getByTestId("project-upload-status").innerText();
+      } catch {
+        statusText = "";
+      }
+      check(
+        "活動房上傳影片時看得到進度（不是靜止畫面）",
+        /上傳|準備|處理/.test(statusText),
+        statusText.replace(/\s+/g, " ").slice(0, 60) || "沒有狀態列",
+      );
+      // 建立內容之後 App 會把人帶進這條新分支（activeBranchId），而它還沒有
+      // 版本 — 就是使用者回報的那個畫面。上傳跑著的時候那裡不可以還擺一顆
+      // 按了會被上傳鎖擋掉的「＋ 加入影片」。
+      // 建立內容之後 App 會把人帶進這條新分支（activeBranchId），而它還沒有
+      // 版本 — 就是使用者回報的那個畫面。上傳跑著的時候那裡不可以還擺一顆
+      // 按了會被上傳鎖擋掉的「＋ 加入影片」。
+      let inflightSeen = false;
+      try {
+        await page.waitForFunction(
+          () =>
+            !!document.querySelector('[data-testid="branch-upload-inflight"]') &&
+            !document.querySelector(".project-branch-empty-detail .project-upload-button"),
+          null,
+          { timeout: 20000 },
+        );
+        inflightSeen = true;
+      } catch {
+        inflightSeen = false;
+      }
+      check(
+        "上傳中的空分支不再擺一顆按了沒反應的按鈕",
+        inflightSeen,
+        inflightSeen
+          ? ""
+          : (await page.evaluate(() => document.querySelector(".project-branch-detail")?.innerText?.slice(0, 120) ?? "沒有分支詳情")).replace(/\s+/g, " "),
+      );
+    }
+    faults.videoUploadDelayMs = 0;
     await page.waitForSelector("video.v-video", { timeout: 90000 });
+    check(
+      "上傳完成後狀態列自己收掉",
+      (await page.getByTestId("project-upload-status").count()) === 0,
+    );
     check("影片分支沿用既有播放器並能載入", await page.locator("video.v-video").count() === 1);
     check("影片分支沒有把文宣版本串進來", await page.locator(".m-vchip:not(.m-vchip-add)").count() === 1);
     await page.locator("button.m-home").click();
@@ -291,6 +340,61 @@ try {
       check("同一房間可同時看文宣、影片、企劃分支", ["演講文宣", "招生影片", "擺攤計畫"].every((name) => overviewTexts.some((text) => text.includes(name))), overviewTexts.join(" / "));
     }
     await closePushedPane(page);
+
+    // 上傳失敗這條路以前是最糟的：畫面沒有進度、錯誤 toast 兩秒半就自己
+    // 消失，而空分支上那顆按鈕看起來還能按。更糟的是上傳鎖有機會沒放掉，
+    // 之後每一次點擊都被靜靜擋掉 — 按鈕從此完全沒有反應。
+    {
+      faults.videoUpload = true;
+      await page.getByTestId("open-content-pane").click();
+      await page.getByRole("button", { name: /新增影片/ }).click();
+      const failSheet = page.getByTestId("create-content-sheet");
+      await failSheet.locator('input:not([type="file"])').first().fill("擺攤影片");
+      await failSheet.locator('input[type="file"]').setInputFiles({ name: "booth.webm", mimeType: "video/webm", buffer: videoBytes });
+      await failSheet.locator("button.project-submit").click();
+
+      let failText = "";
+      try {
+        await page.waitForFunction(
+          () => document.querySelector('[data-testid="project-upload-status"]')?.classList.contains("is-error"),
+          null,
+          { timeout: 60000 },
+        );
+        failText = await page.getByTestId("project-upload-status").innerText();
+      } catch {
+        failText = "";
+      }
+      faults.videoUpload = false;
+      check("上傳失敗在活動房裡看得到（不是只有會消失的 toast）", failText.length > 0, failText.replace(/\s+/g, " ").slice(0, 60) || "沒有錯誤狀態列");
+
+      // 鎖真的放掉了：空分支的入口必須回來，而且是能再按的那一顆。
+      let retryable = false;
+      try {
+        await page.waitForFunction(
+          () =>
+            !!document.querySelector(".project-branch-empty-detail .project-upload-button") &&
+            !document.querySelector('[data-testid="branch-upload-inflight"]'),
+          null,
+          { timeout: 30000 },
+        );
+        retryable = true;
+      } catch {
+        retryable = false;
+      }
+      check(
+        "失敗後「＋ 加入影片」可以再按一次（上傳鎖沒被鎖死）",
+        retryable,
+        retryable
+          ? ""
+          : (await page.evaluate(() => document.querySelector(".project-branch-detail")?.innerText?.slice(0, 120) ?? "沒有分支詳情")).replace(/\s+/g, " "),
+      );
+
+      await page.getByTestId("project-upload-status").getByRole("button", { name: "知道了" }).click();
+      check("按「知道了」收掉錯誤狀態列", (await page.getByTestId("project-upload-status").count()) === 0);
+
+      await page.locator(".project-back-button").click();
+      await closePushedPane(page);
+    }
 
     // A branch share is intentionally checked from a real workspace. The
     // preview path may change, but its fragment must remain the app target.

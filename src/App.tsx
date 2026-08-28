@@ -32,7 +32,7 @@ import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanv
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
-import { roomCode, uid } from "./lib/id";
+import { roomCode, uid, uuid } from "./lib/id";
 import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
@@ -879,7 +879,12 @@ export function App() {
         showToast("檢視者可以留言與投票，但不能建立文宣版本。", { tone: "error" });
         return;
       }
-      if (busy.current.has("upload")) return;
+      // 同 addVideoFile：正在跑的上傳擋住第二次點擊時要說話，不能讓按鈕
+      // 看起來壞掉。
+      if (busy.current.has("upload")) {
+        showToast("已經有檔案在上傳，等它完成再選下一個。");
+        return;
+      }
       busy.current.add("upload");
       try {
         const current = roomOverride ?? roomRef.current ?? emptyRoom(roomCode(), "未命名文宣");
@@ -945,7 +950,13 @@ export function App() {
         showToast("檢視者可以留言與投票，但不能建立影片版本。", { tone: "error" });
         return;
       }
-      if (busy.current.has("upload")) return;
+      // 沉默的 return 是這條路上最貴的一行：使用者按了「加入影片」、選了
+      // 檔，畫面完全沒動 — 沒有進度、沒有錯誤、什麼都沒有。上傳中就說在
+      // 上傳。
+      if (busy.current.has("upload")) {
+        showToast("已經有一支檔案在上傳，等它完成再選下一支。");
+        return;
+      }
 
       const check = acceptVideoFile(file);
       if (!check.ok) {
@@ -969,35 +980,46 @@ export function App() {
       }
 
       busy.current.add("upload");
-      const existing = roomOverride ?? roomRef.current;
-      const isNewRoom = !existing;
-      const base = existing ?? emptyRoom(roomCode(), "未命名影片", "video");
-      const targetBranchId = forcedBranchId ?? activeBranchId ?? (base.branches?.length === 1 ? base.branches[0].id : undefined);
-      const branchCount = targetBranchId ? branchVersions(base, targetBranchId).length : base.versions.length;
-      if (isNewRoom) {
-        setRoom(base);
-        setView(initialView(base));
-      }
-
-      const versionId = crypto.randomUUID();
-      const index = branchCount;
-      const label = VIDEO_VERSION_LABELS[index] ?? `改${index}`;
       // Cancelling has to work from the first frame, not only once the XHR
       // exists: the cloud room is created first, and that takes a moment on a
       // slow connection.
       let abandoned = false;
-      // Both ids the room may answer to while this upload is in flight; the
-      // cloud id joins once the room exists (binding re-keys the room to it).
-      const belongsToThisUpload = new Set([base.id]);
       let handleCancel: (() => void) | null = null;
       const cancel = () => {
         abandoned = true;
         handleCancel?.();
       };
       videoCancelRef.current = cancel;
+      // 進度先出現，房間才鋪底。這一句以前排在 ensureCloudRoom 那一段之後，
+      // 慢裝置上有好幾秒畫面是全靜止的。
       setVideoUpload({ state: "preparing", progress: 0, cancel });
 
+      // Both ids the room may answer to while this upload is in flight; the
+      // cloud id joins once the room exists (binding re-keys the room to it).
+      const belongsToThisUpload = new Set<string>();
+      let isNewRoom = false;
+      let base: Room | null = null;
+
+      // 房間鋪底（emptyRoom／版本 id／分支計算）以前放在 try 之外。那裡只要
+      // 丟一次例外（舊 WebView 沒有 crypto.randomUUID 就是這樣），finally 永遠
+      // 到不了，"upload" 這把鎖被永久鎖住 — 之後每一次按都被上面那個
+      // has("upload") 靜靜擋掉，按鈕從此死掉且不說一句話。整段收進 try。
       try {
+        const existing = roomOverride ?? roomRef.current;
+        isNewRoom = !existing;
+        base = existing ?? emptyRoom(roomCode(), "未命名影片", "video");
+        belongsToThisUpload.add(base.id);
+        const targetBranchId = forcedBranchId ?? activeBranchId ?? (base.branches?.length === 1 ? base.branches[0].id : undefined);
+        const branchCount = targetBranchId ? branchVersions(base, targetBranchId).length : base.versions.length;
+        if (isNewRoom) {
+          setRoom(base);
+          setView(initialView(base));
+        }
+
+        const versionId = uuid();
+        const index = branchCount;
+        const label = VIDEO_VERSION_LABELS[index] ?? `改${index}`;
+
         const cloudRoom = await cloudRef.current.ensureCloudRoom(base);
         if (!cloudRoom) throw new Error("cloud-room-failed");
         if (abandoned) throw new CancelledUpload();
@@ -1060,7 +1082,7 @@ export function App() {
           // A room created for an upload nobody wants must not keep the local
           // id tied to an empty cloud room — the next attempt would make a
           // second one and orphan this.
-          if (isNewRoom) {
+          if (isNewRoom && base) {
             // The bind already cached an empty snapshot; leaving it behind puts
             // a room in 最近討論 that opens to nothing.
             //
@@ -1078,7 +1100,10 @@ export function App() {
           // above finish. Switching to idle earlier renders Home immediately,
           // where 最近討論 can observe the empty cached room for one frame.
           setVideoUpload({ state: "idle" });
-        } else if (!belongsToThisUpload.has(roomRef.current?.id ?? "")) {
+        } else if (base && !belongsToThisUpload.has(roomRef.current?.id ?? "")) {
+          // `base` null 表示連房間都還沒鋪底就炸了 — 那不是「人已經走開」，
+          // 是這一次上傳當場失敗，要走下面的錯誤狀態，不能只丟一個會自己
+          // 消失的 toast。
           // The upload failed after the person had already moved on. Telling
           // whichever room they are in now that something failed there would be
           // a lie; the success path already knows this, and so must this one.
@@ -1137,7 +1162,7 @@ export function App() {
       if (!branchId) {
         const now = Date.now();
         const branch: RoomBranch = {
-          id: crypto.randomUUID(),
+          id: uuid(),
           roomId: current.id,
           name,
           branchType: "video",
@@ -1208,7 +1233,7 @@ export function App() {
       if (!branchId) {
         const now = Date.now();
         const branch: RoomBranch = {
-          id: crypto.randomUUID(),
+          id: uuid(),
           roomId: current.id,
           name,
           branchType: "poster",
@@ -1285,7 +1310,7 @@ export function App() {
       const normalized = normalizeRoomBranches(current);
       const now = Date.now();
       const branch: RoomBranch = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         roomId: current.id,
         name,
         branchType: type,
@@ -1431,7 +1456,7 @@ export function App() {
       if (!body && !input?.kind) return;
       const message: DiscussionMessage = {
         // 附件卡的 storage 路徑以 messageId 為鍵，所以允許呼叫端先發 id。
-        id: input?.id ?? crypto.randomUUID(),
+        id: input?.id ?? uuid(),
         roomId: roomRef.current?.id ?? "",
         authorId: cloud.userId ?? guest.id,
         authorName: guest.name,
@@ -1480,7 +1505,7 @@ export function App() {
       attachmentBusy.current = true;
       setAttachmentUploading(true);
       try {
-        const messageId = crypto.randomUUID();
+        const messageId = uuid();
         const mime = file.type || "application/octet-stream";
         // planform 場佈 JSON（PR-06）：識別＋摘要進 payload，原始 bytes
         // 原樣上傳 — 讀不懂就當一般附件，永不因此擋上傳。
@@ -1494,7 +1519,7 @@ export function App() {
             /* 壞 JSON：一般附件 */
           }
         }
-        const path = attachmentPath(roomId, messageId, crypto.randomUUID(), attachmentExt(mime, file.name));
+        const path = attachmentPath(roomId, messageId, uuid(), attachmentExt(mime, file.name));
         await uploadAttachment(getSupabase()!, path, file, mime);
         sendDiscussion({
           id: messageId,
@@ -1571,7 +1596,7 @@ export function App() {
         return;
       }
       const board: Whiteboard = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         roomId: roomRef.current?.id ?? "",
         title,
         description: "",
@@ -1799,7 +1824,7 @@ export function App() {
         return;
       }
       const decision = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         roomId: roomRef.current?.id ?? "",
         title,
         body: "",
@@ -2874,6 +2899,10 @@ export function App() {
       <>
         <MultiBranchRoomShell api={{
           ...projectApi,
+          // 沒有這一條，活動房裡按「加入影片」之後畫面完全不會動：上傳狀態
+          // 機照跑，但唯一會畫它的 uploadingFirstVideo 區塊排在這個 return
+          // 後面，專案房永遠走不到（#上傳系統沒反應）。
+          upload: videoUpload,
           workspace: branchWorkspace,
           discussionGhosts: discussionOutbox.ghosts,
           discussionSendStates: discussionOutbox.sendStates,
