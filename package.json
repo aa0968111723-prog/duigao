@@ -23,7 +23,7 @@
     "test:collaboration-e2e": "node scripts/e2e/collaboration-workspace.mjs",
     "test:migrations": "node scripts/e2e/migrations.mjs",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
-    "test:design-intelligence": "tsc -p tsconfig.scripts.json --noEmit && tsx --test scripts/tests/design-intelligence-schema.test.ts",
+    "test:design-intelligence": "tsc -p tsconfig.scripts.json --noEmit && tsx --test scripts/tests/design-intelligence-schema.test.ts scripts/tests/design-intelligence-retrieval.test.ts",
     "test:agent": "node --test scripts/tests/agent-layer.test.mjs",
     "test:edge-cors": "node --test scripts/tests/edge-cors.test.mjs",
     "agent:context": "node scripts/agent-context.mjs",
