@@ -1,15 +1,14 @@
 /**
  * LiveKit 連線的薄封裝（PR-03）。
  *
- * livekit-client 約 200KB min — 與 peerjs 同一套紀律：動態載入，
+ * livekit-client 約 580KB min — 與 peerjs 同一套紀律：動態載入，
  * 只有真的按下「加入語音」的那一刻才付這筆；Home 首屏與純文字討論
  * 完全不揹。載入失敗（離線）走誠實錯誤，不白屏。
  *
- * 這一層只做三件事：connect（含開麥）、mute、disconnect，加上把
- * LiveKit 的參與者事件折成一個簡單的 roster 回呼。誰在房裡、誰在
- * 講話，以 LiveKit 的即時事實為準；voice_session_participants 的
- * DB 列是給「沒加入語音的人也看得到有語音在進行」的持久紀錄，
- * 由 useVoiceRoom 維護，不在這裡。
+ * 這一層做四件事：connect（含開麥）、**遠端音軌 attach（沒有這步就
+ * 聽不到聲音 — Grok 03 F3）**、mute、disconnect；並把參與者事件折成
+ * 一個 roster 回呼。誰在房裡、誰在講話，以 LiveKit 的即時事實為準；
+ * voice_session_participants 的 DB 列由 useVoiceRoom 維護。
  */
 
 export type VoiceParticipantInfo = {
@@ -44,13 +43,33 @@ async function loadLiveKit(): Promise<LiveKitModule> {
 export async function connectVoice(input: ConnectVoiceInput): Promise<VoiceConnection> {
   const { Room, RoomEvent, Track } = await loadLiveKit();
   const room = new Room({
-    // 音訊房：自動訂閱即可，參與者數量小（房間協作規模），不需要
-    // selective subscription 的複雜度。
     adaptiveStream: false,
     dynacast: false,
   });
 
   let intentionalDisconnect = false;
+  // 遠端音軌的 <audio> 元素（Grok 03 F3）：attach 才有聲音。統一收在
+  // 這個集合，斷線時全部 detach＋移出 DOM，不留殭屍元素。
+  const attachedAudio = new Set<HTMLMediaElement>();
+
+  const attachAudioTrack = (track: { kind: string; attach: () => HTMLMediaElement }) => {
+    if (track.kind !== "audio") return;
+    const element = track.attach();
+    element.style.display = "none";
+    document.body.appendChild(element);
+    attachedAudio.add(element);
+  };
+  const detachAudioTrack = (track: { kind: string; detach: () => HTMLMediaElement[] }) => {
+    if (track.kind !== "audio") return;
+    for (const element of track.detach()) {
+      attachedAudio.delete(element);
+      element.remove();
+    }
+  };
+  const detachAll = () => {
+    for (const element of attachedAudio) element.remove();
+    attachedAudio.clear();
+  };
 
   const snapshotRoster = () => {
     const list: VoiceParticipantInfo[] = [];
@@ -75,30 +94,45 @@ export async function connectVoice(input: ConnectVoiceInput): Promise<VoiceConne
     input.onRoster(list);
   };
 
-  const rosterEvents = [
+  room.on(RoomEvent.TrackSubscribed, (track) => {
+    attachAudioTrack(track as never);
+    snapshotRoster();
+  });
+  room.on(RoomEvent.TrackUnsubscribed, (track) => {
+    detachAudioTrack(track as never);
+    snapshotRoster();
+  });
+
+  const rosterOnlyEvents = [
     RoomEvent.ParticipantConnected,
     RoomEvent.ParticipantDisconnected,
     RoomEvent.ActiveSpeakersChanged,
     RoomEvent.TrackMuted,
     RoomEvent.TrackUnmuted,
-    RoomEvent.TrackSubscribed,
-    RoomEvent.TrackUnsubscribed,
     RoomEvent.LocalTrackPublished,
     RoomEvent.LocalTrackUnpublished,
   ] as const;
-  for (const event of rosterEvents) {
-    // 單一 snapshot 函式吃所有事件：roster 永遠是全量重建，不做增量
-    // 補丁 — 參與者數量小，正確性比省事件重要。
+  for (const event of rosterOnlyEvents) {
     room.on(event, snapshotRoster);
   }
 
   room.on(RoomEvent.Disconnected, (reason) => {
+    detachAll();
     if (!intentionalDisconnect) input.onDisconnected(String(reason ?? "disconnected"));
   });
 
   await room.connect(input.url, input.token);
-  // 開麥失敗（權限拒絕）要讓呼叫端知道 — 連上了但不能講話不是「已加入」。
-  await room.localParticipant.setMicrophoneEnabled(true);
+  try {
+    // 開麥失敗（權限拒絕）＝沒有加入：把剛建立的連線收乾淨再上拋
+    //（Grok 03 F1 — 不留「連著但 UI 說失敗」的幽靈）。
+    await room.localParticipant.setMicrophoneEnabled(true);
+  } catch (err) {
+    intentionalDisconnect = true;
+    await room.disconnect().catch(() => undefined);
+    room.removeAllListeners();
+    detachAll();
+    throw err;
+  }
   snapshotRoster();
 
   return {
@@ -108,7 +142,10 @@ export async function connectVoice(input: ConnectVoiceInput): Promise<VoiceConne
     },
     disconnect: async () => {
       intentionalDisconnect = true;
-      await room.disconnect();
+      await room.disconnect().catch(() => undefined);
+      // 舊 Room 的 listener 不得再打 roster 回呼（Grok 03 F2）。
+      room.removeAllListeners();
+      detachAll();
     },
   };
 }

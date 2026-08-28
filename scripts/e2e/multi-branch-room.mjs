@@ -463,7 +463,20 @@ try {
       const participantRows = rows.voice_session_participants.length;
       check("開始語音：voice_sessions live 列落地", sessionRows >= 1, `sessions=${sessionRows}`);
       check("開始語音：自己的參與者列落地", participantRows >= 1, `participants=${participantRows}`);
-      check("假 LiveKit 連不上 → 誠實錯誤，不假裝已加入", errShown && (await page.getByTestId("voice-dock").innerText()).includes("失敗"));
+      const dockText = await page.getByTestId("voice-dock").innerText();
+      check(
+        "假 LiveKit 連不上 → 誠實錯誤，不假裝已加入（無離開鈕、join 可重試）",
+        errShown &&
+          dockText.includes("失敗") &&
+          (await page.getByTestId("voice-leave").count()) === 0 &&
+          (await page.getByTestId("voice-join").count()) === 1 &&
+          !(await page.getByTestId("voice-join").isDisabled()),
+        dockText.slice(0, 80),
+      );
+      // 連不上的場不得留下「進行中」殘影：session 已被結束或無活躍參與者
+      const lingering = rows.voice_sessions.filter((row) => row.status === "live").length;
+      const activeParts = rows.voice_session_participants.filter((row) => !row.left_at).length;
+      check("連線失敗不留空場（live 場=0 或無活躍參與者）", lingering === 0 || activeParts === 0, `live=${lingering} active=${activeParts}`);
     }
 
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
