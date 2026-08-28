@@ -970,7 +970,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
               </section>
             )}
           </main>
-          {api.canManage && <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>}
+          {api.canManage && !api.activeWhiteboardId && (
+            <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>
+          )}
           {pushedPane && (
             <div className="project-push-pane" data-testid={`${pushedPane}-pane`}>
               <header className="project-push-head">

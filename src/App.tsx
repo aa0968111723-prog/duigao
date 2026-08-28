@@ -100,6 +100,7 @@ function RoomWorkspaceShell(props: React.ComponentProps<typeof RoomWorkspace>) {
   );
 }
 import { Home } from "./components/Home";
+import { BrandMark } from "./components/BrandMark";
 import { INTAKE_PROFILES, UniversalIntake } from "./components/UniversalIntake";
 import { ShareSheet, type ShareCard, type ShareCustomization, type ShareState } from "./components/ShareSheet";
 import { sharePresentation } from "./lib/sharePresentation";
@@ -2765,13 +2766,17 @@ export function App() {
     return (
       <div className="onboard">
         <div className="onboard-card">
-          <h1 className="onboard-title">文宣討論區</h1>
+          <BrandMark />
+          <span className="onboard-eyebrow">歡迎加入對稿空間</span>
+          <h1 className="onboard-title">一起把作品<br />調整到最好。</h1>
           <p className="onboard-hint">
             {isGuestSession
               ? "夥伴邀你一起看文宣。點畫面上要調整的位置，留下你的意見就好。"
               : "把文宣傳給夥伴，直接在畫面上指出哪裡需要調整。"}
           </p>
+          <label className="onboard-label" htmlFor="display-name">你的顯示名稱</label>
           <input
+            id="display-name"
             className="text-input"
             placeholder="你的名字"
             value={nameInput}
@@ -2783,6 +2788,7 @@ export function App() {
           <button className="btn btn-primary btn-block" onClick={confirmName} disabled={!nameInput.trim()}>
             {isGuestSession ? "進入討論" : "開始"}
           </button>
+          <p className="onboard-privacy"><span aria-hidden="true">✓</span> 不需註冊，只會在這個對稿空間顯示</p>
         </div>
       </div>
     );
