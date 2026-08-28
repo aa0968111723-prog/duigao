@@ -10,6 +10,7 @@ import type {
   CanvaBridgeDesignList,
   CanvaBridgeHealth,
   CanvaBridgeImportResult,
+  CanvaBridgePageList,
   CanvaBridgeStatus,
 } from "../lib/canvaContract";
 
@@ -86,9 +87,28 @@ export async function canvaListDesigns(supabase: SupabaseClient): Promise<CanvaB
   }
 }
 
+export async function canvaListPages(
+  supabase: SupabaseClient,
+  designId: string,
+): Promise<CanvaBridgePageList> {
+  try {
+    const { data, error } = await supabase.functions.invoke("canva-bridge", {
+      body: { action: "list-pages", designId },
+    });
+    if (error) {
+      const body = await readErrorBody<Extract<CanvaBridgePageList, { ok: false }>>(error);
+      if (body) return body;
+      throw error;
+    }
+    return (data ?? { ok: false, code: "CANVA_UNREACHABLE" }) as CanvaBridgePageList;
+  } catch {
+    return { ok: false, code: "CANVA_UNREACHABLE" };
+  }
+}
+
 export async function importCanvaDesign(
   supabase: SupabaseClient,
-  input: { roomId: string; designId: string; branchId?: string; label?: string },
+  input: { roomId: string; designId: string; branchId?: string; label?: string; pageNumber?: number; pageId?: string },
 ): Promise<CanvaBridgeImportResult> {
   try {
     const { data, error } = await supabase.functions.invoke("canva-bridge", {
