@@ -428,6 +428,9 @@ try {
 
         const nodesBefore = await page.locator(".wb-node:not(.wb-node-ai-preview)").count();
         const versionsBefore = (rows.whiteboard_versions ?? []).length;
+        const dbNodesBefore = (rows.whiteboard_nodes ?? []).length;
+        const dbMessagesBefore = (rows.room_discussion_messages ?? []).length;
+        const auditBefore = (rows.collaboration_audit_events ?? []).length;
         await page.getByTestId("whiteboard-more").click();
         await page.getByTestId("wb-open-ai").click();
         await page.waitForSelector('[data-testid="wb-ai-sheet"]', { timeout: 8000 });
@@ -439,19 +442,44 @@ try {
         const previewCount = await page.locator(".wb-node-ai-preview").count();
         check("AI 建議先以預覽出現（不是直接落板）", previewCount === 2, `preview=${previewCount}`);
         check("預覽期間真節點數沒有變", (await page.locator(".wb-node:not(.wb-node-ai-preview)").count()) === nodesBefore);
+        // 紅線的**DB 層證據**：只數 DOM 的話，「預覽時順手 insert」也會全綠
+        check(
+          "預覽沒有寫進 whiteboard_nodes（紅線的 DB 層證據）",
+          (rows.whiteboard_nodes ?? []).length === dbNodesBefore,
+          `${dbNodesBefore}→${(rows.whiteboard_nodes ?? []).length}`,
+        );
+        check(
+          "預覽沒有把留言提案送進討論串",
+          (rows.room_discussion_messages ?? []).length === dbMessagesBefore,
+          `${dbMessagesBefore}→${(rows.room_discussion_messages ?? []).length}`,
+        );
         check("預覽點不到（pointer-events:none）", (await page.evaluate(() => {
           const ghost = document.querySelector(".wb-node-ai-preview");
           return ghost ? getComputedStyle(ghost).pointerEvents : "missing";
         })) === "none");
         const summary = await page.getByTestId("wb-ai-summary").innerText();
         check("預覽有說會發生什麼", summary.includes("會加上"), summary);
-        check("非白板提案（留言）不會混進板上預覽", previewCount === 2);
+        // 原本這條重複斷言同一個 previewCount（沒有新觀察）。真正要驗的是
+        // 「留言提案沒有變成板上的東西」：預覽節點的文字只能來自白板提案。
+        const ghostTexts = await page.evaluate(() =>
+          [...document.querySelectorAll(".wb-node-ai-preview")].map((el) => el.textContent ?? ""),
+        );
+        check(
+          "非白板提案（留言）不會混進板上預覽",
+          ghostTexts.length === 2 && !ghostTexts.some((text) => text.includes("這個之後再說")),
+          JSON.stringify(ghostTexts),
+        );
 
         // 取消：什麼都沒發生
         await page.getByTestId("wb-ai-discard").click();
         await page.waitForFunction(() => !document.querySelector('[data-testid="wb-ai-preview-bar"]'), null, { timeout: 5000 });
         check("取消後預覽整批消失、板上沒有殘留", (await page.locator(".wb-node:not(.wb-node-ai-preview)").count()) === nodesBefore
           && (await page.locator(".wb-node-ai-preview").count()) === 0);
+        check(
+          "取消後 DB 也沒有任何殘留",
+          (rows.whiteboard_nodes ?? []).length === dbNodesBefore,
+          `${dbNodesBefore}→${(rows.whiteboard_nodes ?? []).length}`,
+        );
 
         // 再問一次並套用
         await page.getByTestId("whiteboard-more").click();
@@ -475,6 +503,17 @@ try {
         check("套用前自動存了快照（可以回得去）", versionsAfter > versionsBefore, `${versionsBefore}→${versionsAfter}`);
         const aiSnapshot = (rows.whiteboard_versions ?? []).some((row) => String(row.label ?? "").includes("AI 套用前"));
         check("快照標籤說明它是 AI 套用前存的", aiSnapshot);
+        // 稽核這一腳原本完全沒被端到端覆蓋（章節標題卻寫著「→ 稽核」）
+        const auditAfter = (rows.collaboration_audit_events ?? []).length;
+        check("套用有寫進稽核表（0019）", auditAfter > auditBefore, `${auditBefore}→${auditAfter}`);
+        // 「預覽不持久」的證據：關板再開（元件重掛、房態重讀）之後不得復活。
+        // 不用 page.reload —— 這個 e2e 的房是本機建的，重整會回首頁，
+        // 那樣驗到的是「回首頁沒有預覽」而不是「預覽不持久」。
+        await page.locator(".wb-focus-top .project-back-button").click();
+        await page.waitForSelector(".wb-list", { timeout: 10000 });
+        await page.locator(".wb-card").first().click();
+        await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+        check("關板再開預覽沒有復活（預覽不持久）", (await page.locator(".wb-node-ai-preview").count()) === 0);
         await page.unroute("**/functions/v1/room-ai-context");
       }
 

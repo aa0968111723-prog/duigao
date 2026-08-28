@@ -104,9 +104,21 @@ export type WhiteboardApi = {
    * 問 AI（帶白板上下文）。回傳**預覽**，不寫任何東西 —— 未提供＝不顯示
    * AI 入口（本機房沒有 AI）。
    */
-  onAskBoardAi?: (question: string, context: { nodes: WhiteboardNode[]; selectedIds: string[] }) => Promise<BoardAiPreview>;
+  onAskBoardAi?: (
+    question: string,
+    context: { nodes: WhiteboardNode[]; selectedIds: string[]; centerWorld: { x: number; y: number } },
+  ) => Promise<BoardAiPreview>;
   /** 使用者按下套用：呼叫端負責快照、寫入、稽核。回傳實際結果。 */
-  onApplyBoardAi?: (plan: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] }, preview: BoardAiPreview) => Promise<{ applied: number; snapshotTaken: boolean }>;
+  onApplyBoardAi?: (
+    plan: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] },
+    preview: BoardAiPreview,
+  ) => Promise<{ applied: number; snapshotTaken: boolean; queued?: boolean; auditRecorded?: boolean }>;
+  /**
+   * 上層（房間層 AI 面板）暫存進來的預覽（F1）：房間 AI 的
+   * add_whiteboard_node 不再直接落板，改成開板 ＋ 交給這裡預覽。
+   */
+  stagedAiPreview?: BoardAiPreview | null;
+  onConsumeStagedAiPreview?: () => void;
 };
 
 type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "versions" | "ai" | null;
@@ -348,6 +360,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [aiQuestion, setAiQuestion] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiPreview, setAiPreview] = useState<BoardAiPreview | null>(null);
+  /** 套用進行中（F4）：setState 是非同步的，連點兩次會寫兩批。 */
+  const aiApplyingRef = useRef(false);
+  /** 提問序號：關掉 sheet 或再問一次都會讓在途的回應作廢。 */
+  const aiAskSeqRef = useRef(0);
   const [frameRenaming, setFrameRenaming] = useState(false);
   const [frameTitleDraft, setFrameTitleDraft] = useState("");
   const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
@@ -458,6 +474,28 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     });
     return () => cancelAnimationFrame(raf);
   }, [api.railVisible]);
+
+  // 房間層 AI 暫存進來的預覽（F1）：接手後立刻通知上層清掉，避免重複掛。
+  useEffect(() => {
+    if (!api.stagedAiPreview) return;
+    setAiPreview(api.stagedAiPreview);
+    api.onConsumeStagedAiPreview?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api.stagedAiPreview]);
+
+  // F4：切板時清掉**不屬於這塊板**的預覽 —— 預覽節點帶的是產生當時那塊板
+  // 的 whiteboardId，換板後按套用會把節點寫進舊板、快照卻存的是新板。
+  //
+  // 不能無條件清空：房間層 AI 是「開板 ＋ 暫存預覽」同一次 commit 完成的，
+  // 無條件清會把剛送進來的預覽當場抹掉（e2e 抓到）。
+  useEffect(() => {
+    aiApplyingRef.current = false;
+    setAiPreview((current) => {
+      if (!current) return current;
+      const belongs = current.nodes.every((node) => node.whiteboardId === board?.id);
+      return belongs ? current : null;
+    });
+  }, [board?.id]);
 
   // camera memory：開板還原、關板/切板時存（cameraRef 取最新值）
   const cameraRef = useRef(camera);
@@ -1305,10 +1343,16 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 if (!api.onAskBoardAi) return;
                 setAiBusy(true);
                 try {
+                  const askSeq = (aiAskSeqRef.current += 1);
                   const preview = await api.onAskBoardAi(aiQuestion.trim(), {
                     nodes: liveNodes.filter((node) => !node.deletedAt),
                     selectedIds: selected,
+                    // F3：預覽要出現在**使用者正在看的地方**，不是固定座標
+                    centerWorld: screenToWorld(camera, viewport.width / 2, viewport.height / 2),
                   });
+                  // 使用者在等待期間按了取消／關掉 sheet：這批結果作廢
+                  // （不然預覽會自己冒出來 — 自審抓到）
+                  if (askSeq !== aiAskSeqRef.current) return;
                   setSheet(null);
                   if (!preview.nodes.length) {
                     showNotice("AI 這次沒有可以放上白板的建議");
@@ -1323,7 +1367,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 }
               }}>{aiBusy ? "想一下…" : "看看建議"}</button>
             </div>
-            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+            <button type="button" className="project-sheet-close" onClick={() => { aiAskSeqRef.current += 1; setSheet(null); }}>取消</button>
           </section>
         </div>
       )}
@@ -1628,17 +1672,29 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           <span className="wb-ai-summary" data-testid="wb-ai-summary">{describePreview(aiPreview)}</span>
           <button type="button" className="project-save-button" data-testid="wb-ai-apply" disabled={!canEdit || aiBusy || !aiPreview.nodes.length} onClick={async () => {
             if (!api.onApplyBoardAi) return;
+            if (aiApplyingRef.current) return; // F4：連點兩次會寫兩批
+            aiApplyingRef.current = true;
             setAiBusy(true);
             try {
               const plan = planApply(aiPreview, nextOpId);
               const result = await api.onApplyBoardAi(plan, aiPreview);
-              showNotice(result.snapshotTaken
-                ? `已套用 ${result.applied} 項（套用前已存快照）`
-                : `已套用 ${result.applied} 項`);
+              // 進 undo 疊（F2）：AI 放上來的東西必須一鍵撤得掉 —— 尤其在
+              // 快照沒存成功的時候，↺ 是使用者唯一的退路。
+              for (const node of plan.nodes) record(nodeCreateDraft(nextOpId(), node));
+              // 只說真話：離線是「排隊中」不是「已完成」；快照／稽核沒成功
+              // 都要講出來（使用者事後才發現查無此事最傷）。
+              const notes: string[] = [];
+              if (!result.snapshotTaken) notes.push("這次沒能存快照");
+              if (result.auditRecorded === false) notes.push("稽核紀錄沒寫成");
+              const head = result.queued
+                ? `已套用 ${result.applied} 項，離線中會在回網後送出`
+                : `已套用 ${result.applied} 項`;
+              showNotice(notes.length ? `${head}；${notes.join("、")}，按 ↺ 可以撤回` : `${head}（按 ↺ 可以撤回）`);
               setAiPreview(null);
             } catch {
               showNotice("套用沒有完成，白板維持原狀");
             } finally {
+              aiApplyingRef.current = false;
               setAiBusy(false);
             }
           }}>套用</button>

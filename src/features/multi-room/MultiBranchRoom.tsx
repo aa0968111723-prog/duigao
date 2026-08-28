@@ -121,8 +121,14 @@ export type MultiBranchRoomApi = {
   onRestoreVersion?: (snapshot: import("../whiteboard/versions").BoardSnapshot) => Promise<{ applied: number; queued: boolean }>;
   onAskBoardAi?: (
     question: string,
-    context: { nodes: import("../collaboration/types").WhiteboardNode[]; selectedIds: string[] },
+    context: {
+      nodes: import("../collaboration/types").WhiteboardNode[];
+      selectedIds: string[];
+      centerWorld: { x: number; y: number };
+    },
   ) => Promise<import("../whiteboard/aiPreview").BoardAiPreview>;
+  stagedAiPreview?: import("../whiteboard/aiPreview").BoardAiPreview | null;
+  onConsumeStagedAiPreview?: () => void;
   onApplyBoardAi?: (
     plan: { nodes: import("../collaboration/types").WhiteboardNode[]; edges: import("../collaboration/types").WhiteboardEdge[] },
     preview: import("../whiteboard/aiPreview").BoardAiPreview,
@@ -1040,6 +1046,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onLoadVersion: api.onLoadVersion,
                     onRestoreVersion: api.onRestoreVersion,
                     onAskBoardAi: api.onAskBoardAi,
+                    stagedAiPreview: api.stagedAiPreview,
+                    onConsumeStagedAiPreview: api.onConsumeStagedAiPreview,
                     onApplyBoardAi: api.onApplyBoardAi,
                     isMobile,
                     focusNodeId: api.focusNodeId,

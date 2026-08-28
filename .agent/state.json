@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T16:51:09.000Z",
+  "generatedAt": "2026-08-28T17:03:35.000Z",
   "git": {
     "branch": "agent/wb06-ai-assist",
-    "sha": "22681bca72fafabc504169d37661f06e36425d39",
+    "sha": "2886c5a4ad1d3ad0f089b8d3d94afcc2dca4d52b",
     "mainSha": "361bec04be944d36cb1c6a3e9e62572caecc54c7",
     "dirty": true
   },

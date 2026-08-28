@@ -61,9 +61,12 @@ export function describePreview(preview: BoardAiPreview): string {
   for (const node of preview.nodes) {
     kinds.set(node.nodeType, (kinds.get(node.nodeType) ?? 0) + 1);
   }
+  // 型別名要說人話：吐英文 enum 給使用者看等於沒說（自審）
   const label = (type: string) =>
     type === "text" ? "便利貼" : type === "mindmap" ? "心智圖" : type === "flow" ? "流程" :
-    type === "room_content" ? "內容卡" : type === "decision" ? "決策" : type;
+    type === "room_content" ? "內容卡" : type === "decision" ? "決策" : type === "poll" ? "投票" :
+    type === "image" ? "圖片" : type === "link" ? "連結" : type === "group" ? "群組" :
+    type === "ai_result" ? "AI 卡" : type === "freehand" ? "手寫" : "項目";
   const parts = [...kinds.entries()].map(([type, count]) => `${count} 個${label(type)}`);
   if (preview.edges.length) parts.push(`${preview.edges.length} 條連線`);
   return `會加上 ${parts.join("、")}`;
