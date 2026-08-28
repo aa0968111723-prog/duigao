@@ -94,6 +94,8 @@ export type MultiBranchRoomApi = {
   online: number;
   editors: PresenceEditor[];
   onShare: () => void;
+  /** 改房間名字。刻意與 setTitle 分開：setTitle 在有 activeBranchId 時改的是分支名。 */
+  onRenameRoom: (title: string) => void;
   onOpenAi: (assetId?: string) => void;
   onGoHome: () => void;
   /**
@@ -750,7 +752,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       <header className="project-room-header">
         <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="回到房間列表">●</button>
         {inShellBranch ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
-        <div className="project-room-heading"><span className="project-kicker">活動房</span><h1>{api.room.title}</h1></div>
+        <div className="project-room-heading"><span className="project-kicker">活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房名稱" /> : <h1>{api.room.title}</h1>}</div>
         <div className="project-head-actions">
           <button type="button" className="project-ai-button" data-testid="room-ai-launcher" onClick={() => api.onOpenAi()}>✦ AI</button>
           <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>

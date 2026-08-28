@@ -2832,6 +2832,10 @@ export function App() {
         online: cloud.online || peerCount,
         editors: boardEditors,
         onShare: openShare,
+        onRenameRoom: (title: string) => {
+          updateRoom((r) => ({ ...r, title }));
+          cloudRef.current.writes.setTitle(title);
+        },
         onOpenAi: openAi,
         onGoHome: () => {
           clearUndo();
