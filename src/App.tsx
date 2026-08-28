@@ -542,7 +542,10 @@ export function App() {
     }
     let cancelled = false;
     const branchId = activeBranchId ?? undefined;
-    void listIntelligentAssets(supabase, room.id, {
+    // 雲端查詢用雲端 id：綁定當下 room.id 還是本地短碼，送進 uuid 欄位
+    // 會被 PostgREST 以 22P02 擋掉（正式站每次建房都噴一次 400）。
+    const cloudRoomId = cloud.boundRoomId;
+    void listIntelligentAssets(supabase, cloudRoomId, {
       branchId,
       branches: room.branches,
       versions: room.versions,
@@ -571,7 +574,7 @@ export function App() {
           console.warn("[asset-intelligence] unavailable:", error instanceof Error ? error.message : error);
         }
       });
-    const unsubscribe = subscribeAssetAnalysis(supabase, room.id, ({ assetId, status, progress }) => {
+    const unsubscribe = subscribeAssetAnalysis(supabase, cloudRoomId, ({ assetId, status, progress }) => {
       setAssetIntelligence((current) => {
         if (!current) return current;
         return {
