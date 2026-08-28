@@ -22,7 +22,8 @@
     "test:multi-branch-e2e": "node scripts/e2e/multi-branch-room.mjs",
     "test:collaboration-e2e": "node scripts/e2e/collaboration-workspace.mjs",
     "test:migrations": "node scripts/e2e/migrations.mjs",
-    "test:design-intelligence": "tsx --test scripts/tests/design-intelligence-schema.test.ts",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
+    "test:design-intelligence": "tsc -p tsconfig.scripts.json --noEmit && tsx --test scripts/tests/design-intelligence-schema.test.ts",
     "test:agent": "node --test scripts/tests/agent-layer.test.mjs",
     "test:edge-cors": "node --test scripts/tests/edge-cors.test.mjs",
     "agent:context": "node scripts/agent-context.mjs",
@@ -38,6 +39,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",

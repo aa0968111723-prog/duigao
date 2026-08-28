@@ -1500,6 +1500,104 @@ try {
   ok("重跑 0020 後 RLS / policy 形狀不變（true/true/0）", canvaBefore === canvaShape() && canvaBefore === "true/true/0", `${canvaBefore} → ${canvaShape()}`);
   ok("重跑後成員依然讀不到 token 表", as(owner, `select count(*) from public.canva_connections;`).failed);
 
+  section("0027：設計知識庫（兩段式授權）");
+  psqlFile(join(MIGRATIONS, "0027_design_knowledge.sql"));
+
+  // (a) seed：通用知識進得去，而且是 approved
+  ok(
+    "seed 的通用設計知識存在且為 approved",
+    psql(`select count(*) from public.design_knowledge where project_specific is null and status = 'approved';`).out === "7",
+    psql(`select count(*) from public.design_knowledge where project_specific is null;`).out,
+  );
+
+  // (b) 讀：通用知識任何登入者都讀得到（設計原則每個房間都需要）
+  ok("成員讀得到通用知識", Number(as(owner, `select count(*) from public.design_knowledge where project_specific is null;`).out) >= 7);
+  ok("非本房成員也讀得到通用知識", Number(as(reviewer, `select count(*) from public.design_knowledge where project_specific is null;`).out) >= 7);
+  ok("anon 讀不到任何知識", asAnon(`select count(*) from public.design_knowledge;`).out !== "7");
+
+  // (c) 寫：**通用知識沒有 client 政策** — 任何登入者都寫不進去。
+  // 這是本表最重要的一條：讓任何人寫全域知識＝讓任何人污染所有房間的 AI 判斷依據。
+  ok(
+    "登入者寫不進通用知識（project_specific is null）",
+    as(owner, `insert into public.design_knowledge (category, title, summary, rules, content_hash, created_by) values ('color', '我的規則', '摘要', array['規則'], 'hash-global-attack', '${owner}'::uuid);`).failed,
+  );
+
+  // (d) 專案規範：owner 寫得進、reviewer 寫不進（沿用 can_manage_media）
+  ok(
+    "owner 寫得進自己房間的專案規範",
+    !as(owner, `insert into public.design_knowledge (category, title, summary, rules, project_specific, created_by) values ('brand-rules', '品牌主色', '摘要', array['主色 #6157ef'], '${capRoom}'::uuid, '${owner}'::uuid);`).failed,
+  );
+  ok(
+    "reviewer 寫不進專案規範（can_manage_media 擋下）",
+    as(reviewer, `insert into public.design_knowledge (category, title, summary, rules, project_specific, created_by) values ('brand-rules', 'reviewer 想寫', '摘要', array['規則'], '${capRoom}'::uuid, '${reviewer}'::uuid);`).failed,
+  );
+  ok("房內成員讀得到專案規範", as(reviewer, `select count(*) from public.design_knowledge where project_specific = '${capRoom}'::uuid;`).out === "1");
+
+  // (e) created_by 必須是自己 — 不能冒名寫入
+  ok(
+    "不能以別人的身分寫專案規範",
+    as(owner, `insert into public.design_knowledge (category, title, summary, rules, project_specific, created_by) values ('brand-rules', '冒名', '摘要', array['規則'], '${capRoom}'::uuid, '${reviewer}'::uuid);`).failed,
+  );
+
+  // (f) 機器研究的結果不得自稱 approved／project（DB 層的第二道，client 驗證擋不住直接打 REST 的）
+  ok(
+    "machine-researched 不得自稱 approved（CHECK 擋下）",
+    as(owner, `insert into public.design_knowledge (category, title, summary, rules, project_specific, created_by, status, trust_level) values ('color', '搜來的', '摘要', array['規則'], '${capRoom}'::uuid, '${owner}'::uuid, 'machine-researched', 'approved');`).failed,
+  );
+  ok(
+    "trust_level='project' 必須真的屬於某個專案",
+    psql(`insert into public.design_knowledge (category, title, summary, rules, trust_level) values ('color', '無主專案規範', '摘要', array['規則'], 'project');`, { expectError: true }).failed,
+  );
+
+  // (g) rules 是核心：空陣列與空字串規則都不算知識
+  ok(
+    "沒有規則的條目寫不進去",
+    psql(`insert into public.design_knowledge (category, title, summary, rules) values ('color', '空規則', '摘要', array[]::text[]);`, { expectError: true }).failed,
+  );
+  ok(
+    "規則裡有空字串也寫不進去",
+    psql(`insert into public.design_knowledge (category, title, summary, rules) values ('color', '空字串規則', '摘要', array['', '有內容']);`, { expectError: true }).failed,
+  );
+
+  // (h) content_hash 由 trigger 算，呼叫端提供的值一律被覆寫。
+  // 否則寫入端可以宣稱「我跟那條已審查的知識內容相同」來繞過判重。
+  const forgedHash = "0000forged0000";
+  ok(
+    "呼叫端提供的 content_hash 被覆寫",
+    !as(owner, `insert into public.design_knowledge (category, title, summary, rules, content_hash, project_specific, created_by) values ('brand-rules', '想偽造雜湊', '摘要', array['規則'], '${forgedHash}', '${capRoom}'::uuid, '${owner}'::uuid);`).failed &&
+      psql(`select count(*) from public.design_knowledge where content_hash = '${forgedHash}';`).out === "0",
+  );
+
+  // (i) 判重：同範圍、同 category、**同內容**只能有一列（內容決定雜湊）
+  ok(
+    "同一專案同內容不重複收錄",
+    as(owner, `insert into public.design_knowledge (category, title, summary, rules, project_specific, created_by) values ('brand-rules', '品牌主色', '摘要', array['主色 #6157ef'], '${capRoom}'::uuid, '${owner}'::uuid);`).failed,
+  );
+  ok(
+    "同一專案不同內容可以並存",
+    !as(owner, `insert into public.design_knowledge (category, title, summary, rules, project_specific, created_by) values ('brand-rules', '品牌副色', '摘要', array['副色 #ff9f1c'], '${capRoom}'::uuid, '${owner}'::uuid);`).failed,
+  );
+
+  // (j) version 只進不退（touch trigger）
+  const knId = psql(`select id from public.design_knowledge where title = '品牌主色';`).out;
+  ok(
+    "更新後 version 自動前進",
+    !as(owner, `update public.design_knowledge set summary = '改過的摘要' where id = '${knId}'::uuid;`).failed &&
+      psql(`select version from public.design_knowledge where id = '${knId}'::uuid;`).out === "2",
+  );
+  ok(
+    "version 倒退被 trigger 擋下",
+    as(owner, `update public.design_knowledge set summary = 'x', version = 1 where id = '${knId}'::uuid;`).failed,
+  );
+
+  // (k) 冪等：重跑不炸、seed 不重複、policy 形狀不變
+  const knShape = () => psql(`select
+    (select count(*) from pg_policies where tablename = 'design_knowledge') || '/' ||
+    (select count(*) from public.design_knowledge where project_specific is null);`).out;
+  const knBefore = knShape();
+  psqlFile(join(MIGRATIONS, "0027_design_knowledge.sql"));
+  ok("重跑 0027 後 policy 數與 seed 筆數不變", knBefore === knShape(), `${knBefore} → ${knShape()}`);
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

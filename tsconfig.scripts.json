@@ -1,0 +1,18 @@
+{
+  // scripts/ 不在主 tsconfig 的 include 裡（只有 "src"），所以測試檔從來沒被
+  // 型別檢查過 —— 型別錯的斷言可以照樣「全綠」（白板工作線實際踩過：一個
+  // 傳 0 給 Map<string,number>、少一個參數的測試，全程是綠的）。
+  //
+  // 這份設定刻意只涵蓋**本分支擁有的檔案**。把整個 scripts/tests 打開會拉出
+  // 其他工作線既有的型別錯誤（multi-branch.test.ts、collaboration.test.ts），
+  // 那些不歸這條分支改 —— 已寫進 handoff，由檔案的所有者處理。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": [
+    "scripts/tests/design-intelligence-schema.test.ts",
+    "src/features/design-intelligence"
+  ]
+}

@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T22:40:28.000Z",
+  "generatedAt": "2026-08-28T23:22:50.000Z",
   "git": {
     "branch": "agent/design-intelligence-perplexity",
-    "sha": "2a17b7b133ae89e34f7d39a0a0a2f551b0b35f0f",
+    "sha": "a80856b413c02727dd3d2946996ce9818a490b5a",
     "mainSha": "2a17b7b133ae89e34f7d39a0a0a2f551b0b35f0f",
-    "dirty": true
+    "dirty": false
   },
   "project": {
     "name": "duigao",
@@ -33,8 +33,9 @@
       "Deployment config"
     ],
     "openPrs": {
-      "status": "available",
-      "items": []
+      "status": "unknown",
+      "items": [],
+      "reason": "gh returned invalid JSON"
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -1148,6 +1149,10 @@
       "code": "FEATURE_CLAIM_MISMATCH",
       "feature": "video-transcode",
       "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
+    },
+    {
+      "code": "OPEN_PRS_UNKNOWN",
+      "message": "gh returned invalid JSON"
     }
   ],
   "releaseReadiness": {

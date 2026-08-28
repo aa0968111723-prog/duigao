@@ -22,6 +22,7 @@ import {
   SEVERITIES,
   SOURCE_TYPES,
   TRUST_LEVELS,
+  type ColorRole,
   type ColorToken,
   type DesignAlternative,
   type Diagnostic,
@@ -137,13 +138,23 @@ export function parseColorTokens(raw: unknown): ParseResult<ColorToken[]> {
   const list = Array.isArray(raw) ? raw : [];
   const byRole = new Map<string, ColorToken>();
 
-  // 先掃一遍取得背景色，對比才有基準
-  let background: string | null = null;
+  // 先掃一遍取得**所有**可能的底色。
+  //
+  // 只拿 background 當基準是錯的：對抗審查給出的反例是
+  // background #000 + surface #fff + text #aaaaaa —— 對 background 是
+  // 9.04（AAA），但那個字實際上是落在 surface #fff 上，真值 2.32（不及格）。
+  // 只看 background 會把不及格的配色標成 AAA，正好是這個檔案要防的事。
+  //
+  // 這一層不知道每個字實際疊在哪個面上（那要版面資訊），所以取**最差情況**：
+  // 對所有底色算一遍，回報最低的那個，並記錄是對誰算的。寧可誤報也不漏報。
+  const surfaces: Array<{ role: ColorRole; hex: string }> = [];
   for (const item of list) {
     const record = asRecord(item);
-    if (record.role === "background") {
-      const hex = text(record.hex, 9);
-      if (hex && HEX_RE.test(hex)) background = hex;
+    const role = oneOf(record.role, COLOR_ROLES);
+    if (role !== "background" && role !== "surface") continue;
+    const hex = text(record.hex, 9);
+    if (hex && HEX_RE.test(hex) && !surfaces.some((s) => s.role === role)) {
+      surfaces.push({ role, hex });
     }
   }
 
@@ -164,16 +175,22 @@ export function parseColorTokens(raw: unknown): ParseResult<ColorToken[]> {
       rejected.push(`同一個角色出現兩次，保留第一個：${role}`);
       continue;
     }
-    const needsContrast = CONTRAST_REQUIRED.has(role) && background !== null;
-    const ratio = needsContrast ? contrastRatio(hex, background!) : null;
+    let worst: { role: ColorRole; ratio: number } | null = null;
+    if (CONTRAST_REQUIRED.has(role)) {
+      for (const surface of surfaces) {
+        const ratio = contrastRatio(hex, surface.hex);
+        if (ratio === null) continue;
+        if (!worst || ratio < worst.ratio) worst = { role: surface.role, ratio };
+      }
+    }
     byRole.set(role, {
       role,
       hex: hex.toLowerCase(),
       rgb,
       cssToken: text(record.cssToken, 60) ?? `--di-${role}`,
-      contrastAgainst: needsContrast ? "background" : undefined,
-      contrastRatio: ratio,
-      wcag: wcagLevel(ratio),
+      contrastAgainst: worst?.role,
+      contrastRatio: worst?.ratio ?? null,
+      wcag: wcagLevel(worst?.ratio ?? null),
     });
   }
   const value = [...byRole.values()];
@@ -297,7 +314,32 @@ export function parseAlternatives(raw: unknown, max = 3): ParseResult<DesignAlte
  * 擋掉的東西（任務書第九節）：`file://`、`localhost`、內網網段、
  * 雲端 metadata endpoint。這是 SSRF 與內網探測的第一道防線，而且**在型別
  * 邊界就擋**，不是等到發請求才擋。
+ *
+ * 採**預設拒絕**：
+ *  - 任何 IP 字面值一律拒絕（v4 與 v6 都是）。合法的引用來源不會用裸 IP，
+ *    而逐一列舉內網網段永遠列不完 —— 對抗審查實測繞過的就是列舉法：
+ *    `[::ffff:169.254.169.254]`（IPv4-mapped IPv6）、`https://0/`
+ *    （URL parser 正規化成 `0.0.0.0`）、`[fe80::1]`、`[::]`。
+ *  - 主機名尾端的點會先剝掉：`metadata.google.internal.` 與
+ *    `localhost.` 在 DNS 上等價於沒有尾點的版本，但字串比對不等價。
+ *
+ * **這個函式不是出站許可**。它只保證「這個字串長得像公開網址」。真正發請求
+ * 的一端必須：不跟隨跨主機重新導向、或在每一跳重新驗證 —— 因為 3xx 可以從
+ * 一個合法網域跳進 metadata endpoint，而本層看不到那一跳。
  */
+const BLOCKED_HOST_SUFFIXES = [
+  ".localhost", ".local", ".internal", ".lan", ".home.arpa", ".test", ".invalid", ".onion",
+];
+const BLOCKED_HOSTS = new Set([
+  "localhost", "metadata.google.internal", "metadata", "instance-data",
+]);
+
+/** 主機名是不是 IP 字面值（IPv4 點分四段或方括號 IPv6）。 */
+function isIpLiteral(host: string): boolean {
+  if (host.startsWith("[")) return true; // URL parser 只有 IPv6 會加方括號
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+}
+
 export function isSafePublicUrl(raw: string): boolean {
   let url: URL;
   try {
@@ -306,15 +348,14 @@ export function isSafePublicUrl(raw: string): boolean {
     return false;
   }
   if (url.protocol !== "https:") return false;
-  const host = url.hostname.toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return false;
-  if (host === "metadata.google.internal" || host === "169.254.169.254") return false;
-  // IPv4 私有／迴環／link-local
-  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return false;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
-  if (/^169\.254\./.test(host)) return false;
-  // IPv6 迴環與唯一本地
-  if (host === "::1" || host.startsWith("[::1") || /^\[?f[cd]/i.test(host)) return false;
+  // 尾端的點在 DNS 上無意義，但會讓字串比對失效 → 先正規化
+  const host = url.hostname.toLowerCase().replace(/\.+$/, "");
+  if (!host) return false;
+  if (isIpLiteral(host)) return false;
+  if (BLOCKED_HOSTS.has(host)) return false;
+  if (BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return false;
+  // 沒有點的單標籤主機名（`https://intranet/`）只可能是內網
+  if (!host.includes(".")) return false;
   return true;
 }
 
@@ -363,7 +404,24 @@ export function parseResearchSources(raw: unknown, max = 12): ParseResult<Resear
  * 這裡把它變成硬性檢查：`status === "machine-researched"` 時
  * trustLevel 最高只能到 `machine`。
  */
-export function parseKnowledgeEntry(raw: unknown): ParseResult<KnowledgeEntry | null> {
+/**
+ * 知識條目的來源。決定這條知識**最高**能被信任到什麼程度。
+ *
+ * 這是刻意的必填語意（預設值取最嚴格的 "machine"）：呼叫端忘了傳，
+ * 拿到的是最不被信任的那一檔，而不是最寬鬆的。
+ */
+export type KnowledgeProvenance = "machine" | "human-review" | "project";
+
+const TRUST_CEILING: Record<KnowledgeProvenance, KnowledgeEntry["trustLevel"]> = {
+  machine: "machine",
+  "human-review": "approved",
+  project: "project",
+};
+
+export function parseKnowledgeEntry(
+  raw: unknown,
+  provenance: KnowledgeProvenance = "machine",
+): ParseResult<KnowledgeEntry | null> {
   const rejected: string[] = [];
   const record = asRecord(raw);
   const title = text(record.title, 160);
@@ -378,11 +436,24 @@ export function parseKnowledgeEntry(raw: unknown): ParseResult<KnowledgeEntry | 
     rejected.push(`知識條目沒有任何可執行規則：${title}`);
     return { ok: false, value: null, rejected };
   }
-  const status = oneOf(record.status, KNOWLEDGE_STATUSES) ?? "draft";
+  // 信任等級由**來源**決定，不由 payload 自己宣稱。
+  //
+  // 舊版只在 `status === "machine-researched"` 時降級，但 status 本身就來自
+  // 同一份不可信輸入 —— 搜尋結果只要回 `status: "approved"` 就整條繞過。
+  // 現在上限由呼叫端傳入的 provenance 決定：研究層一律傳 "machine"，
+  // 人工審查介面傳 "human-review"，migration/專案規範傳 "project"。
+  const ceiling = TRUST_CEILING[provenance];
+  let status = oneOf(record.status, KNOWLEDGE_STATUSES) ?? "draft";
   let trustLevel = oneOf(record.trustLevel, TRUST_LEVELS) ?? "unverified";
-  if (status === "machine-researched" && (trustLevel === "approved" || trustLevel === "project")) {
-    rejected.push(`機器研究的結果不得自稱 ${trustLevel}，已降為 machine：${title}`);
-    trustLevel = "machine";
+  if (TRUST_ORDER[trustLevel] < TRUST_ORDER[ceiling]) {
+    rejected.push(`${provenance} 來源不得自稱 ${trustLevel}，已降為 ${ceiling}：${title}`);
+    trustLevel = ceiling;
+  }
+  if (provenance === "machine" && status !== "draft") {
+    if (status !== "machine-researched") {
+      rejected.push(`機器來源不得自稱 ${status}，已改為 machine-researched：${title}`);
+    }
+    status = "machine-researched";
   }
   const sourceUrl = text(record.sourceUrl, 2048);
   if (sourceUrl && !isSafePublicUrl(sourceUrl)) {
@@ -409,25 +480,47 @@ export function parseKnowledgeEntry(raw: unknown): ParseResult<KnowledgeEntry | 
       trustLevel,
       projectSpecific: text(record.projectSpecific, 64),
       status,
-      contentHash: text(record.contentHash, 128) ?? contentHashOf(title, summary, rules),
+      // 一律重算：輸入給的雜湊沒有任何可信度，接受它等於讓呼叫端宣告
+      // 「我跟那條已審查的知識內容相同」而繞過衝突偵測。
+      contentHash: contentHashOf(title, summary, rules),
     },
   };
 }
 
 /**
- * 內容雜湊（FNV-1a 32-bit，十六進位）。
+ * 內容的正規化編碼。
  *
- * 用途是偵測「同一份知識被重複匯入」與「內容被悄悄改掉」，不是密碼學用途 ——
- * 所以不用 crypto.subtle（那是非同步的，會讓純函式層被迫變 async）。
+ * **長度前綴**，不用分隔字元：`5:title6:summary...`。理由是分隔字元一律可以
+ * 被嵌進內容裡構造出「不同內容、相同編碼」—— 舊版用 NUL 當分隔，
+ * 標題裡塞一個 NUL 就能偽造出相同的雜湊輸入。長度前綴沒有這個面。
  */
-export function contentHashOf(title: string, summary: string, rules: string[]): string {
-  const input = `${title} ${summary} ${rules.join(" ")}`;
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
+function canonicalContent(title: string, summary: string, rules: readonly string[]): string {
+  const part = (value: string) => `${value.length}:${value}`;
+  return [part(title), part(summary), part(String(rules.length)), ...rules.map(part)].join("");
+}
+
+/**
+ * 內容雜湊（FNV-1a，兩組不同起始值串成 64 bit，十六進位）。
+ *
+ * 用途是偵測「同一份知識被重複匯入」與「內容被悄悄改掉」，**不是密碼學用途**，
+ * 也不是資料庫的判重依據 —— DB 的 `content_hash` 由 trigger 自己算
+ * （見 `0027_design_knowledge.sql`），呼叫端給什麼都會被覆蓋。兩者刻意分開：
+ * 這一個是本地變更偵測，那一個是唯一索引的權威來源，不互相比較。
+ *
+ * 不用 `crypto.subtle`：那是非同步的，會逼整個純函式層變 async。
+ * 32-bit 在幾萬條知識下生日碰撞已經不可忽略，所以串到 64-bit。
+ */
+export function contentHashOf(title: string, summary: string, rules: readonly string[]): string {
+  const input = canonicalContent(title, summary, rules);
+  const fnv = (seed: number) => {
+    let hash = seed;
+    for (let i = 0; i < input.length; i += 1) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+  };
+  return fnv(0x811c9dc5) + fnv(0x7fffffff);
 }
 
 // ---- 知識優先序 -----------------------------------------------------------
