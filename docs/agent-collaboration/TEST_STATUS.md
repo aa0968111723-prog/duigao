@@ -39,3 +39,9 @@
 | test:agent / asset-intelligence / review-viewer | 16/16、15/15、27/27 |
 | agent:gate | PASS |
 | test:video | 157/158 — check 23 本機環境性（pre-fix 基底 384389a 同簽名失敗，A/B 已做），CI 為準 |
+
+## 白板長任務（2026-08-28）
+
+基準 main@1d30c67 全綠（build/browser/migrations/agent-read-layer 四
+required checks）。白板重構的新增測試矩陣見
+rounds/wb00/test-plan.md；WB00 為純文件 PR，不新增測試。

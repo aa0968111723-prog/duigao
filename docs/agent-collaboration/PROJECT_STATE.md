@@ -24,6 +24,22 @@
 同時 loadEdgeHandler 補上 `../_shared/*.ts` 支援 — 此前 room-ai-context 與
 asset-analysis **在 harness 裡根本載不起來**，等於從未被測試執行過。
 
+## 白板長任務（2026-08-28 新任務書，進行中）
+
+分支：`agent/canonical-whiteboard-mobile-tablet`（獨立 worktree，自
+main@1d30c67）。**規則變更：Claude 只建 PR、不自行合併、不自動部署
+production。**
+
+- PR-WB00（本 PR）：稽核＋架構決策。交付：WHITEBOARD_AUDIT.md、
+  ADR-013（保留自研引擎＋分層強化，xyflow 後備＋量化重評檢查點）、
+  ADR-014（entity-level OCC＋append-only operations）、
+  rounds/wb00/{wireflow,migration-plan,test-plan,parallel-agents-conflict-report}。
+  不宣稱任何功能完成。
+- 序列：WB01 canonical schema（0021–0024）→ WB02 手機 Focus Mode →
+  WB03 雙向連結 → WB04 Realtime/presence → WB05 平板/Pencil → WB06 AI。
+- 平行衝突：open PR #71 動 MultiBranchRoom/RoomDiscussion/App.tsx，
+  與 WB02 重疊 — 開工前重查（rounds/wb00/parallel-agents-conflict-report.md）。
+
 ## 已合併（時序）
 
 #42 CI 紅燈修復 → #43 PR-00 計畫 → #44 AI Apply（第三 agent）→ #45 keyed
