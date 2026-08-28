@@ -47,8 +47,18 @@ export function useDiscussionOutbox(args: {
     setEntries((current) => {
       const entry = current[message.id];
       if (!entry) return current;
-      // 成功 ≠ 快照已包含：轉 acked 留著當 ghost，等 serverIds 對帳。
-      return { ...current, [message.id]: { message: stamped, state: ok ? "acked" : "failed" } };
+      if (ok) {
+        // 成功 ≠ 快照已包含：轉 acked 留著當 ghost，等 serverIds 對帳。
+        return { ...current, [message.id]: { message: stamped, state: "acked" } };
+      }
+      // 死區 fetch 懸掛→abort 落地時網路常已恢復（PR-08b）：onLine 且
+      // 這輪還沒自動補送過 → 立刻補一次（id 不變，重複=duplicate-key=
+      // 成功）。上限一次 — 之後誠實 failed，等手動重試或 online 事件。
+      if (typeof navigator !== "undefined" && navigator.onLine && !entry.autoRetried) {
+        void dispatch(stamped);
+        return { ...current, [message.id]: { message: stamped, state: "sending", autoRetried: true } };
+      }
+      return { ...current, [message.id]: { message: stamped, state: "failed", autoRetried: entry.autoRetried } };
     });
   }, []);
 
@@ -68,11 +78,32 @@ export function useDiscussionOutbox(args: {
         const entry = current[messageId];
         if (!entry || entry.state !== "failed") return current;
         void dispatch(entry.message);
-        return { ...current, [messageId]: { ...entry, state: "sending" } };
+        // 手動重試重置 autoRetried：這是新的一輪。
+        return { ...current, [messageId]: { ...entry, state: "sending", autoRetried: false } };
       });
     },
     [dispatch],
   );
+
+  // 回網：failed 的一次性 flush（outbox 仍是唯一 retry owner — 這裡就是
+  // outbox 自己）。sending 不碰（in-flight 或等 abort deadline）。
+  useEffect(() => {
+    const onOnline = () => {
+      setEntries((current) => {
+        let changed = false;
+        const next: typeof current = { ...current };
+        for (const [id, entry] of Object.entries(current)) {
+          if (entry.state !== "failed") continue;
+          changed = true;
+          void dispatch(entry.message);
+          next[id] = { ...entry, state: "sending", autoRetried: true };
+        }
+        return changed ? next : current;
+      });
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [dispatch]);
 
   // 房間身分變化：遷移（同房 re-key）→ 補送（剛綁定）→ 隔離（別房殘留）。
   const prevRoomRef = useRef<{ local: string | null; bound: string | null }>({ local: null, bound: null });

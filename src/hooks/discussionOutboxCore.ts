@@ -5,6 +5,8 @@ export type OutboxEntryState = "sending" | "failed" | "acked";
 export interface OutboxEntry {
   message: DiscussionMessage;
   state: OutboxEntryState;
+  /** 這輪失敗後已自動補送過一次（上限一次；之後只聽手動重試/online）。 */
+  autoRetried?: boolean;
 }
 
 export interface OutboxRoomContext {

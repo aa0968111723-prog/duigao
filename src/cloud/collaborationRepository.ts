@@ -318,6 +318,10 @@ export async function deleteEdge(supabase: SupabaseClient, roomId: string, edgeI
 }
 
 export async function insertDiscussion(supabase: SupabaseClient, message: DiscussionMessage): Promise<void> {
+  // 討論訊息的 insert 必須有 deadline（PR-08b 離線矩陣發現）：行動網路
+  // 死區（與 CDP offline 模擬一致）的 fetch 會「懸掛而非拒絕」— 沒有
+  // timeout 的話 outbox 卡在 sending，重試按鈕永遠不出現。12 秒後 abort
+  // → 誠實 failed → 使用者可重試；id 不變，重送撞 duplicate-key=成功。
   const { error } = await supabase.from("room_discussion_messages").insert({
     id: message.id,
     room_id: message.roomId,
@@ -328,7 +332,7 @@ export async function insertDiscussion(supabase: SupabaseClient, message: Discus
     body: message.body,
     payload: message.payload,
     reply_to_id: message.replyToId ?? null,
-  });
+  }).abortSignal(AbortSignal.timeout(12000));
   if (error) throw new CloudError(error.message, "discussion");
 }
 
