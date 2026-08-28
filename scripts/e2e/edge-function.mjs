@@ -37,6 +37,11 @@ const FN_SOURCE = join(
  * 通用版：載入任一 supabase/functions/<name>/index.ts（同一 Deno shim）。
  * env 由呼叫端整包給 — cutos-bridge 之類的函式各自有自己的變數。
  */
+// 多個 edge function 共用同一個 globalThis.Deno shim：env 用合併表，
+// 否則第二次載入會把第一支函式的變數蓋掉（voice-token 讀到 CUTOS env
+// 的那種災難）。鍵名衝突只有 SUPABASE_*，值相同，合併安全。
+const combinedEdgeEnv = {};
+
 export async function loadEdgeHandler(name, env) {
   let source = await readFile(
     join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "functions", name, "index.ts"),
@@ -53,8 +58,9 @@ export async function loadEdgeHandler(name, env) {
   const file = join(dir, name + ".mjs");
   await writeFile(file, js, "utf8");
   let handler = null;
+  Object.assign(combinedEdgeEnv, env);
   globalThis.Deno = {
-    env: { get: (key) => env[key] },
+    env: { get: (key) => combinedEdgeEnv[key] },
     serve: (fn) => {
       handler = fn;
       return { finished: Promise.resolve() };
