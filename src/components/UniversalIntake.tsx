@@ -50,6 +50,30 @@ type Props = {
   children?: ReactNode;
 };
 
+/**
+ * 一份與 `<input>` 完全脫鉤的 FileList。
+ *
+ * 這是 DataTransfer 不能用時的替代品，而不是「退回原本那個 FileList」——
+ * input 給的 FileList 是活的：onChange 一結束就 `input.value = ""`，那個物件
+ * 當場變成空的。CreateSheet 會把選取放進 state 一直留到按「建立」，拿到活的
+ * 那份等於什麼都沒選到，舊 WebView 上建立文宣／影片就永遠做不成。
+ *
+ * 消費端只用 length、索引、item() 與展開／for..of，這四件事這裡都給足。
+ */
+export function staticFileList(files: File[]): FileList {
+  // 快照：呼叫端之後怎麼動它的陣列都與這份清單無關。
+  const snapshot = [...files];
+  const list: Record<PropertyKey, unknown> = {
+    length: snapshot.length,
+    item: (index: number) => snapshot[index] ?? null,
+    [Symbol.iterator]: () => snapshot[Symbol.iterator](),
+  };
+  snapshot.forEach((file, index) => {
+    list[index] = file;
+  });
+  return list as unknown as FileList;
+}
+
 function filterBySize(
   files: FileList | null,
   maxBytes: number | undefined,
@@ -64,9 +88,17 @@ function filterBySize(
   // 一律以 DataTransfer 物化：input 的 FileList 是 live 的，reset input
   // 之後就變空。呼叫端（如 CreateSheet）要能把選取「持有」到 submit，
   // 必須與 input 解耦。
-  const dt = new DataTransfer();
-  for (const file of kept) dt.items.add(file);
-  return dt.files;
+  try {
+    const dt = new DataTransfer();
+    for (const file of kept) dt.items.add(file);
+    return dt.files;
+  } catch {
+    // 舊 WebView／被鎖住的 in-app 瀏覽器沒有可用的 DataTransfer 建構子。
+    // 以前這裡會直接把例外丟進 onChange handler，整批檔案無聲蒸發 —
+    // 使用者只看到「選完檔案什麼都沒發生」。改用自己做的靜態清單，脫鉤這
+    // 件事就還在：把 input 的活 FileList 交出去，reset 之後它就空了。
+    return staticFileList(kept);
+  }
 }
 
 export const UniversalIntake = forwardRef<IntakeHandle, Props>(function UniversalIntake(
@@ -84,8 +116,14 @@ export const UniversalIntake = forwardRef<IntakeHandle, Props>(function Universa
   }), [camera]);
 
   const handle = (files: FileList | null) => {
-    const kept = filterBySize(files, "maxBytes" in spec ? spec.maxBytes : undefined, onReject);
-    if (kept) onFiles(kept);
+    // 收件層丟出來的例外會被 React 的事件系統吞掉，畫面上什麼都不會發生。
+    // 檔案入口最不能有的就是「靜靜失敗」。
+    try {
+      const kept = filterBySize(files, "maxBytes" in spec ? spec.maxBytes : undefined, onReject);
+      if (kept) onFiles(kept);
+    } catch {
+      onReject?.("讀取這個檔案時出了問題，請再選一次。");
+    }
   };
 
   const inputs = (

@@ -1094,6 +1094,16 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .project-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .project-detail-head select, .project-related-add select, .project-related-add button { min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); }
 .project-branch-empty-detail { padding: 46px 20px; border: 1px dashed var(--line); border-radius: 16px; text-align: center; color: var(--ink-faint); }
+/* 上傳狀態列：上傳期間活動房裡唯一會動的東西，所以它自己不能被捲走。
+   寬度與其他區塊同一條 gutter，看起來才是同一個畫面的一部分。 */
+.project-upload-status { position: sticky; z-index: 18; top: 0; width: min(680px, calc(100% - 32px)); margin: 10px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 9px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-soft); color: var(--ink); font-size: 13px; }
+.project-upload-status.is-error { border-color: var(--danger, #c2483a); }
+.project-upload-status-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* 錯誤訊息是要照著做的一句話，寧可換行也不要被截掉。 */
+.project-upload-status.is-error .project-upload-status-text { flex: 1 1 100%; white-space: normal; overflow: visible; }
+.project-upload-track { flex: 0 1 120px; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.project-upload-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .25s ease-out; }
+.project-upload-cancel { flex: none; min-height: 32px; margin-left: auto; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--ink); cursor: pointer; }
 .project-upload-button, .project-file-picker { position: relative; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }
 .project-upload-button input, .project-file-picker input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .project-plan-editor { display: flex; flex-direction: column; gap: 14px; }

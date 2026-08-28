@@ -19,6 +19,7 @@ import type {
 } from "../collaboration/types";
 import { RoomDiscussion } from "../room-discussion/RoomDiscussion";
 import { WhiteboardWorkspace } from "../whiteboard/WhiteboardWorkspace";
+import { uuid } from "../../lib/id";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useViewport } from "../../hooks/useViewport";
 import {
@@ -34,6 +35,7 @@ import {
   sortBranchesByRecent,
 } from "../../lib/roomBranches";
 import type { RoomRole } from "../../cloud/roomRepository";
+import type { VideoUploadState } from "../../components/api";
 import { UniversalIntake } from "../../components/UniversalIntake";
 
 export type MultiBranchRoomApi = {
@@ -65,6 +67,12 @@ export type MultiBranchRoomApi = {
     importDesign: (designId: string, name: string, retryBranchId?: string) => Promise<{ ok: boolean; message: string; branchId?: string }>;
   };
   onAddFiles: (branchId: string, files: FileList | null) => void;
+  /**
+   * 影片上傳狀態。活動房以前拿不到它 — App 的上傳進度畫面排在這個殼的
+   * return 之後，專案房永遠走不到，所以選完檔案畫面完全沒反應（上傳其實
+   * 正在跑）。殼自己負責把它畫出來。
+   */
+  upload?: VideoUploadState;
   onUpdateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => void;
   onSavePlan: (plan: PlanDocument) => void;
   onCreateRelation: (relation: ContentRelation) => void;
@@ -117,6 +125,49 @@ export type MultiBranchRoomApi = {
   onSendDiscussionLink?: (url: string) => boolean;
   resolveAssetUrl?: (path: string) => Promise<string>;
 };
+
+/**
+ * 上傳狀態列。
+ *
+ * 存在的理由很單純：在活動房裡按「＋ 加入影片」選完檔案之後，畫面必須有
+ * 東西動。上傳本身早就在跑（XHR 有真的 byte 進度），只是沒有人把它畫出來 —
+ * 對使用者而言那和「按鈕壞了」完全無法區分，而一支手機拍的影片在行動網路
+ * 上要跑好幾十秒。
+ *
+ * 進度是真的 byte 數，不是假的動畫；瀏覽器算不出總量時就只留一句「正在上傳
+ * 影片」，不畫一條會說謊的進度條。
+ */
+function UploadStatus({ upload }: { upload?: VideoUploadState }) {
+  if (!upload || upload.state === "idle") return null;
+  const failed = upload.state === "error";
+  const pct = Math.round((failed ? 0 : upload.progress) * 100);
+  return (
+    <div
+      className={`project-upload-status${failed ? " is-error" : ""}`}
+      role="status"
+      aria-live="polite"
+      data-testid="project-upload-status"
+    >
+      <span className="project-upload-status-text">
+        {upload.state === "uploading"
+          ? `正在上傳影片 ${pct}%`
+          : upload.state === "processing"
+            ? "正在處理影片…"
+            : upload.state === "error"
+              ? upload.message
+              : "正在準備影片…"}
+      </span>
+      {upload.state === "uploading" && (
+        <span className="project-upload-track" aria-hidden>
+          <span className="project-upload-fill" style={{ width: `${pct}%` }} />
+        </span>
+      )}
+      <button type="button" className="project-upload-cancel" onClick={upload.cancel}>
+        {failed ? "知道了" : "取消"}
+      </button>
+    </div>
+  );
+}
 
 /** 從討論殼「推進去」的次要面板；討論本身是房間的根畫面，不再是並列分頁。 */
 type PushedPane = "overview" | "content" | "plan";
@@ -291,7 +342,7 @@ function PlanEditor({
   };
 
   const addBlock = (kind: PlanBlock["kind"]) => {
-    const id = crypto.randomUUID();
+    const id = uuid();
     const next: PlanBlock = kind === "checklist"
       ? { id, kind, text: "待辦事項", checked: false }
       : kind === "link"
@@ -390,7 +441,7 @@ function PlanEditor({
               onClick={() => {
                 if (!relationTarget) return;
                 onCreateRelation({
-                  id: crypto.randomUUID(),
+                  id: uuid(),
                   roomId: room.id,
                   fromBranchId: branch.id,
                   toBranchId: relationTarget,
@@ -559,7 +610,7 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
   );
 }
 
-function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType }: { onClose: () => void; onCreate: MultiBranchRoomApi["onCreateContent"]; onCutosImport?: MultiBranchRoomApi["cutosImport"]; canva?: MultiBranchRoomApi["canva"]; initialType?: BranchType }) {
+function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType, onReject }: { onClose: () => void; onCreate: MultiBranchRoomApi["onCreateContent"]; onCutosImport?: MultiBranchRoomApi["cutosImport"]; canva?: MultiBranchRoomApi["canva"]; initialType?: BranchType; onReject?: (reason: string) => void }) {
   const [type, setType] = useState<BranchType | "cutos" | "canva" | null>(initialType ?? null);
   const [name, setName] = useState("");
   const [files, setFiles] = useState<FileList | null>(null);
@@ -629,7 +680,7 @@ function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType }: {
             <h2>新增{type === "copy" ? "文案" : branchTypeLabel(type)}</h2>
             <label className="project-field"><span>名稱</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={type === "poster" ? "例如：擺攤文宣" : type === "video" ? "例如：招生影片" : "例如：擺攤計畫"} /></label>
             {needsFile && (
-              <UniversalIntake profile={type === "poster" ? "poster" : "video"} mode="zone" className="project-file-picker" onFiles={setFiles}>
+              <UniversalIntake profile={type === "poster" ? "poster" : "video"} mode="zone" className="project-file-picker" onFiles={setFiles} onReject={onReject}>
                 <span>{files?.[0]?.name ?? (type === "poster" ? "選一張圖片" : "選一支影片")}</span>
               </UniversalIntake>
             )}
@@ -732,13 +783,17 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const createContent = (type: BranchType, name: string, files: FileList | null) => api.onCreateContent(type, name, files);
 
   const createPoll = (question: string, options: string[]) => api.onCreatePoll({
-    id: crypto.randomUUID(), roomId: api.room.id, question, options, createdBy: api.guest.id, createdAt: Date.now(), updatedAt: Date.now(),
+    id: uuid(), roomId: api.room.id, question, options, createdBy: api.guest.id, createdAt: Date.now(), updatedAt: Date.now(),
   });
 
   const votePoll = (poll: RoomPoll, option: string) => api.onVotePoll({
     pollId: poll.id, roomId: api.room.id, userId: api.userId ?? api.guest.id, option, createdAt: Date.now(),
   });
 
+  // 「還在跑」與「跑完但失敗」要分開：失敗時上傳鎖已經放掉，那顆按鈕必須
+  // 立刻能再按一次。
+  const uploadState = api.upload?.state ?? "idle";
+  const uploadBusy = uploadState !== "idle" && uploadState !== "error";
   const recentComments = [...api.room.comments].sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
   const branchNameForVersion = (versionId: string) => {
     const comment = recentComments.find((item) => item.versionId === versionId);
@@ -758,6 +813,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>
         </div>
       </header>
+
+      {/* 掛在殼上而不是分支詳情裡：上傳期間人常常按「‹」回房間看別的東西，
+          進度不能因此消失。 */}
+      <UploadStatus upload={api.upload} />
 
       {!inShellBranch && (
         <div className="project-search-wrap">
@@ -784,11 +843,15 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           ) : (
             <div className="project-branch-empty-detail">
               <p>{branchVersions(normalized, inShellBranch.id).length ? "準備好進入檢視器。" : `這份${branchTypeLabel(inShellBranch.branchType)}還沒有版本。`}</p>
-              {api.canManage && (
-                <UniversalIntake profile={inShellBranch.branchType === "poster" ? "poster" : "video"} mode="zone" className="project-upload-button" onFiles={(picked) => api.onAddFiles(inShellBranch.id, picked)}>
+              {/* 上傳進行中就不要再擺一顆看起來能按、按了卻被上傳鎖擋掉的
+                  按鈕；狀態列在上面，這裡說完成後會發生什麼事。 */}
+              {api.canManage && (uploadBusy ? (
+                <p className="project-muted" data-testid="branch-upload-inflight">影片正在上傳，完成後會出現在這裡。</p>
+              ) : (
+                <UniversalIntake profile={inShellBranch.branchType === "poster" ? "poster" : "video"} mode="zone" className="project-upload-button" onFiles={(picked) => api.onAddFiles(inShellBranch.id, picked)} onReject={api.onIntakeReject}>
                   <span>＋ {branchVersions(normalized, inShellBranch.id).length ? "新增版本" : `加入${branchTypeLabel(inShellBranch.branchType)}`}</span>
                 </UniversalIntake>
-              )}
+              ))}
             </div>
           )}
         </main>
@@ -843,7 +906,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       openBranch(branchId, opts);
                     },
                     onCreatePoll: (question, options) => {
-                      const id = crypto.randomUUID();
+                      const id = uuid();
                       api.onCreatePoll({
                         id,
                         roomId: api.room.id,
@@ -980,7 +1043,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           )}
         </>
       )}
-      {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} onCutosImport={api.cutosImport} canva={api.canva} />}
+      {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} onCutosImport={api.cutosImport} canva={api.canva} onReject={api.onIntakeReject} />}
       {pollOpen && <PollSheet onClose={() => setPollOpen(false)} onCreate={createPoll} />}
       {api.workspace && (
         // 對稿工作區疊在討論殼上；殼不卸載，返回時狀態全在。此容器（與其

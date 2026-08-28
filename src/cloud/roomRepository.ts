@@ -18,6 +18,7 @@ import type {
   Version,
 } from "../lib/types";
 import { anchorFromComment, anchorToCommentColumns } from "../lib/contextAnchor";
+import { uuid } from "../lib/id";
 import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
@@ -94,7 +95,6 @@ export function canManageMedia(role: RoomRole | null): boolean {
 
 export type CloudSnapshot = { room: Room; proposals: CloudProposal[]; role: RoomRole | null };
 
-const uuid = () => crypto.randomUUID();
 const isUuid = (value: string): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
