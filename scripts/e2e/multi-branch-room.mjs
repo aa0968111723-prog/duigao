@@ -453,34 +453,29 @@ try {
 
       // (3) 按「開始語音」：session＋參與者列落 DB；LiveKit 連線對假
       //     wss 失敗 → 誠實錯誤文案（不是假裝已加入）
-      console.log("[voice-diag] dock before click:", (await page.getByTestId("voice-dock").innerText()).slice(0, 120));
       await page.getByTestId("voice-join").click();
+      // 假 wss 連不上 → join 失敗 → F5 清理（left_at＋end session）會把
+      // live 場立刻收掉：正確的終態是「錯誤可見＋沒有殘場」，不是
+      // 「live 場還在」。
       const errShown = await page.waitForFunction(
         () => document.querySelector(".rd-voice-error")?.textContent?.includes("失敗") ?? false,
         null,
         { timeout: 30000 },
       ).then(() => true).catch(() => false);
-      console.log("[voice-diag] dock after wait:", (await page.getByTestId("voice-dock").innerText()).slice(0, 160));
-      console.log("[voice-diag] reqTail:", requestLog.filter((l) => l.includes("voice")).slice(-8).join(" | "));
-      page.on("console", (m) => { if (/voice|Error|error/.test(m.text())) console.log("[browser]", m.text().slice(0, 160)); });
-      const sessionRows = rows.voice_sessions.filter((row) => row.status === "live").length;
-      const participantRows = rows.voice_session_participants.length;
-      check("開始語音：voice_sessions live 列落地", sessionRows >= 1, `sessions=${sessionRows}`);
-      check("開始語音：自己的參與者列落地", participantRows >= 1, `participants=${participantRows}`);
-      const dockText = await page.getByTestId("voice-dock").innerText();
+      const errText = await page.locator(".rd-voice-error").innerText().catch(() => "");
+      check("假 LiveKit 連不上 → 誠實錯誤文案", errShown && errText.includes("失敗"), errText.slice(0, 60));
+      // DB 終態：曾經建場（POST 發生）、失敗即清（live=0、參與者已離場）
+      const sessionsEverCreated = rows.voice_sessions.length;
+      const liveLeft = rows.voice_sessions.filter((row) => row.status === "live").length;
+      const zombieParts = rows.voice_session_participants.filter((row) => !row.left_at).length;
+      check("開始語音有真的建場（session 列曾落地）", sessionsEverCreated >= 1, `total=${sessionsEverCreated}`);
+      check("連線失敗即清場（無 live 殘場、無在場殭屍）", liveLeft === 0 && zombieParts === 0, `live=${liveLeft} zombies=${zombieParts}`);
       check(
-        "假 LiveKit 連不上 → 誠實錯誤，不假裝已加入（無離開鈕、join 可重試）",
-        errShown &&
-          dockText.includes("失敗") &&
-          (await page.getByTestId("voice-leave").count()) === 0 &&
+        "不假裝已加入：無離開鈕、join 可再試",
+        (await page.getByTestId("voice-leave").count()) === 0 &&
           (await page.getByTestId("voice-join").count()) === 1 &&
           !(await page.getByTestId("voice-join").isDisabled()),
-        dockText.slice(0, 80),
       );
-      // 連不上的場不得留下「進行中」殘影：session 已被結束或無活躍參與者
-      const lingering = rows.voice_sessions.filter((row) => row.status === "live").length;
-      const activeParts = rows.voice_session_participants.filter((row) => !row.left_at).length;
-      check("連線失敗不留空場（live 場=0 或無活躍參與者）", lingering === 0 || activeParts === 0, `live=${lingering} active=${activeParts}`);
     }
 
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
