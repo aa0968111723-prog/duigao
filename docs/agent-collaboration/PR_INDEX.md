@@ -23,7 +23,7 @@
 | #63 PR-08b | feat/offline-matrix | OPEN（CI 中；Grok PASS） | 離線矩陣 e2e＋死區懸掛修復（insert deadline＋回網自癒） | rounds/pr08（08b round）；collab e2e 43/43 |
 | PR-03 | feat/voice-room-livekit | MERGED（#64＋修復輪 #65） | LiveKit 語音房 MVP：voice-token edge＋VoiceDock＋失敗即清場 | rounds/pr03 |
 | PR-04 | （#44 已由第三 agent 合併核心） | 部分完成 | 剩餘：audit event migration、chunk cap 對齊（Grok pr00 F8） | #44 |
-| PR-05 | feat/canva-surface | BLOCKED_CANVA_CREDENTIALS | adapter+fixture 先行 | — |
+| PR-05 | feat/canva-bridge | MERGED（#69）＋接續修復 #68/#70 | Canva OAuth bridge＋設計匯入為房間圖片版本；share-preview 真人 302 | rounds/pr05 |
 | PR-06 | feat/planform-artifact | 未開始 | planform JSON+snapshot artifact 契約 | — |
 | PR-07 | feat/cutos-s2s-contract | 部分可做（ADR-005 v2） | AIOS-key S2S contract+fixture+MP4 artifact；EDL 等 CUTOS auth |  — |
 | PR-08 | hardening/release | 未開始 | realtime row-patch、code-split、offline 矩陣、部署驗收 | — |
