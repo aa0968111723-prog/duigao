@@ -752,7 +752,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         {inShellBranch ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
         <div className="project-room-heading"><span className="project-kicker">活動房</span><h1>{api.room.title}</h1></div>
         <div className="project-head-actions">
-          <button type="button" className="project-ai-button" onClick={() => api.onOpenAi()}>✦ AI</button>
+          <button type="button" className="project-ai-button" data-testid="room-ai-launcher" onClick={() => api.onOpenAi()}>✦ AI</button>
           <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>
         </div>
       </header>

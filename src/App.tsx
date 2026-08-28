@@ -2882,7 +2882,6 @@ export function App() {
           onSendDiscussionLink: sendLink,
           resolveAssetUrl,
         }} />
-        {isCloudConfigured && !branchWorkspace && <AssetAiFab project onClick={() => openAi()} />}
         {aiSheetOpen && room && <RoomAiSheet
           roomTitle={room.title}
           assets={assetIntelligence?.assets ?? []}

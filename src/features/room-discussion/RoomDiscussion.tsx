@@ -211,7 +211,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         <div>
           <div className="project-section-title-row">
             <h3>待決定</h3>
-            {api.canManage && <button type="button" className="project-text-button" onClick={() => api.onCreateDecision("待決定：主視覺")}>＋</button>}
+            {api.canManage && <button type="button" className="project-text-button" aria-label="新增待決定" onClick={() => api.onCreateDecision("待決定：主視覺")}>新增</button>}
           </div>
           {pending.map((item) => (
             <article className="rd-decision" key={item.id} data-testid={`decision-${item.id}`}>

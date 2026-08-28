@@ -166,7 +166,7 @@ try {
   check("Android 390px 房間仍能載入", await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   await page.getByTestId("room-ai-launcher").click();
   await page.waitForSelector('[data-testid="room-ai-sheet"]', { timeout: 10000 });
-  check("手機 AI 入口是 bottom sheet", await page.locator('[data-testid="room-ai-sheet"]').isVisible() && await page.locator(".asset-ai-fab").count() === 1);
+  check("手機 AI 入口是 bottom sheet，且活動房只有一個 AI 入口", await page.locator('[data-testid="room-ai-sheet"]').isVisible() && await page.getByTestId("room-ai-launcher").count() === 1);
   await page.waitForFunction(() => document.querySelector(".asset-ai-assets-toggle")?.textContent?.includes("1 項"), null, { timeout: 10000 });
   await page.getByRole("button", { name: "素材理解" }).click();
   check("素材理解預設收起、點擊才展開", await page.locator('[data-testid^="ai-asset-"]').count() === 1);
