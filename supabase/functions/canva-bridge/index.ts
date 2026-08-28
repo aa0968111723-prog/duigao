@@ -385,6 +385,11 @@ async function handle(request: Request): Promise<Response> {
       job = (pollData?.job ?? null) as Record<string, unknown> | null;
     }
     if (!downloadUrl) return jsonResponse({ ok: false, code: "EXPORT_PENDING" });
+    // SSRF 邊界：下載 URL 是上游回應的字串 — 只信 https（真 Canva 簽名
+    // URL）或 apiBase 自身（e2e 假上游）。內網位址一律拒絕。
+    if (!downloadUrl.startsWith("https://") && !downloadUrl.startsWith(apiBase() + "/")) {
+      return jsonResponse({ ok: false, code: "EXPORT_FAILED" });
+    }
 
     // 下載匯出檔。這裡 follow redirect：Canva export URL 是簽名 URL，
     // request 不帶任何 Authorization（credential 無外洩面）；串流計量同
