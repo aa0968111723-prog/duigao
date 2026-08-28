@@ -51,9 +51,30 @@
 
 - shell 內 `claude` CLI 不存在（`command not found`）。本工作由 Claude Code agent session 執行，能力等價；依規範不冒充已執行 CLI 健檢。
 
-## NOTE_TKU_ZEN_AGENT_DEPLOYMENT（PR-04 驗收時需解）
+## RESOLVED_TKU_ZEN_AGENT（2026-08-28 契約已端到端驗證）
 
-- 程式契約兩端已在（HMAC + 測試），但 duigao edge 需要 `TKU_ZEN_AGENT_URL` + shared secret 設定於 Supabase Functions env；目前無法從本機驗證線上是否已設。PR-04 驗收需一次 live 探測（agent-status 端點）。
+- tku-zen-agent 部署於 **https://tku-zen-agent-k7f2.zeabur.app**（曾 502，
+  使用者重啟後 200）。
+- 端到端握手已實測通過（node 直發、忠實 SafeAsset/ContextCitation 形狀）：
+  HMAC `sha256(secret, "<ts>." + body)` 兩端一致 → HTTP 200，回傳繁中答案
+  ＋ citations（sourceId 對得上）＋ 一個 `create_plan_draft` action
+  （AI 提案 → 人 Apply 迴圈的上游已具備），provider=tku-zen-agent，
+  model=gpt-4.1-mini。錯誤/缺簽章皆正確 401。
+- **殘餘（唯一）**：Supabase Edge Functions secrets 需加
+  `TKU_ZEN_AGENT_URL=https://tku-zen-agent-k7f2.zeabur.app`（結尾不加斜線；
+  room-ai-context 會自動接上 /api/v1/room-context/answer）。
+  `DUIGAO_AGENT_SHARED_SECRET` 已設且與 tku 端
+  `DUIGAO_CONTEXT_SHARED_SECRET` 相符（簽章驗證通過即為證明）。
+
+## NOTE_BROWSER_ONLY_DEFECTS（2026-08-28，紀律）
+
+curl/health 探針全綠不代表使用者可用：edge function 的 CORS 預檢漏放
+supabase-js 必送的 `x-client-info`/`apikey` 時，瀏覽器直接擋掉，正式站
+edge logs 呈現「瀏覽器 OPTIONS 數十次、瀏覽器 POST 0 次」。e2e 的 mock
+在路由到函式前就自行回應 OPTIONS，同樣測不到。護欄：`npm run
+test:edge-cors` 對每支真實 handler 發預檢（已掛 build 與
+agent-release-gate）。宣稱功能可用前一律用真瀏覽器點過。
+
 
 ## NOTE_SLOW_DEVICE_FIRSTUPLOAD（已解 — PR-01c，2026-08-28）
 
