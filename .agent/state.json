@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-27T23:03:01.000Z",
+  "generatedAt": "2026-08-28T00:58:46.000Z",
   "git": {
-    "branch": "feat/bundle-code-split",
-    "sha": "b1403833d7612cbf8ca5ec570d61d3d4aec3fb8a",
-    "mainSha": "d4be5135b1976d4c1c6ce60c910490c78baff771",
-    "dirty": false
+    "branch": "feat/voice-room-livekit",
+    "sha": "22b0d1b07824e692d3caefab241f2d3e714ecad1",
+    "mainSha": "22b0d1b07824e692d3caefab241f2d3e714ecad1",
+    "dirty": true
   },
   "project": {
     "name": "duigao",

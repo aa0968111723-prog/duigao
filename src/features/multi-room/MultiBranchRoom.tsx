@@ -47,6 +47,8 @@ export type MultiBranchRoomApi = {
   loadingBranchId?: string | null;
   onBackToRoom: () => void;
   onCreateContent: (type: BranchType, name: string, files: FileList | null) => void;
+  /** 語音房（PR-03）。undefined/available=false → 討論殼顯示誠實文案。 */
+  voice?: import("../../hooks/useVoiceRoom").VoiceDockApi;
   /**
    * CUTOS 成品匯入（PR-07 第一階段）。undefined＝不可用（未設定/健檢
    * 失敗），整個入口不渲染 — 誠實不可用，不是灰掉的按鈕。
@@ -710,6 +712,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onReject: api.onIntakeReject,
                     onSendLink: api.onSendDiscussionLink,
                     resolveAssetUrl: api.resolveAssetUrl,
+                    voice: api.voice,
                     pane: discussPane,
                     draft: api.chatInput,
                     setDraft: api.setChatInput,

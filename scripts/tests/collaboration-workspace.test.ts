@@ -264,8 +264,18 @@ test("search, group, relation helpers", () => {
   assert.equal(createRelationEdges("board-1", "room-1", ["a", "b"]).length, 1);
 });
 
-test("voice stays a boundary, not a shipped MVP claim", () => {
-  assert.equal(VOICE_ROOM_MVP, false);
+test("voice MVP 旗標翻真必須帶機器證據（PR-03：LiveKit 落地）", () => {
+  // 這個測試從「不得宣稱」翻面成「宣稱必須有實作」：旗標為 true 時，
+  // token edge、連線模組、狀態機 hook 三件缺一不可 — 防止有人只翻旗標。
+  assert.equal(VOICE_ROOM_MVP, true);
+  const tokenEdge = readFileSync(resolve(ROOT, "supabase/functions/voice-token/index.ts"), "utf8");
+  assert.match(tokenEdge, /mintLiveKitToken/);
+  assert.match(tokenEdge, /canPublishSources: \[\"microphone\"\]/);
+  const live = readFileSync(resolve(ROOT, "src/features/voice/liveVoice.ts"), "utf8");
+  assert.match(live, /import\("livekit-client"\)/);
+  const hook = readFileSync(resolve(ROOT, "src/hooks/useVoiceRoom.ts"), "utf8");
+  assert.match(hook, /voice_session_participants/);
+  assert.match(hook, /left_at/);
 });
 
 test("persists send last-acked version and adopt the trigger increment", () => {
@@ -478,7 +488,10 @@ test("canva 不入庫、語音由 VOICE_ROOM_MVP 單一旗標把關（原型契�
     .join("\n");
   assert.equal(migrations.includes("canva_designs"), false);
   const voice = readFileSync(resolve(ROOT, "src/features/collaboration/voice.ts"), "utf8");
-  assert.match(voice, /VOICE_ROOM_MVP = false/);
+  // 語音仍由單一旗標把關；旗標現為 true（PR-03），且 runtime 可用性
+  // 另由 health gate 決定 — 未設定 env 的部署維持誠實文案。
+  assert.match(voice, /VOICE_ROOM_MVP = true/);
+  assert.match(voice, /voiceUnavailableReason/);
 });
 
 test("第一屏契約如今綁在真殼上：討論根＋對話/白板 tabs＋語音一行邊界", () => {

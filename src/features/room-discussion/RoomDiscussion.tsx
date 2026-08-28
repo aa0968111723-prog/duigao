@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { UniversalIntake, type IntakeHandle } from "../../components/UniversalIntake";
 import { anchorFromDiscussion, openTarget } from "../../lib/contextAnchor";
 import type { Guest, Room, RoomPoll } from "../../lib/types";
-import { VOICE_ROOM_MVP, voiceUnavailableReason } from "../collaboration/voice";
+import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
 import "./discussion.css";
 
@@ -46,6 +46,11 @@ export type RoomDiscussionApi = {
   onSendLink?: (url: string) => boolean;
   /** 附件卡的 signed URL 解析（App 持有 client 與快取；本元件純呈現）。 */
   resolveAssetUrl?: (path: string) => Promise<string>;
+  /**
+   * 語音房（PR-03，LiveKit）。undefined 或 available=false → 顯示既有的
+   * 「還在準備」誠實文案；available → VoiceDock（加入/離開/靜音/名單）。
+   */
+  voice?: import("../../hooks/useVoiceRoom").VoiceDockApi;
 };
 
 function humanSize(bytes?: number): string {
@@ -149,11 +154,46 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       </div>
       )}
 
-      {/* 語音在 provider 落地前是一行不可互動的說明，不佔 pane（Grok pr00 F1）。 */}
+      {/* 語音（PR-03）：可用時是真的 dock；未設定/本機房維持誠實文案。 */}
       {(api.showVoiceNote ?? true) && (
-      <div className="rd-voice-note" data-testid="voice-boundary">
-        {VOICE_ROOM_MVP ? "語音已開啟" : voiceUnavailableReason()}
-      </div>
+        api.voice?.available ? (
+          <div className="rd-voice-dock" data-testid="voice-dock">
+            {api.voice.state === "live" ? (
+              <>
+                <span className="rd-voice-live" aria-hidden>●</span>
+                <span className="rd-voice-roster" data-testid="voice-roster">
+                  {api.voice.participants.map((p) => (
+                    <span key={p.identity} className={p.speaking ? "is-speaking" : ""}>
+                      {p.name}{p.muted ? "（靜音）" : ""}
+                    </span>
+                  ))}
+                </span>
+                <button type="button" className="rd-voice-btn" onClick={api.voice.toggleMute} data-testid="voice-mute">
+                  {api.voice.muted ? "取消靜音" : "靜音"}
+                </button>
+                <button type="button" className="rd-voice-btn is-leave" onClick={api.voice.leave} data-testid="voice-leave">離開</button>
+              </>
+            ) : (
+              <>
+                <span>{api.voice.activeSessionTitle ? `語音進行中：${api.voice.activeSessionTitle}` : "語音房間"}</span>
+                <button
+                  type="button"
+                  className="rd-voice-btn"
+                  onClick={api.voice.join}
+                  disabled={api.voice.state === "connecting"}
+                  data-testid="voice-join"
+                >
+                  {api.voice.state === "connecting" ? "連線中…" : api.voice.activeSessionTitle ? "加入語音" : api.voice.canStart ? "開始語音" : "加入語音"}
+                </button>
+              </>
+            )}
+            {api.voice.error && <span className="rd-voice-error" role="alert">{api.voice.error}</span>}
+          </div>
+        ) : (
+          <div className="rd-voice-note" data-testid="voice-boundary">
+            {voiceUnavailableReason()}
+          </div>
+        )
       )}
 
       {showDecisions && (

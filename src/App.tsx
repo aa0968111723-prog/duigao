@@ -132,6 +132,7 @@ import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContext
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
+import { useVoiceRoom } from "./hooks/useVoiceRoom";
 import { DiscussionDrawer } from "./features/room-discussion/DiscussionDrawer";
 import { adoptPersistedNode, stampPersistedNode } from "./features/collaboration/nodes";
 import {
@@ -510,6 +511,15 @@ export function App() {
   cloudRef.current = cloud;
 
   // 討論送出狀態機：失敗可見可重試、快照替換後樂觀列不消失、綁定前先扣住。
+  // 語音房（PR-03）：cloud 綁定的房才活；health gate 在 hook 內。
+  const voiceDock = useVoiceRoom({
+    supabase: getSupabase(),
+    boundRoomId: cloud.boundRoomId,
+    userId: cloud.userId,
+    displayName: guest?.name ?? "夥伴",
+    canManage: cloud.boundRoomId ? cloud.canManageMedia : false,
+  });
+
   const discussionOutbox = useDiscussionOutbox({
     insert: cloud.writes.insertDiscussion,
     bound: Boolean(cloud.boundRoomId),
@@ -2679,6 +2689,7 @@ export function App() {
         },
         onCreateContent: createProjectContent,
         ...(cutosReady ? { cutosImport: importFromCutos } : {}),
+        voice: voiceDock,
         onAddFiles: addFilesToBranch,
         onUpdateBranch: updateProjectBranch,
         onSavePlan: saveProjectPlan,

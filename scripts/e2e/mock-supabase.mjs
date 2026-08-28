@@ -68,6 +68,7 @@ const CONFLICT_KEYS = {
   version_review_briefs: ["version_id"],
   version_verdicts: ["version_id", "user_id"],
   version_review_progress: ["version_id", "user_id"],
+  voice_session_participants: ["session_id", "user_id"],
 };
 
 /**
@@ -312,6 +313,7 @@ function unwrapMultipart(raw, contentType) {
 /** Set by start({ appOrigin }) — mounts the real Edge Function at /functions/v1. */
 let previewHandler = null;
 let cutosBridgeHandler = null;
+let voiceTokenHandler = null;
 let mockOrigin = `http://127.0.0.1:${PORT}`;
 
 export const server = http.createServer(async (req, res) => {
@@ -327,6 +329,9 @@ export const server = http.createServer(async (req, res) => {
   }
   if (cutosBridgeHandler && p.startsWith("/functions/v1/cutos-bridge")) {
     return serveHandler(cutosBridgeHandler, req, res, mockOrigin);
+  }
+  if (voiceTokenHandler && p.startsWith("/functions/v1/voice-token")) {
+    return serveHandler(voiceTokenHandler, req, res, mockOrigin);
   }
 
   // ---- 假 CUTOS（bridge 的上游；key 驗證與真實 route 同語意）----
@@ -1044,6 +1049,15 @@ export async function start(port = PORT, options = {}) {
       supabaseUrl: mockOrigin,
       anonKey: "sb_publishable_e2e_mock_key_000000",
       appOrigin: options.appOrigin.replace(/\/+$/, ""),
+    });
+  }
+  if (options.voiceToken) {
+    voiceTokenHandler = await loadEdgeHandler("voice-token", {
+      SUPABASE_URL: mockOrigin,
+      SUPABASE_ANON_KEY: "sb_publishable_e2e_mock_key_000000",
+      LIVEKIT_URL: "wss://e2e-livekit.invalid",
+      LIVEKIT_API_KEY: "e2e-livekit-key",
+      LIVEKIT_API_SECRET: "e2e-livekit-secret-for-harness-only",
     });
   }
   if (options.cutosBridge) {

@@ -1,14 +1,15 @@
 import type { VoiceParticipant, VoiceSession } from "./types";
 
 /**
- * Voice Room is an architecture boundary in 1.0.
+ * Voice Room（PR-03，LiveKit）。
  *
- * The schema (`voice_sessions`, `voice_session_participants`) and this
- * interface exist so a later line can plug in WebRTC without reshaping the
- * room. The feature flag stays off until create/join/leave/mute is stable.
- * Do not claim IMPLEMENTED while this flag is false.
+ * create/join/leave/mute 已由 useVoiceRoom＋voice-token edge＋LiveKit
+ * 落地（本旗標翻 true 的證據：scripts/e2e 的 voice 檢查與 harness 對
+ * voice-token 真實源碼的簽名驗證）。實際可用性仍由 runtime health 決定
+ * — LIVEKIT_* env 未設定的部署顯示誠實的「還在準備」文案，
+ * voiceUnavailableReason 因此保留。
  */
-export const VOICE_ROOM_MVP = false;
+export const VOICE_ROOM_MVP = true;
 
 export type VoiceRoomApi = {
   create(roomId: string, title: string): Promise<VoiceSession>;

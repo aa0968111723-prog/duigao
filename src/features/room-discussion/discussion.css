@@ -45,3 +45,12 @@
 .rd-link { display: inline-block; text-decoration: none; word-break: break-all; }
 .rd-attach-button { min-width: 40px; min-height: 40px; border: 0; border-radius: 10px; background: var(--raise); color: var(--ink-dim); font-size: 17px; }
 .rd-attach-button:disabled { opacity: .5; }
+
+/* 語音 dock（PR-03）：composer 上方的一行條，不佔 pane。 */
+.rd-voice-dock { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; font-size: 13px; color: var(--ink-soft); border-bottom: 1px solid var(--line-faint, rgba(0,0,0,0.08)); }
+.rd-voice-live { color: #2e9e5b; }
+.rd-voice-roster { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.rd-voice-roster .is-speaking { color: #2e9e5b; font-weight: 600; }
+.rd-voice-btn { min-height: 32px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line, rgba(0,0,0,0.15)); background: transparent; color: inherit; cursor: pointer; }
+.rd-voice-btn.is-leave { color: #c2483a; border-color: rgba(194,72,58,0.4); }
+.rd-voice-error { color: #c2483a; width: 100%; }
