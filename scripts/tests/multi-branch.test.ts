@@ -162,3 +162,82 @@ test("summary lazy plans never clobber local blocks; full rows win by updatedAt"
   assert.equal(mergedFull.plans?.[0].blocks.length, 0);
   void mergedLazy;
 });
+
+// ---------------------------------------------------------------- uuid ----
+// 上傳路徑用它產生 versions.id。舊 WebView（Android WebView < 92、iOS
+// 15.0–15.3）與任何非 https 的頁面都沒有 crypto.randomUUID；以前那一行直接
+// 丟例外，而且丟在 try 之外 — 上傳鎖再也放不掉，按鈕從此完全沒反應。
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test("uuid(): 沒有 crypto.randomUUID 也要給出合法 v4，且絕不丟例外", async () => {
+  const { uuid } = await import("../../src/lib/id.ts");
+  const real = globalThis.crypto;
+
+  assert.match(uuid(), UUID_V4, "有 randomUUID 時走原生");
+
+  // 只剩 getRandomValues（Chrome 60–91 / Safari 11–15.3 的形狀）
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { getRandomValues: (arr: Uint8Array) => real.getRandomValues(arr) },
+  });
+  const noRandomUUID = uuid();
+  assert.match(noRandomUUID, UUID_V4);
+
+  // randomUUID 存在但被鎖住（部分 in-app 瀏覽器）：不能讓例外逃出去
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: {
+      randomUUID: () => {
+        throw new Error("blocked by embedder");
+      },
+      getRandomValues: (arr: Uint8Array) => real.getRandomValues(arr),
+    },
+  });
+  assert.match(uuid(), UUID_V4);
+
+  // 連 crypto 都沒有（極舊 WebView / 非安全脈絡）
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+  assert.match(uuid(), UUID_V4);
+
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: real });
+
+  // 同一顆瀏覽器連續要 200 個 id 不可以撞號 — 撞號等於覆蓋別人的版本列。
+  const seen = new Set<string>();
+  for (let i = 0; i < 200; i += 1) seen.add(uuid());
+  assert.equal(seen.size, 200);
+});
+
+// -------------------------------------------------------- intake fallback --
+// UniversalIntake 在沒有 DataTransfer 建構子的瀏覽器（舊 Android WebView、
+// 被鎖住的 in-app 瀏覽器）改用自己做的靜態清單。重點不是「有東西回傳」，
+// 而是那份清單與 <input> 脫鉤：onChange 收尾會 input.value = ""，input 給的
+// FileList 是活的，當場會變空 — CreateSheet 把選取留到按「建立」才用，拿到
+// 活的那份等於什麼都沒選到。
+
+test("staticFileList(): 像 FileList，而且不會被 input 清空", async () => {
+  const { staticFileList } = await import("../../src/components/UniversalIntake.tsx");
+  const a = new File(["a"], "a.webm", { type: "video/webm" });
+  const b = new File(["bb"], "b.png", { type: "image/png" });
+
+  const list = staticFileList([a, b]);
+  assert.equal(list.length, 2);
+  assert.equal(list[0], a);
+  assert.equal(list[1], b);
+  assert.equal(list.item(0), a);
+  assert.equal(list.item(5), null);
+  assert.deepEqual([...list], [a, b]);
+  assert.deepEqual(Array.from(list), [a, b]);
+  assert.equal(list[0]?.name, "a.webm");
+
+  // 這份清單是快照，不是視圖：來源被清空（input reset 在瀏覽器裡就是這件
+  // 事）之後，已經交出去的選取仍然完整 — CreateSheet 要留到按「建立」才用。
+  const source = [a, b];
+  const held = staticFileList(source);
+  source.length = 0;
+  assert.equal(held.length, 2);
+  assert.deepEqual([...held], [a, b]);
+  assert.equal(held.item(1), b);
+
+  assert.equal(staticFileList([]).length, 0);
+});
