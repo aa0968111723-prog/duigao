@@ -237,10 +237,10 @@ try {
   // no-store: the endpoint sets a short public cache, and this run fetches the
   // same URL again after toggling the thumbnail off. (Crawler user agents are
   // covered by scripts/e2e/share-preview.mjs — fetch() cannot set one.)
-  const card = await A.evaluate(async (u) => {
-    const res = await fetch(u, { cache: "no-store" });
-    return { status: res.status, type: res.headers.get("content-type"), html: await res.text() };
-  }, previewUrl);
+  // 真人 UA 現在吃 302（share-preview 的新契約），所以爬蟲卡片改由
+  // node 側帶爬蟲 UA 直接抓 — 這段本來就是在演 unfurler。
+  const card = await fetch(previewUrl, { headers: { "user-agent": "facebookexternalhit/1.1" }, cache: "no-store" })
+    .then(async (res) => ({ status: res.status, type: res.headers.get("content-type"), html: await res.text() }));
   const ogImage = /<meta property="og:image" content="([^"]*)"/.exec(card.html)?.[1] ?? "";
   const ogTitle = /<meta property="og:title" content="([^"]*)"/.exec(card.html)?.[1] ?? "";
   const inviteToken = shareUrl.split("&invite=")[1];
@@ -276,7 +276,7 @@ try {
     null,
     { timeout: 30000 },
   ).catch(() => {});
-  const offCard = await A.evaluate(async (u) => (await fetch(u, { cache: "no-store" })).text(), previewUrl);
+  const offCard = await fetch(previewUrl, { headers: { "user-agent": "facebookexternalhit/1.1" }, cache: "no-store" }).then((res) => res.text());
   const offImage = /<meta property="og:image" content="([^"]*)"/.exec(offCard)?.[1] ?? "";
   check("A. 關閉縮圖後 og:image 換成通用封面", offImage.endsWith("/og-cover.png"), offImage);
   check("A. 關閉縮圖後不再暴露文宣縮圖", !offCard.includes("/share-previews/"));
@@ -503,10 +503,10 @@ try {
   );
   {
     const previewId = rows.share_previews[0].id;
-    const card = await A.evaluate(
-      async (u) => (await fetch(u, { cache: "no-store" })).text(),
-      `http://127.0.0.1:${MOCK_PORT}/functions/v1/share-preview/${previewId}`,
-    );
+    const card = await fetch(`http://127.0.0.1:${MOCK_PORT}/functions/v1/share-preview/${previewId}`, {
+      headers: { "user-agent": "facebookexternalhit/1.1" },
+      cache: "no-store",
+    }).then((res) => res.text());
     check(
       "PR30. 自訂封面之後 og:image 指向自訂封面",
       /og:image[^>]*share-previews/.test(card) && !card.includes("og-cover.png"),
