@@ -92,3 +92,11 @@ video-flow check 24（5 斷言）。原始記錄留存如下。
 - 影響：慢裝置上的真實使用者；與網路無關的錯誤被說成網路問題。
 - 歸屬：PR-01c（手機上傳強化）— 找出 ensureCloudRoom 中被 CPU 餓死的
   環節、錯誤文案分流、重試沿用已建立的房。
+
+## NOTE_PR71_OVERLAP（白板 WB02 前置檢查，2026-08-28）
+
+他人 open PR #71（claude/duigao-design-board-ggfm2z）修改
+App.tsx / MultiBranchRoom.tsx / RoomDiscussion.tsx — 與白板 Focus Mode
+（WB02）重疊。WB00/WB01 零重疊先行；WB02 開工前重新 fetch 判定（合併則
+以其後 main 為底並尊重其 UI 決策；仍 open 則最小侵入＋PR 內標注衝突點
+交人類裁決）。詳 rounds/wb00/parallel-agents-conflict-report.md。
