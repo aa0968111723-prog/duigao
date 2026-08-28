@@ -90,3 +90,18 @@ test("payload 摘要：只帶呈現欄位，round-trip 穩定", () => {
     routeCount: 1,
   });
 });
+
+// ---- Grok pr06 F2/F6：碰撞面 fixture ---------------------------------------
+
+test("碰撞面：{version,classroom:[],corridor:{}} 不再誤認（陣列不是場地）", () => {
+  assert.equal(looksLikePlanformProject({ version: 1, classroom: [], corridor: {} }), false);
+  assert.equal(looksLikePlanformProject({ version: 1, classroom: {}, corridor: {} }), false); // 缺 length/width
+  assert.equal(
+    looksLikePlanformProject({
+      version: 1,
+      classroom: { length: 10, width: 8 },
+      corridor: { length: 10, width: 2 },
+    }),
+    true, // 真正的 AreaConfig 骨架仍認得
+  );
+});

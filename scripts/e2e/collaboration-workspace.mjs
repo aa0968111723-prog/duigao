@@ -483,7 +483,9 @@ try {
       const feed = await page.getByTestId("discussion-feed").innerText();
       check("場佈卡標題用場佈名稱不是檔名", feed.includes("場佈：迎新場佈"), "");
       // 非 planform 的 JSON：一般附件卡，無 chip
-      await attachInput.setInputFiles({ name: "notes.json", mimeType: "application/json", buffer: Buffer.from('{"hello":"world"}') });
+      // 負例用「碰撞形狀」（Grok pr06 F6）：有 version＋classroom/corridor
+      // 鍵但不是真場地（陣列/缺數字欄）— 識別器必須不認。
+      await attachInput.setInputFiles({ name: "notes.json", mimeType: "application/json", buffer: Buffer.from('{"version":1,"classroom":[],"corridor":{}}') });
       await page.waitForFunction(
         () => document.body.innerText.includes("notes.json"),
         null,

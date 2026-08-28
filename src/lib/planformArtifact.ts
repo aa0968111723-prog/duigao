@@ -46,16 +46,22 @@ const countOf = (value: unknown): number => (Array.isArray(value) ? value.length
  * 識別器的責任是「別把 package.json 當場佈」，不是 schema 檢查。
  */
 export function looksLikePlanformProject(json: unknown): boolean {
-  if (!json || typeof json !== "object") return false;
+  if (!json || typeof json !== "object" || Array.isArray(json)) return false;
   const p = json as Record<string, unknown>;
+  // 場地區塊必須長得像 AreaConfig（length/width 數字）— typeof [] 也是
+  // "object"，光驗物件擋不住 {classroom:[]}（Grok pr06 F2 收緊）。
+  const isArea = (value: unknown): boolean =>
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).length === "number" &&
+    typeof (value as Record<string, unknown>).width === "number";
   return (
     typeof p.version === "number" &&
     Number.isFinite(p.version) &&
     p.version >= 1 &&
-    typeof p.classroom === "object" &&
-    p.classroom !== null &&
-    typeof p.corridor === "object" &&
-    p.corridor !== null
+    isArea(p.classroom) &&
+    isArea(p.corridor)
   );
 }
 
