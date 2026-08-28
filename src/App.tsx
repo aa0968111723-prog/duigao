@@ -28,6 +28,7 @@ import {
   type ViewState,
 } from "./lib/types";
 import { cutosHealth, importCutosOutput } from "./cloud/cutos";
+import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -1178,6 +1179,87 @@ export function App() {
       return { ok: true, message: "已匯入。" };
     },
     [guest, showToast],
+  );
+
+  // Canva 文宣匯入（PR-05）：健檢過了入口才存在 — 誠實不可用。
+  const [canvaReady, setCanvaReady] = useState(false);
+  useEffect(() => {
+    if (!cloud.boundRoomId || !room?.projectMode || !isCloudConfigured) { setCanvaReady(false); return; }
+    let cancelled = false;
+    void canvaHealth(getSupabase()!).then((health) => {
+      if (!cancelled) setCanvaReady(Boolean(health.ok));
+    });
+    return () => { cancelled = true; };
+  }, [cloud.boundRoomId, room?.projectMode]);
+
+  const importFromCanva = useCallback(
+    async (designId: string, name: string, retryBranchId?: string): Promise<{ ok: boolean; message: string; branchId?: string }> => {
+      const current = roomRef.current;
+      if (!current || !guest) return { ok: false, message: "房間還沒準備好。" };
+      const roomId = cloudRef.current.boundRoomId;
+      if (!roomId) return { ok: false, message: "還在連上雲端，稍等一下再試。" };
+      if (!cloudRef.current.canManageMedia) return { ok: false, message: "檢視者不能新增內容。" };
+      // 分支只建一次：重試沿用上一次那條，不會每按一次多一條空分支
+      // （Grok 07 F4 同紀律）。
+      let branchId = retryBranchId;
+      if (!branchId) {
+        const now = Date.now();
+        const branch: RoomBranch = {
+          id: crypto.randomUUID(),
+          roomId: current.id,
+          name,
+          branchType: "poster",
+          sortOrder: normalizeRoomBranches(current).branches?.length ?? 0,
+          status: "in_progress",
+          createdBy: cloudRef.current.userId ?? guest.id,
+          createdAt: now,
+          updatedAt: now,
+        };
+        try {
+          await cloudRef.current.writes.createBranch(branch);
+        } catch {
+          return { ok: false, message: "建立內容失敗，請確認連線後再試一次。" };
+        }
+        branchId = branch.id;
+      }
+      const result = await importCanvaDesign(getSupabase()!, { roomId, designId, branchId, label: name });
+      if (!result.ok) {
+        // 分支留著（重試沿用同一條）。訊息按碼分流，不轉述上游原文。
+        const message =
+          result.code === "NOT_CONNECTED"
+            ? "Canva 連結已失效 — 回上一步重新連結後再匯入（會沿用剛建立的分支）。"
+            : result.code === "EXPORT_PENDING"
+              ? "Canva 還在轉檔，稍等幾秒再按一次匯入（會沿用剛建立的分支）。"
+              : result.code === "TOO_LARGE"
+                ? "匯出的圖片超過 25MB 上限 — 在 Canva 端縮小尺寸，或下載後走一般圖片上傳。"
+                : result.code === "FORBIDDEN"
+                  ? "檢視者不能新增內容。"
+                  : result.code === "CANVA_NOT_CONFIGURED"
+                    ? "Canva 整合尚未設定。"
+                    : "匯入沒有成功。分支已建立，重試會沿用它。";
+        return { ok: false, message, branchId };
+      }
+      // 匯入已落地（版本列在雲端）。快照拉失敗要說真話，不假裝畫面上
+      // 已經有它（Grok 07 F5 同紀律）。
+      const refreshed = await cloudRef.current.loadBranch(branchId).catch(() => false);
+      if (refreshed) showToast(`已匯入 Canva 設計：${result.label}`, { tone: "success" });
+      else showToast("已匯入成功，但畫面同步慢了一步 — 重新整理就看得到。", { tone: "info" });
+      return { ok: true, message: "已匯入。" };
+    },
+    [guest, showToast],
+  );
+
+  const canvaSheetApi = useMemo(
+    () =>
+      canvaReady
+        ? {
+            status: () => canvaStatus(getSupabase()!),
+            connectUrl: () => canvaConnectUrl(getSupabase()!),
+            listDesigns: () => canvaListDesigns(getSupabase()!),
+            importDesign: importFromCanva,
+          }
+        : undefined,
+    [canvaReady, importFromCanva],
   );
 
   const createProjectContent = useCallback(
@@ -2689,6 +2771,7 @@ export function App() {
         },
         onCreateContent: createProjectContent,
         ...(cutosReady ? { cutosImport: importFromCutos } : {}),
+        ...(canvaSheetApi ? { canva: canvaSheetApi } : {}),
         voice: voiceDock,
         onAddFiles: addFilesToBranch,
         onUpdateBranch: updateProjectBranch,
