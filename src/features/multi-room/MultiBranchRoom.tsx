@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   BranchStatus,
   BranchType,
@@ -54,6 +54,16 @@ export type MultiBranchRoomApi = {
    * 失敗），整個入口不渲染 — 誠實不可用，不是灰掉的按鈕。
    */
   cutosImport?: (cutosProjectId: string, name: string, retryBranchId?: string) => Promise<{ ok: boolean; message: string; branchId?: string }>;
+  /**
+   * Canva 文宣匯入（PR-05 第一階段）。undefined＝不可用（未設定/健檢
+   * 失敗），入口不渲染。連結狀態與清單都問 bridge，token 不進瀏覽器。
+   */
+  canva?: {
+    status: () => Promise<boolean>;
+    connectUrl: () => Promise<string | null>;
+    listDesigns: () => Promise<import("../../lib/canvaContract").CanvaBridgeDesignList>;
+    importDesign: (designId: string, name: string, retryBranchId?: string) => Promise<{ ok: boolean; message: string; branchId?: string }>;
+  };
   onAddFiles: (branchId: string, files: FileList | null) => void;
   onUpdateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => void;
   onSavePlan: (plan: PlanDocument) => void;
@@ -396,8 +406,137 @@ function PlanEditor({
   );
 }
 
-function CreateSheet({ onClose, onCreate, onCutosImport, initialType }: { onClose: () => void; onCreate: MultiBranchRoomApi["onCreateContent"]; onCutosImport?: MultiBranchRoomApi["cutosImport"]; initialType?: BranchType }) {
-  const [type, setType] = useState<BranchType | "cutos" | null>(initialType ?? null);
+/**
+ * Canva 匯入面板（PR-05）：未連結→官方授權頁開新分頁；已連結→挑設計匯入。
+ * 失敗留在原地把話說清楚；重試沿用同一條分支（與 CUTOS 同紀律，Grok 07 F4）。
+ */
+function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBranchRoomApi["canva"]>; onBack: () => void; onDone: () => void }) {
+  const [connected, setConnected] = useState<boolean | null>(null);
+  const [designs, setDesigns] = useState<import("../../lib/canvaContract").CanvaDesignSummary[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [branchId, setBranchId] = useState<string | undefined>(undefined);
+
+  const loadDesigns = useCallback(() => {
+    setDesigns(null);
+    setListError(null);
+    void canva.listDesigns().then((result) => {
+      if (result.ok) setDesigns(result.designs);
+      else {
+        setDesigns([]);
+        setListError(
+          result.code === "NOT_CONNECTED"
+            ? "Canva 連結已失效，請重新連結。"
+            : "拿不到設計清單，請稍後再試。",
+        );
+        if (result.code === "NOT_CONNECTED") setConnected(false);
+      }
+    });
+  }, [canva]);
+
+  const checkStatus = useCallback(() => {
+    setConnected(null);
+    void canva.status().then((ok) => {
+      setConnected(ok);
+      if (ok) loadDesigns();
+    });
+  }, [canva, loadDesigns]);
+
+  useEffect(() => {
+    checkStatus();
+  }, [checkStatus]);
+
+  if (connected === null) {
+    return (
+      <div>
+        <button type="button" className="project-sheet-back" onClick={onBack}>‹ 返回</button>
+        <h2>從 Canva 匯入</h2>
+        <p className="project-sheet-note">確認 Canva 連結狀態…</p>
+      </div>
+    );
+  }
+
+  if (!connected) {
+    return (
+      <div>
+        <button type="button" className="project-sheet-back" onClick={onBack}>‹ 返回</button>
+        <h2>從 Canva 匯入</h2>
+        <p className="project-sheet-note">先把你的 Canva 帳號連結進來（會開 Canva 官方授權頁，這裡不會經手你的密碼）。授權完成回到這裡按「我連好了」。</p>
+        <button
+          type="button"
+          className="project-save-button project-submit"
+          data-testid="canva-connect"
+          onClick={() => {
+            void canva.connectUrl().then((url) => {
+              if (url) window.open(url, "_blank", "noopener");
+              else setMessage("拿不到授權連結，請稍後再試。");
+            });
+          }}
+        >
+          連結 Canva 帳號
+        </button>
+        <button type="button" className="project-text-button" data-testid="canva-recheck" onClick={checkStatus}>我連好了，重新檢查</button>
+        {message && <p className="project-sheet-error" role="alert">{message}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!selectedId || !name.trim() || busy) return;
+        setBusy(true);
+        setMessage(null);
+        void canva.importDesign(selectedId, name.trim(), branchId).then((outcome) => {
+          setBusy(false);
+          if (outcome.ok) onDone();
+          else {
+            setMessage(outcome.message); // 失敗留在原地，話說清楚
+            setBranchId(outcome.branchId); // 重試沿用，不增生分支
+          }
+        });
+      }}
+    >
+      <button type="button" className="project-sheet-back" onClick={onBack}>‹ 返回</button>
+      <h2>從 Canva 匯入</h2>
+      <p className="project-sheet-note">挑一份設計，匯出成圖片放進這間房。Canva 上的原稿不會被改動。</p>
+      {designs === null ? (
+        <p className="project-sheet-note">載入設計清單…</p>
+      ) : designs.length === 0 ? (
+        <p className="project-sheet-note">{listError ?? "你的 Canva 帳號還沒有設計。"}</p>
+      ) : (
+        <div className="project-create-options canva-design-list" role="radiogroup" aria-label="選擇設計">
+          {designs.map((design) => (
+            <button
+              type="button"
+              key={design.id}
+              data-testid="canva-design-item"
+              aria-pressed={selectedId === design.id}
+              className={selectedId === design.id ? "canva-design-selected" : undefined}
+              onClick={() => {
+                setSelectedId(design.id);
+                if (!name.trim()) setName(design.title);
+              }}
+            >
+              {design.thumbnailUrl ? <img src={design.thumbnailUrl} alt="" width={48} height={36} loading="lazy" /> : <span aria-hidden>▤</span>}
+              {design.title}
+            </button>
+          ))}
+        </div>
+      )}
+      <label className="project-field"><span>名稱</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：招生海報 9 月版" /></label>
+      {message && <p className="project-sheet-error" role="alert">{message}</p>}
+      <button type="submit" className="project-save-button project-submit" data-testid="canva-import-submit" disabled={!selectedId || !name.trim() || busy}>{busy ? "匯入中…" : "匯入"}</button>
+    </form>
+  );
+}
+
+function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType }: { onClose: () => void; onCreate: MultiBranchRoomApi["onCreateContent"]; onCutosImport?: MultiBranchRoomApi["cutosImport"]; canva?: MultiBranchRoomApi["canva"]; initialType?: BranchType }) {
+  const [type, setType] = useState<BranchType | "cutos" | "canva" | null>(initialType ?? null);
   const [name, setName] = useState("");
   const [files, setFiles] = useState<FileList | null>(null);
   const [cutosProjectId, setCutosProjectId] = useState("");
@@ -426,10 +565,18 @@ function CreateSheet({ onClose, onCreate, onCutosImport, initialType }: { onClos
                   CUTOS 影片成品
                 </button>
               )}
+              {canva && (
+                <button type="button" data-testid="canva-import-option" onClick={() => setType("canva")}>
+                  <span aria-hidden>▤</span>
+                  Canva 文宣
+                </button>
+              )}
             </div>
           </>
         ) : (
-          type === "cutos" ? (
+          type === "canva" ? (
+            canva ? <CanvaImportPane canva={canva} onBack={() => setType(null)} onDone={onClose} /> : null
+          ) : type === "cutos" ? (
           <form onSubmit={(event) => {
             event.preventDefault();
             if (!onCutosImport || !name.trim() || !cutosProjectId.trim() || cutosBusy) return;
@@ -809,7 +956,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           )}
         </>
       )}
-      {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} onCutosImport={api.cutosImport} />}
+      {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} onCutosImport={api.cutosImport} canva={api.canva} />}
       {pollOpen && <PollSheet onClose={() => setPollOpen(false)} onCreate={createPoll} />}
       {api.workspace && (
         // 對稿工作區疊在討論殼上；殼不卸載，返回時狀態全在。此容器（與其

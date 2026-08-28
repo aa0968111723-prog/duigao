@@ -48,6 +48,7 @@ const tables = {
   whiteboards: [], whiteboard_nodes: [], whiteboard_edges: [],
   room_discussion_messages: [], room_discussion_supports: [], decision_records: [],
   voice_sessions: [], voice_session_participants: [], presentation_state: [],
+  canva_connections: [], canva_oauth_states: [],
   collaboration_audit_events: [],
   // 影片對稿 2.0 (PR #32)
   version_review_briefs: [], video_reactions: [], version_verdicts: [],
@@ -69,6 +70,7 @@ const CONFLICT_KEYS = {
   version_verdicts: ["version_id", "user_id"],
   version_review_progress: ["version_id", "user_id"],
   voice_session_participants: ["session_id", "user_id"],
+  canva_connections: ["user_id"],
 };
 
 /**
@@ -231,9 +233,15 @@ function json(res, code, body) {
 function userOf(req) {
   const auth = req.headers.authorization || "";
   const t = auth.replace(/^Bearer\s+/i, "");
+  // e2e 的 service role 代演：canva-bridge 等 edge 以 service key 讀寫
+  // 專用表（真環境是 service_role 繞 RLS；mock 給它一個穩定假 uid）。
+  if (t === "e2e-service-role-key") return "service-role";
   return users.get(t) || null;
 }
 function isMember(roomId, uid) {
+  // service role（e2e 代演）通行一切 — 真環境它本來就繞 RLS；canva 的
+  // user-scoped 表（無 room_id）只有它會碰。
+  if (uid === "service-role") return true;
   return Boolean(uid && members.get(roomId)?.has(uid));
 }
 function session(uid) {
@@ -314,6 +322,9 @@ function unwrapMultipart(raw, contentType) {
 let previewHandler = null;
 let cutosBridgeHandler = null;
 let voiceTokenHandler = null;
+let canvaBridgeHandler = null;
+/** 假 Canva OAuth 的一次性 code 與 PKCE challenge 記錄。 */
+const canvaOauth = { lastChallenge: "", codes: new Map() };
 let mockOrigin = `http://127.0.0.1:${PORT}`;
 
 export const server = http.createServer(async (req, res) => {
@@ -332,6 +343,74 @@ export const server = http.createServer(async (req, res) => {
   }
   if (voiceTokenHandler && p.startsWith("/functions/v1/voice-token")) {
     return serveHandler(voiceTokenHandler, req, res, mockOrigin);
+  }
+  if (canvaBridgeHandler && p.startsWith("/functions/v1/canva-bridge")) {
+    return serveHandler(canvaBridgeHandler, req, res, mockOrigin);
+  }
+
+  // ---- 假 Canva（bridge 的上游；Basic 驗證與 PKCE S256 都是真的驗）----
+  if (p === "/canva-oauth/api/oauth/authorize") {
+    // 官方授權頁的 e2e 替身：記住 challenge，立刻帶 code 跳回 redirect_uri。
+    const challenge = url.searchParams.get("code_challenge") || "";
+    const state = url.searchParams.get("state") || "";
+    const redirectUri = url.searchParams.get("redirect_uri") || "";
+    canvaOauth.lastChallenge = challenge;
+    const code = `e2e-code-${randomUUID().slice(0, 8)}`;
+    canvaOauth.codes.set(code, challenge);
+    const target = new URL(redirectUri);
+    target.searchParams.set("code", code);
+    target.searchParams.set("state", state);
+    res.writeHead(302, { location: target.toString() });
+    return res.end();
+  }
+  if (p === "/canva-api/rest/v1/oauth/token") {
+    const auth = String(req.headers.authorization || "");
+    const expected = "Basic " + Buffer.from("e2e-canva-client:e2e-canva-secret").toString("base64");
+    if (auth !== expected) return json(res, 401, { error: "invalid_client" });
+    const form = new URLSearchParams((await readBody(req)).toString());
+    if (form.get("grant_type") === "authorization_code") {
+      const challenge = canvaOauth.codes.get(form.get("code") || "");
+      if (challenge == null) return json(res, 400, { error: "invalid_grant" });
+      canvaOauth.codes.delete(form.get("code") || "");
+      const digest = createHash("sha256").update(form.get("code_verifier") || "").digest("base64url");
+      if (digest !== challenge) return json(res, 400, { error: "invalid_grant", detail: "pkce" });
+      return json(res, 200, { access_token: "e2e-canva-at", refresh_token: "e2e-canva-rt", expires_in: 14400 });
+    }
+    if (form.get("grant_type") === "refresh_token") {
+      if (form.get("refresh_token") !== "e2e-canva-rt") return json(res, 400, { error: "invalid_grant" });
+      return json(res, 200, { access_token: "e2e-canva-at2", refresh_token: "e2e-canva-rt2", expires_in: 14400 });
+    }
+    return json(res, 400, { error: "unsupported_grant_type" });
+  }
+  if (p === "/canva-api/rest/v1/designs") {
+    const auth = String(req.headers.authorization || "");
+    if (!/^Bearer e2e-canva-at2?$/.test(auth)) return json(res, 401, { error: "unauthorized" });
+    return json(res, 200, {
+      items: [
+        { id: "DAGe2eDesign1", title: "招生海報 A", thumbnail: { url: `${mockOrigin}/canva-api/thumb.png` }, updated_at: 1756300000 },
+        { id: "DAGe2eDesign2", title: "茶會邀請卡", thumbnail: {}, updated_at: 1756200000 },
+      ],
+    });
+  }
+  if (p === "/canva-api/rest/v1/exports" && req.method === "POST") {
+    const auth = String(req.headers.authorization || "");
+    if (!/^Bearer e2e-canva-at2?$/.test(auth)) return json(res, 401, { error: "unauthorized" });
+    const body = JSON.parse((await readBody(req)).toString() || "{}");
+    if (body.design_id !== "DAGe2eDesign1" && body.design_id !== "DAGe2eDesign2") {
+      return json(res, 404, { error: "design_not_found" });
+    }
+    return json(res, 200, { job: { id: "e2e-export-1", status: "in_progress" } });
+  }
+  if (p === "/canva-api/rest/v1/exports/e2e-export-1") {
+    return json(res, 200, { job: { id: "e2e-export-1", status: "success", urls: [`${mockOrigin}/canva-api/export.png`] } });
+  }
+  if (p === "/canva-api/export.png" || p === "/canva-api/thumb.png") {
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("e2e-canva-png-".repeat(16)),
+    ]);
+    res.writeHead(200, { "content-type": "image/png", "content-length": String(png.length) });
+    return res.end(png);
   }
 
   // ---- 假 CUTOS（bridge 的上游；key 驗證與真實 route 同語意）----
@@ -571,7 +650,7 @@ export const server = http.createServer(async (req, res) => {
         if ("user_id" in (tables[table][0] ?? {}) || CONFLICT_KEYS[table] || table === "video_reactions") {
           if (filled.user_id === undefined && table !== "version_review_briefs") filled.user_id = uid;
         }
-        if (filled.user_id !== undefined && filled.user_id !== uid) {
+        if (filled.user_id !== undefined && filled.user_id !== uid && uid !== "service-role") {
           return json(res, 403, { message: "new row violates row-level security policy" });
         }
 
@@ -1058,6 +1137,18 @@ export async function start(port = PORT, options = {}) {
       LIVEKIT_URL: "wss://e2e-livekit.invalid",
       LIVEKIT_API_KEY: "e2e-livekit-key",
       LIVEKIT_API_SECRET: "e2e-livekit-secret-for-harness-only",
+    });
+  }
+  if (options.canvaBridge) {
+    // 真實的 canva-bridge 源碼＋指向本 mock 的假 Canva：env 齊備。
+    canvaBridgeHandler = await loadEdgeHandler("canva-bridge", {
+      SUPABASE_URL: mockOrigin,
+      SUPABASE_ANON_KEY: "sb_publishable_e2e_mock_key_000000",
+      SUPABASE_SERVICE_ROLE_KEY: "e2e-service-role-key",
+      CANVA_CLIENT_ID: "e2e-canva-client",
+      CANVA_CLIENT_SECRET: "e2e-canva-secret",
+      CANVA_API_BASE: mockOrigin + "/canva-api",
+      CANVA_OAUTH_BASE: mockOrigin + "/canva-oauth",
     });
   }
   if (options.cutosBridge) {

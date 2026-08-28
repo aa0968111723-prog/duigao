@@ -177,7 +177,7 @@ try {
       VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_e2e_mock_key_000000",
     },
   });
-  mock = await startMock(MOCK_PORT, { cutosBridge: true, voiceToken: true });
+  mock = await startMock(MOCK_PORT, { cutosBridge: true, voiceToken: true, canvaBridge: true });
   app = await serveStatic(dist, APP_PORT);
   browser = await chromium.launch(browserOptions());
 
@@ -392,6 +392,80 @@ try {
       check("重試沿用同一條分支，不增生", branchesBefore === 1 && branchesAfter === 1, `before=${branchesBefore} after=${branchesAfter}`);
       faults.cutosOutputProjectId = "cutos-demo";
       await page.locator(".project-sheet-close").click();
+    }
+
+    // ---- PR-05：Canva 文宣匯入（OAuth bridge，真實 edge 源碼） --------
+    {
+      // (0) 未連結：health 過 → 入口出現；面板顯示官方授權引導
+      await page.locator(".project-fab").click();
+      await page.waitForSelector('[data-testid="create-content-sheet"]', { timeout: 15000 });
+      check("Canva 匯入入口在健檢通過後出現", (await page.getByTestId("canva-import-option").count()) === 1);
+      await page.getByTestId("canva-import-option").click();
+      await page.waitForSelector('[data-testid="canva-connect"]', { timeout: 15000 });
+      check("未連結時顯示連結引導，不露設計清單", (await page.getByTestId("canva-design-item").count()) === 0);
+
+      // (1) OAuth 機械（node 側、獨立使用者）：connect-url → authorize 302
+      //     → callback 交換。PKCE S256 是 mock 真的驗，state 一次性。
+      const canvaMock = `http://127.0.0.1:${MOCK_PORT}`;
+      const nodeSession = await fetch(`${canvaMock}/auth/v1/token?grant_type=password`, { method: "POST", body: "{}" }).then((r) => r.json());
+      const invokeCanva = (action, extra = {}) =>
+        fetch(`${canvaMock}/functions/v1/canva-bridge`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${nodeSession.access_token}`, "content-type": "application/json" },
+          body: JSON.stringify({ action, ...extra }),
+        });
+      const connectRes = await (await invokeCanva("connect-url")).json();
+      check(
+        "connect-url：官方授權頁＋PKCE S256，無 secret 外洩",
+        Boolean(connectRes.ok) && /code_challenge=/.test(String(connectRes.url)) && /code_challenge_method=S256/.test(String(connectRes.url)) && !/e2e-canva-secret/.test(String(connectRes.url)),
+        String(connectRes.url ?? "").slice(0, 110),
+      );
+      const authorizeRes = await fetch(connectRes.url, { redirect: "manual" });
+      const callbackUrl = authorizeRes.headers.get("location") ?? "";
+      const cbHtml = await fetch(callbackUrl).then((r) => r.text());
+      check("callback 完成 code+verifier 交換（回報已連結）", cbHtml.includes("已連結"), cbHtml.slice(0, 80));
+      const nodeConn = rows.canva_connections.find((row) => row.user_id === nodeSession.user.id);
+      check("token 落 service 專用表", Boolean(nodeConn && nodeConn.access_token && nodeConn.refresh_token));
+      const replayStatus = (await fetch(callbackUrl)).status;
+      check("同一 state 重放被拒（一次性消費）", replayStatus === 400, `status=${replayStatus}`);
+
+      // refresh 輪替：把過期時間撥回過去 → 下一次呼叫必須 refresh 並把
+      // 輪替後的新 refresh token 落盤（不落盤＝下次斷線）。
+      nodeConn.token_expires_at = new Date(Date.now() - 1000).toISOString();
+      const listAfterRefresh = await (await invokeCanva("list-designs")).json();
+      check("token 過期自動 refresh，清單照拿", Boolean(listAfterRefresh.ok) && listAfterRefresh.designs.length === 2, JSON.stringify(listAfterRefresh).slice(0, 90));
+      check("輪替後的 refresh token 已落盤", rows.canva_connections.find((row) => row.user_id === nodeSession.user.id)?.refresh_token === "e2e-canva-rt2");
+      check("清單是誠實子集（回應不含任何 token）", !JSON.stringify(listAfterRefresh).includes("e2e-canva-at"));
+
+      // 非成員匯入 page 的房 → 404（房間對外人是不存在的）
+      const pageRoomId = rows.room_branches[0]?.room_id;
+      const denied = await invokeCanva("import-design", { roomId: pageRoomId, designId: "DAGe2eDesign1" });
+      check("非成員匯入 404 ROOM_NOT_FOUND", denied.status === 404);
+
+      // (2) UI：page 使用者標為已連結（同一機械已在 (1) 驗過）→ 清單 →
+      //     匯入 → 圖片版本落地、分支 FK 齊備。
+      const pageUid = rows.room_branches[0]?.created_by;
+      rows.canva_connections.push({
+        user_id: pageUid,
+        access_token: "e2e-canva-at",
+        refresh_token: "e2e-canva-rt",
+        token_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+      });
+      await page.getByTestId("canva-recheck").click();
+      await page.waitForSelector('[data-testid="canva-design-item"]', { timeout: 15000 });
+      check("已連結後看得到設計清單", (await page.getByTestId("canva-design-item").count()) === 2);
+      await page.getByTestId("canva-design-item").first().click();
+      await page.getByLabel("名稱").fill("Canva 招生海報");
+      await page.getByTestId("canva-import-submit").click();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="create-content-sheet"]'), null, { timeout: 30000 });
+      const canvaVersion = rows.versions.find((row) => row.label === "Canva 招生海報");
+      check(
+        "Canva 匯入落成圖片版本列（image_path＋png）",
+        Boolean(canvaVersion && String(canvaVersion.image_path || "").endsWith("poster.png") && canvaVersion.mime_type === "image/png"),
+        `row=${JSON.stringify(canvaVersion ?? null).slice(0, 120)}`,
+      );
+      const canvaBranch = rows.room_branches.find((row) => row.name === "Canva 招生海報");
+      check("匯入建立了文宣分支（FK 齊備）", Boolean(canvaBranch) && canvaVersion?.branch_id === canvaBranch?.id, `branch=${canvaBranch?.id ?? "none"}`);
     }
 
     // ---- PR-03：語音房（LiveKit）— token 契約與 UI 誠實性 ------------
