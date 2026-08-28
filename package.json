@@ -18,7 +18,7 @@
     "test:asset-intelligence": "tsx --test scripts/tests/asset-intelligence.test.ts scripts/tests/ai-proposals.test.ts scripts/tests/room-context-strip.test.ts",
     "test:asset-intelligence-e2e": "node scripts/e2e/asset-intelligence.mjs",
     "test:multi-branch": "tsx --test scripts/tests/multi-branch.test.ts scripts/tests/video-media.test.ts scripts/tests/cutos-contract.test.ts scripts/tests/canva-contract.test.ts",
-    "test:collaboration": "tsx --test scripts/tests/collaboration-workspace.test.ts scripts/tests/pending-writes.test.ts scripts/tests/discussion-outbox.test.ts scripts/tests/context-anchor.test.ts scripts/tests/planform-artifact.test.ts",
+    "test:collaboration": "tsx --test scripts/tests/collaboration-workspace.test.ts scripts/tests/pending-writes.test.ts scripts/tests/discussion-outbox.test.ts scripts/tests/context-anchor.test.ts scripts/tests/whiteboard-operations.test.ts scripts/tests/planform-artifact.test.ts",
     "test:multi-branch-e2e": "node scripts/e2e/multi-branch-room.mjs",
     "test:collaboration-e2e": "node scripts/e2e/collaboration-workspace.mjs",
     "test:migrations": "node scripts/e2e/migrations.mjs",

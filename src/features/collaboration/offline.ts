@@ -2,7 +2,7 @@ import type { PendingEdit, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./
 
 export type CloudNodeWrites = {
   upsertNode?: (node: WhiteboardNode) => unknown;
-  deleteNode?: (id: string) => unknown;
+  deleteNode?: (id: string, version: number) => unknown;
 };
 
 /** True only when the cloud write actually succeeded — not a fire-and-forget void. */
@@ -59,12 +59,14 @@ export async function applyPendingCloudWrites(
         }
         result = await writes.upsertNode(edit.payload as WhiteboardNode);
       } else if (edit.op === "delete") {
-        const id = (edit.payload as { id?: string }).id;
+        const { id, version } = edit.payload as { id?: string; version?: number };
         if (!id || !writes.deleteNode) {
           retained.push(edit.id);
           continue;
         }
-        result = await writes.deleteNode(id);
+        // 佇列裡的舊 payload 可能沒有 version（升版相容）：以 1 送出 —
+        // 比伺服器低會走 stale-write → conflict → drop，誠實而不靜默覆蓋。
+        result = await writes.deleteNode(id, version ?? 1);
       } else {
         retained.push(edit.id);
         continue;
@@ -104,7 +106,13 @@ export function applyBoardPatches(
   let nextNodes = nodes;
   let nextEdges = edges;
   for (const patch of patches) {
-    if (patch.type === "node-upsert") {
+    if (patch.type === "node-upsert" && patch.node.deletedAt) {
+      // tombstone row 走 upsert 進來（第二層防線；第一層在 useCloudRoom 的
+      // row→patch 轉換）：視同刪除，且不推進 ack 水位 — 版本屬於墓碑列。
+      if (!shieldedIds?.has(patch.node.id) && nextNodes.some((item) => item.id === patch.node.id)) {
+        nextNodes = nextNodes.filter((item) => item.id !== patch.node.id);
+      }
+    } else if (patch.type === "node-upsert") {
       const incoming = patch.node;
       if (shieldedIds?.has(incoming.id)) {
         // 讓路且「不推進 ack」（Grok pr02c F1）：若推進，拖曳/打字結束的
@@ -152,6 +160,10 @@ export function replaceBoardGraph(
   graph: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] },
   shieldedIds: ReadonlySet<string> | null,
 ): { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] } {
+  // tombstone（0021）：整替時墓碑列不進畫面 — 含墓碑的 graph 在此收斂，
+  // 呼叫端不需自行過濾。shield 保留規則不變（拖曳/in-flight 節點讓路）。
+  const liveGraphNodes = graph.nodes.filter((node) => !node.deletedAt);
+  graph = { nodes: liveGraphNodes, edges: graph.edges };
   const incomingIds = new Set(graph.nodes.map((node) => node.id));
   const keptLocal = nodes.filter(
     (node) => node.whiteboardId !== whiteboardId || (shieldedIds?.has(node.id) && !incomingIds.has(node.id)),
@@ -319,5 +331,8 @@ export function reconcileNodes(local: WhiteboardNode[], remote: WhiteboardNode[]
     }),
   );
   for (const id of deleted) if (id) byId.delete(id);
-  return [...byId.values()];
+  // tombstone（0021）：合併後過濾 — 這裡是唯一的殭屍消滅點。IDB 快照裡的
+  // 舊活列會被雲端墓碑列（version 較高）在上面的合併蓋掉，然後在此濾除；
+  // 本地未同步的新建列（雲端沒有）不受影響。
+  return [...byId.values()].filter((node) => !node.deletedAt);
 }

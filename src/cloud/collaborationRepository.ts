@@ -6,8 +6,11 @@ import type {
   DiscussionSupport,
   Whiteboard,
   WhiteboardEdge,
+  WhiteboardFrame,
   WhiteboardNode,
+  WhiteboardOperation,
 } from "../features/collaboration/types";
+import { FRAME_KINDS } from "../features/collaboration/types";
 import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaboration/types";
 import { CloudError } from "./errors";
 
@@ -41,12 +44,26 @@ export type NodeRow = {
   created_at: string;
   updated_at: string;
   version: number;
+  // 0021/0022（舊部署的列可能缺欄 — 全部 optional，讀側補值）
+  rotation?: number | null;
+  z_index?: number | null;
+  locked?: boolean | null;
+  source_version_id?: string | null;
+  anchor?: Record<string, unknown> | null;
+  updated_by?: string | null;
+  deleted_at?: string | null;
+  frame_id?: string | null;
 };
 
 export type EdgeRow = {
   id: string;
   whiteboard_id: string;
   room_id: string;
+  updated_at?: string | null;
+  created_by?: string | null;
+  version?: number | null;
+  source_handle?: string | null;
+  target_handle?: string | null;
   source_node_id: string;
   target_node_id: string;
   edge_type: string;
@@ -128,6 +145,14 @@ export function nodeFromRow(row: NodeRow): WhiteboardNode | null {
     createdAt: ms(row.created_at),
     updatedAt: ms(row.updated_at),
     version: row.version ?? 1,
+    rotation: Number(row.rotation) || 0,
+    zIndex: Number(row.z_index) || 0,
+    locked: Boolean(row.locked),
+    sourceVersionId: row.source_version_id ?? undefined,
+    anchor: (row.anchor && typeof row.anchor === "object" ? row.anchor : undefined) as WhiteboardNode["anchor"],
+    updatedBy: row.updated_by ?? undefined,
+    deletedAt: row.deleted_at ? ms(row.deleted_at) : undefined,
+    frameId: row.frame_id ?? undefined,
   };
 }
 
@@ -142,6 +167,11 @@ export function edgeFromRow(row: EdgeRow): WhiteboardEdge | null {
     edgeType: row.edge_type,
     label: row.label ?? "",
     createdAt: ms(row.created_at),
+    updatedAt: row.updated_at ? ms(row.updated_at) : undefined,
+    version: row.version ?? 1,
+    createdBy: row.created_by ?? undefined,
+    sourceHandle: (row.source_handle ?? undefined) as WhiteboardEdge["sourceHandle"],
+    targetHandle: (row.target_handle ?? undefined) as WhiteboardEdge["targetHandle"],
   };
 }
 
@@ -267,6 +297,14 @@ function nodeRowPayload(node: WhiteboardNode) {
     parent_group_id: node.parentGroupId ?? null,
     created_by: isUuid(node.createdBy) ? node.createdBy : null,
     version: node.version,
+    rotation: node.rotation ?? 0,
+    z_index: node.zIndex ?? 0,
+    locked: node.locked ?? false,
+    source_version_id: node.sourceVersionId ?? null,
+    anchor: node.anchor ?? null,
+    frame_id: node.frameId ?? null,
+    // deleted_at 刻意不在 upsert payload：復活/刪除只走 softDeleteNode 的
+    // 專用 update — 一般編輯永遠碰不到墓碑欄。
   };
 }
 
@@ -294,8 +332,23 @@ export async function persistNodePosition(supabase: SupabaseClient, node: Whiteb
   return requireNodeFromRow(data as NodeRow | null, node);
 }
 
-export async function deleteNode(supabase: SupabaseClient, roomId: string, nodeId: string): Promise<void> {
-  const { error } = await supabase.from("whiteboard_nodes").delete().eq("id", nodeId).eq("room_id", roomId);
+/**
+ * 刪除 = tombstone（0021）：update deleted_at 帶「最後 ack 的 version」
+ * 走 touch trigger 的 OCC — 離線刪除蓋掉線上編輯的 ADR-011 缺口在此
+ * 關閉（stale 即 raise，上層走既有 conflict 路徑）。REST 硬刪已被 0021
+ * revoke，這是唯一刪除路徑。
+ */
+export async function softDeleteNode(
+  supabase: SupabaseClient,
+  roomId: string,
+  nodeId: string,
+  version: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from("whiteboard_nodes")
+    .update({ deleted_at: new Date().toISOString(), version })
+    .eq("id", nodeId)
+    .eq("room_id", roomId);
   if (error) throw new CloudError(error.message, "whiteboard-node");
 }
 
@@ -308,8 +361,165 @@ export async function insertEdge(supabase: SupabaseClient, edge: WhiteboardEdge)
     target_node_id: edge.targetNodeId,
     edge_type: edge.edgeType,
     label: edge.label,
+    source_handle: edge.sourceHandle ?? null,
+    target_handle: edge.targetHandle ?? null,
+    created_by: isUuid(edge.createdBy ?? "") ? edge.createdBy : null,
   });
   if (error) throw new CloudError(error.message, "whiteboard-edge");
+}
+
+// ---- frames / operations / versions（0022–0024，WB01 資料層） --------------
+
+export type FrameRow = {
+  id: string;
+  whiteboard_id: string;
+  room_id: string;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  kind: string;
+  style: Record<string, unknown> | null;
+  z_index: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
+};
+
+export function frameFromRow(row: FrameRow): WhiteboardFrame | null {
+  if (!(FRAME_KINDS as readonly string[]).includes(row.kind)) return null;
+  return {
+    id: row.id,
+    whiteboardId: row.whiteboard_id,
+    roomId: row.room_id,
+    title: row.title ?? "",
+    x: Number(row.x) || 0,
+    y: Number(row.y) || 0,
+    width: Number(row.width) || 480,
+    height: Number(row.height) || 320,
+    kind: row.kind as WhiteboardFrame["kind"],
+    style: (row.style && typeof row.style === "object" ? row.style : {}) as Record<string, unknown>,
+    zIndex: Number(row.z_index) || -1,
+    createdBy: row.created_by ?? "system",
+    createdAt: ms(row.created_at),
+    updatedAt: ms(row.updated_at),
+    version: row.version ?? 1,
+  };
+}
+
+export async function loadFrames(
+  supabase: SupabaseClient,
+  roomId: string,
+  whiteboardId: string,
+): Promise<WhiteboardFrame[]> {
+  const { data, error } = await supabase
+    .from("whiteboard_frames")
+    .select("*")
+    .eq("room_id", roomId)
+    .eq("whiteboard_id", whiteboardId);
+  if (error) throw new CloudError(error.message, "whiteboard-frame");
+  return ((data ?? []) as FrameRow[]).map(frameFromRow).filter((frame): frame is WhiteboardFrame => frame !== null);
+}
+
+export async function upsertFrame(supabase: SupabaseClient, frame: WhiteboardFrame): Promise<WhiteboardFrame> {
+  const { data, error } = await supabase
+    .from("whiteboard_frames")
+    .upsert({
+      id: frame.id,
+      whiteboard_id: frame.whiteboardId,
+      room_id: frame.roomId,
+      title: frame.title,
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
+      kind: frame.kind,
+      style: frame.style,
+      z_index: frame.zIndex,
+      created_by: isUuid(frame.createdBy) ? frame.createdBy : null,
+      version: frame.version,
+    })
+    .select("*")
+    .maybeSingle();
+  if (error) throw new CloudError(error.message, "whiteboard-frame");
+  const persisted = data ? frameFromRow(data as FrameRow) : null;
+  return persisted ?? { ...frame, version: (frame.version ?? 1) + 1 };
+}
+
+export async function deleteFrame(supabase: SupabaseClient, roomId: string, frameId: string): Promise<void> {
+  const { error } = await supabase.from("whiteboard_frames").delete().eq("id", frameId).eq("room_id", roomId);
+  if (error) throw new CloudError(error.message, "whiteboard-frame");
+}
+
+/**
+ * append-only 操作事件（0023）。op_id unique：重試撞 duplicate-key 視為
+ * 已入帳（冪等 ack — 與 pendingWrites 的 duplicate-key 語意一致）。
+ */
+export async function insertOperation(supabase: SupabaseClient, op: WhiteboardOperation): Promise<void> {
+  const { error } = await supabase.from("whiteboard_operations").insert({
+    op_id: op.opId,
+    whiteboard_id: op.whiteboardId,
+    room_id: op.roomId,
+    actor_user_id: op.actorUserId,
+    op_type: op.opType,
+    entity_id: op.entityId,
+    field_mask: op.fieldMask,
+    before: op.before,
+    after: op.after,
+  });
+  if (error && !/duplicate key/i.test(error.message)) {
+    throw new CloudError(error.message, "whiteboard-operation");
+  }
+}
+
+export async function listOperations(
+  supabase: SupabaseClient,
+  whiteboardId: string,
+  limit = 100,
+): Promise<WhiteboardOperation[]> {
+  const { data, error } = await supabase
+    .from("whiteboard_operations")
+    .select("*")
+    .eq("whiteboard_id", whiteboardId)
+    .order("id", { ascending: false })
+    .limit(limit);
+  if (error) throw new CloudError(error.message, "whiteboard-operation");
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    opId: String(row.op_id),
+    whiteboardId: String(row.whiteboard_id),
+    roomId: String(row.room_id),
+    actorUserId: String(row.actor_user_id),
+    opType: row.op_type as WhiteboardOperation["opType"],
+    entityId: String(row.entity_id),
+    fieldMask: Array.isArray(row.field_mask) ? (row.field_mask as string[]) : [],
+    before: (row.before && typeof row.before === "object" ? row.before : {}) as Record<string, unknown>,
+    after: (row.after && typeof row.after === "object" ? row.after : {}) as Record<string, unknown>,
+    createdAt: ms(String(row.created_at)),
+  }));
+}
+
+export async function createBoardVersion(
+  supabase: SupabaseClient,
+  input: {
+    id: string;
+    whiteboardId: string;
+    roomId: string;
+    label: string;
+    createdBy: string;
+    snapshot: { nodes: unknown[]; edges: unknown[]; frames?: unknown[] };
+  },
+): Promise<void> {
+  const { error } = await supabase.from("whiteboard_versions").insert({
+    id: input.id,
+    whiteboard_id: input.whiteboardId,
+    room_id: input.roomId,
+    label: input.label,
+    snapshot: input.snapshot,
+    created_by: input.createdBy,
+  });
+  if (error) throw new CloudError(error.message, "whiteboard-version");
 }
 
 export async function deleteEdge(supabase: SupabaseClient, roomId: string, edgeId: string): Promise<void> {

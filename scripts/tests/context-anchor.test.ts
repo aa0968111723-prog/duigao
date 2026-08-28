@@ -316,3 +316,37 @@ test("意見列：region 是 JSON 字串（未解析）→ normalizeRegion 不�
     { type: "image-point", x: 0.6, y: 0.9, versionId: undefined },
   );
 });
+
+// ---- WB01：message 與 plan-section 臂 --------------------------------------
+
+test("message 臂：payload round-trip＋node link 用 'discussion' 詞彙＋openTarget", () => {
+  const anchor = { type: "message", messageId: "m-1" } as const;
+  const payload = anchorToDiscussionPayload(anchor);
+  assert.deepEqual(payload, { messageId: "m-1" });
+  assert.deepEqual(anchorFromDiscussion(payload), anchor);
+  // provenance 缺口的契約半邊：全庫第一個 'discussion' link 生產路徑
+  assert.deepEqual(anchorToNodeLink(anchor), { linkedEntityType: "discussion", linkedEntityId: "m-1" });
+  assert.deepEqual(openTarget(anchor), { surface: "discussion", messageId: "m-1" });
+});
+
+test("plan-section 臂：round-trip、node link 到 plan、openTarget 到 content", () => {
+  const anchor = { type: "plan-section", branchId: "br-1", sectionId: "s-2" } as const;
+  const payload = anchorToDiscussionPayload(anchor);
+  assert.deepEqual(payload, { branchId: "br-1", planSectionId: "s-2" });
+  assert.deepEqual(anchorFromDiscussion(payload), anchor);
+  assert.deepEqual(anchorToNodeLink(anchor), { linkedEntityType: "plan", linkedEntityId: "br-1" });
+  assert.deepEqual(openTarget(anchor), { surface: "content", branchId: "br-1" });
+  // 無 sectionId 的退化：payload 只剩 branchId → 讀回是 entity branch（不
+  // 捏造 plan-section）— 退化方向永遠往「較少宣稱」走
+  const bare = anchorToDiscussionPayload({ type: "plan-section", branchId: "br-1" });
+  assert.deepEqual(bare, { branchId: "br-1" });
+  assert.deepEqual(anchorFromDiscussion(bare), { type: "entity", entityType: "branch", entityId: "br-1" });
+});
+
+test("messageId 優先權：payload 同時有 messageId 與 branchId 時讀成 message 臂", () => {
+  assert.deepEqual(
+    anchorFromDiscussion({ messageId: "m-9", branchId: "br-1" }),
+    { type: "message", messageId: "m-9" },
+  );
+});
+

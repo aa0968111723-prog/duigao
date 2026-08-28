@@ -49,6 +49,7 @@ const tables = {
   room_discussion_messages: [], room_discussion_supports: [], decision_records: [],
   voice_sessions: [], voice_session_participants: [], presentation_state: [],
   canva_connections: [], canva_oauth_states: [],
+  whiteboard_frames: [], whiteboard_operations: [], whiteboard_versions: [],
   collaboration_audit_events: [],
   // 影片對稿 2.0 (PR #32)
   version_review_briefs: [], video_reactions: [], version_verdicts: [],
@@ -299,6 +300,9 @@ function filterRows(rows, params) {
       const values = v.slice(4, -1).split(",").map((item) => item.replace(/^\"|\"$/g, ""));
       out = out.filter((r) => values.includes(String(r[k])));
     }
+    // tombstone 讀路（0021）：`deleted_at=is.null` 與 not.is.null
+    if (v === "is.null") out = out.filter((r) => r[k] === null || r[k] === undefined);
+    if (v === "not.is.null") out = out.filter((r) => r[k] !== null && r[k] !== undefined);
   }
   return out;
 }
@@ -661,6 +665,12 @@ export const server = http.createServer(async (req, res) => {
           }
         }
 
+        if (table === "whiteboard_operations") {
+          // 0023：op_id unique — 重試冪等的 DB 半邊
+          if (tables[table].some((r) => r.op_id === filled.op_id)) {
+            return json(res, 409, { code: "23505", message: "duplicate key value violates unique constraint" });
+          }
+        }
         const keys = CONFLICT_KEYS[table];
         const existing = keys ? tables[table].find((r) => keys.every((k) => r[k] === filled[k])) : null;
         if (existing && upsert) {

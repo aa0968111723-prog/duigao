@@ -1717,20 +1717,38 @@ export function App() {
 
   const deleteNode = useCallback(
     (id: string) => {
+      // tombstone（0021）：刪除是帶版本的 update，走 touch trigger 的 OCC。
+      // 版本取「畫面上這一列」＝最後 ack 的值；離線刪除撞上線上編輯時
+      // stale-write → conflict，ADR-011 的缺口在此關閉。
+      const target = (roomRef.current?.whiteboardNodes ?? []).find((node) => node.id === id);
+      const version = target?.version ?? 1;
+      const targetBoardId = target?.whiteboardId ?? null;
       updateRoom((r) => ({
         ...r,
         whiteboardNodes: (r.whiteboardNodes ?? []).filter((node) => node.id !== id),
         whiteboardEdges: (r.whiteboardEdges ?? []).filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id),
       }));
       const persistDelete = async () => {
-        const result = await cloudRef.current.writes.deleteNode?.(id);
+        const result = await cloudRef.current.writes.deleteNode?.(id, version);
         if (isCloudWriteAcknowledged(result)) {
           await clearPendingEdit(`node-del:${id}`);
           return;
         }
-        // delete 沒有版本檢查（touch trigger 只掛 BEFORE UPDATE），SQL 上
-        // 到不了 stale-write — 不裝死碼假裝有 OCC；離線 delete 蓋掉線上
-        // 編輯的語意缺口記在 ADR-011，tombstone 時一併處理。
+        if (result === "conflict") {
+          // 刪除輸掉 OCC（節點在別處被改過）：舊刪除不進佇列（重放永遠
+          // 409），refetch 讓節點誠實回到畫面 — 與 upsert 衝突同一模式。
+          await clearPendingEdit(`node-del:${id}`);
+          const refreshed = targetBoardId
+            ? await cloudRef.current.loadWhiteboard?.(targetBoardId).catch(() => false)
+            : false;
+          showToast(
+            refreshed
+              ? "這個節點剛被別人改過，刪除沒有生效，白板已同步成最新版本。"
+              : "這個節點剛被別人改過，刪除沒有生效；重新打開白板可取得最新版本。",
+            { tone: "info" },
+          );
+          return;
+        }
         const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
         if (retry.queueDurable && cloudRef.current.active) {
           await queuePendingEdit({
@@ -1738,7 +1756,7 @@ export function App() {
             roomId: roomRef.current?.id ?? "",
             kind: "node",
             op: "delete",
-            payload: { id },
+            payload: { id, version },
             createdAt: Date.now(),
           });
         }
@@ -1752,7 +1770,7 @@ export function App() {
         roomId: roomRef.current?.id ?? "",
         kind: "node",
         op: "delete",
-        payload: { id },
+        payload: { id, version },
         createdAt: Date.now(),
       });
     },

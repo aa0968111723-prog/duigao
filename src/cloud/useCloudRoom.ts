@@ -97,7 +97,7 @@ import {
   updateDecision as repoUpdateDecision,
   updateWhiteboard as repoUpdateWhiteboard,
   upsertNode as repoUpsertNode,
-  deleteNode as repoDeleteNode,
+  softDeleteNode as repoSoftDeleteNode,
 } from "./collaborationRepository";
 import { decideNodeWriteRetry } from "../features/collaboration/offline";
 import {
@@ -130,7 +130,7 @@ export type CloudWrites = {
   createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false | "conflict">;
-  deleteNode?: (id: string) => Promise<boolean | "conflict">;
+  deleteNode?: (id: string, version: number) => Promise<boolean | "conflict">;
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
@@ -623,7 +623,12 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
           // 白板增量：row → domain，直接 patch（不整房 reload — PR-02c）
           onBoardNodeUpsert: (row) => {
             const node = nodeFromRow(row);
-            if (node) onBoardPatchRef.current?.({ type: "node-upsert", node });
+            if (!node) return;
+            // tombstone 的 UPDATE echo 轉刪除 patch（Grok wb00 F3：照 upsert
+            // 走會把本地已刪節點以更高 version 復活）。applyBoardPatches 內
+            // 另有同語意防線 — 兩層都測。
+            if (node.deletedAt) onBoardPatchRef.current?.({ type: "node-delete", id: node.id });
+            else onBoardPatchRef.current?.({ type: "node-upsert", node });
           },
           onBoardNodeDelete: (id) => onBoardPatchRef.current?.({ type: "node-delete", id }),
           onBoardEdgeInsert: (row) => {
@@ -1063,8 +1068,10 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     createWhiteboard: (board) => run(`whiteboard-insert:${board.id}`, () => insertWhiteboard(supabase!, board)),
     updateWhiteboard: (board) => run(`whiteboard:${board.id}`, () => repoUpdateWhiteboard(supabase!, board)),
     upsertNode: (node) => writeAck(() => repoUpsertNode(supabase!, { ...node, roomId: boundRef.current! })),
-    deleteNode: (id) => writeAck(async () => {
-      await repoDeleteNode(supabase!, boundRef.current!, id);
+    // tombstone（0021）：帶最後 ack 的 version 走 OCC — stale 即 conflict，
+    // 由 writeAck 的既有衝突路徑接手（drop+refetch+誠實 toast）。
+    deleteNode: (id, version) => writeAck(async () => {
+      await repoSoftDeleteNode(supabase!, boundRef.current!, id, version);
       return true;
     }),
     createEdge: (edge) => run(`edge:${edge.id}`, () => insertEdge(supabase!, edge)),

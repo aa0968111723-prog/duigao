@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T03:25:02.000Z",
+  "generatedAt": "2026-08-28T05:23:53.000Z",
   "git": {
-    "branch": "fix/edge-cors-preflight",
-    "sha": "007713e45870a0338e22ee620c74cf84082befe8",
-    "mainSha": "007713e45870a0338e22ee620c74cf84082befe8",
+    "branch": "agent/wb01-canonical-schema",
+    "sha": "5ca25e4382a0580cdb2df957f0e61e8b86bf635e",
+    "mainSha": "1d30c6791ddf6b3cb771712e5639130754700a60",
     "dirty": true
   },
   "project": {
@@ -980,7 +980,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0020",
+    "repoMigrationHead": "0024",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -1001,10 +1001,14 @@
       "supabase/migrations/0017_author_acl.sql",
       "supabase/migrations/0018_discussion_attachments.sql",
       "supabase/migrations/0019_ai_apply_audit.sql",
-      "supabase/migrations/0020_canva_bridge.sql"
+      "supabase/migrations/0020_canva_bridge.sql",
+      "supabase/migrations/0021_whiteboard_canonical_columns.sql",
+      "supabase/migrations/0022_whiteboard_frames.sql",
+      "supabase/migrations/0023_whiteboard_operations.sql",
+      "supabase/migrations/0024_whiteboard_versions.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0020",
+    "productionMigrationExpectation": "0024",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1166,7 +1170,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0020_canva_bridge.sql."
+        "message": "Migration order is contiguous through 0024_whiteboard_versions.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",
