@@ -453,12 +453,16 @@ try {
 
       // (3) 按「開始語音」：session＋參與者列落 DB；LiveKit 連線對假
       //     wss 失敗 → 誠實錯誤文案（不是假裝已加入）
+      console.log("[voice-diag] dock before click:", (await page.getByTestId("voice-dock").innerText()).slice(0, 120));
       await page.getByTestId("voice-join").click();
       const errShown = await page.waitForFunction(
         () => document.querySelector(".rd-voice-error")?.textContent?.includes("失敗") ?? false,
         null,
         { timeout: 30000 },
       ).then(() => true).catch(() => false);
+      console.log("[voice-diag] dock after wait:", (await page.getByTestId("voice-dock").innerText()).slice(0, 160));
+      console.log("[voice-diag] reqTail:", requestLog.filter((l) => l.includes("voice")).slice(-8).join(" | "));
+      page.on("console", (m) => { if (/voice|Error|error/.test(m.text())) console.log("[browser]", m.text().slice(0, 160)); });
       const sessionRows = rows.voice_sessions.filter((row) => row.status === "live").length;
       const participantRows = rows.voice_session_participants.length;
       check("開始語音：voice_sessions live 列落地", sessionRows >= 1, `sessions=${sessionRows}`);
