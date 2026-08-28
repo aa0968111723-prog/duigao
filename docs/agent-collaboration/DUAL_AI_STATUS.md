@@ -13,6 +13,12 @@
 - `grok inspect`：讀到 D:\duigao 專案（trusted）、Agents.md（~328 tokens）、35 permissions、22 skills → rounds/pr00/grok-inspect.txt。
 - Headless 握手：`grok -p "Reply exactly: GROK_DUAL_COLLAB_READY" --output-format json` → exit 0、回覆逐字正確、sessionId 01a043c9-59cd-70c0-9241-b31b7bfe38c5、model grok-4.6-build → rounds/pr00/grok-smoke.json。
 
+## 白板長任務握手（2026-08-28）
+
+- Grok：`grok --version` → `grok 1.0.5 (5115b46bc9)`（真實輸出）。
+- Claude：shell 無 `claude` CLI（command not found）— 本 session 即
+  Claude Code 執行環境（claude-fable-5），如實記錄不冒充。
+
 ## 已完成 rounds
 
 | Round | Grok 輸出 | 裁決 |
