@@ -97,7 +97,8 @@
     "test:share-e2e",
     "test:share-preview",
     "test:video",
-    "test:viewer-geometry"
+    "test:viewer-geometry",
+    "typecheck:scripts"
   ],
   "agentContextCommand": "npm run agent:context"
 }

@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T23:22:50.000Z",
+  "generatedAt": "2026-08-28T23:49:42.000Z",
   "git": {
     "branch": "agent/design-intelligence-perplexity",
-    "sha": "a80856b413c02727dd3d2946996ce9818a490b5a",
-    "mainSha": "2a17b7b133ae89e34f7d39a0a0a2f551b0b35f0f",
-    "dirty": false
+    "sha": "db5f8babe40aae57c1044b8e7f9a9f807b846f8d",
+    "mainSha": "b0f7a1bf3f7422977f41c855c62a4d6a8478cf04",
+    "dirty": true
   },
   "project": {
     "name": "duigao",
@@ -33,9 +33,25 @@
       "Deployment config"
     ],
     "openPrs": {
-      "status": "unknown",
-      "items": [],
-      "reason": "gh returned invalid JSON"
+      "status": "available",
+      "items": [
+        {
+          "baseRefName": "main",
+          "headRefName": "feat/brand-ui-alignment",
+          "isDraft": false,
+          "number": 87,
+          "title": "feat(ui): 全面對齊 UI/UX 與品牌 Logo",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/87"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "agent/wb01-canonical-schema",
+          "isDraft": false,
+          "number": 78,
+          "title": "PR-WB01: canonical whiteboard schema — 0021-0024＋tombstone 資料層＋operations＋anchors",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/78"
+        }
+      ]
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -981,7 +997,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0021",
+    "repoMigrationHead": "0027",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -1003,10 +1019,11 @@
       "supabase/migrations/0018_discussion_attachments.sql",
       "supabase/migrations/0019_ai_apply_audit.sql",
       "supabase/migrations/0020_canva_bridge.sql",
-      "supabase/migrations/0021_canva_design_pages.sql"
+      "supabase/migrations/0021_canva_design_pages.sql",
+      "supabase/migrations/0027_design_knowledge.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0021",
+    "productionMigrationExpectation": "0027",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1149,14 +1166,10 @@
       "code": "FEATURE_CLAIM_MISMATCH",
       "feature": "video-transcode",
       "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
-    },
-    {
-      "code": "OPEN_PRS_UNKNOWN",
-      "message": "gh returned invalid JSON"
     }
   ],
   "releaseReadiness": {
-    "status": "structurally_ready_tests_not_run",
+    "status": "blocked",
     "automergeAllowed": false,
     "rule": "AUTOMERGE REQUIRES AGENT_GATE_PASS",
     "structuralChecks": [
@@ -1172,8 +1185,8 @@
       },
       {
         "code": "MIGRATION_ORDER",
-        "ok": true,
-        "message": "Migration order is contiguous through 0021_canva_design_pages.sql."
+        "ok": false,
+        "message": "Migration naming/order is invalid."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",
