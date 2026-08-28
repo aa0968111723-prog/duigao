@@ -134,3 +134,97 @@
 
 /* WB04：板上在場者（人數旁的小標，非游標流） */
 .wb-online em { font-style: normal; margin-left: 6px; padding: 2px 6px; border-radius: 999px; background: var(--raise); color: var(--ink-dim); font-size: 11px; }
+
+/* .wb-focus-main：畫布＋工具列的容器。手機是直向（工具列在下），平板改成
+   橫向（工具列成為右邊的一欄）。基礎規則必須在這裡、不能只寫在 media
+   query 裡 —— 少了它畫布高度會塌成 0（e2e 的 ≥75% 斷言直接歸零）。 */
+.wb-focus-main { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+/* 側欄收合鈕預設隱藏（平板的 media query 之後會打開 —— 這條**必須**寫在
+   media query 之前，同權重時後者才贏；寫在後面會把平板的規則蓋掉，
+   e2e 直接抓不到按鈕）。 */
+.wb-rail-toggle { display: none; }
+
+/* ---- WB05 平板以上（寬 ≥900px **且** 高 ≥600px）：Split View ＋ 側欄工具列 ----
+   高度條件不可省：iPhone Pro Max 橫向有 926–956 CSS px 寬但只有 ~430px 高，
+   只看寬度會讓手機橫向誤進平板版面（實抓）。
+
+   **不限指標型態**：桌機瀏覽器也會進這個版面，而且那是想要的 —— 螢幕夠寬
+   時「討論與白板同時看得到」對滑鼠使用者一樣成立。視覺基準因此新增
+   desktop-1280 一組，避免這條路徑沒有任何覆蓋。
+
+   側欄的**掛載**由 useIsTabletUp（同一組條件）決定，不是只靠 CSS 隱藏：
+   否則手機也會多掛一份完整的討論面板（重複的 outbox／捲動／焦點副作用），
+   而且進板第一格會出現「畫布已讓位、側欄還沒掛」的空白帶。 */
+:root { --wb-rail-w: 340px; }
+
+/* 側欄開著時才讓位（class 與側欄掛載同源，不會有中間影格） */
+.wb-focus.is-rail-open { left: var(--wb-rail-w); }
+
+@media (min-width: 900px) and (min-height: 600px) {
+  /* 工具列是**版面的一欄**，不是浮在畫布上的層：浮動時它會蓋住畫布右緣，
+     底下的節點點不到也拖不動（自審 N12 實抓）。 */
+  .wb-focus-main { flex-direction: row; }
+  .wb-focus-main .wb-focus-canvas { flex: 1; min-width: 0; }
+  .wb-focus-bottom {
+    flex-direction: column;
+    width: 96px;
+    flex: none;
+    padding: 8px;
+    border-top: 0;
+    border-left: 1px solid var(--line-soft);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .wb-focus-bottom button { flex: 0 0 auto; width: 100%; }
+  /* 情境列（選取節點/區塊時）維持底部橫列 — 它是「對這個東西做什麼」，
+     擺在內容附近比擺側邊直覺 */
+  .wb-focus-bottom.wb-context-bar {
+    flex-direction: row;
+    width: auto;
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  /* sheet／scrim 不要壓在討論欄上（自審 N14） */
+  .wb-focus.is-rail-open .project-scrim { left: var(--wb-rail-w); }
+  .wb-rail-toggle { display: inline-flex; }
+}
+
+/* 討論側欄（平板）：與 Focus 同層、固定在左側。掛載由 JS 決定，
+   這裡只負責外觀。 */
+.wb-side-rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--wb-rail-w);
+  z-index: var(--z-board-focus);
+  display: flex;
+  flex-direction: column;
+  background: #12100e;
+  border-right: 1px solid var(--line-soft);
+  overflow: hidden;
+}
+.wb-side-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 4px 10px;
+  padding-top: calc(4px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--line-soft);
+}
+.wb-side-rail-head strong { flex: 1; font-size: 14px; }
+.wb-side-rail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* 側欄裡的討論自己捲：主討論靠整頁捲＋fixed composer，側欄是固定高度的
+   容器 — 不給 feed 自己的捲軸就看不到舊訊息，訊息一多連輸入框都被裁掉。 */
+.wb-side-rail-body .rd-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wb-side-rail-body .rd-feed { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.wb-side-rail-body .rd-composer {
+  position: static;
+  flex: none;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+}

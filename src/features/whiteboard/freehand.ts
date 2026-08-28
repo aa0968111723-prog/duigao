@@ -5,7 +5,7 @@
  * 的 [x,y][]（節點 x/y/width/height 是筆畫外接框＋pad）。搬動節點＝搬筆畫，
  * 不用重寫每個點；undo/redo 走既有 x/y mask。
  */
-export type StrokePoint = { x: number; y: number };
+export type StrokePoint = { x: number; y: number; pressure?: number };
 
 /** 抽點：與上一保留點距離 < minDist 的點丟棄（觸控抖動不進資料）。首尾必留。 */
 export function thinStroke(points: StrokePoint[], minDist = 3): StrokePoint[] {
@@ -26,6 +26,8 @@ export type NormalizedStroke = {
   height: number;
   /** 相對節點左上的點（含 pad 位移），存進 content.points。 */
   points: [number, number][];
+  /** 每個點的筆壓（WB05；沒有壓感的輸入是空陣列）。 */
+  pressures: number[];
 };
 
 const STROKE_PAD = 8;
@@ -58,6 +60,9 @@ export function normalizeStroke(points: StrokePoint[], pad = STROKE_PAD): Normal
     width: Math.min(MAX_SIZE, Math.max(MIN_SIZE, rawW * scale)),
     height: Math.min(MAX_SIZE, Math.max(MIN_SIZE, rawH * scale)),
     points: points.map((point) => [(point.x - x) * scale, (point.y - y) * scale]),
+    pressures: points.some((point) => typeof point.pressure === "number")
+      ? points.map((point) => (typeof point.pressure === "number" ? point.pressure : 0.5))
+      : [],
   };
 }
 
@@ -66,6 +71,17 @@ export function strokePath(points: [number, number][]): string {
   if (!points.length) return "";
   const [first, ...rest] = points;
   return `M ${first[0]} ${first[1]}` + rest.map(([px, py]) => ` L ${px} ${py}`).join("");
+}
+
+/** content.pressures 的防禦性讀取（長度對不上就當作沒有壓感）。 */
+export function readStrokePressures(value: unknown, pointCount: number): number[] {
+  if (!Array.isArray(value) || value.length !== pointCount) return [];
+  const out: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isFinite(item)) return [];
+    out.push(item);
+  }
+  return out;
 }
 
 /** content.points 的防禦性讀取（DB 來的 jsonb 什麼形狀都可能）。 */

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { historyLayers } from "../../lib/historyLayers";
+import { useIsTabletUp } from "../../hooks/useIsTabletUp";
 import { emptyPlan, shouldAdoptRemotePlan } from "./planDraft";
 import type {
   BranchStatus,
@@ -746,12 +747,21 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const [pushedPane, setPushedPane] = useState<PushedPane | null>(null);
   // Focus Mode（WB02）：白板全螢幕時抑制 project-fab（條件不渲染，非蓋住）
   const [boardFocused, setBoardFocused] = useState(false);
+  // 平板 Split View 的討論側欄是否收起（手機用不到 — CSS 斷點控制顯示）
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const tabletUp = useIsTabletUp();
+  /** 側欄此刻是否真的要掛（與 CSS 斷點同源，避免中間影格與手機多掛一份）。 */
+  const railVisible = tabletUp && !railCollapsed;
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
   // WB03「打開來源訊息」：關板→切對話→捲動到訊息＋1.6s 高亮。訊息元素
   // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
   const openDiscussionMessage = (messageId: string) => {
-    api.onOpenWhiteboard(null);
-    setDiscussPane("chat");
+    // Split View（平板）：討論就在左邊側欄，關掉白板反而把使用者正在看的
+    // 東西收走（自審 N13）。只有手機的「切 tab」語意才需要關板。
+    if (!railVisible) {
+      api.onOpenWhiteboard(null);
+      setDiscussPane("chat");
+    }
     const started = performance.now();
     const seek = () => {
       const el = document.querySelector(`[data-testid="discussion-${messageId}"]`);
@@ -840,6 +850,62 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合
     api.onOpenBranch(branchId, opts);
   };
+
+  // 討論面板（WB05）：手機是 tab、平板是左側常駐欄 — 同一份 api 兩個
+  // 掛載點共用，不複製一份會漂走的設定。
+  // 用函式而不是 const：JSX 只在渲染時求值，宣告順序就不受 createPoll /
+  // openBranch 這些後面才宣告的相依限制（函式宣告會提升）。
+  /**
+   * pane 覆寫（WB05）：RoomDiscussion 在 `pane === "board"` 時自己 return
+   * null（手機是 tab、同時只有一個）。平板的側欄是**同時**顯示，所以要
+   * 明確傳 "chat" — 否則側欄是空的（e2e 抓到）。
+   */
+  function renderDiscussion(paneOverride?: "chat" | "board") {
+    return (
+                    <RoomDiscussion api={{
+                      room: normalized,
+                      guest: api.guest,
+                      userId: api.userId ?? api.guest.id,
+                      canManage: api.canManage,
+                      canTalk: true,
+                      messages: (() => {
+                        const base = api.room.discussion ?? [];
+                        const ids = new Set(base.map((m) => m.id));
+                        return [...base, ...(api.discussionGhosts ?? []).filter((m) => !ids.has(m.id))];
+                      })(),
+                      supports: api.room.discussionSupports ?? [],
+                      decisions: api.room.decisions ?? [],
+                      boards: api.room.whiteboards ?? [],
+                      hideTabs: true,
+                      sendStates: api.discussionSendStates,
+                      onRetry: api.onRetryDiscussion,
+                      onAttach: api.onAttachDiscussion,
+                      attachBusy: api.attachBusy,
+                      onReject: api.onIntakeReject,
+                      onSendLink: api.onSendDiscussionLink,
+                      resolveAssetUrl: api.resolveAssetUrl,
+                      voice: api.voice,
+                      pane: paneOverride ?? discussPane,
+                      draft: api.chatInput,
+                      setDraft: api.setChatInput,
+                      onSend: (input) => {
+                        if (input) api.onSendDiscussion(input);
+                        else api.sendChat();
+                      },
+                      onSupport: api.onSupportDiscussion,
+                      onCreatePoll: createPoll,
+                      onAddToBoard: api.onAddMessageToBoard,
+                      onOpenBoardNode: (whiteboardId, nodeId) => {
+                        setDiscussPane("board");
+                        api.onOpenWhiteboard(whiteboardId);
+                        api.onFocusNode?.(nodeId ?? null);
+                      },
+                      onCreateDecision: api.onCreateDecision,
+                      onFinalizeDecision: api.onFinalizeDecision,
+                      onOpenContent: openBranch,
+                    }} />
+    );
+  }
 
   const tabBranches = (type: BranchType) => branches.filter((branch) => branchHasType(branch, type) && branch.status !== "archived");
   const [createType, setCreateType] = useState<BranchType | undefined>();
@@ -958,6 +1024,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     online: api.online,
                     editors: api.editors,
                     boardPeople: api.boardPeople,
+                    railVisible,
+                    onToggleRail: tabletUp ? () => setRailCollapsed((current) => !current) : undefined,
                     onFrameDragState: api.onFrameDragState,
                     onSnapshotBoard: api.onSnapshotBoard,
                     onListVersions: api.onListVersions,
@@ -1008,48 +1076,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     },
                   }} />
                 ) : (
-                  <RoomDiscussion api={{
-                    room: normalized,
-                    guest: api.guest,
-                    userId: api.userId ?? api.guest.id,
-                    canManage: api.canManage,
-                    canTalk: true,
-                    messages: (() => {
-                      const base = api.room.discussion ?? [];
-                      const ids = new Set(base.map((m) => m.id));
-                      return [...base, ...(api.discussionGhosts ?? []).filter((m) => !ids.has(m.id))];
-                    })(),
-                    supports: api.room.discussionSupports ?? [],
-                    decisions: api.room.decisions ?? [],
-                    boards: api.room.whiteboards ?? [],
-                    hideTabs: true,
-                    sendStates: api.discussionSendStates,
-                    onRetry: api.onRetryDiscussion,
-                    onAttach: api.onAttachDiscussion,
-                    attachBusy: api.attachBusy,
-                    onReject: api.onIntakeReject,
-                    onSendLink: api.onSendDiscussionLink,
-                    resolveAssetUrl: api.resolveAssetUrl,
-                    voice: api.voice,
-                    pane: discussPane,
-                    draft: api.chatInput,
-                    setDraft: api.setChatInput,
-                    onSend: (input) => {
-                      if (input) api.onSendDiscussion(input);
-                      else api.sendChat();
-                    },
-                    onSupport: api.onSupportDiscussion,
-                    onCreatePoll: createPoll,
-                    onAddToBoard: api.onAddMessageToBoard,
-                    onOpenBoardNode: (whiteboardId, nodeId) => {
-                      setDiscussPane("board");
-                      api.onOpenWhiteboard(whiteboardId);
-                      api.onFocusNode?.(nodeId ?? null);
-                    },
-                    onCreateDecision: api.onCreateDecision,
-                    onFinalizeDecision: api.onFinalizeDecision,
-                    onOpenContent: openBranch,
-                  }} />
+                  renderDiscussion()
                 )}
               </section>
             )}
@@ -1129,6 +1156,17 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       )}
       {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} onCutosImport={api.cutosImport} canva={api.canva} onReject={api.onIntakeReject} />}
       {pollOpen && <PollSheet onClose={() => setPollOpen(false)} onCreate={createPoll} />}
+      {/* WB05 平板 Split View：白板全螢幕時，左側常駐討論欄。手機由 CSS
+          斷點隱藏（display:none），行為與之前完全一樣。 */}
+      {boardFocused && railVisible && (
+        <aside className="wb-side-rail" data-testid="wb-side-rail" aria-label="討論">
+          <div className="wb-side-rail-head">
+            <strong>討論</strong>
+            <button type="button" onClick={() => setRailCollapsed(true)} aria-label="收起討論">✕</button>
+          </div>
+          <div className="wb-side-rail-body">{renderDiscussion("chat")}</div>
+        </aside>
+      )}
       {api.workspace && (
         // 對稿工作區疊在討論殼上；殼不卸載，返回時狀態全在。此容器（與其
         // 祖先）不可有 transform/filter/contain，工作區自己的 fixed 底欄

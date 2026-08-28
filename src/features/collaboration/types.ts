@@ -95,6 +95,8 @@ export type NodeContent = {
   /** freehand（WB03）：相對節點左上的筆畫點；搬節點＝搬筆畫。 */
   points?: [number, number][];
   strokeWidth?: number;
+  /** WB05：每個點的筆壓（與 points 等長；沒有壓感時不存）。 */
+  pressures?: number[];
 };
 
 export type WhiteboardNode = {
