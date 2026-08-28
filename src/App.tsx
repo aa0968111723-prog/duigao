@@ -29,7 +29,8 @@ import {
 } from "./lib/types";
 import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
-import { loadFrames as loadBoardFrames, loadNodeRefs } from "./cloud/collaborationRepository";
+import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, loadBoardVersion, createBoardVersion } from "./cloud/collaborationRepository";
+import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type BoardVersionSummary } from "./features/whiteboard/versions";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -259,32 +260,137 @@ export function App() {
   // WB02 Focus Mode：白板全螢幕時 AssetAiFab 條件不渲染（wireflow 疊加規則）
   const [boardFocused, setBoardFocused] = useState(false);
   const [boardFrames, setBoardFrames] = useState<import("./features/collaboration/types").WhiteboardFrame[]>([]);
+  const activeWhiteboardRef = useRef<string | null>(null);
+  activeWhiteboardRef.current = activeWhiteboardId;
+  const boardFramesRef = useRef<import("./features/collaboration/types").WhiteboardFrame[]>([]);
+  boardFramesRef.current = boardFrames;
+  /** 本機正在拖/縮的 frame id（遠端事件對它讓路）。 */
+  const draggingFrameRef = useRef<string | null>(null);
+  /** 版本還原進行中：壓住逐筆衝突提示，改成結束後一次重讀。 */
+  const restoringRef = useRef(false);
+  /** 有寫入在路上、尚未 ack 的 frame ids（遠端 echo 對它們讓路）。 */
+  const inFlightFrameIds = useRef(new Set<string>());
+  /** loadFramesForBoard 的請求序號：舊回應不得蓋掉新狀態（R3）。 */
+  const framesLoadSeq = useRef(0);
   // 開板時載該板 frames — onOpenWhiteboard 與 WB03 反向鏈 chip 共用同一
   // 條路徑（S13：chip 直接設 activeWhiteboardId 會讓 frames 停在上一塊板
   // 的內容，使用者以為區塊被刪了）。
   // 雲端 ack 後採納 server 版本（S6）：只動 version，位置/標題以本地
   // 樂觀值為準（使用者可能已經又拖了一下）。
   const adoptFrameVersion = useCallback((persisted: import("./features/collaboration/types").WhiteboardFrame) => {
+    inFlightFrameIds.current.delete(persisted.id);
     setBoardFrames((current) =>
       current.map((item) => (item.id === persisted.id ? { ...item, version: persisted.version } : item)),
     );
   }, []);
+  /** 送出 frame 寫入：標記 in-flight，ack 或衝突時解除。 */
+  const writeFrame = useCallback((frame: import("./features/collaboration/types").WhiteboardFrame) => {
+    inFlightFrameIds.current.add(frame.id);
+    cloudRef.current.writes.upsertFrame?.(frame, adoptFrameVersion, () => {
+      inFlightFrameIds.current.delete(frame.id);
+      onFrameConflictRef.current?.();
+    });
+  }, [adoptFrameVersion]);
+  const onFrameConflictRef = useRef<(() => void) | null>(null);
   // 反向鏈的雲端來源（S10）：對稿開啟時查「誰引用了這個 branch／它的
   // 版本」，不依賴房內是否已載入該板節點。
   const [remoteBranchRefs, setRemoteBranchRefs] = useState<{
     branchId: string;
     refs: Array<{ id: string; whiteboardId: string }>;
   } | null>(null);
-  const loadFramesForBoard = useCallback((boardId: string | null) => {
-    setBoardFrames([]);
+  // frames 即時（WB04）：別人建/移/刪的區塊直接進畫面。版本較舊的 echo
+  // 丟棄 — 自己剛寫的樂觀值不會被自己那份較舊的廣播蓋回去。
+  useEffect(() => {
+    cloudRef.current.setFrameEventHandler?.((event) => {
+      if (event.type === "delete") {
+        setBoardFrames((current) => current.filter((item) => item.id !== event.id));
+        return;
+      }
+      const incoming = event.frame;
+      if (incoming.whiteboardId !== activeWhiteboardRef.current) return; // 不是開著的板
+      // 護盾（R1）：正在被本機拖/縮、**或有寫入還沒 ack** 的 frame 一律
+      // 讓路。放手到 ack 之間如果吃下自己的 echo，畫面會跳回上一手的位置
+      // （節點路徑早就有 inFlight ∪ dragging 兩層護盾，frames 當初漏了）。
+      if (draggingFrameRef.current === incoming.id) return;
+      if (inFlightFrameIds.current.has(incoming.id)) return;
+      setBoardFrames((current) => {
+        const existing = current.find((item) => item.id === incoming.id);
+        if (!existing) return [...current, incoming];
+        // **嚴格**大於才採納：版本相等時本地是「已採納版本號、但座標更新」
+        // 的狀態，用 `<` 判斷會讓自己較舊的 echo 整列蓋回去。
+        if ((incoming.version ?? 1) <= (existing.version ?? 1)) return current;
+        return current.map((item) => (item.id === incoming.id ? incoming : item));
+      });
+    });
+    return () => cloudRef.current.setFrameEventHandler?.(null);
+  }, []);
+
+  // userId → 顯示名稱：只用房內已載入、受 RLS 保護的資料（討論作者、
+  // 節點的最後寫入者戳記）。presence 線路上沒有姓名（P1）。
+  const nameByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+    // 直接讀 room（不是 roomRef）：這個 memo 在 roomRef 宣告之前，
+    // 讀 ref 會是 TDZ ReferenceError —— 整個 App 白畫面。
+    for (const message of room?.discussion ?? []) {
+      if (message.authorId && message.authorName) map.set(message.authorId, message.authorName);
+    }
+    for (const node of room?.whiteboardNodes ?? []) {
+      const id = node.content.lastWriterId;
+      const name = node.content.lastWriterName;
+      if (id && name) map.set(id, name);
+    }
+    return map;
+  }, [room?.discussion, room?.whiteboardNodes]);
+
+  // frame stale-write：這次寫入已被丟棄（不重試），重讀該板 frames 並誠實
+  // 告知 — 與節點衝突路徑同一紀律（F2）。
+  const onFrameConflict = useCallback(() => {
+    const boardId = activeWhiteboardRef.current;
+    if (boardId) loadFramesForBoardRef.current?.(boardId);
+    if (restoringRef.current) return; // 還原期間不逐筆吵（P5）
+    showToast("這個區塊剛被別人改過，已同步成最新版本。", { tone: "error" });
+  }, []);
+  onFrameConflictRef.current = onFrameConflict;
+  const loadFramesForBoardRef = useRef<((boardId: string | null, opts?: { keepCurrent?: boolean }) => void) | null>(null);
+  const loadFramesForBoard = useCallback((boardId: string | null, opts?: { keepCurrent?: boolean }) => {
+    // 請求序號（R3）：慢回應不得蓋掉「載入視窗內抵達的即時事件」，也不得
+    // 把別塊板的 frames 灌進來（那會讓之後的快照存成空的、還原時把現有
+    // 區塊全刪掉）。
+    const seq = (framesLoadSeq.current += 1);
+    if (!opts?.keepCurrent) setBoardFrames([]);
     if (!boardId) return;
     const supabase = getSupabase();
     const bound = cloudRef.current.boundRoomId;
     if (!supabase || !bound) return;
     void loadBoardFrames(supabase, bound, boardId)
-      .then((frames) => setBoardFrames(frames))
-      .catch(() => setBoardFrames([]));
+      .then((frames) => {
+        if (seq !== framesLoadSeq.current) return; // 過期回應，丟棄
+        if (boardId !== activeWhiteboardRef.current) return; // 已經切板
+        setBoardFrames(frames);
+      })
+      .catch(() => {
+        if (seq !== framesLoadSeq.current) return;
+        if (!opts?.keepCurrent) setBoardFrames([]);
+      });
   }, []);
+  loadFramesForBoardRef.current = loadFramesForBoard;
+
+  // 重連／回前景的自癒（R2）：既有路徑只補 nodes/edges — frames 會停在
+  // 斷線前的標題與位置且不會再收斂。keepCurrent 讓畫面在重讀期間不閃空。
+  useEffect(() => {
+    cloudRef.current.setReviveHandler?.(() => {
+      const boardId = activeWhiteboardRef.current;
+      if (boardId) loadFramesForBoardRef.current?.(boardId, { keepCurrent: true });
+    });
+    return () => cloudRef.current.setReviveHandler?.(null);
+  }, []);
+
+  // 在場身分（WB04）：開/關板時重新 track — 只在這兩個時機，不送游標、
+  // 不送心跳（presence.ts 既有的「行動裝置友善」紀律）。
+  useEffect(() => {
+    // boardId 由 useCloudRoom 現查 activeWhiteboardRef（F3）— 這裡只推名字
+    cloudRef.current.retrackPresence?.({ name: guest?.name ?? "" });
+  }, [activeWhiteboardId, guest?.name]);
 
   useEffect(() => {
     const branchId = activeBranchId;
@@ -1753,12 +1859,14 @@ export function App() {
             // 不前進，之後每一筆都 409 空轉）。
             inFlightNodeIds.current.delete(node.id);
             const refreshed = await cloudRef.current.loadWhiteboard?.(node.whiteboardId).catch(() => false);
-            showToast(
-              refreshed
-                ? "這個節點被別人改過，白板已同步成最新版本。"
-                : "這個節點被別人改過；重新打開白板可取得最新版本。",
-              { tone: "error" },
-            );
+            if (!restoringRef.current) {
+              showToast(
+                refreshed
+                  ? "這個節點被別人改過，白板已同步成最新版本。"
+                  : "這個節點被別人改過；重新打開白板可取得最新版本。",
+                { tone: "error" },
+              );
+            }
             return;
           }
           const retry = decideNodeWriteRetry(cloudRef.current.active ? "failed" : "unbound");
@@ -2968,11 +3076,11 @@ export function App() {
         whiteboardFrames: boardFrames,
         onCreateFrame: (frame) => {
           setBoardFrames((current) => [...current, frame]);
-          cloudRef.current.writes.upsertFrame?.(frame, adoptFrameVersion);
+          writeFrame(frame);
         },
         onUpdateFrame: (frame) => {
           setBoardFrames((current) => current.map((item) => (item.id === frame.id ? frame : item)));
-          cloudRef.current.writes.upsertFrame?.(frame, adoptFrameVersion);
+          writeFrame(frame);
         },
         onDeleteFrame: (id) => {
           setBoardFrames((current) => current.filter((item) => item.id !== id));
@@ -2995,6 +3103,90 @@ export function App() {
             createdAt: Date.now(),
           });
         },
+        // ---- WB04 版本歷史 ----
+        // 三個 handler 只在**真的綁著雲端房**時掛上（P3）：本機房沒有快照
+        // 表，掛著等於擺一顆按了只會失敗的按鈕。Workspace 的入口判斷就是
+        // 「handler 在不在」。
+        ...(isCloudConfigured && cloud.boundRoomId ? {
+          onSnapshotBoard: async (label: string) => {
+            const supabase = getSupabase();
+            const bound = cloudRef.current.boundRoomId;
+            const boardId = activeWhiteboardRef.current;
+            const actor = cloudRef.current.userId;
+            if (!supabase || !bound || !boardId || !actor) throw new Error("cloud-required");
+            const roomNow = roomRef.current;
+            const snapshot = buildSnapshot(
+              (roomNow?.whiteboardNodes ?? []).filter((node) => node.whiteboardId === boardId),
+              (roomNow?.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId === boardId),
+              boardFramesRef.current.filter((frame) => frame.whiteboardId === boardId),
+            );
+            // 先擋 0025 的 CHECK（P4）：超過上限就直說，不要讓使用者一直重試
+            if (snapshotTooLarge(snapshot)) throw new Error("snapshot-too-large");
+            await createBoardVersion(supabase, {
+              id: crypto.randomUUID(),
+              whiteboardId: boardId,
+              roomId: bound,
+              label,
+              createdBy: actor,
+              snapshot,
+            });
+          },
+          onListVersions: async (): Promise<BoardVersionSummary[]> => {
+            const supabase = getSupabase();
+            const bound = cloudRef.current.boundRoomId;
+            const boardId = activeWhiteboardRef.current;
+            if (!supabase || !bound || !boardId) return [];
+            return listBoardVersions(supabase, bound, boardId);
+          },
+          onLoadVersion: async (versionId: string) => {
+            const supabase = getSupabase();
+            const bound = cloudRef.current.boundRoomId;
+            if (!supabase || !bound) throw new Error("cloud-required");
+            return loadBoardVersion(supabase, bound, versionId);
+          },
+          onRestoreVersion: async (snapshot: BoardSnapshot) => {
+            const boardId = activeWhiteboardRef.current;
+            if (!boardId) return { applied: 0, queued: false };
+            const roomNow = roomRef.current;
+            const plan = planRestore(snapshot, {
+              nodes: (roomNow?.whiteboardNodes ?? []).filter((node) => node.whiteboardId === boardId),
+              edges: (roomNow?.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId === boardId),
+              frames: boardFramesRef.current.filter((frame) => frame.whiteboardId === boardId),
+            });
+            // 還原期間壓住逐筆衝突提示（P5）：400 個節點各噴一次 toast＋
+            // 各觸發一次整板 refetch 是災難。結束後統一重讀一次。
+            restoringRef.current = true;
+            try {
+              if (plan.upsertNodes.length) upsertNodes(plan.upsertNodes);
+              for (const node of plan.restoreNodes) {
+                upsertNode(node);
+                cloudRef.current.writes.restoreNode?.(node);
+              }
+              for (const id of plan.deleteNodeIds) deleteNode(id);
+              for (const frame of plan.upsertFrames) {
+                setBoardFrames((current) => current.some((item) => item.id === frame.id)
+                  ? current.map((item) => (item.id === frame.id ? frame : item))
+                  : [...current, frame]);
+                writeFrame(frame);
+              }
+              for (const id of plan.deleteFrameIds) {
+                setBoardFrames((current) => current.filter((item) => item.id !== id));
+                cloudRef.current.writes.deleteFrame?.(id);
+              }
+              for (const edge of plan.createEdges) createEdge(edge);
+            } finally {
+              // 寫入是樂觀＋佇列（非同步）；把旗標放到下一輪事件迴圈再落，
+              // 這批寫入產生的衝突提示才會被壓住。
+              window.setTimeout(() => { restoringRef.current = false; }, 0);
+            }
+            const applied =
+              plan.upsertNodes.length + plan.restoreNodes.length + plan.deleteNodeIds.length +
+              plan.upsertFrames.length + plan.deleteFrameIds.length + plan.createEdges.length;
+            // 離線時這些寫入是進佇列、不是已完成 — UI 要說得出差別（P2）。
+            return { applied, queued: !navigator.onLine || cloudRef.current.status === "offline-pending" };
+          },
+        } : {}),
+        onFrameDragState: (id) => { draggingFrameRef.current = id; },
         onBoardFocusChange: setBoardFocused,
         onRenameWhiteboard: (id, title) => {
           const target = (roomRef.current?.whiteboards ?? []).find((item) => item.id === id);
@@ -3018,6 +3210,11 @@ export function App() {
         focusNodeId,
         online: cloud.online || peerCount,
         editors: boardEditors,
+        boardPeople: (cloud.presencePeople ?? [])
+          .filter((person) => person.boardId && person.boardId === activeWhiteboardId && person.userId !== cloud.userId)
+          // 姓名不走 realtime（P1）：從房內已受 RLS 保護的資料對照出來 —
+          // 對照不到就留空，UI 顯示「夥伴」，不假裝知道。
+          .map((person) => ({ userId: person.userId, name: nameByUserId.get(person.userId) ?? "" })),
         onShare: openShare,
         onRenameRoom: (title: string) => {
           updateRoom((r) => ({ ...r, title }));

@@ -131,3 +131,6 @@
 .wb-freehand { display: block; pointer-events: none; }
 .wb-node-freehand { background: transparent; border: 0; box-shadow: none; padding: 0; overflow: visible; }
 .wb-node-freehand.is-selected { outline: 2px dashed var(--accent); }
+
+/* WB04：板上在場者（人數旁的小標，非游標流） */
+.wb-online em { font-style: normal; margin-left: 6px; padding: 2px 6px; border-radius: 999px; background: var(--raise); color: var(--ink-dim); font-size: 11px; }
