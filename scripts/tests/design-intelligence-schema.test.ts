@@ -489,12 +489,28 @@ test("contentHash 一律重算，輸入給的雜湊沒有可信度", () => {
   assert.equal(forger.value?.contentHash, honest.value?.contentHash, "輸入的雜湊必須被忽略");
   assert.notEqual(forger.value?.contentHash, "deadbeef");
 
-  // 長度前綴編碼：把分隔字元嵌進內容裡不能構造出相同雜湊
-  const shifted = parseKnowledgeEntry(
-    { ...base, title: "標題摘要", summary: "" },
+  // 長度前綴編碼：把分隔字元嵌進內容裡不能構造出相同雜湊。
+  //
+  // 這一對在「用分隔字元串接」的實作下會**碰撞**：
+  //   a │ b<SEP>c │ [d]      → "a<SEP>b<SEP>c<SEP>d"
+  //   a │ b       │ [c, d]   → "a<SEP>b<SEP>c<SEP>d"
+  // 也就是說攻擊者可以在 summary 裡塞一個分隔字元，讓自己的條目跟另一條
+  // 已審查知識算出相同雜湊，藉此讓 findKnowledgeConflicts 認為「內容相同」
+  // 而不回報衝突。長度前綴沒有這個面。
+  const SEP = " ";
+  const collideA = parseKnowledgeEntry(
+    { category: "color", title: "a", summary: `b${SEP}c`, rules: ["d"] },
     "human-review",
   );
-  assert.notEqual(shifted.value?.contentHash, honest.value?.contentHash, "欄位邊界必須進雜湊");
+  const collideB = parseKnowledgeEntry(
+    { category: "color", title: "a", summary: "b", rules: ["c", "d"] },
+    "human-review",
+  );
+  assert.notEqual(
+    collideA.value?.contentHash,
+    collideB.value?.contentHash,
+    "把分隔字元嵌進 summary 就能構造出相同雜湊 —— 欄位邊界必須進雜湊",
+  );
 
   // 內容改了雜湊就要變（這是它唯一的用途）
   const edited = parseKnowledgeEntry({ ...base, rules: ["規則二"] }, "human-review");
