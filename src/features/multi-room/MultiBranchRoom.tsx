@@ -419,6 +419,8 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [branchId, setBranchId] = useState<string | undefined>(undefined);
+  /** 彈窗被擋時的後路：把授權連結直接顯示成可點的 <a>（Grok 05 F2）。 */
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
 
   const loadDesigns = useCallback(() => {
     setDesigns(null);
@@ -470,14 +472,34 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
           className="project-save-button project-submit"
           data-testid="canva-connect"
           onClick={() => {
+            // 彈窗要在 user gesture 的同步棧裡開（await 之後才 open 會被
+            // Chrome/Safari 擋 — Grok 05 F2）：先開空白分頁，拿到 URL 再導。
+            const popup = window.open("", "_blank");
+            setMessage(null);
+            setFallbackUrl(null);
             void canva.connectUrl().then((url) => {
-              if (url) window.open(url, "_blank", "noopener");
-              else setMessage("拿不到授權連結，請稍後再試。");
+              if (!url) {
+                popup?.close();
+                setMessage("拿不到授權連結，請稍後再試。");
+                return;
+              }
+              if (popup && !popup.closed) {
+                popup.location.href = url;
+              } else {
+                // 被彈窗攔截：退成可點的連結，一定開得起來。
+                setFallbackUrl(url);
+              }
             });
           }}
         >
           連結 Canva 帳號
         </button>
+        {fallbackUrl && (
+          <p className="project-sheet-note">
+            瀏覽器擋了新視窗 —{" "}
+            <a href={fallbackUrl} target="_blank" rel="noreferrer noopener" data-testid="canva-connect-fallback">點這裡開 Canva 授權頁</a>
+          </p>
+        )}
         <button type="button" className="project-text-button" data-testid="canva-recheck" onClick={checkStatus}>我連好了，重新檢查</button>
         {message && <p className="project-sheet-error" role="alert">{message}</p>}
       </div>

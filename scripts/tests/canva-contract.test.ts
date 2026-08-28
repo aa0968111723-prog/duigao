@@ -46,6 +46,17 @@ test("canva-bridge edge：OAuth 走 PKCE＋Basic、token 永不出橋", () => {
   assert.match(edge, /reader\.cancel/);
   // 上游 fetch 不跟 redirect（除簽名下載 URL 外）
   assert.match(edge, /redirect: "manual"/);
+  // SSRF host 邊界（Grok 05 F4）：光 https 前綴不夠 — host 必須是
+  // apiBase 或 *.canva.com
+  assert.match(edge, /downloadHost === apiHost/);
+  assert.match(edge, /endsWith\(".canva.com"\)/);
+  // refresh 失敗分級（Grok 05 F3）：暫時性不刪列
+  assert.match(edge, /failure === "unreachable"/);
+});
+
+test("callback 的平台 JWT 閘已在 config.toml 關掉（Grok 05 F1）", () => {
+  const toml = readFileSync(resolve(ROOT, "supabase/config.toml"), "utf8");
+  assert.match(toml, /\[functions\.canva-bridge\][^[]*verify_jwt = false/);
 });
 
 test("0020：token 表對 client 是不存在的（RLS＋revoke 雙層）", () => {

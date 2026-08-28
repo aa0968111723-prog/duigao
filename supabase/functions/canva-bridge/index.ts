@@ -90,7 +90,7 @@ type TokenSet = { accessToken: string; refreshToken: string; expiresAt: string }
 async function exchangeToken(
   env: CanvaEnv,
   form: Record<string, string>,
-): Promise<TokenSet | null> {
+): Promise<TokenSet | { failure: "rejected" | "unreachable" }> {
   let res: Response;
   try {
     res = await fetch(`${apiBase()}/rest/v1/oauth/token`, {
@@ -104,20 +104,27 @@ async function exchangeToken(
       redirect: "manual",
     });
   } catch {
-    return null;
+    return { failure: "unreachable" };
   }
-  if (!res.ok) return null;
+  // 4xx＝授權端明確拒絕（invalid_grant 等）；其他非 2xx（5xx、redirect）
+  // 是暫時性 — 兩者的後果天差地遠（Grok 05 F3），呼叫端必須分得出來。
+  if (!res.ok) return { failure: res.status >= 400 && res.status < 500 ? "rejected" : "unreachable" };
   const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   const accessToken = text(data?.access_token);
   const refreshToken = text(data?.refresh_token);
   const expiresIn = Number(data?.expires_in ?? 0);
-  if (!accessToken || !refreshToken || !Number.isFinite(expiresIn) || expiresIn <= 0) return null;
+  if (!accessToken || !refreshToken || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+    return { failure: "rejected" };
+  }
   return {
     accessToken,
     refreshToken,
     expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
   };
 }
+
+const isTokenSet = (value: TokenSet | { failure: string }): value is TokenSet =>
+  !("failure" in value);
 
 /**
  * 取可用 access token：快過期（60 秒 skew）就 refresh 並落盤新的一組
@@ -139,11 +146,46 @@ async function getAccessToken(
   if (Number.isFinite(expiresAt) && expiresAt - Date.now() > TOKEN_REFRESH_SKEW_SECONDS * 1000) {
     return text(row.access_token) || null;
   }
+  const usedRefreshToken = text(row.refresh_token);
   const refreshed = await exchangeToken(env, {
     grant_type: "refresh_token",
-    refresh_token: text(row.refresh_token),
+    refresh_token: usedRefreshToken,
   });
-  if (!refreshed) {
+  if (!isTokenSet(refreshed)) {
+    // 暫時性失敗（網路、5xx）不等於連結已死：這次回未連結，列留著，
+    // 下次再試（Grok 05 F3 — 原本任何失敗都刪列，會把好連結誤殺）。
+    if (refreshed.failure === "unreachable") return null;
+    // 明確拒絕：可能真的失效，也可能是並發 refresh 的輸家（Canva 會
+    // 輪替 RT — 贏家已寫入新的一顆）。重讀一次分辨：RT 變了就用新的
+    // 再試一回，沒變才刪列。
+    const { data: latest } = await service
+      .from("canva_connections")
+      .select("access_token,refresh_token,token_expires_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (latest && text(latest.refresh_token) !== usedRefreshToken) {
+      const retryExpires = Date.parse(text(latest.token_expires_at));
+      if (Number.isFinite(retryExpires) && retryExpires - Date.now() > TOKEN_REFRESH_SKEW_SECONDS * 1000) {
+        return text(latest.access_token) || null;
+      }
+      const retry = await exchangeToken(env, {
+        grant_type: "refresh_token",
+        refresh_token: text(latest.refresh_token),
+      });
+      if (isTokenSet(retry)) {
+        await service
+          .from("canva_connections")
+          .update({
+            access_token: retry.accessToken,
+            refresh_token: retry.refreshToken,
+            token_expires_at: retry.expiresAt,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", userId);
+        return retry.accessToken;
+      }
+      return null;
+    }
     await service.from("canva_connections").delete().eq("user_id", userId);
     return null;
   }
@@ -205,7 +247,7 @@ async function handleCallback(request: Request): Promise<Response> {
     code_verifier: text(stateRow.code_verifier),
     redirect_uri: callbackUrl(),
   });
-  if (!tokens) return fail("和 Canva 交換憑證失敗。");
+  if (!isTokenSet(tokens)) return fail("和 Canva 交換憑證失敗。");
 
   const { error: upsertError } = await service.from("canva_connections").upsert(
     {
@@ -385,9 +427,22 @@ async function handle(request: Request): Promise<Response> {
       job = (pollData?.job ?? null) as Record<string, unknown> | null;
     }
     if (!downloadUrl) return jsonResponse({ ok: false, code: "EXPORT_PENDING" });
-    // SSRF 邊界：下載 URL 是上游回應的字串 — 只信 https（真 Canva 簽名
-    // URL）或 apiBase 自身（e2e 假上游）。內網位址一律拒絕。
-    if (!downloadUrl.startsWith("https://") && !downloadUrl.startsWith(apiBase() + "/")) {
+    // SSRF 邊界（Grok 05 F4：光看 scheme 擋不住 https://127.0.0.1）：
+    // host 必須是 apiBase 自己（e2e 假上游）或 *.canva.com（真簽名 URL
+    // 都在 Canva 網域），其他一律拒絕 — IP literal、localhost、內網名
+    // 全都到不了 fetch。
+    let downloadHost = "";
+    try {
+      downloadHost = new URL(downloadUrl).hostname.toLowerCase();
+    } catch {
+      return jsonResponse({ ok: false, code: "EXPORT_FAILED" });
+    }
+    const apiHost = new URL(apiBase()).hostname.toLowerCase();
+    const hostAllowed =
+      downloadUrl.startsWith(apiBase() + "/") ||
+      (downloadUrl.startsWith("https://") &&
+        (downloadHost === apiHost || downloadHost === "canva.com" || downloadHost.endsWith(".canva.com")));
+    if (!hostAllowed) {
       return jsonResponse({ ok: false, code: "EXPORT_FAILED" });
     }
 
