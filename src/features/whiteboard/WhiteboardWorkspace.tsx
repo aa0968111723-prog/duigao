@@ -35,6 +35,9 @@ import {
 import { emptyHistory, pushHistory, redoStep, undoStep, type HistoryStack } from "./history";
 import { historyLayers } from "../../lib/historyLayers";
 import { normalizeStroke, thinStroke, type StrokePoint } from "./freehand";
+import { initialPenState, penDown, penUp, segmentWidths, shouldRejectPointer, type PointerKind } from "./pen";
+import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
+import { describePreview, planApply, type BoardAiPreview } from "./aiPreview";
 import { rendererFor } from "./registry";
 import "./whiteboard.css";
 
@@ -81,9 +84,44 @@ export type WhiteboardApi = {
   onDeleteFrame?: (id: string) => void;
   /** 板節點「打開來源訊息」→ 切討論並捲動高亮。 */
   onOpenDiscussionMessage?: (messageId: string) => void;
+  /** WB04：開著這塊板的其他人（具名在場）。 */
+  boardPeople?: { userId: string; name: string }[];
+  /** WB05 平板 Split View：側欄此刻是否真的掛著（掛載由上層以 JS 判定，
+   *  與 CSS 斷點同源 — 只靠 CSS 隱藏會讓手機也掛一份討論面板）。 */
+  railVisible?: boolean;
+  onToggleRail?: () => void;
+  /** WB04 版本歷史：未提供＝不顯示入口（本機房沒有快照表）。 */
+  /** 本機正在拖/縮的 frame id（遠端事件對它讓路）。 */
+  onFrameDragState?: (id: string | null) => void;
+  onSnapshotBoard?: (label: string) => Promise<void>;
+  onListVersions?: () => Promise<BoardVersionSummary[]>;
+  /** 點下某個版本才取它的快照（清單不帶快照 — 可能是好幾 MB）。 */
+  onLoadVersion?: (versionId: string) => Promise<{ snapshot: BoardSnapshot; dropped: number }>;
+  /** 回傳實際結果：寫出去幾筆、是否離線排隊中 — UI 只能說真話。 */
+  onRestoreVersion?: (snapshot: BoardSnapshot) => Promise<{ applied: number; queued: boolean }>;
+  // ---- WB06：板內 AI（提案→預覽→套用→稽核） ----
+  /**
+   * 問 AI（帶白板上下文）。回傳**預覽**，不寫任何東西 —— 未提供＝不顯示
+   * AI 入口（本機房沒有 AI）。
+   */
+  onAskBoardAi?: (
+    question: string,
+    context: { nodes: WhiteboardNode[]; selectedIds: string[]; centerWorld: { x: number; y: number } },
+  ) => Promise<BoardAiPreview>;
+  /** 使用者按下套用：呼叫端負責快照、寫入、稽核。回傳實際結果。 */
+  onApplyBoardAi?: (
+    plan: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] },
+    preview: BoardAiPreview,
+  ) => Promise<{ applied: number; snapshotTaken: boolean; queued?: boolean; auditRecorded?: boolean }>;
+  /**
+   * 上層（房間層 AI 面板）暫存進來的預覽（F1）：房間 AI 的
+   * add_whiteboard_node 不再直接落板，改成開板 ＋ 交給這裡預覽。
+   */
+  stagedAiPreview?: BoardAiPreview | null;
+  onConsumeStagedAiPreview?: () => void;
 };
 
-type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | null;
+type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "versions" | "ai" | null;
 
 const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
@@ -293,6 +331,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const strokeDownRef = useRef<{ pointerId: number; point: { x: number; y: number }; time: number } | null>(null);
   // S1：第一指的**當前**螢幕座標 — 轉 pinch 回放要用它，不是起筆點
   const strokeScreenRef = useRef<{ x: number; y: number } | null>(null);
+  /** 觸控筆狀態（掌拒）— 純函式在 pen.ts，這裡只存。 */
+  const penRef = useRef(initialPenState());
   // ---- WB03：frame 選取/拖曳/縮放 ----
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [framePreview, setFramePreview] = useState<WhiteboardFrame | null>(null);
@@ -310,6 +350,20 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     startNodes: Map<string, WhiteboardNode>;
     moved: boolean;
   } | null>(null);
+  const [versions, setVersions] = useState<BoardVersionSummary[] | null>(null);
+  const [versionBusy, setVersionBusy] = useState(false);
+  /** 點開的那一版：快照取回後才算得出「還原會發生什麼」。 */
+  const [versionPreview, setVersionPreview] = useState<
+    { version: BoardVersionSummary; snapshot: BoardSnapshot; dropped: number } | null
+  >(null);
+  // ---- WB06：AI 預覽（只活在這裡，不進房態、不寫 DB） ----
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiPreview, setAiPreview] = useState<BoardAiPreview | null>(null);
+  /** 套用進行中（F4）：setState 是非同步的，連點兩次會寫兩批。 */
+  const aiApplyingRef = useRef(false);
+  /** 提問序號：關掉 sheet 或再問一次都會讓在途的回應作廢。 */
+  const aiAskSeqRef = useRef(0);
   const [frameRenaming, setFrameRenaming] = useState(false);
   const [frameTitleDraft, setFrameTitleDraft] = useState("");
   const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
@@ -369,6 +423,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     // Escape 不自己監聽（S12）：協調器的單一 handler 會派給棧頂層 —
     // 這層的 onBack 已經處理「先關 sheet、再退板」的階梯。
     return () => {
+      // 離開 Focus 時清掉筆狀態（N2）：元件不卸載，殘留的 penPointerId 會
+      // 讓重開板後所有手指被永久掌拒。
+      penRef.current = initialPenState();
+      strokePointerRef.current = null;
+      strokeRef.current = null;
+      strokeDownRef.current = null;
+      strokeScreenRef.current = null;
       apiRef.current.onFocusChange?.(false);
       remove(poppingRef.current);
       poppingRef.current = false;
@@ -378,11 +439,71 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const measure = () => setViewport({ width: el.clientWidth, height: el.clientHeight });
+    const measure = () => {
+      measuredWidthRef.current = el.clientWidth;
+      setViewport({ width: el.clientWidth, height: el.clientHeight });
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
+  }, [board?.id]);
+
+  /**
+   * 側欄開合的 camera 補償（F5）：畫布寬度變了，把**畫面中心**的內容留在
+   * 原地 —— 不補償的話收起討論欄時整個畫布往左跳一個側欄的寬度。
+   *
+   * 刻意只在「使用者切換側欄」時做，不掛在 ResizeObserver 上：掛載期間
+   * 的量測序列（0 → 全寬 → 讓出側欄後的寬）也會被當成變化，開板的初始
+   * 視角就變成競態的產物（視覺基準會抖）。
+   */
+  const measuredWidthRef = useRef(0);
+  const railRef = useRef(api.railVisible);
+  useEffect(() => {
+    if (railRef.current === api.railVisible) return;
+    railRef.current = api.railVisible;
+    const el = wrapRef.current;
+    if (!el) return;
+    const before = measuredWidthRef.current;
+    const raf = requestAnimationFrame(() => {
+      const after = el.clientWidth;
+      measuredWidthRef.current = after;
+      if (before > 0 && after > 0 && after !== before) {
+        setCamera((current) => ({ ...current, x: current.x + (after - before) / 2 }));
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [api.railVisible]);
+
+  // 房間層 AI 暫存進來的預覽（F1）：接手後立刻通知上層清掉，避免重複掛。
+  useEffect(() => {
+    if (!api.stagedAiPreview) return;
+    setAiPreview(api.stagedAiPreview);
+    api.onConsumeStagedAiPreview?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api.stagedAiPreview]);
+
+  // F4：切板時清掉**不屬於這塊板**的預覽 —— 預覽節點帶的是產生當時那塊板
+  // 的 whiteboardId，換板後按套用會把節點寫進舊板、快照卻存的是新板。
+  //
+  // 不能無條件清空：房間層 AI 是「開板 ＋ 暫存預覽」同一次 commit 完成的，
+  // 無條件清會把剛送進來的預覽當場抹掉（e2e 抓到）。
+  useEffect(() => {
+    // 切板同樣要重置筆與筆畫狀態：元件不卸載（!board 只是改渲染 BoardList），
+    // 只在「離開 Focus」重置的話，切板時殘留的 penPointerId 會讓新板上的
+    // 所有手指被永久掌拒（自審實抓；筆在玻璃上時別人封存這塊板就會遇到）。
+    penRef.current = initialPenState();
+    strokePointerRef.current = null;
+    strokeRef.current = null;
+    strokeDownRef.current = null;
+    strokeScreenRef.current = null;
+    setStrokePreview(null);
+    aiApplyingRef.current = false;
+    setAiPreview((current) => {
+      if (!current) return current;
+      const belongs = current.nodes.every((node) => node.whiteboardId === board?.id);
+      return belongs ? current : null;
+    });
   }, [board?.id]);
 
   // camera memory：開板還原、關板/切板時存（cameraRef 取最新值）
@@ -669,6 +790,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   // ---- 繪圖（WB03）：單指直接收筆畫、繞過 reducer；第二指落下＝取消
   // 筆畫並把兩個 down 補進 reducer（轉 pinch 縮放）。 ----
+  /** pointerType 正規化（N7）：未知/缺值當滑鼠處理，不硬轉型別。 */
+  const pointerKind = (event: { pointerType?: string }): PointerKind =>
+    event.pointerType === "pen" ? "pen" : event.pointerType === "touch" ? "touch" : "mouse";
+
   const finalizeStroke = (discard: boolean) => {
     const points = strokeRef.current;
     strokeRef.current = null;
@@ -679,6 +804,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     if (discard || !points || !board) return;
     const normalized = normalizeStroke(thinStroke(points, 2.5 / camera.zoom));
     if (!normalized) return; // 誤觸（單點）不成節點
+    const pressureContent = normalized.pressures.length ? { pressures: normalized.pressures } : {};
     const node: WhiteboardNode = {
       id: nextOpId(),
       whiteboardId: board.id,
@@ -688,7 +814,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       y: normalized.y,
       width: normalized.width,
       height: normalized.height,
-      content: { points: normalized.points, color: "#e8c27a", strokeWidth: 3 },
+      content: { points: normalized.points, color: "#e8c27a", strokeWidth: 3, ...pressureContent },
       createdBy: "local",
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -701,17 +827,44 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     if (target?.closest("textarea, input, button, a")) return;
+    const kind = pointerKind(event);
+    // 掌拒（WB05）：筆在畫的時候，手掌落在畫布上不得中斷筆畫。
+    // 只擋**新**的 touch — 已經在手勢狀態機裡的 pointer 一律放行，
+    // 否則它的 up 被吞掉、永遠留在 pointers map，下一次單指按下就被
+    // 當成第二指直接進 pinch（Grok wb05 F1 實抓：先用手指按著再拿筆寫）。
+    if (!gesture.current.pointers.has(event.pointerId) && shouldRejectPointer(penRef.current, kind, performance.now())) return;
+    // 第二支筆：整個事件丟掉（兩人共用一台平板時，B 的筆不得打斷 A 正在
+    // 寫的字）。**這個判斷必須在 penDown 之前** —— penDown 會把
+    // penPointerId 覆寫成第二支筆的 id，之後再比就永遠相等、守衛失效。
+    if (
+      kind === "pen" &&
+      penRef.current.penPointerId !== null &&
+      penRef.current.penPointerId !== event.pointerId &&
+      strokePointerRef.current !== null
+    ) {
+      return;
+    }
+    if (kind === "pen") penRef.current = penDown(penRef.current, event.pointerId);
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
       /* programmatic pointer events cannot capture */
     }
-    if (drawMode && canEdit) {
+    // 筆優先（N1 修正）：筆預設就是畫，**但工具列選了別的工具時筆要聽話**。
+    // 原本無條件短路，等於觸控筆再也選不到節點、拖不動、雙擊編輯不了、
+    // 連線與框選全滅 —— 平板使用者沒有第二種指標可以退回。
+    const penDraws = kind === "pen" && selectTool === "off" && !connectMode;
+    if ((drawMode || penDraws) && canEdit) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
+      // 手指起的筆畫遇到筆落下（N3）：手指那筆作廢，讓筆接手 —— 不作廢的話
+      // 筆會被當成第二個 pointer 進 pinch，畫面暴縮。
+      if (kind === "pen" && strokePointerRef.current !== null && strokePointerRef.current !== event.pointerId) {
+        finalizeStroke(true);
+      }
       if (strokePointerRef.current === null) {
         strokePointerRef.current = event.pointerId;
-        const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+        const world = { ...screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top), pressure: kind === "pen" ? event.pressure : undefined };
         strokeRef.current = [world];
         setStrokePreview([world]);
         strokeDownRef.current = { pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() };
@@ -740,11 +893,16 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     feed({ type: "down", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const kind = pointerKind(event);
+    if (!gesture.current.pointers.has(event.pointerId) && shouldRejectPointer(penRef.current, kind, performance.now())) return;
     if (strokePointerRef.current === event.pointerId && strokeRef.current) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
       strokeScreenRef.current = { x: event.clientX, y: event.clientY };
-      const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+      const world: StrokePoint = {
+        ...screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top),
+        pressure: kind === "pen" ? event.pressure : undefined,
+      };
       const last = strokeRef.current[strokeRef.current.length - 1];
       // 螢幕 2px 以下抖動不收（世界距離 × zoom）
       if (Math.hypot(world.x - last.x, world.y - last.y) * camera.zoom < 2) return;
@@ -755,6 +913,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     feed({ type: "move", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now(), zoom: camera.zoom }, event);
   };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const kind = pointerKind(event);
+    if (kind === "pen") penRef.current = penUp(penRef.current, event.pointerId, performance.now());
+    // up 永遠要讓已追蹤的 pointer 通過（見 down 的註解）
+    else if (!gesture.current.pointers.has(event.pointerId) && shouldRejectPointer(penRef.current, kind, performance.now())) return;
     if (strokePointerRef.current === event.pointerId) {
       finalizeStroke(event.type === "pointercancel");
       return;
@@ -765,9 +927,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   // ---- frame 拖曳/縮放（WB03）：把手自帶 handler＋pointer capture，
   // stopPropagation 不進畫布手勢 reducer。成員判定凍結在起拖。 ----
   const beginFrameDrag = (event: ReactPointerEvent<HTMLDivElement>, frame: WhiteboardFrame, mode: "move" | "resize") => {
-    // S4/S5：繪圖模式（筆要落在 frame 帶上）與唯讀者（把手＝平移死區）
-    // 都不攔 — 不 stopPropagation，事件冒泡回畫布走筆畫/平移。
-    if (drawMode || !canEdit) return;
+    // 繪圖模式、**觸控筆**（筆優先不開 drawMode — Grok wb05 F4）與唯讀者
+    // （把手＝平移死區）都不攔 — 不 stopPropagation，事件冒泡回畫布走
+    // 筆畫/平移。
+    if (drawMode || event.pointerType === "pen" || !canEdit) return;
+    // 掌拒也要管到把手（N6）：筆在寫的時候手掌壓在標題帶上，原本會把整個
+    // 區塊連同成員節點拖走。
+    if (shouldRejectPointer(penRef.current, pointerKind(event), performance.now())) return;
     // S3：已有進行中的 frame session 時，第二指不得覆寫（先到先贏）
     if (frameDragRef.current) return;
     event.stopPropagation();
@@ -792,6 +958,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       moved: false,
     };
     setFramePreviewSync(frame);
+    api.onFrameDragState?.(frame.id);
   };
   const onFramePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const session = frameDragRef.current;
@@ -826,6 +993,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const session = frameDragRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
     frameDragRef.current = null;
+    api.onFrameDragState?.(null);
     event.stopPropagation();
     const preview = framePreviewRef.current;
     setFramePreviewSync(null);
@@ -921,6 +1089,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   };
   const skippedText = (skipped: string) =>
     skipped === "conflict-drift" ? "已跳過：這步之後被其他人改過" : skipped === "missing-node" ? "已跳過：節點已不存在" : "已跳過：不支援的操作";
+  /** 還原之後舊的 undo/redo 不再對得上現況 — 清掉比留著誤導安全（P7）。 */
+  const resetHistory = () => setHistory(emptyHistory());
   const runUndo = () => {
     const result = undoStep(historyRef.current, executors, nextOpId());
     setHistory(result.stack);
@@ -1028,6 +1198,20 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     placeBranch(branch);
   };
 
+  // 在場者（WB04）：只顯示開著同一塊板的人，名字去重、最多列 3 個
+  const boardPeople = useMemo(() => {
+    const seen = new Set<string>();
+    return (api.boardPeople ?? []).filter((person) => {
+      const key = person.userId || person.name;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [api.boardPeople]);
+  const boardPeopleLabel = boardPeople.length
+    ? `${boardPeople.slice(0, 2).map((person) => person.name || "夥伴").join("、")}${boardPeople.length > 2 ? ` 等 ${boardPeople.length} 人` : ""} 也在`
+    : "";
+
   const selectedNode = liveNodes.find((node) => node.id === selected[0]);
   const polls: RoomPoll[] = api.room.polls ?? [];
 
@@ -1124,6 +1308,20 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   setSheet(null);
                 }}>新增區塊（Frame）</button>
               )}
+              {api.onAskBoardAi && (
+                <button type="button" className="wb-card" data-testid="wb-open-ai" onClick={() => { setSheet("ai"); setAiQuestion(""); }}>
+                  問 AI（會先給你看，再決定要不要放上去）
+                </button>
+              )}
+              {api.onListVersions && api.onLoadVersion && (
+                <button type="button" className="wb-card" data-testid="wb-open-versions" onClick={() => {
+                  setSheet("versions");
+                  setVersions(null);
+                  void Promise.resolve(api.onListVersions!())
+                    .then((list) => setVersions(list))
+                    .catch(() => setVersions([]));
+                }}>版本歷史</button>
+              )}
               {api.canManageBoards && <button type="button" className="wb-card" onClick={() => { api.onArchiveBoard(board.id); api.onOpenBoard(null); setSheet(null); }}>封存這塊白板</button>}
               {api.canToggleOpenEdit && (
                 <button type="button" className="wb-card" onClick={() => { api.onToggleAllowEdit(); setSheet(null); }}>
@@ -1135,6 +1333,136 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-write-decision" onClick={() => { api.onCreateDecision("已決定：採用 B 版", undefined, "decided"); addAtView("decision", { text: "已決定：採用 B 版", sourceLabel: "決策區" }); setSheet(null); }}>寫下決策</button>}
             </div>
             <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+          </section>
+        </div>
+      )}
+      {sheet === "ai" && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="問 AI">
+            <div className="project-sheet-grip" />
+            <div className="wb-sheet" data-testid="wb-ai-sheet">
+              <h3>問 AI</h3>
+              <p className="project-muted">
+                AI 會依這塊板上的內容給建議，先以虛線顯示在板上 —— 你看過再決定要不要放上去。
+                {selected.length ? `目前會以選取的 ${selected.length} 個節點為重點。` : ""}
+              </p>
+              <input
+                className="text-input wb-search"
+                autoFocus
+                value={aiQuestion}
+                onChange={(event) => setAiQuestion(event.target.value)}
+                placeholder="例如：把這些點子整理成三個方向"
+                aria-label="想問 AI 什麼"
+              />
+              <button type="button" className="project-save-button project-submit" data-testid="wb-ai-ask" disabled={aiBusy || !aiQuestion.trim()} onClick={async () => {
+                if (!api.onAskBoardAi) return;
+                setAiBusy(true);
+                try {
+                  const askSeq = (aiAskSeqRef.current += 1);
+                  const preview = await api.onAskBoardAi(aiQuestion.trim(), {
+                    nodes: liveNodes.filter((node) => !node.deletedAt),
+                    selectedIds: selected,
+                    // F3：預覽要出現在**使用者正在看的地方**，不是固定座標
+                    centerWorld: screenToWorld(camera, viewport.width / 2, viewport.height / 2),
+                  });
+                  // 使用者在等待期間按了取消／關掉 sheet：這批結果作廢
+                  // （不然預覽會自己冒出來 — 自審抓到）
+                  if (askSeq !== aiAskSeqRef.current) return;
+                  setSheet(null);
+                  if (!preview.nodes.length) {
+                    showNotice("AI 這次沒有可以放上白板的建議");
+                    setAiPreview(null);
+                    return;
+                  }
+                  setAiPreview(preview);
+                } catch {
+                  showNotice("AI 沒有回應，白板沒有任何變動");
+                } finally {
+                  setAiBusy(false);
+                }
+              }}>{aiBusy ? "想一下…" : "看看建議"}</button>
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => { aiAskSeqRef.current += 1; setSheet(null); }}>取消</button>
+          </section>
+        </div>
+      )}
+      {sheet === "versions" && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="版本歷史">
+            <div className="project-sheet-grip" />
+            <div className="wb-sheet" data-testid="wb-versions">
+              <h3>版本歷史</h3>
+              {versionPreview ? (
+                <>
+                  <p><strong>{versionPreview.version.label || "快照"}</strong> · {relative(versionPreview.version.createdAt)}</p>
+                  <p className="project-muted" data-testid="wb-restore-summary">
+                    還原會：{describeRestore(planRestore(versionPreview.snapshot, { nodes: liveNodes, edges, frames }))}
+                    {versionPreview.dropped ? `（有 ${versionPreview.dropped} 筆內容格式不符，已略過）` : ""}
+                  </p>
+                  <button type="button" className="project-save-button project-submit" data-testid="wb-restore-confirm" disabled={!canEdit || versionBusy} onClick={async () => {
+                    setVersionBusy(true);
+                    try {
+                      const result = await api.onRestoreVersion!(versionPreview.snapshot);
+                      // 只說真話：離線時是「排隊中」，不是「已還原」
+                      showNotice(result.queued
+                        ? `已套用 ${result.applied} 筆，離線中會在回網後送出`
+                        : result.applied ? `已還原（${result.applied} 筆）` : "沒有需要變更的內容");
+                      resetHistory(); // 還原後舊的 undo/redo 不再對得上
+                      setSheet(null);
+                      setVersionPreview(null);
+                    } catch {
+                      showNotice("還原沒有完成，畫面維持現狀");
+                    } finally {
+                      setVersionBusy(false);
+                    }
+                  }}>確認還原</button>
+                  <button type="button" className="wb-card" onClick={() => setVersionPreview(null)}>看其他版本</button>
+                </>
+              ) : (
+                <>
+                  <p className="project-muted">存一張快照，之後可以整塊板回到那時候。還原是逐筆寫回，走一樣的版本檢查。</p>
+                  {canEdit && api.onSnapshotBoard && (
+                    <button type="button" className="project-save-button project-submit" data-testid="wb-snapshot" disabled={versionBusy} onClick={async () => {
+                      setVersionBusy(true);
+                      try {
+                        await api.onSnapshotBoard!(`${new Date().toLocaleString("zh-TW", { hour12: false })} 的快照`);
+                        setVersions(await api.onListVersions!());
+                        showNotice("已存下這一刻的快照");
+                      } catch (error) {
+                        showNotice(error instanceof Error && error.message === "snapshot-too-large"
+                          ? "這塊板超過 2000 個內容，存不了快照"
+                          : "快照沒存成功，請再試一次");
+                      } finally {
+                        setVersionBusy(false);
+                      }
+                    }}>存一張快照</button>
+                  )}
+                  <div className="wb-options">
+                    {versions === null && <p className="project-muted">載入中…</p>}
+                    {versions?.length === 0 && <p className="project-muted">還沒有快照。先存一張，之後才有得回去。</p>}
+                    {(versions ?? []).map((version) => (
+                      <button type="button" className="wb-card" key={version.id} data-testid={`wb-version-${version.id}`} disabled={versionBusy} onClick={async () => {
+                        setVersionBusy(true);
+                        try {
+                          const loaded = await api.onLoadVersion!(version.id);
+                          setVersionPreview({ version, ...loaded });
+                        } catch {
+                          showNotice("這個版本讀不出來");
+                        } finally {
+                          setVersionBusy(false);
+                        }
+                      }}>
+                        <span>
+                          <strong>{version.label || "快照"}</strong>
+                          <small>{relative(version.createdAt)}</small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => { setSheet(null); setVersionPreview(null); }}>關閉</button>
           </section>
         </div>
       )}
@@ -1187,7 +1515,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   // ---- Focus Mode：portal 到 body 的 fixed 全屏層（wireflow §9） ----
   return createPortal(
-    <div className="wb-focus" data-testid="whiteboard-workspace">
+    <div className={`wb-focus${api.railVisible ? " is-rail-open" : ""}`} data-testid="whiteboard-workspace">
       <header className="wb-focus-top">
         <button type="button" className="project-back-button" onClick={() => window.history.back()} aria-label="回到白板列表">‹</button>
         {renaming && api.canManageBoards ? (
@@ -1197,15 +1525,33 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         ) : (
           <h2 onClick={() => { if (api.canManageBoards) { setRenameDraft(board.title); setRenaming(true); } }}>{board.title}</h2>
         )}
-        <span className="wb-online" data-testid="wb-presence">{api.online > 0 ? `${api.online}` : "1"} 人</span>
+        <span className="wb-online" data-testid="wb-presence" title={boardPeopleLabel}>
+          {api.online > 0 ? `${api.online}` : "1"} 人
+          {/* 名字要看得見（P11）：手機沒有 hover，只放 title 等於沒做。
+              數字與名單同語意 — 都是「除了我以外還有誰」。 */}
+          {boardPeople.length ? (
+            <em data-testid="wb-board-people">{boardPeopleLabel}</em>
+          ) : null}
+        </span>
         <button type="button" onClick={runUndo} disabled={!history.undo.length} aria-label="復原" data-testid="wb-undo">↺</button>
         <button type="button" onClick={runRedo} disabled={!history.redo.length} aria-label="重做" data-testid="wb-redo">↻</button>
+        {api.onToggleRail && (
+          <button
+            type="button"
+            className="wb-rail-toggle"
+            data-testid="wb-rail-toggle"
+            aria-label={api.railVisible ? "收起討論" : "顯示討論"}
+            aria-pressed={Boolean(api.railVisible)}
+            onClick={api.onToggleRail}
+          >{api.railVisible ? "☰" : "☰ 討論"}</button>
+        )}
         <button type="button" onClick={() => setSheet("more")} aria-label="更多" data-testid="whiteboard-more">⋯</button>
         <span hidden data-testid="wb-stats" data-nodes={nodes.length} data-edges={edges.length} data-flow={nodes.filter((node) => node.nodeType === "flow").length} data-mindmap={nodes.filter((node) => node.nodeType === "mindmap").length} />
       </header>
 
       {api.editors[0] ? <div className="wb-editing-line">{formatEditorLine(api.editors[0], board.title)}</div> : null}
 
+      <div className="wb-focus-main">
       <div
         ref={wrapRef}
         className="wb-focus-canvas"
@@ -1269,6 +1615,18 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               onChangeText={(text) => api.onUpsertNode(applyNodePatch(node, { content: { ...node.content, text } }), "now")}
             />
           ))}
+          {/* WB06 AI 預覽：虛線幽靈節點，pointer-events:none —— 它們還不是
+              板上的東西，點不到也拖不動，按「套用」才會變成真的。 */}
+          {aiPreview?.nodes.map((node) => (
+            <div
+              key={node.id}
+              className="wb-node wb-node-ai-preview"
+              style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
+              data-testid={`wb-ai-preview-${node.id}`}
+            >
+              <span className="wb-node-static">{node.content.text || node.content.title || "AI 建議"}</span>
+            </div>
+          ))}
           {marquee && (
             <div
               className="wb-marquee"
@@ -1286,8 +1644,23 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             </svg>
           )}
           {strokePreview && strokePreview.length > 1 && (
-            <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
-              <polyline points={strokePreview.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#e8c27a" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" data-testid="wb-stroke-preview" />
+            <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }} data-testid="wb-stroke-preview">
+              {/* 預覽也要逐段線寬（Grok wb05 F6）：畫的時候固定粗細、抬筆
+                  才變粗細不一，線條會「跳」一下 */}
+              {strokePreview.some((point) => typeof point.pressure === "number")
+                ? segmentWidths(strokePreview.map((point) => point.pressure), 3).map((width, index) => (
+                    <line
+                      key={index}
+                      x1={strokePreview[index].x}
+                      y1={strokePreview[index].y}
+                      x2={strokePreview[index + 1].x}
+                      y2={strokePreview[index + 1].y}
+                      stroke="#e8c27a"
+                      strokeWidth={width}
+                      strokeLinecap="round"
+                    />
+                  ))
+                : <polyline points={strokePreview.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#e8c27a" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />}
             </svg>
           )}
         </div>
@@ -1307,8 +1680,42 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         )}
       </div>
 
-      {/* 底部：frame 情境列 / 節點情境列 / 主工具列（wireflow §11） */}
-      {selectedFrameId && frames.some((frame) => frame.id === selectedFrameId) && canEdit && !multiSelect ? (
+      {/* 底部：AI 預覽確認列 / frame 情境列 / 節點情境列 / 主工具列
+          （wireflow §11）平板時 .wb-focus-main 讓它變成右側的一欄 */}
+      {aiPreview ? (
+        <nav className="wb-focus-bottom wb-context-bar wb-ai-bar" aria-label="AI 建議" data-testid="wb-ai-preview-bar">
+          <span className="wb-ai-summary" data-testid="wb-ai-summary">{describePreview(aiPreview)}</span>
+          <button type="button" className="project-save-button" data-testid="wb-ai-apply" disabled={!canEdit || aiBusy || !aiPreview.nodes.length} onClick={async () => {
+            if (!api.onApplyBoardAi) return;
+            if (aiApplyingRef.current) return; // F4：連點兩次會寫兩批
+            aiApplyingRef.current = true;
+            setAiBusy(true);
+            try {
+              const plan = planApply(aiPreview, nextOpId);
+              const result = await api.onApplyBoardAi(plan, aiPreview);
+              // 進 undo 疊（F2）：AI 放上來的東西必須一鍵撤得掉 —— 尤其在
+              // 快照沒存成功的時候，↺ 是使用者唯一的退路。
+              for (const node of plan.nodes) record(nodeCreateDraft(nextOpId(), node));
+              // 只說真話：離線是「排隊中」不是「已完成」；快照／稽核沒成功
+              // 都要講出來（使用者事後才發現查無此事最傷）。
+              const notes: string[] = [];
+              if (!result.snapshotTaken) notes.push("這次沒能存快照");
+              if (result.auditRecorded === false) notes.push("稽核紀錄沒寫成");
+              const head = result.queued
+                ? `已套用 ${result.applied} 項，離線中會在回網後送出`
+                : `已套用 ${result.applied} 項`;
+              showNotice(notes.length ? `${head}；${notes.join("、")}，按 ↺ 可以撤回` : `${head}（按 ↺ 可以撤回）`);
+              setAiPreview(null);
+            } catch {
+              showNotice("套用沒有完成，白板維持原狀");
+            } finally {
+              aiApplyingRef.current = false;
+              setAiBusy(false);
+            }
+          }}>套用</button>
+          <button type="button" data-testid="wb-ai-discard" onClick={() => setAiPreview(null)}>取消</button>
+        </nav>
+      ) : selectedFrameId && frames.some((frame) => frame.id === selectedFrameId) && canEdit && !multiSelect ? (
         <nav className="wb-focus-bottom wb-context-bar" aria-label="區塊動作" data-testid="wb-frame-actions">
           {frameRenaming ? (
             <form className="wb-frame-rename" onSubmit={(event) => { event.preventDefault(); commitFrameRename(); }}>
@@ -1426,6 +1833,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         </nav>
       )}
 
+      </div>
       {sheetLayer}
     </div>,
     document.body,

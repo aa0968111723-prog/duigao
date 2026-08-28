@@ -13,7 +13,8 @@ import type { ReactNode } from "react";
 import { formatVideoRange } from "../collaboration/nodes";
 import { stickyTextInputProps } from "../collaboration/permissions";
 import type { NodeType, WhiteboardNode } from "../collaboration/types";
-import { readStrokePoints, strokePath } from "./freehand";
+import { readStrokePoints, readStrokePressures, strokePath } from "./freehand";
+import { segmentWidths, strokeRuns } from "./pen";
 
 export type NodeRendererProps = {
   node: WhiteboardNode;
@@ -92,16 +93,28 @@ const REGISTRY: Partial<Record<NodeType, NodeRenderer>> = {
   // freehand（WB03/0026）：content.points 是相對節點左上的筆畫點
   freehand: ({ node }) => {
     const points = readStrokePoints(node.content.points);
+    const pressures = readStrokePressures(node.content.pressures, points.length);
+    const color = node.content.color || "#e8c27a";
+    const base = node.content.strokeWidth || 3;
     return (
       <svg className="wb-freehand" viewBox={`0 0 ${node.width} ${node.height}`} width="100%" height="100%" aria-label="手繪筆畫">
-        <path
-          d={strokePath(points)}
-          fill="none"
-          stroke={node.content.color || "#e8c27a"}
-          strokeWidth={node.content.strokeWidth || 3}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        {pressures.length ? (
+          // 有壓感（觸控筆）：逐段線寬。單一 path 畫不出粗細變化，而粗細
+          // 正是筆相對於手指的價值所在。
+          strokeRuns(points, segmentWidths(pressures, base)).map((run, index) => (
+            <polyline
+              key={index}
+              points={run.points.map(([px, py]) => `${px},${py}`).join(" ")}
+              fill="none"
+              stroke={color}
+              strokeWidth={run.width}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))
+        ) : (
+          <path d={strokePath(points)} fill="none" stroke={color} strokeWidth={base} strokeLinecap="round" strokeLinejoin="round" />
+        )}
       </svg>
     );
   },

@@ -139,7 +139,14 @@ export function applyBoardPatches(
         nextNodes = nextNodes.filter((item) => item.id !== patch.id);
       }
     } else if (patch.type === "edge-insert") {
-      if (!nextEdges.some((item) => item.id === patch.edge.id)) nextEdges = [...nextEdges, patch.edge];
+      // upsert 語意（WB04）：edges 自 0022 起有 version/label/handle 可改，
+      // realtime 也開始送 UPDATE。只在版本前進時替換 — 舊 echo 不倒退。
+      const existing = nextEdges.find((item) => item.id === patch.edge.id);
+      if (!existing) {
+        nextEdges = [...nextEdges, patch.edge];
+      } else if ((patch.edge.version ?? 1) > (existing.version ?? 1)) {
+        nextEdges = nextEdges.map((item) => (item.id === patch.edge.id ? patch.edge : item));
+      }
     } else if (nextEdges.some((item) => item.id === patch.id)) {
       nextEdges = nextEdges.filter((item) => item.id !== patch.id);
     }
