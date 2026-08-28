@@ -121,7 +121,15 @@ async function fillEditing(page, text) {
   await box.fill(text);
 }
 
+async function dismissSelection(page) {
+  // WB02：選取節點時情境列取代主工具列 — 開主工具列動作前先取消選取
+  const dismiss = page.locator(".wb-context-dismiss");
+  if (await dismiss.count()) await dismiss.click();
+}
+
 async function searchNode(page, name) {
+  // WB02：搜尋移進「更多」sheet（wireflow §11 — 主畫面不擺搜尋）
+  await page.getByTestId("whiteboard-more").click();
   await page.getByTestId("whiteboard-search").click();
   const input = page.getByRole("textbox", { name: "搜尋節點" });
   await input.waitFor({ timeout: 5000 });
@@ -206,6 +214,40 @@ try {
     await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 10000 });
     check("可建立並打開白板", await page.getByTestId("wb-canvas").count() === 1);
 
+    // ---- WB02 Focus Mode 驗收（Grok wb00 F8 的防假綠斷言）----------
+    {
+      // 有效畫布面積：canvas 元素本身（工具列在 flex 流內、不疊在 canvas 上）
+      const metrics = await page.evaluate(() => {
+        const canvas = document.querySelector('[data-testid="wb-canvas"]');
+        const rect = canvas.getBoundingClientRect();
+        return {
+          canvasArea: rect.width * rect.height,
+          viewportArea: window.innerWidth * window.innerHeight,
+          canvasPct: Math.round((rect.width * rect.height) / (window.innerWidth * window.innerHeight) * 100),
+        };
+      });
+      check(`Focus Mode：有效畫布 ≥75% 視窗（實測 ${metrics.canvasPct}%）`, metrics.canvasPct >= 75, JSON.stringify(metrics));
+      // FAB：unmount（count===0，display:none 不算過）
+      check("Focus Mode：project-fab 不渲染", (await page.locator(".project-fab").count()) === 0);
+      check("Focus Mode：asset-ai-fab 不渲染", (await page.locator(".asset-ai-fab").count()) === 0);
+      // 殼元素被全屏層蓋住之外，畫面上不得再渲染搜尋列/膠囊/rd-tabs 在層上方
+      const focusZ = await page.evaluate(() => getComputedStyle(document.querySelector(".wb-focus")).zIndex);
+      check("Focus 層 z-index=45（疊加規則）", focusZ === "45", `z=${focusZ}`);
+
+      // back 階梯：開 sheet → back 關 sheet 不退板；再 back 退回板清單
+      await page.getByTestId("whiteboard-add").click();
+      await page.waitForSelector(".project-scrim", { timeout: 5000 });
+      await page.goBack();
+      await page.waitForFunction(() => !document.querySelector(".project-scrim"), null, { timeout: 5000 });
+      check("back 先關 sheet、板不退", (await page.getByTestId("wb-canvas").count()) === 1);
+      await page.goBack();
+      await page.waitForSelector(".wb-list", { timeout: 5000 });
+      check("再 back 退出 Focus 回板清單", (await page.locator(".wb-list").count()) === 1);
+      // 重新開板繼續後面的流程
+      await page.locator(".wb-card").first().click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 10000 });
+    }
+
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "心智圖" }).click();
     await fillEditing(page, "招生");
@@ -231,12 +273,15 @@ try {
     check("擺攤可自動長出流程下一步", flowCount >= 5, `flow=${flowCount}`);
     check("流程邊線會一起建立", edgeCount >= 5, `edges=${edgeCount}`);
 
+    await dismissSelection(page);
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤文宣/ }).click();
+    await dismissSelection(page);
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤計畫/ }).click();
+    await dismissSelection(page);
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /招生影片/ }).click();
@@ -268,6 +313,7 @@ try {
     await canvas.dispatchEvent("pointerup", { pointerId: 12 });
     check("雙指可 pinch zoom", true);
 
+    await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("whiteboard-arrange").click();
     check("整理按鈕可按", true);
     const nodeCount = await page.locator("[data-testid^='wb-node-']").count();
@@ -295,6 +341,9 @@ try {
     }
 
     await page.getByRole("button", { name: "分享至討論", exact: false }).first().click().catch(() => undefined);
+    // WB02 Focus Mode：rd-tabs 在全屏層之下 — 先返回板清單再切對話
+    await page.locator(".wb-focus-top .project-back-button").click();
+    await page.waitForSelector(".wb-list", { timeout: 10000 });
     await page.getByRole("button", { name: "對話", exact: true }).click();
     check("討論與白板互相連得起來", (await page.getByTestId("discussion-feed").innerText()).length > 0);
     check("決策區看得到已決定", (await page.getByTestId("decision-area").innerText()).includes("採用 B 版"));
@@ -341,8 +390,9 @@ try {
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       // 開著的板未必有可編輯便利貼：先建一張，等它落雲（有 server version）
       if (!(await page.locator("textarea.wb-node-text").count())) {
+        await dismissSelection(page);
         await page.getByTestId("whiteboard-add").click();
-        await page.getByRole("button", { name: "便利貼" }).click();
+        await page.locator(".project-sheet").getByRole("button", { name: "便利貼" }).click();
         await page.waitForSelector("textarea.wb-node-text", { timeout: 15000 });
       }
       await page.waitForTimeout(600); // 等新便利貼的雲端 ack（version 進 mock）
@@ -377,11 +427,16 @@ try {
       }
       // --- PR-02c：兩分頁即時增量（無整房 reload） --------------------
       {
-        // A 拿分享連結（殼 header 的分享 — PR-01a 抬升後兩路徑都渲染）
+        // WB02 Focus Mode：殼 header 在全屏層之下 — 先退出白板拿分享連結
+        await page.locator(".wb-focus-top .project-back-button").click();
+        await page.waitForSelector(".wb-list", { timeout: 10000 });
         await page.locator(".project-share-button").click();
         await page.waitForSelector("input.m-share-url", { timeout: 30000 });
         const shareUrl = await page.locator("input.m-share-url").inputValue();
         await page.locator(".m-modal").getByRole("button", { name: "關閉", exact: true }).click().catch(() => undefined);
+        // 回到板上繼續雙分頁劇本
+        await page.locator(".wb-card").first().click();
+        await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
 
         const ctxB = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, userAgent: "Mozilla/5.0 (Linux; Android 14) e2e" });
         const B = await ctxB.newPage();
@@ -419,19 +474,23 @@ try {
           }
           requestLog.length = 0;
           // A 新增一張便利貼並打字（INSERT + UPDATE 都走 row-patch）
+          await dismissSelection(page);
           await page.getByTestId("whiteboard-add").click();
-          await page.getByRole("button", { name: "便利貼" }).click();
+          await page.locator(".project-sheet").getByRole("button", { name: "便利貼" }).click();
           await page.waitForSelector("textarea.wb-node-text", { timeout: 15000 });
           await page.locator("textarea.wb-node-text").last().fill("跨分頁增量");
           await page.keyboard.press("Tab");
 
           // B 不做任何重開動作，節點與文字要自己出現
+          // WB02：非編輯節點是靜態層（textarea 只在編輯時渲染）
+          const seesText = (needle) => (el) => el.textContent && el.textContent.includes(needle);
           await B.waitForFunction(
-            () => [...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("跨分頁增量")),
+            () => [...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")),
             null,
             { timeout: 20000 },
           );
-          const bSeen = await B.evaluate(() => [...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("跨分頁增量")));
+          const bSeen = await B.evaluate(() => [...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")));
+          void seesText;
           check("兩分頁：B 不重開就看到 A 的新節點與文字", bSeen);
 
           // reload 風暴不見了：整房快照與板 GET 都必須為 0 —
@@ -444,12 +503,11 @@ try {
           // A 刪掉那張便利貼：B 不重開要看到它消失（tombstone UPDATE →
           // row-patch 的 delete 轉換 — 復活路徑的第一防線）
           {
-            // 點節點邊框環（textarea 會吃掉點擊 — audit §2 的已知行為），
-            // 讓節點進入 selected 態、動作列出現
-            await page.locator(".wb-node").last().click({ position: { x: 5, y: 5 }, force: true });
+            // WB02：非編輯節點是靜態層，整卡可點選（audit 缺陷已修）
+            await page.locator(".wb-node").last().click({ force: true });
             await page.getByRole("button", { name: "刪除", exact: true }).click();
             await B.waitForFunction(
-              () => ![...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("跨分頁增量")),
+              () => ![...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")),
               null,
               { timeout: 20000 },
             );
@@ -461,13 +519,13 @@ try {
             // 殭屍防護（F1 的真反例）：B 的 IndexedDB 快照裡還有這個節點
             // （刪除前存的）。B 離開板再重開 — 「先快照後雲端整替」的序列
             // 必須讓墓碑贏，節點不得回到畫面。
-            await B.locator(".wb-toolbar .project-back-button").click().catch(() => undefined);
+            await B.locator(".wb-focus-top .project-back-button").click().catch(() => undefined);
             await B.waitForSelector(".wb-list", { timeout: 15000 }).catch(() => undefined);
             await B.locator(".wb-card").first().click({ force: true });
             await B.waitForSelector('[data-testid="wb-canvas"]', { timeout: 20000 });
             // 給快照→雲端序列一個完整落地窗
             await B.waitForFunction(
-              () => ![...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("跨分頁增量")),
+              () => ![...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")),
               null,
               { timeout: 20000 },
             );
@@ -482,7 +540,11 @@ try {
       // 回網」的整條使用者旅程 — 誠實狀態、不掉資料、回網自癒。
       {
         const ctx = page.context();
-        // 前段停在白板 pane：先回對話，composer 才在。
+        // 前段停在白板 pane：Focus 開著要先退出，殼 tabs 才點得到。
+        if (await page.locator(".wb-focus").count()) {
+          await page.locator(".wb-focus-top .project-back-button").click();
+          await page.waitForSelector(".wb-list", { timeout: 10000 });
+        }
         await page.getByRole("button", { name: "對話", exact: true }).click();
         await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
 
@@ -526,7 +588,7 @@ try {
         await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 20000 });
         await ctx.setOffline(true);
         await page.getByTestId("whiteboard-add").click();
-        await page.getByRole("button", { name: "便利貼" }).click();
+        await page.locator(".project-sheet").getByRole("button", { name: "便利貼" }).click();
         await page.waitForSelector("textarea.wb-node-text", { timeout: 15000 });
         await page.locator("textarea.wb-node-text").last().fill("離線寫的節點");
         await page.keyboard.press("Tab");
@@ -551,6 +613,10 @@ try {
         check("離線寫的節點回網後仍在畫面上", stillVisible);
       }
 
+      if (await page.locator(".wb-focus").count()) {
+        await page.locator(".wb-focus-top .project-back-button").click();
+        await page.waitForSelector(".wb-list", { timeout: 10000 });
+      }
       await page.getByRole("button", { name: "對話", exact: true }).click();
     }
     // 舊 ghost 已被離線矩陣段的 online flush 自動送到（這正是 PR-08b 的

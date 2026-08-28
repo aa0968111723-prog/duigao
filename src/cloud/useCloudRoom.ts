@@ -99,6 +99,8 @@ import {
   updateWhiteboard as repoUpdateWhiteboard,
   upsertNode as repoUpsertNode,
   softDeleteNode as repoSoftDeleteNode,
+  upsertFrame as repoUpsertFrame,
+  insertOperation as repoInsertOperation,
 } from "./collaborationRepository";
 import { decideNodeWriteRetry } from "../features/collaboration/offline";
 import {
@@ -132,6 +134,8 @@ export type CloudWrites = {
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false | "conflict">;
   deleteNode?: (id: string, version: number) => Promise<boolean | "conflict">;
+  upsertFrame?: (frame: import("../features/collaboration/types").WhiteboardFrame) => void;
+  insertOperation?: (op: import("../features/collaboration/types").WhiteboardOperation) => void;
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
@@ -1076,6 +1080,10 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       return true;
     }),
     createEdge: (edge) => run(`edge:${edge.id}`, () => insertEdge(supabase!, edge)),
+    upsertFrame: (frame) => run(`frame:${frame.id}`, () => repoUpsertFrame(supabase!, { ...frame, roomId: boundRef.current! }).then(() => undefined)),
+    // op 入帳 best-effort：duplicate（重試）在 repository 折成成功；
+    // 失敗只損 undo 粒度不損資料 — 不進佇列、不擋操作（ADR-014）。
+    insertOperation: (op) => run(`op:${op.opId}`, () => repoInsertOperation(supabase!, { ...op, roomId: boundRef.current! })),
     createDecision: (decision) => run(`decision-insert:${decision.id}`, () => insertDecision(supabase!, decision)),
     updateDecision: (decision) => run(`decision:${decision.id}`, () => repoUpdateDecision(supabase!, decision)),
     setAllowBoardEdit: (allow) => run("allow-board-edit", () => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),

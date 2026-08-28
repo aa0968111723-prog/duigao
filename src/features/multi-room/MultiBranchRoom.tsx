@@ -87,6 +87,12 @@ export type MultiBranchRoomApi = {
   onCreateWhiteboard: (title: string) => void;
   onArchiveWhiteboard: (id: string) => void;
   onOpenWhiteboard: (id: string | null) => void;
+  /** WB02：frames／op 入帳／focus 通知（App 據此抑制 AssetAiFab）。 */
+  whiteboardFrames?: import("../collaboration/types").WhiteboardFrame[];
+  onCreateFrame?: (frame: import("../collaboration/types").WhiteboardFrame) => void;
+  onEmitOperation?: (draft: import("../collaboration/operations").OperationDraft) => void;
+  onBoardFocusChange?: (focused: boolean) => void;
+  onRenameWhiteboard?: (id: string, title: string) => void;
   onUpsertNode: (node: WhiteboardNode, persist?: "now" | "end") => void;
   onUpsertNodes: (nodes: WhiteboardNode[]) => void;
   onDeleteNode: (id: string) => void;
@@ -720,6 +726,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   useViewport();
   // 討論是根畫面；總覽/內容/企劃是可返回的推進面板（Grok pr00 F1/F3）。
   const [pushedPane, setPushedPane] = useState<PushedPane | null>(null);
+  // Focus Mode（WB02）：白板全螢幕時抑制 project-fab（條件不渲染，非蓋住）
+  const [boardFocused, setBoardFocused] = useState(false);
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -896,7 +904,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onDragState: api.onBoardDragState,
                     onCreateBoard: api.onCreateWhiteboard,
                     onArchiveBoard: api.onArchiveWhiteboard,
-                    onRenameBoard: () => undefined,
+                    onRenameBoard: api.onRenameWhiteboard ?? (() => undefined),
                     onUpsertNode: api.onUpsertNode,
                     onDeleteNode: api.onDeleteNode,
                     onUpsertNodes: api.onUpsertNodes,
@@ -922,6 +930,13 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onToggleAllowEdit: api.onToggleAllowBoardEdit,
                     allowBoardEdit: Boolean(api.room.allowBoardEdit),
                     canToggleOpenEdit: api.role === "owner" || (!api.role && api.canManage),
+                    frames: api.whiteboardFrames,
+                    onCreateFrame: api.onCreateFrame,
+                    onEmitOperation: api.onEmitOperation,
+                    onFocusChange: (focused) => {
+                      setBoardFocused(focused);
+                      api.onBoardFocusChange?.(focused);
+                    },
                   }} />
                 ) : (
                   <RoomDiscussion api={{
@@ -970,7 +985,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
               </section>
             )}
           </main>
-          {api.canManage && <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>}
+          {api.canManage && !boardFocused && <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>}
           {pushedPane && (
             <div className="project-push-pane" data-testid={`${pushedPane}-pane`}>
               <header className="project-push-head">

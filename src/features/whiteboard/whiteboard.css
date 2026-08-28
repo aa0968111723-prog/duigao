@@ -42,3 +42,88 @@
 .wb-multiselect { position: absolute; top: 44px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 999px; background: rgba(20,18,16,.9); border: 1px solid var(--line-soft); font-size: 13px; }
 .wb-multiselect button { border: 0; background: transparent; color: var(--accent); font-size: 13px; }
 .wb-more { display: grid; gap: 8px; }
+
+/* ---- Focus Mode（WB02，wireflow §9＋疊加規則）------------------------- */
+/* z 階梯：push-pane 32 < workspace-overlay 40 < board-focus 45 < scrim 80 */
+:root { --z-board-focus: 45; }
+.wb-focus {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-board-focus);
+  display: flex;
+  flex-direction: column;
+  /* 背景必須不透明：sticky header z-10 在下面（疊加規則） */
+  background: #12100e;
+}
+.wb-focus-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px; /* 48-56 規格 */
+  padding: 4px 10px 4px 6px;
+  padding-top: calc(4px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--line-soft);
+  flex: none;
+}
+.wb-focus-top h2 { flex: 1; min-width: 0; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
+.wb-focus-top button { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--ink); font-size: 18px; border-radius: 12px; }
+.wb-focus-top button:disabled { color: var(--ink-faint); }
+.wb-focus-top .project-back-button { font-size: 24px; }
+.wb-online { padding: 4px 10px; border-radius: 999px; background: var(--raise); font-size: 12px; color: var(--ink-dim); flex: none; }
+.wb-rename { flex: 1; min-width: 0; }
+.wb-rename input { width: 100%; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--raise); color: inherit; font-size: 16px; padding: 8px 10px; }
+.wb-editing-line { padding: 4px 12px; font-size: 12px; color: var(--ink-faint); flex: none; }
+.wb-focus-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(255,255,255,.06) 1px, transparent 0) 0 0 / 22px 22px,
+    #161310;
+}
+.wb-focus-bottom {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line-soft);
+  background: rgba(20,18,16,.96);
+  flex: none;
+  overflow-x: auto;
+}
+.wb-focus-bottom button {
+  flex: 1 0 auto;
+  min-width: 56px;
+  min-height: 48px; /* ≥44 觸控目標 */
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+.wb-focus-bottom button span { display: block; font-size: 18px; line-height: 1; margin-bottom: 2px; }
+.wb-focus-bottom button.is-active { background: var(--raise); color: var(--accent); }
+.wb-focus-bottom button:disabled { color: var(--ink-faint); }
+.wb-context-bar { align-items: center; }
+.wb-context-bar button { flex: 0 0 auto; padding: 0 14px; min-height: 48px; font-size: 14px; }
+.wb-context-dismiss { margin-left: auto; }
+.wb-connect-hint {
+  position: absolute; top: 10px; left: 10px; right: 10px;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; border-radius: 999px;
+  background: rgba(20,18,16,.9); border: 1px solid var(--accent); font-size: 13px;
+}
+.wb-connect-hint button { border: 0; background: transparent; color: var(--accent); min-height: 44px; }
+.wb-node.is-locked { opacity: .82; }
+.wb-lock-badge { position: absolute; top: 4px; right: 6px; font-size: 11px; pointer-events: none; }
+.wb-node.is-connect-source { outline: 2px dashed var(--accent); }
+.wb-node-static { display: block; width: 100%; height: 100%; font-size: 15px; line-height: 1.35; white-space: pre-wrap; overflow: hidden; }
+.wb-node-unknown { color: var(--ink-faint); font-style: italic; }
+.wb-frame {
+  position: absolute; border-radius: 20px;
+  border: 1.5px dashed rgba(255,255,255,.18);
+  background: rgba(255,255,255,.03);
+  pointer-events: none; /* WB02：frame 尚不可拖/縮（WB03）— 誠實不攔事件 */
+}
+.wb-frame-title { position: absolute; top: -22px; left: 8px; font-size: 12px; color: var(--ink-faint); }

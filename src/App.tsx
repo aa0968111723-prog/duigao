@@ -29,6 +29,7 @@ import {
 } from "./lib/types";
 import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
+import { loadFrames as loadBoardFrames } from "./cloud/collaborationRepository";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -255,6 +256,9 @@ export function App() {
   /** Project rooms stay at the room shell until a poster/video branch opens. */
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
   const [activeWhiteboardId, setActiveWhiteboardId] = useState<string | null>(null);
+  // WB02 Focus Mode：白板全螢幕時 AssetAiFab 條件不渲染（wireflow 疊加規則）
+  const [boardFocused, setBoardFocused] = useState(false);
+  const [boardFrames, setBoardFrames] = useState<import("./features/collaboration/types").WhiteboardFrame[]>([]);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
@@ -2877,7 +2881,18 @@ export function App() {
         onOpenWhiteboard: (id) => {
           setActiveWhiteboardId(id);
           if (!id) setFocusNodeId(null);
+          setBoardFrames([]);
           if (!id) return;
+          // frames（0022）：開板載入；realtime 訂閱屬 WB04
+          {
+            const supabase = getSupabase();
+            const bound = cloudRef.current.boundRoomId;
+            if (supabase && bound) {
+              void loadBoardFrames(supabase, bound, id)
+                .then((frames) => setBoardFrames(frames))
+                .catch(() => setBoardFrames([]));
+            }
+          }
           // 順序刻意是「先快照、後雲端」（Grok wb01 F1）：兩者並發時雲端
           // 整替可能先落地，快照的過期活列（沒有 deletedAt 的舊列）接著以
           // 「remote 沒有這列」的路徑把已刪節點救回畫面。序列化後，雲端
@@ -2908,6 +2923,38 @@ export function App() {
           });
         },
         onFocusNode: setFocusNodeId,
+        whiteboardFrames: boardFrames,
+        onCreateFrame: (frame) => {
+          setBoardFrames((current) => [...current, frame]);
+          cloudRef.current.writes.upsertFrame?.(frame);
+        },
+        onEmitOperation: (draft) => {
+          const actor = cloudRef.current.userId;
+          const bound = cloudRef.current.boundRoomId;
+          if (!actor || !bound) return; // 本機房無 op 帳（誠實：無雲端即無稽核）
+          cloudRef.current.writes.insertOperation?.({
+            opId: draft.opId,
+            whiteboardId: draft.whiteboardId,
+            roomId: bound,
+            actorUserId: actor,
+            opType: draft.opType,
+            entityId: draft.entityId,
+            fieldMask: draft.fieldMask,
+            before: draft.before,
+            after: draft.after,
+            createdAt: Date.now(),
+          });
+        },
+        onBoardFocusChange: setBoardFocused,
+        onRenameWhiteboard: (id, title) => {
+          const target = (roomRef.current?.whiteboards ?? []).find((item) => item.id === id);
+          if (!target) return;
+          updateRoom((r) => ({
+            ...r,
+            whiteboards: (r.whiteboards ?? []).map((item) => item.id === id ? { ...item, title } : item),
+          }));
+          cloudRef.current.writes.updateWhiteboard?.({ ...target, title });
+        },
         onUpsertNode: upsertNode,
         onUpsertNodes: upsertNodes,
         onDeleteNode: deleteNode,
@@ -3162,7 +3209,7 @@ export function App() {
         cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
       />
 
-      {isCloudConfigured && <AssetAiFab onClick={() => openAi()} />}
+      {isCloudConfigured && !boardFocused && <AssetAiFab onClick={() => openAi()} />}
       {aiSheetOpen && room && <RoomAiSheet
         roomTitle={room.title}
         assets={assetIntelligence?.assets ?? []}
