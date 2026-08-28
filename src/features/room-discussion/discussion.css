@@ -54,3 +54,11 @@
 .rd-voice-btn { min-height: 32px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line, rgba(0,0,0,0.15)); background: transparent; color: inherit; cursor: pointer; }
 .rd-voice-btn.is-leave { color: #c2483a; border-color: rgba(194,72,58,0.4); }
 .rd-voice-error { color: #c2483a; width: 100%; }
+
+/* WB03「打開來源訊息」跳回高亮 */
+.rd-msg.rd-msg-flash { animation: rd-flash 1.6s ease-out; }
+@keyframes rd-flash {
+  0% { background: rgba(232, 194, 122, 0.35); }
+  100% { background: transparent; }
+}
+.m-vchip-board { border-color: var(--accent, #c45c4a); }

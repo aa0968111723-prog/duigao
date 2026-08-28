@@ -121,3 +121,13 @@
 .wb-frame-title { position: absolute; top: -22px; left: 8px; font-size: 12px; color: var(--ink-faint); }
 
 .wb-notice { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: rgba(20,18,16,.94); border: 1px solid var(--line-soft); color: var(--ink); font-size: 13px; pointer-events: none; z-index: 3; }
+
+/* ---- WB03：frame 互動／freehand ---- */
+.wb-frame-handle { position: absolute; left: 0; right: 0; top: 0; min-height: 30px; pointer-events: auto; touch-action: none; cursor: grab; padding: 4px 8px; }
+.wb-frame.is-selected { outline: 2px solid var(--accent); }
+.wb-frame-resize { position: absolute; right: -8px; bottom: -8px; width: 28px; height: 28px; border-radius: 9px; background: var(--accent); border: 2px solid #12100e; pointer-events: auto; touch-action: none; cursor: nwse-resize; }
+.wb-frame-rename { display: flex; gap: 6px; align-items: center; flex: 1; min-width: 0; }
+.wb-frame-rename input { flex: 1; min-width: 0; background: var(--raise); border: 1px solid var(--line-soft); border-radius: 8px; color: var(--ink); padding: 8px; font-size: 14px; }
+.wb-freehand { display: block; pointer-events: none; }
+.wb-node-freehand { background: transparent; border: 0; box-shadow: none; padding: 0; overflow: visible; }
+.wb-node-freehand.is-selected { outline: 2px dashed var(--accent); }

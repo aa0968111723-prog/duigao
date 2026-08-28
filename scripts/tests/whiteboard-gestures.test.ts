@@ -130,6 +130,25 @@ test("Grok F2：節點上（begin-drag 回填）沒真的拖 — 雙擊仍要到
   assert.ok(dragged.effects.some((effect) => effect.kind === "commit-drag"));
 });
 
+test("WB03 hover 防護：未按下的滑鼠掠過畫布後，真按下仍是單指（不誤入 pinch）", () => {
+  let state = initialGestureState();
+  // 桌機 hover：move 事件先到（沒有 down）
+  state = gestureReducer(state, { type: "move", pointerId: 1, point: { x: 30, y: 30 }, time: 0, zoom: 1 }).state;
+  state = gestureReducer(state, { type: "move", pointerId: 1, point: { x: 60, y: 60 }, time: 10, zoom: 1 }).state;
+  assert.equal(state.pointers.size, 0, "hover 不得進 pointers map");
+  // 真按下（觸控 id 31）：必須是單指 — 長按要 armed、hit-test 要發
+  const down = gestureReducer(state, { type: "down", pointerId: 31, point: { x: 100, y: 100 }, time: 20 });
+  state = down.state;
+  assert.equal(state.mode, "idle");
+  assert.ok(state.longPress, "長按必須 armed（舊 bug：hover 殘影讓這裡變 pinch）");
+  assert.ok(down.effects.some((effect) => effect.kind === "hit-test"));
+  assert.ok(!down.effects.some((effect) => effect.kind === "long-press-cancelled"));
+  // 未追蹤 pointer 的 up 也不得干擾
+  const ghostUp = gestureReducer(state, { type: "up", pointerId: 99, point: { x: 0, y: 0 }, time: 30 });
+  assert.equal(ghostUp.state.mode, "idle");
+  assert.ok(ghostUp.state.longPress, "幽靈 up 不得取消長按");
+});
+
 test("Grok F1：pinch scale 是增量比 — 距離不變的 move 回報 1，不重複回報總比", () => {
   let state = initialGestureState();
   state = gestureReducer(state, { type: "down", pointerId: 1, point: { x: 100, y: 100 }, time: 0 }).state;

@@ -1613,6 +1613,20 @@ try {
   ok("重跑 0022–0025 後 shape 不變（9/true/3）", wbBefore === wbShape() && wbBefore === "9/true/3", `${wbBefore} → ${wbShape()}`);
   ok("重跑後 REST 硬刪依然被 revoke", as(owner, `delete from public.whiteboard_nodes where id = '${tombNode}'::uuid;`).failed);
 
+  section("0026：freehand 詞彙（WB03）");
+  psqlFile(join(MIGRATIONS, "0026_whiteboard_freehand.sql"));
+  const fhNode = psql("select gen_random_uuid();").out;
+  ok("freehand 節點可插入", !as(owner, `insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${fhNode}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'freehand', '{"points":[[0,0],[10,10]]}'::jsonb);`).failed);
+  ok("詞彙外型別仍被 CHECK 擋下", as(owner, `insert into public.whiteboard_nodes (whiteboard_id, room_id, node_type, content) values ('${collabBoard}'::uuid, '${capRoom}'::uuid, 'scribble', '{}'::jsonb);`).failed);
+  // 0014 重放不得把 'freehand' 洗掉（inline CHECK 只在 create table 生效）
+  psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
+  const fhNode2 = psql("select gen_random_uuid();").out;
+  ok("0014 重放後 freehand 仍可插入", !as(owner, `insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${fhNode2}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'freehand', '{}'::jsonb);`).failed);
+  // 0026 重放冪等
+  psqlFile(join(MIGRATIONS, "0026_whiteboard_freehand.sql"));
+  ok("0026 重放後 CHECK 恰一條", psql(`select count(*) from pg_constraint where conname = 'whiteboard_nodes_node_type_check';`).out === "1");
+  ok("0026 重放後 freehand 列仍在", psql(`select count(*) from public.whiteboard_nodes where id in ('${fhNode}'::uuid,'${fhNode2}'::uuid);`).out === "2");
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

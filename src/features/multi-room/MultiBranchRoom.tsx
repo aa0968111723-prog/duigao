@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { historyLayers } from "../../lib/historyLayers";
 import type {
   BranchStatus,
   BranchType,
@@ -90,6 +91,8 @@ export type MultiBranchRoomApi = {
   /** WB02：frames／op 入帳／focus 通知（App 據此抑制 AssetAiFab）。 */
   whiteboardFrames?: import("../collaboration/types").WhiteboardFrame[];
   onCreateFrame?: (frame: import("../collaboration/types").WhiteboardFrame) => void;
+  onUpdateFrame?: (frame: import("../collaboration/types").WhiteboardFrame) => void;
+  onDeleteFrame?: (id: string) => void;
   onEmitOperation?: (draft: import("../collaboration/operations").OperationDraft) => void;
   onBoardFocusChange?: (focused: boolean) => void;
   onRenameWhiteboard?: (id: string, title: string) => void;
@@ -729,6 +732,24 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   // Focus Mode（WB02）：白板全螢幕時抑制 project-fab（條件不渲染，非蓋住）
   const [boardFocused, setBoardFocused] = useState(false);
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
+  // WB03「打開來源訊息」：關板→切對話→捲動到訊息＋1.6s 高亮。訊息元素
+  // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
+  const openDiscussionMessage = (messageId: string) => {
+    api.onOpenWhiteboard(null);
+    setDiscussPane("chat");
+    const started = performance.now();
+    const seek = () => {
+      const el = document.querySelector(`[data-testid="discussion-${messageId}"]`);
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("rd-msg-flash");
+        window.setTimeout(() => el.classList.remove("rd-msg-flash"), 1600);
+        return;
+      }
+      if (performance.now() - started < 1200) requestAnimationFrame(seek);
+    };
+    requestAnimationFrame(seek);
+  };
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
@@ -754,6 +775,26 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       setPushedPane(null);
     }
   }, [api.activeWhiteboardId]);
+
+  // WB03 疊加規則 3：對稿 overlay 疊在（可能開著的）白板 Focus 上時，
+  // back 先關 overlay — 透過 historyLayers 協調器與白板 focus 層排隊，
+  // 不再兩個 popstate listener 互踩（舊 bug：back 退了板、overlay 還在）。
+  const workspaceOpen = Boolean(api.workspace);
+  const mbrApiRef = useRef(api);
+  mbrApiRef.current = api;
+  const overlayPoppingRef = useRef(false);
+  useEffect(() => {
+    if (!workspaceOpen) return;
+    const remove = historyLayers().push("content-overlay", () => {
+      overlayPoppingRef.current = true;
+      mbrApiRef.current.onBackToRoom();
+      return "closed";
+    });
+    return () => {
+      remove(overlayPoppingRef.current);
+      overlayPoppingRef.current = false;
+    };
+  }, [workspaceOpen]);
 
   // 桌機 Escape：對稿 overlay 是最外層的「可返回」，讓工作區自己的
   // ladder（modal/sheet）先吃；事件冒泡到 document 而沒被吃掉才關 overlay。
@@ -932,6 +973,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     canToggleOpenEdit: api.role === "owner" || (!api.role && api.canManage),
                     frames: api.whiteboardFrames,
                     onCreateFrame: api.onCreateFrame,
+                    onUpdateFrame: api.onUpdateFrame,
+                    onDeleteFrame: api.onDeleteFrame,
+                    onOpenDiscussionMessage: openDiscussionMessage,
                     onEmitOperation: api.onEmitOperation,
                     onFocusChange: (focused) => {
                       setBoardFocused(focused);

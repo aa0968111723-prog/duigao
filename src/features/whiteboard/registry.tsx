@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { formatVideoRange } from "../collaboration/nodes";
 import { stickyTextInputProps } from "../collaboration/permissions";
 import type { NodeType, WhiteboardNode } from "../collaboration/types";
+import { readStrokePoints, strokePath } from "./freehand";
 
 export type NodeRendererProps = {
   node: WhiteboardNode;
@@ -88,6 +89,22 @@ const REGISTRY: Partial<Record<NodeType, NodeRenderer>> = {
       <small>{node.content.sourceLabel ?? "AI 提案"}</small>
     </>
   ),
+  // freehand（WB03/0026）：content.points 是相對節點左上的筆畫點
+  freehand: ({ node }) => {
+    const points = readStrokePoints(node.content.points);
+    return (
+      <svg className="wb-freehand" viewBox={`0 0 ${node.width} ${node.height}`} width="100%" height="100%" aria-label="手繪筆畫">
+        <path
+          d={strokePath(points)}
+          fill="none"
+          stroke={node.content.color || "#e8c27a"}
+          strokeWidth={node.content.strokeWidth || 3}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  },
 };
 
 /** 未知型別（DB 比 client 新）：誠實 fallback，不假裝看得懂。 */

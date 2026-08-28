@@ -12,8 +12,8 @@
  * in-memory、per-board、上限 50 — 重開頁即失（誠實：持久歷史屬
  * whiteboard_versions/operations 查詢，WB04）。
  */
-import type { WhiteboardNode } from "../collaboration/types";
-import { applyMasked, inverseDraft, type OperationDraft } from "../collaboration/operations";
+import type { WhiteboardFrame, WhiteboardNode } from "../collaboration/types";
+import { applyFrameMasked, applyMasked, inverseDraft, type OperationDraft } from "../collaboration/operations";
 
 function readMasked(node: WhiteboardNode, path: string): unknown {
   if (path.startsWith("content.")) {
@@ -58,6 +58,11 @@ export type HistoryExecutors = {
   recreate: (draft: OperationDraft) => void;
   /** 找當前節點（undo 套用在「現在的列」上 — 永不整列還原）。 */
   findNode: (id: string) => WhiteboardNode | undefined;
+  // ---- frame（WB03）：未提供＝frame op 誠實回 unsupported ----
+  upsertFrame?: (frame: WhiteboardFrame) => void;
+  deleteFrame?: (id: string) => void;
+  recreateFrame?: (draft: OperationDraft) => void;
+  findFrame?: (id: string) => WhiteboardFrame | undefined;
 };
 
 export type HistoryStepResult = {
@@ -93,6 +98,31 @@ function execute(draft: OperationDraft, executors: HistoryExecutors): HistorySte
     case "node-create": {
       // inverse(node-delete) 而來：after 帶著重建欄位（含 nodeType）
       executors.recreate(draft);
+      return null;
+    }
+    case "frame-update": {
+      if (!executors.findFrame || !executors.upsertFrame) return "unsupported";
+      const current = executors.findFrame(draft.entityId);
+      if (!current) return "missing-node";
+      // drift 防護同 node（frame 欄位是平面的，readMasked 對非 content.*
+      // 路徑本來就是平面讀）
+      const expected = draft.before;
+      for (const path of draft.fieldMask) {
+        const now = (current as unknown as Record<string, unknown>)[path];
+        if (path in expected && !valuesEqual(now, expected[path])) return "conflict-drift";
+      }
+      executors.upsertFrame(applyFrameMasked(current, draft.fieldMask, draft.after));
+      return null;
+    }
+    case "frame-delete": {
+      if (!executors.findFrame || !executors.deleteFrame) return "unsupported";
+      if (!executors.findFrame(draft.entityId)) return "missing-node";
+      executors.deleteFrame(draft.entityId);
+      return null;
+    }
+    case "frame-create": {
+      if (!executors.recreateFrame) return "unsupported";
+      executors.recreateFrame(draft);
       return null;
     }
     default:

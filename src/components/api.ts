@@ -81,6 +81,8 @@ export type PinForm = {
  */
 export type WorkspaceApi = {
   room: Room;
+  /** WB03 反向鏈：這個 branch 被白板節點引用時的入口（0=不給）。 */
+  boardRefs?: { count: number; open: () => void };
   view: ViewState;
   guest: Guest;
   tool: Tool;

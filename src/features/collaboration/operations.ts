@@ -12,7 +12,7 @@
  *
  * 本層零 I/O、零 React：WB02 佈線進 persist 管線，WB04 供版本歷史。
  */
-import type { WhiteboardNode, WhiteboardOperation, WhiteboardOpType } from "./types";
+import type { WhiteboardFrame, WhiteboardNode, WhiteboardOperation, WhiteboardOpType } from "./types";
 
 /** 尚未入帳的 op 草稿（actor/room 由呼叫端在送出時補上）。 */
 export type OperationDraft = {
@@ -138,6 +138,66 @@ export function nodeDeleteDraft(opId: string, node: WhiteboardNode): OperationDr
  * undo（=create）需要執行層**分別呼叫 softDeleteNode / upsertNode（後者
  * 用 before 的 masked 欄位重建列）— WB01 不佈線執行層，WB02/WB04 接。
  */
+// ---- frame drafts（WB03）：frame 欄位是平面的（無 content.*） ----
+const FRAME_MASKABLE_FIELDS = ["x", "y", "width", "height", "title"] as const;
+const FRAME_CREATE_FIELDS = ["x", "y", "width", "height", "title", "kind", "zIndex"] as const;
+
+function pickFrame(frame: WhiteboardFrame, fields: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of fields) out[field] = (frame as unknown as Record<string, unknown>)[field];
+  return out;
+}
+
+export function frameUpdateDraft(opId: string, before: WhiteboardFrame, after: WhiteboardFrame): OperationDraft | null {
+  const mask = FRAME_MASKABLE_FIELDS.filter(
+    (field) => !valueEquals((before as unknown as Record<string, unknown>)[field], (after as unknown as Record<string, unknown>)[field]),
+  );
+  if (!mask.length) return null;
+  return {
+    opId,
+    whiteboardId: after.whiteboardId,
+    opType: "frame-update",
+    entityId: after.id,
+    fieldMask: [...mask],
+    before: pickFrame(before, mask),
+    after: pickFrame(after, mask),
+  };
+}
+
+export function frameCreateDraft(opId: string, frame: WhiteboardFrame): OperationDraft {
+  return {
+    opId,
+    whiteboardId: frame.whiteboardId,
+    opType: "frame-create",
+    entityId: frame.id,
+    fieldMask: [...FRAME_CREATE_FIELDS],
+    before: {},
+    after: pickFrame(frame, FRAME_CREATE_FIELDS),
+  };
+}
+
+export function frameDeleteDraft(opId: string, frame: WhiteboardFrame): OperationDraft {
+  return {
+    opId,
+    whiteboardId: frame.whiteboardId,
+    opType: "frame-delete",
+    entityId: frame.id,
+    fieldMask: [...FRAME_CREATE_FIELDS],
+    before: pickFrame(frame, FRAME_CREATE_FIELDS),
+    after: {},
+  };
+}
+
+/** frame 的 applyMasked（平面欄位版）：只動 mask 內、缺值保留現值。 */
+export function applyFrameMasked(frame: WhiteboardFrame, mask: string[], values: Record<string, unknown>): WhiteboardFrame {
+  const next = { ...frame } as unknown as Record<string, unknown>;
+  for (const path of mask) {
+    if (!(FRAME_CREATE_FIELDS as readonly string[]).includes(path)) continue;
+    if (path in values && values[path] !== undefined) next[path] = values[path];
+  }
+  return next as unknown as WhiteboardFrame;
+}
+
 export function inverseDraft(op: WhiteboardOperation | OperationDraft, newOpId: string): OperationDraft {
   const flipped: Record<WhiteboardOpType, WhiteboardOpType> = {
     "node-create": "node-delete",

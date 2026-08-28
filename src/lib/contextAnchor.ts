@@ -169,6 +169,13 @@ export function anchorFromNode(node: NodeLinkFields): ContextAnchor {
         return { type: "video-point", time: start, ...ids };
       }
     }
+    // discussion link（WB03）：這顆節點是從某則討論訊息放上板的 —
+    // 錨是那則訊息，不是 entity 皮：openTarget 才走得到 discussion
+    // surface（「打開來源訊息」跳回討論）。entity 臂對 discussion 是
+    // 死路（openTarget 的 entity surface 沒人消費 discussion）。
+    if (node.linkedEntityType === "discussion") {
+      return { type: "message", messageId: node.linkedEntityId };
+    }
     return { type: "entity", entityType: node.linkedEntityType, entityId: node.linkedEntityId };
   }
   return { type: "board-node", whiteboardId: node.whiteboardId, nodeId: node.id };

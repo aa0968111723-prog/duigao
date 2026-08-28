@@ -2928,6 +2928,14 @@ export function App() {
           setBoardFrames((current) => [...current, frame]);
           cloudRef.current.writes.upsertFrame?.(frame);
         },
+        onUpdateFrame: (frame) => {
+          setBoardFrames((current) => current.map((item) => (item.id === frame.id ? frame : item)));
+          cloudRef.current.writes.upsertFrame?.(frame);
+        },
+        onDeleteFrame: (id) => {
+          setBoardFrames((current) => current.filter((item) => item.id !== id));
+          cloudRef.current.writes.deleteFrame?.(id);
+        },
         onEmitOperation: (draft) => {
           const actor = cloudRef.current.userId;
           const bound = cloudRef.current.boundRoomId;
@@ -2996,12 +3004,33 @@ export function App() {
       api
         ? activeProjectBranch
         : undefined;
+    // WB03 反向鏈：這個 branch（含其版本）被哪些白板節點引用
+    const overlayBoardRefs = overlayBranch
+      ? (() => {
+          const versionIds = new Set(branchVersions(normalizedRoom!, overlayBranch.id).map((version) => version.id));
+          const refs = (normalizedRoom!.whiteboardNodes ?? []).filter((node) =>
+            !node.deletedAt && node.linkedEntityId && (
+              (node.linkedEntityType === "branch" && node.linkedEntityId === overlayBranch.id) ||
+              (node.linkedEntityType === "version" && versionIds.has(node.linkedEntityId))
+            ));
+          if (!refs.length) return undefined;
+          return {
+            count: refs.length,
+            open: () => {
+              const first = refs[0];
+              setActiveBranchId(null);
+              setActiveWhiteboardId(first.whiteboardId);
+              setFocusNodeId(first.id);
+            },
+          };
+        })()
+      : undefined;
     const branchWorkspace = overlayBranch
       ? {
           branchId: overlayBranch.id,
           node: (
             <RoomWorkspaceShell
-              api={api!}
+              api={{ ...api!, boardRefs: overlayBoardRefs }}
               presence={{
                 status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
                 peers: cloudSession ? cloud.online : peerCount,
