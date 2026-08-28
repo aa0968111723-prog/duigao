@@ -10,9 +10,15 @@ import type { CutosBridgeHealth, CutosBridgeImportResult } from "../lib/cutosCon
 
 let healthCache: { at: number; value: CutosBridgeHealth } | null = null;
 const HEALTH_TTL_MS = 5 * 60 * 1000;
+// 負向結果只快取 30 秒（Grok 07 F6）：env 後補／bridge 剛部署完，入口
+// 半分鐘內就會出現，不用整頁重載。
+const HEALTH_NEGATIVE_TTL_MS = 30 * 1000;
 
 export async function cutosHealth(supabase: SupabaseClient): Promise<CutosBridgeHealth> {
-  if (healthCache && Date.now() - healthCache.at < HEALTH_TTL_MS) return healthCache.value;
+  if (healthCache) {
+    const ttl = healthCache.value.ok ? HEALTH_TTL_MS : HEALTH_NEGATIVE_TTL_MS;
+    if (Date.now() - healthCache.at < ttl) return healthCache.value;
+  }
   try {
     const { data, error } = await supabase.functions.invoke("cutos-bridge", { body: { action: "health" } });
     if (error) throw error;
@@ -40,7 +46,16 @@ export async function importCutosOutput(
     const { data, error } = await supabase.functions.invoke("cutos-bridge", {
       body: { action: "import-output", ...input },
     });
-    if (error) throw error;
+    if (error) {
+      // 非 2xx（FORBIDDEN 403 / ROOM_NOT_FOUND 404）的 body 帶著誠實
+      // 錯誤碼 — 讀回來，別折成「連不上」（Grok 07 F3）。
+      const ctx = (error as { context?: Response }).context;
+      if (ctx && typeof ctx.json === "function") {
+        const body = (await ctx.json().catch(() => null)) as CutosBridgeImportResult | null;
+        if (body && body.ok === false && body.code) return body;
+      }
+      throw error;
+    }
     return (data ?? { ok: false, code: "IMPORT_FAILED" }) as CutosBridgeImportResult;
   } catch {
     return { ok: false, code: "CUTOS_UNREACHABLE" };
