@@ -103,8 +103,28 @@ export function nodeUpdateDraft(
   };
 }
 
+/**
+ * create/delete 的 mask（S8 修復）：**全欄位快照**，不是 diff。
+ *
+ * 舊寫法拿「同一個 node 但 content 清空、x/y 設 NaN」當 before 做 diff —
+ * nodeType/width/height 與自己相同故永遠不進 mask，於是 delete 的 undo
+ * （recreate）只拿得到 x/y/content，節點被以預設 text/180×96 重建：
+ * freehand 筆畫復活成空白便利貼，而且會寫回雲端＝資料損毀。frame 側
+ * 當初用 FRAME_CREATE_FIELDS 全集避開了同一坑，node 側現在補上。
+ */
+function snapshotMask(node: WhiteboardNode): string[] {
+  const mask: string[] = [];
+  for (const field of MASKABLE_FIELDS) {
+    if (readPath(node as never, field) !== undefined) mask.push(field);
+  }
+  for (const key of Object.keys(node.content ?? {})) {
+    if (readPath(node as never, `content.${key}`) !== undefined) mask.push(`content.${key}`);
+  }
+  return mask;
+}
+
 export function nodeCreateDraft(opId: string, node: WhiteboardNode): OperationDraft {
-  const mask = diffMask({ ...node, content: {} as WhiteboardNode["content"], x: NaN, y: NaN } as WhiteboardNode, node);
+  const mask = snapshotMask(node);
   return {
     opId,
     whiteboardId: node.whiteboardId,
@@ -117,7 +137,7 @@ export function nodeCreateDraft(opId: string, node: WhiteboardNode): OperationDr
 }
 
 export function nodeDeleteDraft(opId: string, node: WhiteboardNode): OperationDraft {
-  const mask = diffMask({ ...node, content: {} as WhiteboardNode["content"], x: NaN, y: NaN } as WhiteboardNode, node);
+  const mask = snapshotMask(node);
   return {
     opId,
     whiteboardId: node.whiteboardId,

@@ -40,6 +40,17 @@ test("normalizeStroke：單點（誤觸）回 null；極小筆畫仍有最小可
   assert.ok(dot.width >= 24 && dot.height >= 24, `太小的筆畫要撐到可點擊（${dot.width}x${dot.height}）`);
 });
 
+test("normalizeStroke：超過 DB CHECK 2000 的巨筆畫等比縮限（雲端不 400）", () => {
+  const huge = normalizeStroke([{ x: 0, y: 0 }, { x: 6000, y: 3000 }], 0)!;
+  assert.ok(huge.width <= 2000 && huge.height <= 2000, `${huge.width}x${huge.height} 必須 ≤2000`);
+  // 等比：寬高比不變（6000:3000 = 2:1）
+  assert.ok(Math.abs(huge.width / huge.height - 2) < 0.01);
+  // 相對點仍在框內
+  for (const [px, py] of huge.points) {
+    assert.ok(px >= 0 && px <= huge.width && py >= 0 && py <= huge.height);
+  }
+});
+
 test("strokePath：M/L 序列；空點集回空字串", () => {
   assert.equal(strokePath([[0, 0], [10, 5]]), "M 0 0 L 10 5");
   assert.equal(strokePath([]), "");

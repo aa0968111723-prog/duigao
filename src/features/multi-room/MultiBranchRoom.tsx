@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { historyLayers } from "../../lib/historyLayers";
+import { emptyPlan, shouldAdoptRemotePlan } from "./planDraft";
 import type {
   BranchStatus,
   BranchType,
@@ -187,10 +188,6 @@ const PANE_META: { id: PushedPane; label: string; icon: string }[] = [
   { id: "plan", label: "企劃", icon: "☷" },
 ];
 
-function emptyPlan(branch: RoomBranch): PlanDocument {
-  return { branchId: branch.id, title: branch.name, description: "", blocks: [], updatedAt: Date.now() };
-}
-
 function branchHasType(branch: RoomBranch, type: BranchType): boolean {
   return branch.branchType === type || (type === "plan" && branch.branchType === "copy");
 }
@@ -325,14 +322,20 @@ function PlanEditor({
     () => room.plans?.find((item) => item.branchId === branch.id) ?? emptyPlan(branch),
     [branch.id, branch.name, room.plans],
   );
-  const [draft, setDraft] = useState<PlanDocument>(saved);
+  const [draft, setDraftState] = useState<PlanDocument>(saved);
   const [relationTarget, setRelationTarget] = useState("");
+  // 「有未存編輯」旗標：所有使用者操作都經 setDraft 立旗，存檔後落旗。
+  const dirtyRef = useRef(false);
+  const setDraft: typeof setDraftState = (value) => {
+    dirtyRef.current = true;
+    setDraftState(value);
+  };
 
   // room.plans 的陣列身分每次快照都會變；無條件 reset 會把「打字中、還沒按
   // 完成」的 blocks 洗掉（realtime nudge → branch reload → echo 快照）。
-  // 只有遠端真的比較新（別人存的）才接受，否則保留本地編輯。
+  // 規則：有未存編輯就不接受任何遠端；乾淨時遠端較新才接受。
   useEffect(() => {
-    setDraft((current) => (saved.updatedAt > current.updatedAt ? saved : current));
+    setDraftState((current) => (shouldAdoptRemotePlan(saved, current, dirtyRef.current) ? saved : current));
   }, [saved]);
 
   const relations = (room.relations ?? []).filter(
@@ -420,7 +423,12 @@ function PlanEditor({
           <button type="button" onClick={() => addBlock("list")}>＋清單</button>
           <button type="button" onClick={() => addBlock("checklist")}>＋待辦</button>
           <button type="button" onClick={() => addBlock("link")}>＋連結</button>
-          <button type="button" className="project-save-button" onClick={() => onSave({ ...draft, updatedAt: Date.now() })}>完成</button>
+          <button type="button" className="project-save-button" onClick={() => {
+            const stamped = { ...draft, updatedAt: Date.now() };
+            dirtyRef.current = false; // 存了就不再是未存編輯 — 之後可接受別人的新版
+            setDraftState(stamped);
+            onSave(stamped);
+          }}>完成</button>
         </div>
       )}
       <section className="project-related">
@@ -800,7 +808,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   // ladder（modal/sheet）先吃；事件冒泡到 document 而沒被吃掉才關 overlay。
   // 推進面板同理。
   useEffect(() => {
-    if (!api.workspace && !pushedPane) return;
+    // overlay 的 Escape 交給 historyLayers 協調器（S12）— 這裡只留
+    // pushedPane（推進面板不在協調器棧上）。
+    if (!pushedPane) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       // 內層 ladder（pin/draft/modal…）消費時會 preventDefault，但監聽器
@@ -809,13 +819,15 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       // 只關一件事（Grok pr01a r2 N2）。
       setTimeout(() => {
         if (event.defaultPrevented) return;
-        if (api.workspace) api.onBackToRoom();
-        else setPushedPane(null);
+        // overlay 開著時棧頂是 content-overlay，協調器會關它；推進面板
+        // 只在沒有 overlay 時吃這次 Escape。
+        if (api.workspace) return;
+        setPushedPane(null);
       }, 0);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [api.workspace, pushedPane, api.onBackToRoom]);
+  }, [api.workspace, pushedPane]);
 
   const openBranch = (branchId: string, opts?: { startTime?: number }) => {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合

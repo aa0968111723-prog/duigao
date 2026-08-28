@@ -45,6 +45,8 @@ plan 屬 PlanEditor 殼，本輪不加（誠實範圍）。
   — probe 驗證）。
 - 資料：content.points＝相對節點左上的 [x,y][]（外接框＋8px pad），
   content.color/strokeWidth。搬節點＝搬筆畫，undo 走既有 x/y mask。
+- 尺寸縮限：外接框超過 DB CHECK（0014 width/height ≤2000）時整筆等比
+  縮到框內 — 否則本地樂觀節點進得去、雲端 insert 被打回（永久 400）。
 - 工具列「繪圖」鈕（補 wireflow 缺席位）：作用中時 pointer 直接進筆畫
   收集（**繞過手勢 reducer** — 單指畫、雙指仍縮放：第二指落下即取消
   當前筆畫轉 pinch）。up→thinStroke→normalizeStroke→建節點＋record。

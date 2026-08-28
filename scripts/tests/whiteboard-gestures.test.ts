@@ -13,7 +13,7 @@ import {
 } from "../../src/features/whiteboard/gestures";
 import { hitTest, paintOrder, orderCompare } from "../../src/features/whiteboard/order";
 import { emptyHistory, pushHistory, undoStep, redoStep, HISTORY_LIMIT } from "../../src/features/whiteboard/history";
-import { nodeDeleteDraft, nodeUpdateDraft } from "../../src/features/collaboration/operations";
+import { applyMasked, nodeDeleteDraft, nodeUpdateDraft } from "../../src/features/collaboration/operations";
 import { registeredNodeTypes, rendererFor } from "../../src/features/whiteboard/registry";
 import { NODE_TYPES } from "../../src/features/collaboration/types";
 
@@ -197,8 +197,12 @@ test("undo/redo：move 的 undo 只回位置、redo 復原；上限 50", () => {
   const executors = {
     upsert: (item: WhiteboardNode) => { store.set(item.id, item); },
     softDelete: (id: string) => { store.delete(id); },
+    // 與 WhiteboardWorkspace 的真實執行端同構（S8）：空白 text 基底 ＋
+    // applyMasked。原本直接 node(id) 忽略 draft — 掩蓋了「mask 沒帶
+    // nodeType/width/height 導致節點被以預設值重建」的資料損毀。
     recreate: (draft: import("../../src/features/collaboration/operations").OperationDraft) => {
-      store.set(draft.entityId, node(draft.entityId));
+      const base = node(draft.entityId, { nodeType: "text", width: 180, height: 96, content: {} });
+      store.set(draft.entityId, applyMasked(base, draft.fieldMask, draft.after));
     },
     findNode: (id: string) => store.get(id),
   };
@@ -243,6 +247,36 @@ test("Grok F8：undo 的欄位已被別人改走（drift）→ conflict-drift �
   const result = undoStep(stack, executors, "op-d2");
   assert.equal(result.skipped, "conflict-drift", "欄位 drift 必須誠實跳過");
   assert.equal(store.get("n9")!.content.text, "同事後來改的字", "不得靜默蓋掉別人的字");
+});
+
+test("S8：freehand 刪除後 undo 必須連 nodeType/尺寸一起復原（不得變成空白便利貼）", () => {
+  const stroke = node("s1", {
+    nodeType: "freehand",
+    x: 40,
+    y: 60,
+    width: 320,
+    height: 240,
+    content: { points: [[0, 0], [10, 12], [30, 8]], color: "#e8c27a", strokeWidth: 3 },
+  });
+  const store = new Map<string, WhiteboardNode>();
+  const executors = {
+    upsert: (item: WhiteboardNode) => { store.set(item.id, item); },
+    softDelete: (id: string) => { store.delete(id); },
+    // 真實執行端：空白 text 基底 ＋ applyMasked
+    recreate: (draft: import("../../src/features/collaboration/operations").OperationDraft) => {
+      const base = node(draft.entityId, { nodeType: "text", width: 180, height: 96, content: {} });
+      store.set(draft.entityId, applyMasked(base, draft.fieldMask, draft.after));
+    },
+    findNode: (id: string) => store.get(id),
+  };
+  const stack = pushHistory(emptyHistory(), nodeDeleteDraft("op-1", stroke));
+  undoStep(stack, executors, "op-2");
+  const restored = store.get("s1")!;
+  assert.equal(restored.nodeType, "freehand", "型別必須復原 — 否則筆畫變空白 text 卡並寫回雲端");
+  assert.equal(restored.width, 320);
+  assert.equal(restored.height, 240);
+  assert.deepEqual(restored.content.points, [[0, 0], [10, 12], [30, 8]]);
+  assert.equal(restored.content.strokeWidth, 3);
 });
 
 test("registry：全部 DB 詞彙都有 renderer 或 fallback；fallback 誠實標注", () => {

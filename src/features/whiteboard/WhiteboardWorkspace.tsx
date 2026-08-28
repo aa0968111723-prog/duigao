@@ -291,6 +291,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const strokeRef = useRef<StrokePoint[] | null>(null);
   const strokePointerRef = useRef<number | null>(null);
   const strokeDownRef = useRef<{ pointerId: number; point: { x: number; y: number }; time: number } | null>(null);
+  // S1：第一指的**當前**螢幕座標 — 轉 pinch 回放要用它，不是起筆點
+  const strokeScreenRef = useRef<{ x: number; y: number } | null>(null);
   // ---- WB03：frame 選取/拖曳/縮放 ----
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [framePreview, setFramePreview] = useState<WhiteboardFrame | null>(null);
@@ -301,6 +303,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   };
   const frameDragRef = useRef<{
     mode: "move" | "resize";
+    pointerId: number;
     frame: WhiteboardFrame;
     startClient: { x: number; y: number };
     memberIds: string[];
@@ -363,17 +366,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       apiRef.current.onOpenBoard(null);
       return "closed";
     });
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (sheetRef.current) {
-        setSheet(null);
-        return;
-      }
-      window.history.back();
-    };
-    window.addEventListener("keydown", onKey);
+    // Escape 不自己監聽（S12）：協調器的單一 handler 會派給棧頂層 —
+    // 這層的 onBack 已經處理「先關 sheet、再退板」的階梯。
     return () => {
-      window.removeEventListener("keydown", onKey);
       apiRef.current.onFocusChange?.(false);
       remove(poppingRef.current);
       poppingRef.current = false;
@@ -397,7 +392,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const id = board?.id;
     if (!id) return;
     const saved = CAMERA_MEMORY.get(id);
-    if (saved) setCamera(saved);
+    if (saved) {
+      // cameraRef 同步跟上（S17）：StrictMode 的 create→destroy→create 中，
+      // destroy 會把 cameraRef.current 存回 memory — 若它還停在 useState
+      // 初始值，剛還原的視角當場被預設值覆寫（dev 永遠還原失敗）。
+      cameraRef.current = saved;
+      setCamera(saved);
+    }
     return () => {
       CAMERA_MEMORY.delete(id);
       CAMERA_MEMORY.set(id, cameraRef.current);
@@ -408,11 +409,23 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     };
   }, [board?.id]);
 
+  // 聚焦（深連結／討論卡／WB03 反向鏈）：每個 focusNodeId **只套一次**。
+  // 舊寫法 deps 含 nodes/viewport 且無記帳 — 編輯時每個 keystroke 都
+  // onUpsertNode("now") 換掉 nodes identity，相機就被拉回舊焦點、選取被
+  // 搶走（與 camera memory、鍵盤避讓直接打架）。節點還沒載入時不記帳，
+  // 下次 nodes 變動再試。
+  const appliedFocusRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!api.focusNodeId) return;
-    const node = nodes.find((item) => item.id === api.focusNodeId);
+    const focusId = api.focusNodeId;
+    if (!focusId) {
+      appliedFocusRef.current = null;
+      return;
+    }
+    if (appliedFocusRef.current === focusId) return;
+    const node = nodes.find((item) => item.id === focusId);
     if (!node) return;
-    setSelected([node.id]);
+    appliedFocusRef.current = focusId;
+    setSelected([focusId]);
     setCamera(focusCamera(node, viewport));
   }, [api.focusNodeId, nodes, viewport]);
 
@@ -661,6 +674,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     strokeRef.current = null;
     strokePointerRef.current = null;
     strokeDownRef.current = null;
+    strokeScreenRef.current = null;
     setStrokePreview(null);
     if (discard || !points || !board) return;
     const normalized = normalizeStroke(thinStroke(points, 2.5 / camera.zoom));
@@ -701,12 +715,25 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         strokeRef.current = [world];
         setStrokePreview([world]);
         strokeDownRef.current = { pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() };
+        strokeScreenRef.current = { x: event.clientX, y: event.clientY };
         return;
       }
-      // 第二指：取消當前筆畫，回放兩個 down 給 reducer → pinch
+      // 第二指：取消當前筆畫，轉 pinch。回放第一指用**當前**座標（S1 —
+      // 用起筆點會讓 pinch 基準距離錯到起筆位移那麼多，起手即暴縮），
+      // 且回放不經 runEffects（S2 — down 的 hit-test 副作用會誤選節點/
+      // 誤起 drag；回放只為重建 pointers map）。
       const first = strokeDownRef.current;
+      const firstAt = strokeScreenRef.current ?? first?.point ?? null;
       finalizeStroke(true);
-      if (first) feed({ type: "down", pointerId: first.pointerId, point: first.point, time: first.time }, event);
+      if (first && firstAt) {
+        const restored = gestureReducer(gesture.current, {
+          type: "down",
+          pointerId: first.pointerId,
+          point: { x: firstAt.x, y: firstAt.y },
+          time: performance.now(),
+        });
+        gesture.current = restored.state; // 丟棄 effects：不 hit-test、不 arm 長按計時器
+      }
       feed({ type: "down", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
       return;
     }
@@ -716,6 +743,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     if (strokePointerRef.current === event.pointerId && strokeRef.current) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
+      strokeScreenRef.current = { x: event.clientX, y: event.clientY };
       const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
       const last = strokeRef.current[strokeRef.current.length - 1];
       // 螢幕 2px 以下抖動不收（世界距離 × zoom）
@@ -737,6 +765,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   // ---- frame 拖曳/縮放（WB03）：把手自帶 handler＋pointer capture，
   // stopPropagation 不進畫布手勢 reducer。成員判定凍結在起拖。 ----
   const beginFrameDrag = (event: ReactPointerEvent<HTMLDivElement>, frame: WhiteboardFrame, mode: "move" | "resize") => {
+    // S4/S5：繪圖模式（筆要落在 frame 帶上）與唯讀者（把手＝平移死區）
+    // 都不攔 — 不 stopPropagation，事件冒泡回畫布走筆畫/平移。
+    if (drawMode || !canEdit) return;
+    // S3：已有進行中的 frame session 時，第二指不得覆寫（先到先贏）
+    if (frameDragRef.current) return;
     event.stopPropagation();
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -751,6 +784,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       : [];
     frameDragRef.current = {
       mode,
+      pointerId: event.pointerId,
       frame,
       startClient: { x: event.clientX, y: event.clientY },
       memberIds: members.map((node) => node.id),
@@ -761,7 +795,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   };
   const onFramePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const session = frameDragRef.current;
-    if (!session) return;
+    if (!session || session.pointerId !== event.pointerId) return;
     event.stopPropagation();
     if (!canEdit) return;
     if (!session.moved && Math.hypot(event.clientX - session.startClient.x, event.clientY - session.startClient.y) < 6) return;
@@ -790,8 +824,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   };
   const onFramePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     const session = frameDragRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
     frameDragRef.current = null;
-    if (!session) return;
     event.stopPropagation();
     const preview = framePreviewRef.current;
     setFramePreviewSync(null);

@@ -36,7 +36,7 @@
 .wb-more { display: grid; gap: 8px; }
 
 /* ---- Focus Mode（WB02，wireflow §9＋疊加規則）------------------------- */
-/* z 階梯：push-pane 32 < workspace-overlay 40 < board-focus 45 < scrim 80 */
+/* z 階梯：push-pane 32 < board-focus 45 < workspace-overlay 50 < scrim 80 < ai-scrim/toast 120 */
 :root { --z-board-focus: 45; }
 .wb-focus {
   position: fixed;

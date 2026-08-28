@@ -409,6 +409,33 @@ export function frameFromRow(row: FrameRow): WhiteboardFrame | null {
   };
 }
 
+/**
+ * 反向鏈（WB03/S10）：查「哪些還活著的節點引用了這些 entity」。
+ *
+ * 為什麼不能用房內已載入的節點：loadCollaborationSummary 刻意回
+ * nodes: []（節點只在開該板時才載），所以雲端房重整後、使用者還沒開過
+ * 板時，對稿頂列的「⊞ 白板 N」入口整個不存在 — 本功能在冷啟動路徑上
+ * 等於不存在。這支查詢只取 id/whiteboard_id 兩欄，不把節點灌進房態。
+ */
+export async function loadNodeRefs(
+  supabase: SupabaseClient,
+  roomId: string,
+  entityIds: string[],
+): Promise<Array<{ id: string; whiteboardId: string }>> {
+  if (!entityIds.length) return [];
+  const { data, error } = await supabase
+    .from("whiteboard_nodes")
+    .select("id, whiteboard_id")
+    .eq("room_id", roomId)
+    .in("linked_entity_id", entityIds)
+    .is("deleted_at", null);
+  if (error) throw new CloudError(error.message, "whiteboard-node");
+  return ((data ?? []) as Array<{ id: string; whiteboard_id: string }>).map((row) => ({
+    id: row.id,
+    whiteboardId: row.whiteboard_id,
+  }));
+}
+
 export async function loadFrames(
   supabase: SupabaseClient,
   roomId: string,

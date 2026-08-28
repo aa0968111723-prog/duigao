@@ -85,6 +85,38 @@ test("zombie 亂序：底層被程式性關閉 — 之後的 pop 先打活層、
   assert.equal(stack.depth(), 0);
 });
 
+test("S12 Escape：只關棧頂一層，overlay 關掉後白板 Focus 仍在", () => {
+  const { log, stack } = harness();
+  const hits: string[] = [];
+  stack.push("board-focus", () => { hits.push("focus"); return "closed"; });
+  stack.push("content-overlay", () => { hits.push("overlay"); return "closed"; });
+  stack.handleEscape();
+  assert.deepEqual(hits, ["overlay"], "一次 Escape 只能關一層（舊 bug：兩個 listener 各關一件，板被一起退）");
+  assert.equal(stack.depth(), 1);
+  // Escape 關層時要消耗自己的 history 格，且該格的 popstate 不得再派給下層
+  assert.ok(log.includes("back"));
+  stack.handlePop();
+  assert.deepEqual(hits, ["overlay"], "Escape 產生的 pop 不得再打 focus");
+  // 再一次 Escape 才關 focus
+  stack.handleEscape();
+  assert.deepEqual(hits, ["overlay", "focus"]);
+});
+
+test("S12 Escape：repush 的層（白板有 sheet 開著）不消耗 history、層留著", () => {
+  const { log, stack } = harness();
+  let sheetOpen = true;
+  stack.push("board-focus", () => {
+    if (sheetOpen) { sheetOpen = false; return "repush"; }
+    return "closed";
+  });
+  const backsBefore = log.filter((entry) => entry === "back").length;
+  stack.handleEscape();
+  assert.equal(stack.depth(), 1, "關 sheet 不退層");
+  assert.equal(log.filter((entry) => entry === "back").length, backsBefore, "repush 不得動 history");
+  stack.handleEscape();
+  assert.equal(stack.depth(), 0);
+});
+
 test("remove 重複呼叫是 no-op", () => {
   const { log, stack } = harness();
   const remove = stack.push("focus", () => "closed");

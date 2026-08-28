@@ -30,6 +30,9 @@ export type NormalizedStroke = {
 
 const STROKE_PAD = 8;
 const MIN_SIZE = 24;
+/** DB CHECK（0014）：width/height ≤ 2000 — 超界的筆畫等比縮到框內，
+ *  否則本地樂觀節點進得去、雲端 insert 被 CHECK 打回（永久 400）。 */
+const MAX_SIZE = 2000;
 
 /** 世界座標筆畫 → 節點框＋相對點。少於 2 點（誤觸）回 null。 */
 export function normalizeStroke(points: StrokePoint[], pad = STROKE_PAD): NormalizedStroke | null {
@@ -41,16 +44,20 @@ export function normalizeStroke(points: StrokePoint[], pad = STROKE_PAD): Normal
     if (point.x > maxX) maxX = point.x;
     if (point.y > maxY) maxY = point.y;
   }
+  const rawW = maxX - minX + pad * 2;
+  const rawH = maxY - minY + pad * 2;
+  const scale = Math.min(1, MAX_SIZE / rawW, MAX_SIZE / rawH);
   const x = minX - pad;
   const y = minY - pad;
-  const width = Math.max(MIN_SIZE, maxX - minX + pad * 2);
-  const height = Math.max(MIN_SIZE, maxY - minY + pad * 2);
+  // clamp 在**乘回之後**（S7）：rawW * (MAX_SIZE / rawW) 的浮點回程可能
+  // 得 2000.0000000000002 — DB CHECK 是 <= 2000，差 1 ulp 就永久 400、
+  // 失敗寫入還會進 IndexedDB 重試佇列反覆重放。
   return {
     x,
     y,
-    width,
-    height,
-    points: points.map((point) => [point.x - x, point.y - y]),
+    width: Math.min(MAX_SIZE, Math.max(MIN_SIZE, rawW * scale)),
+    height: Math.min(MAX_SIZE, Math.max(MIN_SIZE, rawH * scale)),
+    points: points.map((point) => [(point.x - x) * scale, (point.y - y) * scale]),
   };
 }
 

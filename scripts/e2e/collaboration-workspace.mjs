@@ -371,6 +371,33 @@ try {
       await page.waitForFunction(() => document.querySelectorAll(".wb-frame").length === 1, null, { timeout: 5000 });
       check("frame 刪除可 undo 重建（含名字）", (await page.locator(".wb-frame-title").first().innerText()) === "招生排程區");
 
+      // S6：同一板連續第二次 frame 寫入 — 版本沒採納的話會被 OCC 擋成
+      // stale-write（同步狀態卡 offline-pending、雲端停在第一次的值）
+      {
+        const handle2 = page.locator("[data-testid^='wb-frame-handle-']").first();
+        const b1 = await handle2.boundingBox();
+        await handle2.dispatchEvent("pointerdown", { clientX: b1.x + 20, clientY: b1.y + 8, pointerId: 81 });
+        await handle2.dispatchEvent("pointermove", { clientX: b1.x + 60, clientY: b1.y + 28, pointerId: 81 });
+        await handle2.dispatchEvent("pointerup", { clientX: b1.x + 60, clientY: b1.y + 28, pointerId: 81 });
+        await page.waitForTimeout(250);
+        const b2 = await page.locator(".wb-frame").first().boundingBox();
+        await handle2.dispatchEvent("pointerdown", { clientX: b2.x + 20, clientY: b2.y + 8, pointerId: 82 });
+        await handle2.dispatchEvent("pointermove", { clientX: b2.x + 55, clientY: b2.y + 30, pointerId: 82 });
+        await handle2.dispatchEvent("pointerup", { clientX: b2.x + 55, clientY: b2.y + 30, pointerId: 82 });
+        await page.waitForTimeout(400);
+        const b3 = await page.locator(".wb-frame").first().boundingBox();
+        check("frame 第二次拖曳也真的移動（S6 版本簿記）", Math.abs(b3.x - b2.x - 35) < 12, `${b2.x}→${b3.x}`);
+        // 直接讀 mock 的資料列（比 page fetch 可靠）：frame 必須真的
+        // 寫進去且版本前進 — 舊 mock 沒有 whiteboard_frames 的自然鍵，
+        // 更新走 insert→409→被 client 折成成功，列從未改變（S9 假綠）。
+        const frameRow = (rows.whiteboard_frames ?? [])[0] ?? null;
+        check(
+          "frame 更新有寫進雲端且版本前進（S6/S9 假綠修正）",
+          Boolean(frameRow && Number(frameRow.version) >= 2),
+          frameRow ? `version=${frameRow.version} x=${Math.round(frameRow.x)}` : "no row",
+        );
+      }
+
       // freehand：繪圖工具畫一筆 → 節點；undo 軟刪
       await dismissSelection(page);
       await page.getByTestId("wb-tool-draw").click();
@@ -384,6 +411,30 @@ try {
       await page.getByTestId("wb-undo").click();
       await page.waitForFunction(() => document.querySelectorAll("[data-node-type='freehand']").length === 0, null, { timeout: 5000 });
       check("freehand 可 undo（軟刪）", true);
+
+      // S1/S2 反例：畫到一半第二指落下轉 pinch — 不得誤選節點、zoom 不得暴衝
+      await page.getByTestId("wb-tool-draw").click();
+      const nodeBox = await page.locator(".wb-node").first().boundingBox();
+      const zoomBefore = await page.evaluate(() => {
+        const style = document.querySelector(".wb-layer")?.getAttribute("style") ?? "";
+        return Number(/scale\(([\d.]+)\)/.exec(style)?.[1] ?? 1);
+      });
+      // 起筆壓在節點上，畫出 200px，再落第二指
+      await canvas.dispatchEvent("pointerdown", { clientX: nodeBox.x + 10, clientY: nodeBox.y + 10, pointerId: 71 });
+      await canvas.dispatchEvent("pointermove", { clientX: nodeBox.x + 210, clientY: nodeBox.y + 60, pointerId: 71 });
+      await canvas.dispatchEvent("pointerdown", { clientX: nodeBox.x + 260, clientY: nodeBox.y + 80, pointerId: 72 });
+      await canvas.dispatchEvent("pointermove", { clientX: nodeBox.x + 215, clientY: nodeBox.y + 62, pointerId: 71 });
+      await canvas.dispatchEvent("pointerup", { clientX: nodeBox.x + 215, clientY: nodeBox.y + 62, pointerId: 71 });
+      await canvas.dispatchEvent("pointerup", { clientX: nodeBox.x + 260, clientY: nodeBox.y + 80, pointerId: 72 });
+      await page.waitForTimeout(150);
+      const zoomAfter = await page.evaluate(() => {
+        const style = document.querySelector(".wb-layer")?.getAttribute("style") ?? "";
+        return Number(/scale\(([\d.]+)\)/.exec(style)?.[1] ?? 1);
+      });
+      check("繪圖轉 pinch：zoom 不暴衝（S1）", zoomAfter > zoomBefore * 0.5 && zoomAfter < zoomBefore * 2, `${zoomBefore}→${zoomAfter}`);
+      check("繪圖轉 pinch：不誤選節點（S2）", (await page.getByTestId("wb-node-actions").count()) === 0);
+      check("繪圖轉 pinch：筆畫已取消不成節點", (await page.locator("[data-node-type='freehand']").count()) === 0);
+      await page.getByTestId("wb-tool-draw").click();
 
       // camera memory：平移後離板重開，視角不歸零
       await canvas.dispatchEvent("pointerdown", { clientX: box.x + 60, clientY: box.y + 420, pointerId: 61 });
@@ -462,10 +513,42 @@ try {
       await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
       check("chip 跳回白板並聚焦引用節點", true);
 
+      // S14：焦點只套一次 — 之後任何節點變動（打字/新增）不得再搶相機
+      {
+        const canvas2 = page.getByTestId("wb-canvas");
+        const cbox = await canvas2.boundingBox();
+        await canvas2.dispatchEvent("pointerdown", { clientX: cbox.x + 60, clientY: cbox.y + 300, pointerId: 91 });
+        await canvas2.dispatchEvent("pointermove", { clientX: cbox.x + 170, clientY: cbox.y + 360, pointerId: 91 });
+        await canvas2.dispatchEvent("pointerup", { pointerId: 91 });
+        await page.waitForTimeout(150);
+        const camPanned = await page.locator(".wb-layer").getAttribute("style");
+        await page.getByTestId("wb-tool-sticky").click();
+        await fillEditing(page, "焦點後新增");
+        await page.waitForTimeout(300);
+        const camAfterEdit = await page.locator(".wb-layer").getAttribute("style");
+        check("焦點不再每次節點變動就搶相機（S14）", camAfterEdit === camPanned, `${camPanned} vs ${camAfterEdit}`);
+      }
+
       // overlay 疊在 Focus 上：打開內容 → back 先關 overlay、板不退
+      // （S14 那段新增了便利貼＝選取已換人，先選回內容卡）
+      await dismissSelection(page);
+      await searchNode(page, "擺攤文宣");
+      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
       await page.getByRole("button", { name: "打開內容" }).click();
       await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
       check("Focus 上可疊對稿 overlay（板不卸載）", (await page.getByTestId("wb-canvas").count()) === 1);
+      // S15：只驗 DOM 存在是假綠 — overlay z 若低於 Focus 會被整個蓋住，
+      // 畫面零變化但 back 卻先關那層看不見的。驗畫面中央實際命中誰。
+      const overlayOnTop = await page.evaluate(() => {
+        const overlay = document.querySelector('[data-testid="branch-workspace-overlay"]');
+        if (!overlay) return { ok: false, why: "no overlay" };
+        const hit = document.elementFromPoint(Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
+        return {
+          ok: Boolean(hit && overlay.contains(hit)),
+          why: hit ? (hit.closest(".wb-focus") ? "被白板 Focus 蓋住" : hit.className || hit.tagName) : "none",
+        };
+      });
+      check("對稿 overlay 真的在最上層可見（S15）", overlayOnTop.ok, overlayOnTop.why);
       await page.goBack();
       await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 8000 });
       check("back 先關 overlay、板不退（WB03 修的 listener 互踩）", (await page.getByTestId("wb-canvas").count()) === 1);

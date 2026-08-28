@@ -38,6 +38,13 @@ export type LayerStack = {
   push: (name: string, onBack: () => LayerBackResponse) => (viaBack: boolean) => void;
   /** popstate 事件入口（瀏覽器 listener 或測試直接呼叫）。 */
   handlePop: () => void;
+  /**
+   * Escape 入口（S12）：語意與 back 相同 — 只派給棧頂層。
+   * 兩個各自監聽 Escape 的元件（白板 Focus 與對稿 overlay）會各關一件，
+   * 一次 Escape 關掉兩層；改由協調器獨佔派發後不再互踩。
+   * 回 "closed" 時同步吃掉自己那格 history（與使用者 back 對齊）。
+   */
+  handleEscape: () => void;
   /** 活層數（測試/偵錯）。 */
   depth: () => number;
 };
@@ -92,7 +99,17 @@ export function createLayerStack(history: HistoryLike): LayerStack {
     };
   };
 
-  return { push, handlePop, depth: () => stack.filter((layer) => !layer.zombie).length };
+  const handleEscape = () => {
+    const top = stack[stack.length - 1];
+    if (!top || top.zombie) return;
+    const result = top.onBack();
+    if (result !== "closed") return; // repush：層自理內層 UI，history 不動
+    stack.pop();
+    pendingConsume += 1;
+    history.back(); // 消耗這層自己 push 的那格
+  };
+
+  return { push, handlePop, handleEscape, depth: () => stack.filter((layer) => !layer.zombie).length };
 }
 
 // ---- 瀏覽器單例（懶掛全域 listener） ----
@@ -102,6 +119,16 @@ export function historyLayers(): LayerStack {
   if (!singleton) {
     singleton = createLayerStack(window.history);
     window.addEventListener("popstate", () => singleton!.handlePop());
+    // Escape 也只由這裡派發（S12）。延遲到同步派發跑完才看
+    // defaultPrevented — 內層 ladder（pin/modal/sheet）消費時會 prevent，
+    // 一次 Escape 只關一件事（沿用 Grok pr01a r2 N2 的既有紀律）。
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      setTimeout(() => {
+        if (event.defaultPrevented) return;
+        singleton!.handleEscape();
+      }, 0);
+    });
   }
   return singleton;
 }

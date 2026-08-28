@@ -135,7 +135,10 @@ export type CloudWrites = {
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false | "conflict">;
   deleteNode?: (id: string, version: number) => Promise<boolean | "conflict">;
-  upsertFrame?: (frame: import("../features/collaboration/types").WhiteboardFrame) => void;
+  upsertFrame?: (
+    frame: import("../features/collaboration/types").WhiteboardFrame,
+    onPersisted?: (frame: import("../features/collaboration/types").WhiteboardFrame) => void,
+  ) => void;
   deleteFrame?: (id: string) => void;
   insertOperation?: (op: import("../features/collaboration/types").WhiteboardOperation) => void;
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
@@ -453,6 +456,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   }, []);
 
   /** Run a cloud write with optimistic UI already done; queue + degrade on failure. */
+  // frame 的「執行時最新值」— 見 writes.upsertFrame（S6 版本簿記）
+  const frameLatest = useRef(new Map<string, import("../features/collaboration/types").WhiteboardFrame>());
   const run = useCallback(
     (key: string, task: () => Promise<void>) => {
       if (!supabase || !boundRef.current) return;
@@ -1082,7 +1087,20 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       return true;
     }),
     createEdge: (edge) => run(`edge:${edge.id}`, () => insertEdge(supabase!, edge)),
-    upsertFrame: (frame) => run(`frame:${frame.id}`, () => repoUpsertFrame(supabase!, { ...frame, roomId: boundRef.current! }).then(() => undefined)),
+    // frame 寫入的版本簿記（S6）：0023 的 touch trigger 會 bump version，
+    // 但舊寫法丟棄回傳、App 端版本永遠停在 1 → 同一板的第二次寫入必被
+    // stale-write 拒絕，且 run() 的重試 closure 捕捉的是同一份過期
+    // payload，重放永遠失敗（佇列中毒）。改為：送出前查 latest（重試時
+    // 自動用到已 ack 的版本），ack 後把 persisted 版本回報給呼叫端。
+    upsertFrame: (frame, onPersisted) => {
+      frameLatest.current.set(frame.id, frame);
+      run(`frame:${frame.id}`, async () => {
+        const latest = frameLatest.current.get(frame.id) ?? frame;
+        const persisted = await repoUpsertFrame(supabase!, { ...latest, roomId: boundRef.current! });
+        frameLatest.current.set(persisted.id, persisted);
+        onPersisted?.(persisted);
+      });
+    },
     deleteFrame: (id) => run(`frame:${id}`, () => repoDeleteFrame(supabase!, boundRef.current!, id)),
     // op 入帳 best-effort：duplicate（重試）在 repository 折成成功；
     // 失敗只損 undo 粒度不損資料 — 不進佇列、不擋操作（ADR-014）。
