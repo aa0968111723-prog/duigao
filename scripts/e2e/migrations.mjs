@@ -1474,6 +1474,32 @@ try {
     !as(owner, `insert into public.collaboration_audit_events (room_id, event_type, actor_user_id, payload) values ('${capRoom}'::uuid, 'ai_proposal_applied', '${owner}'::uuid, '{"proposal_id":"p2","type":"add_whiteboard_node","label":"再套一次"}'::jsonb);`).failed,
   );
 
+  section("0020：Canva token 表對 client 完全不可見");
+  psqlFile(join(MIGRATIONS, "0020_canva_bridge.sql"));
+
+  // token 表：RLS 開、零 policy、grant 全收 — authenticated 連 select 都
+  // 是 permission denied（不是 RLS 濾成空集，是表層拒絕）。
+  ok("成員讀不到 canva_connections（permission denied）", as(owner, `select count(*) from public.canva_connections;`).failed);
+  ok("成員寫不進 canva_connections", as(owner, `insert into public.canva_connections (user_id, access_token, refresh_token, token_expires_at) values ('${owner}'::uuid, 'x', 'y', now());`).failed);
+  ok("anon 讀不到 canva_connections", asAnon(`select count(*) from public.canva_connections;`).failed);
+  ok("成員讀不到 canva_oauth_states", as(owner, `select count(*) from public.canva_oauth_states;`).failed);
+  ok("成員寫不進 canva_oauth_states", as(owner, `insert into public.canva_oauth_states (state, user_id, code_verifier) values ('s1', '${owner}'::uuid, 'v');`).failed);
+  // service role（superuser 代演）照常讀寫 — bridge 的權威路徑。
+  ok(
+    "service 路徑可寫可讀 token 列",
+    !psql(`insert into public.canva_connections (user_id, access_token, refresh_token, token_expires_at) values ('${owner}'::uuid, 'at', 'rt', now() + interval '4 hours');`).failed &&
+      psql(`select count(*) from public.canva_connections where user_id = '${owner}'::uuid;`).out === "1",
+  );
+  // 冪等：重跑不炸、RLS 不被關回去。
+  const canvaShape = () => psql(`select
+    (select relrowsecurity from pg_class where relname = 'canva_connections') || '/' ||
+    (select relrowsecurity from pg_class where relname = 'canva_oauth_states') || '/' ||
+    (select count(*) from pg_policies where tablename in ('canva_connections','canva_oauth_states'));`).out;
+  const canvaBefore = canvaShape();
+  psqlFile(join(MIGRATIONS, "0020_canva_bridge.sql"));
+  ok("重跑 0020 後 RLS / policy 形狀不變（true/true/0）", canvaBefore === canvaShape() && canvaBefore === "true/true/0", `${canvaBefore} → ${canvaShape()}`);
+  ok("重跑後成員依然讀不到 token 表", as(owner, `select count(*) from public.canva_connections;`).failed);
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {
