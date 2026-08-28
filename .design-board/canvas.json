@@ -1,15 +1,71 @@
 {
   "artboards": [
-    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1280, "h": 1360, "title": "基地" },
-    { "file": "Components.dc.html", "x": 1400, "y": 0, "w": 1280, "h": 1340, "title": "元件" },
-    { "file": "Home.dc.html", "x": 0, "y": 1500, "w": 390, "h": 844, "title": "首頁" },
-    { "file": "Review.dc.html", "x": 500, "y": 1500, "w": 390, "h": 844, "title": "對稿" },
-    { "file": "Discussion.dc.html", "x": 1000, "y": 1500, "w": 390, "h": 844, "title": "討論" },
-    { "file": "Project.dc.html", "x": 1500, "y": 1500, "w": 390, "h": 844, "title": "專案房" }
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 1360,
+      "title": "基地"
+    },
+    {
+      "file": "Components.dc.html",
+      "x": 1400,
+      "y": 0,
+      "w": 1280,
+      "h": 1340,
+      "title": "元件"
+    },
+    {
+      "file": "Home.dc.html",
+      "x": 0,
+      "y": 1500,
+      "w": 390,
+      "h": 844,
+      "title": "首頁"
+    },
+    {
+      "file": "Review.dc.html",
+      "x": 500,
+      "y": 1500,
+      "w": 390,
+      "h": 844,
+      "title": "對稿"
+    },
+    {
+      "file": "Discussion.dc.html",
+      "x": 1000,
+      "y": 1500,
+      "w": 390,
+      "h": 844,
+      "title": "討論"
+    },
+    {
+      "file": "Project.dc.html",
+      "x": 1500,
+      "y": 1500,
+      "w": 390,
+      "h": 844,
+      "title": "專案房"
+    }
   ],
   "annotations": [
-    { "id": "note-base", "x": 0, "y": -150, "w": 560, "text": "基地 — AiOS 標誌、光譜，配上 對稿 既有的暖調暗底。\n光譜的紅橙段正好接上 app 現有的 --accent #c45c4a，所以既有畫面一個像素都不用改。" },
-    { "id": "note-screens", "x": 0, "y": 1390, "w": 560, "text": "產品畫面 — 390×844 靜態稿。\n尺寸、圓角、字級全部取自 src/styles.css 與 src/mobile.css；只有分類色換成光譜。" }
+    {
+      "id": "note-base",
+      "x": 0,
+      "y": -150,
+      "w": 560,
+      "text": "基地 — AiOS 標誌與光譜，鋪在標誌自己的紙底上。\n光譜的紅橙段正好接上 app 現有的 --accent #c45c4a，所以既有畫面一個像素都不用改。"
+    },
+    {
+      "id": "note-screens",
+      "x": 0,
+      "y": 1390,
+      "w": 560,
+      "text": "產品畫面 — 390×844 靜態稿，維持 app 真正的暗色。\n尺寸、圓角、字級全部取自 src/styles.css 與 src/mobile.css；只有分類色換成光譜。"
+    }
   ],
-  "launch": { "view": "canvas" }
+  "launch": {
+    "view": "canvas"
+  }
 }
