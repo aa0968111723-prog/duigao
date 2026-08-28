@@ -51,7 +51,7 @@ export type MultiBranchRoomApi = {
    * CUTOS 成品匯入（PR-07 第一階段）。undefined＝不可用（未設定/健檢
    * 失敗），整個入口不渲染 — 誠實不可用，不是灰掉的按鈕。
    */
-  cutosImport?: (cutosProjectId: string, name: string) => Promise<{ ok: boolean; message: string }>;
+  cutosImport?: (cutosProjectId: string, name: string, retryBranchId?: string) => Promise<{ ok: boolean; message: string; branchId?: string }>;
   onAddFiles: (branchId: string, files: FileList | null) => void;
   onUpdateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => void;
   onSavePlan: (plan: PlanDocument) => void;
@@ -401,6 +401,8 @@ function CreateSheet({ onClose, onCreate, onCutosImport, initialType }: { onClos
   const [cutosProjectId, setCutosProjectId] = useState("");
   const [cutosBusy, setCutosBusy] = useState(false);
   const [cutosMessage, setCutosMessage] = useState<string | null>(null);
+  // 失敗後重試沿用同一條分支（Grok 07 F4）
+  const [cutosBranchId, setCutosBranchId] = useState<string | undefined>(undefined);
   const needsFile = type === "poster" || type === "video";
   return (
     <div className="project-scrim" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
@@ -431,10 +433,13 @@ function CreateSheet({ onClose, onCreate, onCutosImport, initialType }: { onClos
             if (!onCutosImport || !name.trim() || !cutosProjectId.trim() || cutosBusy) return;
             setCutosBusy(true);
             setCutosMessage(null);
-            void onCutosImport(cutosProjectId.trim(), name.trim()).then((outcome) => {
+            void onCutosImport(cutosProjectId.trim(), name.trim(), cutosBranchId).then((outcome) => {
               setCutosBusy(false);
               if (outcome.ok) onClose();
-              else setCutosMessage(outcome.message); // 失敗留在原地，話說清楚
+              else {
+                setCutosMessage(outcome.message); // 失敗留在原地，話說清楚
+                setCutosBranchId(outcome.branchId); // 重試沿用，不增生分支
+              }
             });
           }}>
             <button type="button" className="project-sheet-back" onClick={() => setType(null)}>‹ 返回</button>

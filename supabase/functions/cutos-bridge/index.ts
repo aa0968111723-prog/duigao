@@ -23,7 +23,11 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
-const MAX_IMPORT_BYTES = 200 * 1024 * 1024;
+// Edge isolate 記憶體 ~256MB：200MB 的 arrayBuffer 是自殺（Grok 07 F2）。
+// 第一階段誠實上限 50MB — 超過的成品走一般影片上傳（client 有 XHR 進度
+// 與取消），或在 CUTOS 端壓製。串流計量：CL 可缺可謊，讀多少算多少，
+// 超線立即中止。
+const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 
 function responseHeaders(): Record<string, string> {
   return {
@@ -60,6 +64,9 @@ async function cutosHealth(env: CutosEnv): Promise<Record<string, unknown>> {
     const res = await fetch(`${env.baseUrl}/api/aios/manifest`, {
       headers: { authorization: `Bearer ${env.apiKey}` },
       signal: AbortSignal.timeout(8000),
+      // 不跟 redirect（Grok 07 F1）：CUTOS 直接供檔；302 出去可能把
+      // Authorization 轉送到任意 Location（歷史 Deno CVE），一律拒絕。
+      redirect: "manual",
     });
     if (!res.ok) return { ok: false, code: "CUTOS_UNREACHABLE" };
     manifest = (await res.json()) as Record<string, unknown>;
@@ -74,12 +81,8 @@ async function cutosHealth(env: CutosEnv): Promise<Record<string, unknown>> {
   const speaks = [remoteVersion, ...remoteSupported];
   const negotiated = ["cutos.agent.v2", "cutos.agent.v1"].find((candidate) => speaks.includes(candidate));
   if (!negotiated) return { ok: false, code: "PROTOCOL_VERSION_MISMATCH" };
-  return {
-    ok: true,
-    negotiated,
-    manifestVersion: Number(manifest.manifestVersion) || 0,
-    serverVersion: text(manifest.serverVersion).slice(0, 60),
-  };
+  // 只回 client 需要的（Grok 07 F7）：版本指紋不進瀏覽器。
+  return { ok: true, negotiated };
 }
 
 async function handle(request: Request): Promise<Response> {
@@ -126,12 +129,23 @@ async function handle(request: Request): Promise<Response> {
     const role = text(roleData);
     if (!role) return jsonResponse({ ok: false, code: "ROOM_NOT_FOUND" }, 404);
     if (role === "reviewer") return jsonResponse({ ok: false, code: "FORBIDDEN" }, 403);
+    if (branchId) {
+      // branch 必須屬於這間房（Grok 07 F3）：跨房 branch_id 是髒資料。
+      const { data: branchRow } = await supabase
+        .from("room_branches")
+        .select("id")
+        .eq("id", branchId)
+        .eq("room_id", roomId)
+        .maybeSingle();
+      if (!branchRow) return jsonResponse({ ok: false, code: "INVALID_REQUEST" }, 400);
+    }
 
     // 抓成品。404＝還沒渲染過 — 這是使用者可行動的答案，不是錯誤堆疊。
     let upstream: Response;
     try {
       upstream = await fetch(`${env.baseUrl}/api/projects/${cutosProjectId}/output`, {
         signal: AbortSignal.timeout(120000),
+        redirect: "manual", // 302 出去一律拒（Grok 07 F1）
       });
     } catch {
       return jsonResponse({ ok: false, code: "CUTOS_UNREACHABLE" });
@@ -140,9 +154,30 @@ async function handle(request: Request): Promise<Response> {
     if (!upstream.ok || !upstream.body) return jsonResponse({ ok: false, code: "CUTOS_UNREACHABLE" });
     const declared = Number(upstream.headers.get("content-length") ?? "0");
     if (declared > MAX_IMPORT_BYTES) return jsonResponse({ ok: false, code: "TOO_LARGE" });
-    const bytes = new Uint8Array(await upstream.arrayBuffer());
-    if (bytes.byteLength === 0) return jsonResponse({ ok: false, code: "NO_EXPORT" });
-    if (bytes.byteLength > MAX_IMPORT_BYTES) return jsonResponse({ ok: false, code: "TOO_LARGE" });
+    // 串流計量（Grok 07 F2）：CL 缺頭或說謊都擋得住 — 讀多少算多少，
+    // 超線立即取消上游連線，絕不把未知大小的 body 一口氣進記憶體。
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    const reader = upstream.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > MAX_IMPORT_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return jsonResponse({ ok: false, code: "TOO_LARGE" });
+      }
+      chunks.push(value);
+    }
+    if (received === 0) return jsonResponse({ ok: false, code: "NO_EXPORT" });
+    const bytes = new Uint8Array(received);
+    {
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+    }
 
     const versionId = crypto.randomUUID();
     const videoPath = `rooms/${roomId}/videos/${versionId}/original.mp4`;
