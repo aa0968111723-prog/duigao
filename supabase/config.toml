@@ -14,6 +14,13 @@ project_id = "duigao"
 # token (it lives in the URL fragment, which no browser sends to a server).
 verify_jwt = false
 
+[functions.canva-bridge]
+# OAuth callback 是 Canva 授權後的瀏覽器 redirect（GET、無 Authorization
+# header）：平台的 JWT 閘必須關掉，否則 callback 永遠到不了函式（Grok 05
+# F1）。安全性由函式內部承擔：POST 動作全部自驗 JWT；callback 只消費
+# 一次性 state（撞不對就 400），token 落 service-role 專用表（0020）。
+verify_jwt = false
+
 [functions.room-ai-context]
 # The function checks the caller's Supabase JWT and RLS-visible membership
 # before returning a bounded, metadata-only context projection.

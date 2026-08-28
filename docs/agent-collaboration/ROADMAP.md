@@ -70,7 +70,9 @@ BLOCKED_VOICE_PROVIDER。provider adapter＋誠實 unavailable 可先行；真 W
 
 ## PR-05 — Canva 文宣工作面
 
-BLOCKED_CANVA_CREDENTIALS。adapter＋fixture＋flag 可先行；OAuth 需使用者提供。
+已開工（feat/canva-bridge）：canva-bridge edge（OAuth PKCE＋token 於
+service-role 專用表 0020）＋設計清單 picker＋PNG 匯出→房間圖片版本。
+credentials 已到手（Dashboard secrets：CANVA_CLIENT_ID / CANVA_CLIENT_SECRET）。
 
 ## PR-06 — planform-iso 3D 場佈工作面
 
