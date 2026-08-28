@@ -10,6 +10,7 @@ import {
   shouldRejectPointer,
   widthForPressure,
   segmentWidths,
+  strokeRuns,
   PALM_GRACE_MS,
 } from "../../src/features/whiteboard/pen";
 
@@ -55,4 +56,28 @@ test("segmentWidths：每段取相鄰兩點平均，長度是點數減一", () =
   const mixed = segmentWidths([undefined, 0.5, undefined], 4);
   assert.equal(mixed.length, 2);
   assert.ok(mixed.every((width) => Number.isFinite(width) && width > 0));
+});
+
+test("strokeRuns：同寬的相鄰段併成一條 polyline，元素數大幅下降", () => {
+  const points: [number, number][] = [[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]];
+  // 前三段同寬、最後一段變粗
+  const runs = strokeRuns(points, [3, 3, 3, 6]);
+  assert.equal(runs.length, 2, "四段只需要兩個元素");
+  assert.equal(runs[0].points.length, 4, "同寬段連成一條折線");
+  assert.equal(runs[1].width, 6);
+  // 段與段之間要接起來，線不能斷
+  assert.deepEqual(runs[1].points[0], points[3]);
+});
+
+test("strokeRuns：長度對不上或點太少時回空（不畫半截的東西）", () => {
+  assert.deepEqual(strokeRuns([[0, 0]], []), []);
+  assert.deepEqual(strokeRuns([[0, 0], [1, 1]], [3, 3]), [], "widths 必須是點數減一");
+});
+
+test("strokeRuns：平穩運筆（壓感只有微小抖動）壓成極少的段", () => {
+  const points: [number, number][] = Array.from({ length: 200 }, (_, i) => [i, i] as [number, number]);
+  // 每段寬度在 3.0～3.2 之間抖動 —— 都落在同一個 0.5px 桶
+  const widths = Array.from({ length: 199 }, (_, i) => 3 + (i % 3) * 0.1);
+  const runs = strokeRuns(points, widths);
+  assert.ok(runs.length <= 3, `199 段應壓成極少數（實得 ${runs.length}）`);
 });

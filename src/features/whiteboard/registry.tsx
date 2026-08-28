@@ -14,7 +14,7 @@ import { formatVideoRange } from "../collaboration/nodes";
 import { stickyTextInputProps } from "../collaboration/permissions";
 import type { NodeType, WhiteboardNode } from "../collaboration/types";
 import { readStrokePoints, readStrokePressures, strokePath } from "./freehand";
-import { segmentWidths } from "./pen";
+import { segmentWidths, strokeRuns } from "./pen";
 
 export type NodeRendererProps = {
   node: WhiteboardNode;
@@ -101,16 +101,15 @@ const REGISTRY: Partial<Record<NodeType, NodeRenderer>> = {
         {pressures.length ? (
           // 有壓感（觸控筆）：逐段線寬。單一 path 畫不出粗細變化，而粗細
           // 正是筆相對於手指的價值所在。
-          segmentWidths(pressures, base).map((width, index) => (
-            <line
+          strokeRuns(points, segmentWidths(pressures, base)).map((run, index) => (
+            <polyline
               key={index}
-              x1={points[index][0]}
-              y1={points[index][1]}
-              x2={points[index + 1][0]}
-              y2={points[index + 1][1]}
+              points={run.points.map(([px, py]) => `${px},${py}`).join(" ")}
+              fill="none"
               stroke={color}
-              strokeWidth={width}
+              strokeWidth={run.width}
               strokeLinecap="round"
+              strokeLinejoin="round"
             />
           ))
         ) : (

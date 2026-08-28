@@ -1197,11 +1197,22 @@ try {
       check("平板：筆不用切工具就能畫（筆優先）", true);
       const strokeInfo = await page.evaluate(() => {
         const svg = document.querySelector("[data-node-type='freehand'] svg");
-        const lines = svg.querySelectorAll("line");
-        const widths = [...lines].map((line) => Number(line.getAttribute("stroke-width")));
-        return { segments: lines.length, distinctWidths: new Set(widths).size };
+        // 逐段線寬會把同寬的相鄰段併成一條 polyline（元素數＝粗細變化次數）
+        const runs = svg.querySelectorAll("polyline");
+        const widths = [...runs].map((run) => Number(run.getAttribute("stroke-width")));
+        const totalPoints = [...runs].reduce((sum, run) => sum + (run.getAttribute("points") ?? "").split(" ").length, 0);
+        return { runs: runs.length, distinctWidths: new Set(widths).size, totalPoints };
       });
-      check("平板：壓感畫成逐段線寬（不是單一粗細）", strokeInfo.segments >= 2 && strokeInfo.distinctWidths >= 2, JSON.stringify(strokeInfo));
+      check(
+        "平板：壓感畫成逐段線寬（不是單一粗細）",
+        strokeInfo.runs >= 2 && strokeInfo.distinctWidths >= 2,
+        JSON.stringify(strokeInfo),
+      );
+      check(
+        "平板：同寬的段有被合併（不是每段一個元素）",
+        strokeInfo.runs < strokeInfo.totalPoints,
+        JSON.stringify(strokeInfo),
+      );
       // N9：這條原本拿掉掌拒也會綠（筆畫路徑與手指路徑各走各的）。真正
       // 會變的是「手掌有沒有被當成第二指去縮放畫面」——驗 zoom 沒被動到，
       // 以及筆畫的段數沒有因為中途被打斷而變少。
@@ -1258,6 +1269,52 @@ try {
         await dismissSelection(page);
         await page.getByTestId("wb-tool-select").click(); // marquee → lasso
         await page.getByTestId("wb-tool-select").click(); // lasso → off
+      }
+
+      // 自審反例：兩支筆同時 —— B 的筆不得丟掉 A 正在寫的字
+      {
+        const strokesBefore = await page.locator("[data-node-type='freehand']").count();
+        const penA = (type, x, y, extra = {}) => canvas.dispatchEvent(type, {
+          clientX: box.x + x, clientY: box.y + y, pointerId: 301, pointerType: "pen", pressure: 0.7, isPrimary: true, ...extra,
+        });
+        await penA("pointerdown", 150, 620);
+        await penA("pointermove", 210, 650);
+        // B 的筆落下：整個事件應該被丟掉，A 的筆畫繼續
+        await canvas.dispatchEvent("pointerdown", { clientX: box.x + 500, clientY: box.y + 620, pointerId: 302, pointerType: "pen", pressure: 0.6 });
+        await canvas.dispatchEvent("pointermove", { clientX: box.x + 560, clientY: box.y + 650, pointerId: 302, pointerType: "pen", pressure: 0.6 });
+        await penA("pointermove", 270, 630);
+        await penA("pointerup", 270, 630, { pressure: 0 });
+        await canvas.dispatchEvent("pointerup", { clientX: box.x + 560, clientY: box.y + 650, pointerId: 302, pointerType: "pen", pressure: 0 });
+        await page.waitForFunction(
+          (before) => document.querySelectorAll("[data-node-type='freehand']").length === before + 1,
+          strokesBefore,
+          { timeout: 8000 },
+        );
+        check("兩支筆同時：第二支不得丟掉第一支正在寫的字", true);
+        const zoomNow2 = await page.evaluate(() => {
+          const style = document.querySelector(".wb-layer")?.getAttribute("style") ?? "";
+          return Number(/scale\(([\d.]+)\)/.exec(style)?.[1] ?? 1);
+        });
+        check("兩支筆同時不得變成 pinch 縮放", Math.abs(zoomNow2 - penZoomBefore) < 0.01, `${penZoomBefore}→${zoomNow2}`);
+      }
+
+      // 自審反例：切板後筆狀態不得殘留（否則新板上所有手指被永久掌拒）
+      {
+        // 筆按下但**不抬起**就離開這塊板（模擬「筆還在玻璃上時板被關掉」）
+        await canvas.dispatchEvent("pointerdown", { clientX: box.x + 300, clientY: box.y + 680, pointerId: 401, pointerType: "pen", pressure: 0.5 });
+        await page.locator(".wb-focus-top .project-back-button").click();
+        await page.waitForSelector(".wb-list", { timeout: 10000 });
+        await page.locator(".wb-card").first().click();
+        await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+        const canvas2 = page.getByTestId("wb-canvas");
+        const box2 = await canvas2.boundingBox();
+        const camBefore = await page.locator(".wb-layer").getAttribute("style");
+        await canvas2.dispatchEvent("pointerdown", { clientX: box2.x + 120, clientY: box2.y + 300, pointerId: 402, pointerType: "touch" });
+        await canvas2.dispatchEvent("pointermove", { clientX: box2.x + 220, clientY: box2.y + 340, pointerId: 402, pointerType: "touch" });
+        await canvas2.dispatchEvent("pointerup", { clientX: box2.x + 220, clientY: box2.y + 340, pointerId: 402, pointerType: "touch" });
+        await page.waitForTimeout(150);
+        const camAfter = await page.locator(".wb-layer").getAttribute("style");
+        check("切板後手指仍能平移（筆狀態沒有殘留）", camAfter !== camBefore, `${camBefore} vs ${camAfter}`);
       }
 
       // F2：側欄的討論要能自己捲（feed 有自己的捲軸，不靠整頁捲）

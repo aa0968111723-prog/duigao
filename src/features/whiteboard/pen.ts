@@ -76,3 +76,32 @@ export function segmentWidths(pressures: (number | undefined)[], base: number): 
   }
   return widths;
 }
+
+/**
+ * 把逐段線寬壓成「同寬的連續段」（自審：一筆手寫變成數百個 SVG 元素，
+ * 每個平移／縮放影格都要重新協調）。
+ *
+ * 相鄰段的寬度四捨五入到同一個 0.5px 桶就併成一段 polyline。壓感的視覺
+ * 差異保留得住（0.5px 以下人眼本來就分不出），元素數卻從「點數−1」掉到
+ * 「粗細真的變化的次數」——平穩運筆常常只剩個位數。
+ */
+export function strokeRuns(
+  points: [number, number][],
+  widths: number[],
+  bucket = 0.5,
+): Array<{ width: number; points: [number, number][] }> {
+  if (points.length < 2 || widths.length !== points.length - 1) return [];
+  const runs: Array<{ width: number; points: [number, number][] }> = [];
+  let current: { width: number; points: [number, number][] } | null = null;
+  for (let i = 0; i < widths.length; i += 1) {
+    const width = Math.round(widths[i] / bucket) * bucket;
+    if (!current || current.width !== width) {
+      // 新的一段從上一段的末點接起來，線才不會斷開
+      current = { width, points: [points[i], points[i + 1]] };
+      runs.push(current);
+    } else {
+      current.points.push(points[i + 1]);
+    }
+  }
+  return runs;
+}
