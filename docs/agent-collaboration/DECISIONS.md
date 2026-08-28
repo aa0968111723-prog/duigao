@@ -122,3 +122,71 @@ agent-read-layer，strict（head 必須 up-to-date）。效果：automerge 不�
 再搶跑晚到的 push、也不能帶著紅色 browser 合併。副作用：每個 PR 合併前
 若 main 前進需 update-branch（成本可接受）。三次事故皆已以 cherry-pick
 跟進 PR 補齊（#55/#60/#62），main 無缺失殘留。
+
+## ADR-013：白板架構 — 保留自研引擎並分層強化；xyflow 為明訂的後備方案
+
+日期：2026-08-28　狀態：**採納**（PR-02 結束時有量化重評檢查點）
+
+### 比較過的選項（依 WHITEBOARD_AUDIT §9 與 2026-08 現時 library 實查）
+
+| 選項 | 授權/成本 | bundle(gzip) | 行動觸控 | 資料模型主權 | 判定 |
+|---|---|---|---|---|---|
+| A. 保留並強化自研引擎（**採納**） | 無 | 最小（+可選 use-gesture ~7KB） | 缺口明確可補（見下） | 完美（本來就是 entity model） | ✅ |
+| B. @xyflow/react 12.11.5 | MIT | ~60KB | 中等；open issues：pinch 觸發瀏覽器縮放 #5066、pinch 中斷拖曳 #5475、panOnScroll 觸控 #5341 | 最佳（fully controlled 一級模式） | 後備 |
+| C. tldraw 5.3.2 | **專有＋production license key＋年費** | ~524KB | 業界最佳 | **相抵觸**（自帶 reactive store 為 session truth） | ✗ |
+| D. excalidraw 0.18.1 | MIT | ~353KB+lazy | 桌面優先、stylus issues | 弱（自有 scene/element 格式）；**無 custom node renderer** | ✗ |
+| E. konva+react-konva | MIT | ~96KB | 手勢全自建 | 最佳（純 view） | 次備（若節點轉向自由繪圖） |
+| F. pixi.js 8 | MIT | ~258KB+viewport | 全 DIY | 最佳 | overkill ✗ |
+
+### 決策理由
+
+1. **最不可擾動的資產是同步管線，不是渲染**。OCC（DB trigger 自增
+   version）＋row-patch（rAF 合併）＋in-flight/dragging shield＋
+   IndexedDB durable 佇列，經 pr02b/02c/02d 三輪 Grok 對抗審查與真斷網
+   e2e 淬鍊。導入任何自帶 store 的 library（C/D）直接牴觸「Supabase
+   entity-level model 為 source of truth」的硬需求；即使是 controlled
+   模式的 B，也要把 shield/echo/OCC 邏輯重新縫進 zustand 派生 state —
+   在我們已被對抗驗證的程式碼上製造最大 churn。
+2. **稽核顯示行動端痛點多數不在引擎**：畫布 48% 可視是 CSS 高度鏈
+   斷裂＋殼佔用（版面）；手勢缺口（pinch 不清 drag、長按無 slop、雙指
+   平移、套索、鍵盤避讓、pointer 雙擊）是 104 行 canvas.ts＋749 行
+   workspace 內的具體修補，每一項都有測試掛點。
+3. **B 的弱項正是本任務的主戰場**：xyflow 的行動觸控 open-issue 清單
+   （#5066/#5475/#5341）意味著導入後仍要在別人的手勢層裡修行動端 —
+   成本不省，主權還讓渡。「不得只因 library 熱門就導入」。
+4. **成本誠實面**：自研的隱性成本是手勢邊角（iOS Safari 慣性、palm
+   rejection、stylus 區分）。對策：(a) PR-02 允許引入 @use-gesture
+   （~7KB，MIT，純手勢辨識、零資料模型）承擔仲裁數學，PR-02 spike 時
+   決定；(b) 平板 Pencil/palm rejection 屬 PR-05，屆時重評。
+
+### 執行形狀（PR-01/PR-02 的邊界）
+
+- 引擎分層：`canvas.ts` 拆為 camera（純數學）/ gestures（仲裁狀態機）/
+  registry（node renderer 註冊表，消滅 NodeView 內的型別分支）/
+  interaction（selection/marquee/lasso）。WhiteboardWorkspace 只剩組裝。
+- schema 一律 additive（見 rounds/wb00/migration-plan.md）；
+  operations 採 append-only 事件表（不做 CRDT — OCC＋可見衝突已被驗證
+  足夠，CRDT 屬過度工程，除非重評觸發）。
+- presence（cursor/selection）走 Realtime channel broadcast（暫態），
+  **不落表**（沿 0014:783 的既有邊界）；throttle 於 client。
+
+### 重評檢查點（PR-02 結束，量化）
+
+在真機（Android Chrome＋iPhone Safari）以下列驗收跑：pinch 縮放錨點
+漂移 <8px、pinch↔drag 切換零節點跳動、長按成功率（10 次帶自然抖動）
+≥9、雙指平移可用、鍵盤彈出時編輯節點可見。**任兩項不達標且修補
+超過一週** → 啟動 B（xyflow）作為 view layer 的替換 spike，
+同步管線與 entity model 不動。
+
+## ADR-014：白板多人寫入 = entity-level OCC ＋ append-only operations，不做整包覆蓋、不做 CRDT
+
+日期：2026-08-28　狀態：**採納**（PR-01 落地）
+
+- 既有 0014 的 version＋trigger 樂觀鎖保留為權威；`whiteboard_operations`
+  append-only 表補「誰在何時做了什麼」的可重放事實（undo/redo 與版本
+  歷史的基礎），**不是**第二個 truth — 套用順序仍由 row state 決定。
+- edges 補 version/updated_at/created_by＋touch trigger（現況 edges 零
+  OCC，audit §4）；delete 補 tombstone 語意（ADR-011 缺口在 PR-01 併決）。
+- 衝突永遠可見（既有誠實 toast＋drop-refetch 模式延續），禁止靜默
+  last-write-wins；整包 Room JSON 覆蓋僅存的 P2P legacy 路徑（App.tsx:772）
+  在 PR-04 收斂（cloud 房停用 P2P snapshot 覆蓋）。
