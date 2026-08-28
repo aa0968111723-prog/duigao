@@ -489,6 +489,15 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   // 不能無條件清空：房間層 AI 是「開板 ＋ 暫存預覽」同一次 commit 完成的，
   // 無條件清會把剛送進來的預覽當場抹掉（e2e 抓到）。
   useEffect(() => {
+    // 切板同樣要重置筆與筆畫狀態：元件不卸載（!board 只是改渲染 BoardList），
+    // 只在「離開 Focus」重置的話，切板時殘留的 penPointerId 會讓新板上的
+    // 所有手指被永久掌拒（自審實抓；筆在玻璃上時別人封存這塊板就會遇到）。
+    penRef.current = initialPenState();
+    strokePointerRef.current = null;
+    strokeRef.current = null;
+    strokeDownRef.current = null;
+    strokeScreenRef.current = null;
+    setStrokePreview(null);
     aiApplyingRef.current = false;
     setAiPreview((current) => {
       if (!current) return current;
@@ -824,6 +833,17 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     // 否則它的 up 被吞掉、永遠留在 pointers map，下一次單指按下就被
     // 當成第二指直接進 pinch（Grok wb05 F1 實抓：先用手指按著再拿筆寫）。
     if (!gesture.current.pointers.has(event.pointerId) && shouldRejectPointer(penRef.current, kind, performance.now())) return;
+    // 第二支筆：整個事件丟掉（兩人共用一台平板時，B 的筆不得打斷 A 正在
+    // 寫的字）。**這個判斷必須在 penDown 之前** —— penDown 會把
+    // penPointerId 覆寫成第二支筆的 id，之後再比就永遠相等、守衛失效。
+    if (
+      kind === "pen" &&
+      penRef.current.penPointerId !== null &&
+      penRef.current.penPointerId !== event.pointerId &&
+      strokePointerRef.current !== null
+    ) {
+      return;
+    }
     if (kind === "pen") penRef.current = penDown(penRef.current, event.pointerId);
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -837,11 +857,6 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     if ((drawMode || penDraws) && canEdit) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect) return;
-      // 第二支筆：忽略（不打斷第一支正在寫的字，N4）
-      if (kind === "pen" && strokePointerRef.current !== null && strokePointerRef.current !== event.pointerId
-          && penRef.current.penPointerId !== null && penRef.current.penPointerId !== event.pointerId) {
-        return;
-      }
       // 手指起的筆畫遇到筆落下（N3）：手指那筆作廢，讓筆接手 —— 不作廢的話
       // 筆會被當成第二個 pointer 進 pinch，畫面暴縮。
       if (kind === "pen" && strokePointerRef.current !== null && strokePointerRef.current !== event.pointerId) {
