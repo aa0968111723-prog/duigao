@@ -347,6 +347,6 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
   );
 }
 
-export function AssetAiFab({ onClick, project = false }: { onClick: () => void; project?: boolean }) {
-  return <button type="button" className={`asset-ai-fab${project ? " is-project" : ""}`} onClick={onClick} aria-label="問房間 AI" data-testid="room-ai-launcher">✦ <span>AI</span></button>;
+export function AssetAiFab({ onClick }: { onClick: () => void }) {
+  return <button type="button" className="asset-ai-fab" onClick={onClick} aria-label="問房間 AI" data-testid="room-ai-launcher">✦ <span>AI</span></button>;
 }

@@ -22,7 +22,6 @@
 .asset-ai-fab span { font-size: 13px; letter-spacing: .02em; }
 /* The project shell already owns the lower-right create-content FAB. Keep
    the AI entry one comfortable tap target above it on small screens. */
-.asset-ai-fab.is-project { bottom: calc(136px + env(safe-area-inset-bottom)); }
 .asset-ai-scrim {
   position: fixed;
   inset: 0;
@@ -322,5 +321,5 @@
 @media (min-width: 721px) {
   .asset-ai-scrim { align-items: center; padding: 20px; }
   .asset-ai-sheet { max-height: min(780px, 88vh); border-bottom: 1px solid var(--line); border-radius: 20px; }
-  .asset-ai-fab, .asset-ai-fab.is-project { bottom: 24px; }
+  .asset-ai-fab { bottom: 24px; }
 }

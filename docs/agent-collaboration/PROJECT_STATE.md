@@ -35,14 +35,16 @@ production。**
   ADR-014（entity-level OCC＋append-only operations）、
   rounds/wb00/{wireflow,migration-plan,test-plan,parallel-agents-conflict-report}。
   不宣稱任何功能完成。
-- PR-WB01（進行中，疊於 wb00 分支）：0021–0024 migrations（探針
-  277/277）＋tombstone 資料層（六讀路 client 半、ADR-011 關閉）＋
-  operations 純函式層（op_id 冪等＋field_mask undo）＋anchor
-  message/plan-section 臂。本機全綠矩陣（unit 150、e2e 全套）。
+- PR-WB01（#78，待人類審）：0021–0024 migrations（探針 281/281）＋
+  tombstone 資料層（ADR-011 關閉）＋operations 純函式層（op_id 冪等＋
+  field_mask undo）＋anchor message/plan-section 臂。Grok wb01 輪 8
+  findings 全採納。本機全綠矩陣。
 - 序列：WB02 手機 Focus Mode → WB03 雙向連結 → WB04 Realtime/presence
   → WB05 平板/Pencil → WB06 AI。
-- 平行衝突：open PR #71 動 MultiBranchRoom/RoomDiscussion/App.tsx，
-  與 WB02 重疊 — 開工前重查（rounds/wb00/parallel-agents-conflict-report.md）。
+- 平行衝突更新：#71（設計看板＋活動房去重）**已於 2026-08-28 合併**，
+  main 的 App.tsx/MultiBranchRoom/RoomDiscussion 已含其變更 — WB01 已
+  合併最新 main（App.tsx 自動合併乾淨）；WB02 開工時以合併後 main 為底、
+  尊重 #71 的 UI 決策（AI 入口/＋ 的新形狀）。
 
 ## 已合併（時序）
 
