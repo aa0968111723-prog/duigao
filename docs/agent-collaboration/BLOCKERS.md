@@ -14,21 +14,38 @@
 - 影響：任何把 CUTOS 暴露給 duigao 房間成員的整合（iframe/proxy）都會讓所有專案對所有訪客可讀寫。
 - 解法：先在 CUTOS repo 落 auth + project scoping（獨立 PR），之後才進行 duigao 端 live 整合；期間只做 contract/fixture。
 
-## BLOCKED_CANVA_CREDENTIALS（PR-05）
+## RESOLVED_CANVA_CREDENTIALS（PR-05，2026-08-28 已解）
 
-- 現況：repo 內無任何 Canva OAuth client id/secret；Canva Connect API 需註冊 app。
-- 解法：使用者在 Canva Developer Portal 建 app 並提供 credentials（只放部署端 secrets）。期間 PR-05 以 adapter+fixture+flag 進行。
+- 使用者已提供 Canva Connect 的 Client ID 與 Client Secret（值不入 repo，
+  只放 Supabase Edge Functions secrets：CANVA_CLIENT_ID / CANVA_CLIENT_SECRET）。
+- PR-05 canva-bridge 可開工（OAuth code flow 走 edge 端，token 不落 client）。
 
-## BLOCKED_VOICE_PROVIDER（PR-03）
+## RESOLVED_VOICE_PROVIDER（PR-03，2026-08-28 已解）
 
-- 現況：無任何 WebRTC/voice provider credential；client 端 API 明確 throw（`src/features/collaboration/voice.ts:11-41`，VOICE_ROOM_MVP=false）。
-- 解法：使用者選定並提供 LiveKit / Twilio（或其他）credential；期間 UI 保持誠實的「尚未設定」。
+- 使用者選定 **LiveKit**（自有 LiveKit Cloud 專案）。PR-03 已落地並合併
+  （#64＋Grok 修復輪 #65）：voice-token edge（HS256 JWT 鑄造、room_role
+  成員檢查、health gate）＋VoiceDock（join/leave/mute/roster）＋失敗即清場。
+- 殘餘（非 code）：使用者需在 Supabase Dashboard → Edge Functions →
+  Secrets 設 LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET；設定後
+  需一次雙人真機語音驗收（rounds/pr03 裁決記錄的 residual）。
 
-## UNVERIFIED_PRODUCTION_STATE（PR-08 前需解）
+## RESOLVED_PRODUCTION_STATE（2026-08-28 已解）
 
-- 現況：`npm run agent:context` 顯示 `production migration: unknown (live check required)`；本機無 `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY`（check-cloud-env strict 會擋 `npm run build`；`build:local` 正常）。E2E 全部打本機 mock，hosted Supabase 的 migration 落差未驗證。
-- 影響：不能宣稱 production 與 repo 0016 同步；deploy 驗收（任務規範第十六節）未完成。
-- 解法：使用者提供 hosted Supabase URL/key（或在部署平台驗證），跑一次 live migration 盤點與 smoke。
+- 經 Supabase MCP（專案 uanurolzzgshxrqbooix）盤點：正式庫原先只到 0010、
+  **零 edge functions** — 協作工作台在 prod 從未存在。已補齊：
+  0011–0019 全部 migration verbatim 套用（42 房回填 42 分支、9 版本全掛
+  分支、41 表全 RLS），edge functions 部署 ACTIVE：share-preview
+  （verify_jwt=false）、room-ai-context、asset-analysis、cutos-bridge、
+  voice-token。
+- 殘餘：Dashboard secrets 待使用者設（LIVEKIT_*、APP_ORIGIN、
+  TKU_ZEN_AGENT_URL、DUIGAO_AGENT_SHARED_SECRET、CANVA_*）；設後跑
+  live smoke。
+
+## NOTE_EMBEDDINGS_UNAVAILABLE（tku Track B，2026-08-28）
+
+- Zeabur AI Hub（hnd1.aihub.zeabur.ai/v1）的兩把 key 皆限 standard 模型組，
+  `/embeddings` 回 401 — tku-zen-agent 向量檢索（Track B）需真 OpenAI 平台
+  key 或 Zeabur 端開通 embedding 模型組。使用者已知情。
 
 ## NOTE_CLAUDE_CLI_ABSENT（非阻塞，如實記錄）
 

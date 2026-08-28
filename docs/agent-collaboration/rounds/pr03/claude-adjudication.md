@@ -24,3 +24,11 @@
 共機（另一 agent 併行跑 planform Playwright，CPU 65-74%）使 multi-branch
 journey 死於既有 plan-editor 負載競態（src=main A/B 同敗）— CI 為準。
 unit 79/79、build 綠、tsc 0 於本機完成。
+
+## 追記（#65 合併前的 e2e 斷言修訂）
+
+CI 診斷（request tail：participants POST → voice-token POST → left_at
+PATCH → session end PATCH）證實 join 全鏈正確、F5 失敗清場如設計運作 —
+舊 e2e 斷言在等一個「live session 存在」的狀態，而那正是 F5 應該清掉的。
+斷言改為驗證清場終態：誠實錯誤文案、session 曾落地（total>=1）、
+live=0 且無未離場參與者、無離開鈕且 join 可重試。
