@@ -1014,6 +1014,22 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .project-back-button { font-size: 27px; line-height: 1; color: var(--ink); }
 .project-room-heading { min-width: 0; flex: 1; }
 .project-room-heading h1, .project-detail-head h2 { margin: 2px 0 0; font-family: "Noto Serif TC", serif; font-size: 21px; letter-spacing: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-room-title-input {
+  width: 100%;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  font-family: "Noto Serif TC", serif;
+  font-size: 21px;
+  letter-spacing: 1px;
+  text-overflow: ellipsis;
+  outline: none;
+}
+.project-room-title-input::placeholder { color: var(--ink-faint); }
+.project-room-title-input:focus { border-bottom-color: var(--accent); }
 .project-kicker, .project-section-eyebrow { color: var(--ink-faint); font-size: 12px; letter-spacing: .08em; }
 .project-share-button { min-height: 40px; padding: 0 15px; border: 0; border-radius: 999px; background: var(--raise); color: var(--ink); cursor: pointer; }
 .project-search-wrap { width: min(680px, calc(100% - 32px)); margin: 12px auto 0; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); color: var(--ink-faint); }
