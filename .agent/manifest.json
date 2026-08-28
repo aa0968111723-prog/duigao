@@ -97,7 +97,8 @@
     "test:share-preview",
     "test:video",
     "test:viewer-geometry",
-    "test:visual"
+    "test:visual",
+    "typecheck"
   ],
   "agentContextCommand": "npm run agent:context"
 }

@@ -83,13 +83,22 @@ test("內容一樣的節點不進計畫（不製造無謂寫入與 op 帳）", (
   assert.equal(plan.deleteNodeIds.length, 0);
 });
 
-test("快照後新增的節點會被移除；快照裡有但現在被刪的會重建", () => {
+test("F1：快照裡有、現在是墓碑的節點必須走 restoreNodes（不是一般 upsert）", () => {
   const snapshot = buildSnapshot([node("old")], [], []);
-  const current = { nodes: [node("new")], edges: [], frames: [] };
+  // 快照後這個節點被刪了（墓碑還在本地）
+  const current = { nodes: [node("old", { deletedAt: 999, version: 3 }), node("new")], edges: [], frames: [] };
   const plan = planRestore(snapshot, current);
-  assert.deepEqual(plan.deleteNodeIds, ["new"]);
-  assert.deepEqual(plan.upsertNodes.map((item) => item.id), ["old"]);
-  assert.equal(plan.upsertNodes[0].deletedAt, undefined, "重建的節點不得帶墓碑");
+  assert.deepEqual(plan.deleteNodeIds, ["new"], "快照後新增的要移除");
+  assert.equal(plan.upsertNodes.length, 0, "墓碑節點不能走一般 upsert — payload 碰不到 deleted_at，節點會出現一下又消失");
+  assert.deepEqual(plan.restoreNodes.map((item) => item.id), ["old"]);
+  assert.equal(plan.restoreNodes[0].deletedAt, undefined, "復原的節點不得帶墓碑");
+});
+
+test("F1：本地整個沒有的節點也走 restoreNodes（可能是別人刪的、本地已收掉）", () => {
+  const snapshot = buildSnapshot([node("gone")], [], []);
+  const plan = planRestore(snapshot, { nodes: [], edges: [], frames: [] });
+  assert.deepEqual(plan.restoreNodes.map((item) => item.id), ["gone"]);
+  assert.equal(plan.upsertNodes.length, 0);
 });
 
 test("frames 與 edges：frame 同樣沿用現況 version；線只補不刪", () => {
@@ -104,6 +113,11 @@ test("frames 與 edges：frame 同樣沿用現況 version；線只補不刪", ()
   assert.equal(plan.upsertFrames[0].version, 4, "frame 也要沿用現況 version");
   assert.deepEqual(plan.deleteFrameIds, ["f2"]);
   assert.deepEqual(plan.createEdges.map((item) => item.id), ["e1"], "快照有、現在沒有的線要補");
+});
+
+test("describeRestore：復原已刪節點要說出來（使用者要知道會發生什麼）", () => {
+  const plan = planRestore(buildSnapshot([node("gone")], [], []), { nodes: [], edges: [], frames: [] });
+  assert.ok(describeRestore(plan).includes("已刪的會被復原"), describeRestore(plan));
 });
 
 test("describeRestore：沒有差異時誠實說「沒有變化」", () => {

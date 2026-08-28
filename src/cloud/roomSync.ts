@@ -23,8 +23,12 @@ export type SyncHandlers = {
   onPresence?: (count: number) => void;
   /** 具名在場者（WB04）：誰在線上、各自開著哪塊板。無游標流。 */
   onPresenceList?: (people: PresencePerson[]) => void;
-  /** 自己的顯示名稱（track 用）。 */
-  displayName?: string;
+  /**
+   * 目前開著的白板 id。channel 重建時 track 的初值就靠它 — 舊寫法初始化成
+   * null，重訂閱後即使人還在板上也顯示「不在板上」，要等下一次開關板才
+   * 修正（Grok F3）。**刻意不含姓名**：presence payload 沒有 RLS（P1）。
+   */
+  getPresenceIdentity?: () => { boardId: string | null };
   onStatus?: (connected: boolean) => void;
 };
 
@@ -36,8 +40,8 @@ export type Unsubscribe = () => void;
  * missed event is healed by the next loadRoom.
  */
 export type PresencePerson = {
+  /** presence key＝auth uid。姓名不走線路（P1），由客戶端對照成員清單。 */
   userId: string;
-  name: string;
   /** 這個人此刻開著的白板 id（null＝不在白板上）。 */
   boardId: string | null;
   at: number;
@@ -45,7 +49,7 @@ export type PresencePerson = {
 
 export type RoomSubscription = Unsubscribe & {
   /** 身分或所在板變了：重新 track（開關板時呼叫，不是每次移動）。 */
-  retrack: (next: { name?: string; boardId?: string | null }) => void;
+  retrack: () => void;
 };
 
 export function subscribeRoom(
@@ -58,8 +62,16 @@ export function subscribeRoom(
   const channel: RealtimeChannel = supabase.channel(`room:${roomId}`, {
     config: { presence: { key: userId } },
   });
-  const identity: { name: string; boardId: string | null } = { name: handlers.displayName ?? "", boardId: null };
-  const trackPayload = () => ({ at: Date.now(), name: identity.name, boardId: identity.boardId });
+  // **不送姓名**（自審 P1）：Realtime 的 presence 是 channel 層的東西，
+  // postgres_changes 有 RLS 擋、presence 沒有 — 這個 topic 名稱只含房間
+  // uuid（邀請連結裡就有），任何持公開 anon key 的人都能 join 並讀到
+  // payload。WB04 一度把姓名與「開著哪塊板」放進來，等於把成員名單publish
+  // 給房外。現在只送不透明的 id 與 boardId（id 本來就是 presence key），
+  // 姓名在客戶端用房內成員清單（走 RLS）對照出來。
+  const trackPayload = () => {
+    const live = handlers.getPresenceIdentity?.() ?? { boardId: null };
+    return { at: Date.now(), boardId: live.boardId };
+  };
 
   channel
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, (p) =>
@@ -163,12 +175,21 @@ export function subscribeRoom(
       handlers.onPresence?.(Object.keys(state).length);
       const people: PresencePerson[] = [];
       for (const [key, metas] of Object.entries(state)) {
-        const meta = metas[metas.length - 1] ?? {};
+        // 取 `at` 最新的一筆（P9）：metas 是 join 順序，同一人多開一個分頁
+        // 時「最後一筆」會是那個沒開板的新分頁 — 他就從「在板上」名單消失。
+        let meta: Record<string, unknown> = {};
+        let newest = -1;
+        for (const item of metas) {
+          const at = typeof item.at === "number" ? item.at : 0;
+          if (at >= newest) {
+            newest = at;
+            meta = item;
+          }
+        }
         people.push({
           userId: key,
-          name: typeof meta.name === "string" ? meta.name : "",
           boardId: typeof meta.boardId === "string" ? meta.boardId : null,
-          at: typeof meta.at === "number" ? meta.at : 0,
+          at: newest < 0 ? 0 : newest,
         });
       }
       handlers.onPresenceList?.(people);
@@ -181,9 +202,8 @@ export function subscribeRoom(
 
   // 身分／所在板變動時重新 track（**只在開關板時**，不是每次移動 —
   // 「行動裝置友善的在場感：不送游標、不送 16ms 心跳」的既有紀律）。
-  const retrack = (next: { name?: string; boardId?: string | null }) => {
-    if (next.name !== undefined) identity.name = next.name;
-    if (next.boardId !== undefined) identity.boardId = next.boardId;
+  // 真值一律現查 getPresenceIdentity()，這裡不留可能過期的副本。
+  const retrack = () => {
     void channel.track(trackPayload());
   };
 

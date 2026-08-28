@@ -32,6 +32,8 @@ export type LayerBackResponse = "closed" | "repush";
 type HistoryLike = {
   pushState: (state: unknown, unused: string) => void;
   back: () => void;
+  /** 目前那格的 state（重新整理後要接續既有序號 — 見 createLayerStack）。 */
+  getState?: () => unknown;
 };
 
 type Layer = {
@@ -63,13 +65,29 @@ function seqOf(state: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-export function createLayerStack(history: HistoryLike): LayerStack {
+export function createLayerStack(history: HistoryLike, now: () => number = () => Date.now()): LayerStack {
   const stack: Layer[] = [];
-  let seqCounter = 0;
+  // 重新整理後 history 條目還在、但這個 stack 是新的：序號必須**接續**
+  // 現有那格的 __seq，否則新層拿到的序號比舊格小，使用者按返回時落在
+  // 「序號更大」的舊格會被判成 forward → 連按兩次都紋風不動（H2）。
+  const seed = seqOf(history.getState?.());
+  let seqCounter = seed;
   /** 我們認為自己所在的格序號（0＝所有層之下的基準格）。 */
-  let currentSeq = 0;
-  /** 自己呼叫 back() 後預期落地的格 — 那次 popstate 不該派給任何層。 */
-  const selfConsume = new Set<number>();
+  let currentSeq = seed;
+  /**
+   * 自己呼叫 back() 後預期落地的格 — 那次 popstate 不該派給任何層。
+   * 帶時間戳：back() 有可能根本不產生 popstate（例如已經在最舊的一格），
+   * 那筆期待若永遠留著，之後使用者真的按返回時會被它吞掉，兩層都關不掉
+   * （H1）。超過 STALE_CONSUME_MS 就當它沒發生。
+   */
+  const selfConsume = new Map<number, number>();
+  const STALE_CONSUME_MS = 2000;
+  const takeSelfConsume = (seq: number): boolean => {
+    const stamp = selfConsume.get(seq);
+    if (stamp === undefined) return false;
+    selfConsume.delete(seq);
+    return now() - stamp <= STALE_CONSUME_MS;
+  };
 
   const occupy = (layer: Layer) => {
     seqCounter += 1;
@@ -95,7 +113,11 @@ export function createLayerStack(history: HistoryLike): LayerStack {
 
   const handlePop = (state?: unknown) => {
     const landedSeq = seqOf(state);
-    if (selfConsume.delete(landedSeq)) {
+    // 過期的期待先清掉，免得無限累積
+    for (const [seq, stamp] of selfConsume) {
+      if (now() - stamp > STALE_CONSUME_MS) selfConsume.delete(seq);
+    }
+    if (takeSelfConsume(landedSeq)) {
       currentSeq = landedSeq;
       return;
     }
@@ -108,7 +130,7 @@ export function createLayerStack(history: HistoryLike): LayerStack {
   };
 
   const consume = (layer: Layer) => {
-    selfConsume.add(layer.prevSeq);
+    selfConsume.set(layer.prevSeq, now());
     currentSeq = layer.prevSeq;
     history.back();
   };
@@ -147,7 +169,11 @@ let singleton: LayerStack | null = null;
 
 export function historyLayers(): LayerStack {
   if (!singleton) {
-    singleton = createLayerStack(window.history);
+    singleton = createLayerStack({
+      pushState: (state, unused) => window.history.pushState(state, unused),
+      back: () => window.history.back(),
+      getState: () => window.history.state,
+    });
     window.addEventListener("popstate", (event) => singleton!.handlePop(event.state));
     // Escape 也只由這裡派發。延遲到同步派發跑完才看 defaultPrevented —
     // 內層 ladder（pin/modal/sheet）消費時會 prevent，一次 Escape 只關

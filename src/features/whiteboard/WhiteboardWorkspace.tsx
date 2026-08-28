@@ -35,7 +35,7 @@ import {
 import { emptyHistory, pushHistory, redoStep, undoStep, type HistoryStack } from "./history";
 import { historyLayers } from "../../lib/historyLayers";
 import { normalizeStroke, thinStroke, type StrokePoint } from "./freehand";
-import { describeRestore, planRestore, type BoardVersion } from "./versions";
+import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
 import { rendererFor } from "./registry";
 import "./whiteboard.css";
 
@@ -85,9 +85,14 @@ export type WhiteboardApi = {
   /** WB04：開著這塊板的其他人（具名在場）。 */
   boardPeople?: { userId: string; name: string }[];
   /** WB04 版本歷史：未提供＝不顯示入口（本機房沒有快照表）。 */
-  onSnapshotBoard?: (label: string) => Promise<void> | void;
-  onListVersions?: () => Promise<BoardVersion[]>;
-  onRestoreVersion?: (version: BoardVersion) => Promise<void> | void;
+  /** 本機正在拖/縮的 frame id（遠端事件對它讓路）。 */
+  onFrameDragState?: (id: string | null) => void;
+  onSnapshotBoard?: (label: string) => Promise<void>;
+  onListVersions?: () => Promise<BoardVersionSummary[]>;
+  /** 點下某個版本才取它的快照（清單不帶快照 — 可能是好幾 MB）。 */
+  onLoadVersion?: (versionId: string) => Promise<{ snapshot: BoardSnapshot; dropped: number }>;
+  /** 回傳實際結果：寫出去幾筆、是否離線排隊中 — UI 只能說真話。 */
+  onRestoreVersion?: (snapshot: BoardSnapshot) => Promise<{ applied: number; queued: boolean }>;
 };
 
 type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "versions" | null;
@@ -317,8 +322,12 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     startNodes: Map<string, WhiteboardNode>;
     moved: boolean;
   } | null>(null);
-  const [versions, setVersions] = useState<BoardVersion[] | null>(null);
+  const [versions, setVersions] = useState<BoardVersionSummary[] | null>(null);
   const [versionBusy, setVersionBusy] = useState(false);
+  /** 點開的那一版：快照取回後才算得出「還原會發生什麼」。 */
+  const [versionPreview, setVersionPreview] = useState<
+    { version: BoardVersionSummary; snapshot: BoardSnapshot; dropped: number } | null
+  >(null);
   const [frameRenaming, setFrameRenaming] = useState(false);
   const [frameTitleDraft, setFrameTitleDraft] = useState("");
   const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
@@ -801,6 +810,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       moved: false,
     };
     setFramePreviewSync(frame);
+    api.onFrameDragState?.(frame.id);
   };
   const onFramePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const session = frameDragRef.current;
@@ -835,6 +845,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const session = frameDragRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
     frameDragRef.current = null;
+    api.onFrameDragState?.(null);
     event.stopPropagation();
     const preview = framePreviewRef.current;
     setFramePreviewSync(null);
@@ -930,6 +941,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   };
   const skippedText = (skipped: string) =>
     skipped === "conflict-drift" ? "已跳過：這步之後被其他人改過" : skipped === "missing-node" ? "已跳過：節點已不存在" : "已跳過：不支援的操作";
+  /** 還原之後舊的 undo/redo 不再對得上現況 — 清掉比留著誤導安全（P7）。 */
+  const resetHistory = () => setHistory(emptyHistory());
   const runUndo = () => {
     const result = undoStep(historyRef.current, executors, nextOpId());
     setHistory(result.stack);
@@ -1048,7 +1061,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     });
   }, [api.boardPeople]);
   const boardPeopleLabel = boardPeople.length
-    ? `也在這塊板：${boardPeople.slice(0, 3).map((person) => person.name || "夥伴").join("、")}${boardPeople.length > 3 ? ` 等 ${boardPeople.length} 人` : ""}`
+    ? `${boardPeople.slice(0, 2).map((person) => person.name || "夥伴").join("、")}${boardPeople.length > 2 ? ` 等 ${boardPeople.length} 人` : ""} 也在`
     : "";
 
   const selectedNode = liveNodes.find((node) => node.id === selected[0]);
@@ -1147,7 +1160,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   setSheet(null);
                 }}>新增區塊（Frame）</button>
               )}
-              {api.onListVersions && (
+              {api.onListVersions && api.onLoadVersion && (
                 <button type="button" className="wb-card" data-testid="wb-open-versions" onClick={() => {
                   setSheet("versions");
                   setVersions(null);
@@ -1176,50 +1189,77 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             <div className="project-sheet-grip" />
             <div className="wb-sheet" data-testid="wb-versions">
               <h3>版本歷史</h3>
-              <p className="project-muted">存一張快照，之後可以整塊板回到那時候。還原是逐筆寫回，不會蓋掉別人此刻正在改的版本簿記。</p>
-              {canEdit && api.onSnapshotBoard && (
-                <button type="button" className="project-save-button project-submit" data-testid="wb-snapshot" disabled={versionBusy} onClick={async () => {
-                  setVersionBusy(true);
-                  try {
-                    await api.onSnapshotBoard!(`${new Date().toLocaleString("zh-TW", { hour12: false })} 的快照`);
-                    const list = await Promise.resolve(api.onListVersions?.() ?? []);
-                    setVersions(list);
-                    showNotice("已存下這一刻的快照");
-                  } catch {
-                    showNotice("快照沒存成功，請再試一次");
-                  } finally {
-                    setVersionBusy(false);
-                  }
-                }}>存一張快照</button>
-              )}
-              <div className="wb-options">
-                {versions === null && <p className="project-muted">載入中…</p>}
-                {versions?.length === 0 && <p className="project-muted">還沒有快照。先存一張，之後才有得回去。</p>}
-                {(versions ?? []).map((version) => {
-                  const plan = planRestore(version.snapshot, { nodes: liveNodes, edges, frames });
-                  return (
-                    <button type="button" className="wb-card" key={version.id} data-testid={`wb-version-${version.id}`} disabled={!canEdit || versionBusy} onClick={async () => {
+              {versionPreview ? (
+                <>
+                  <p><strong>{versionPreview.version.label || "快照"}</strong> · {relative(versionPreview.version.createdAt)}</p>
+                  <p className="project-muted" data-testid="wb-restore-summary">
+                    還原會：{describeRestore(planRestore(versionPreview.snapshot, { nodes: liveNodes, edges, frames }))}
+                    {versionPreview.dropped ? `（有 ${versionPreview.dropped} 筆內容格式不符，已略過）` : ""}
+                  </p>
+                  <button type="button" className="project-save-button project-submit" data-testid="wb-restore-confirm" disabled={!canEdit || versionBusy} onClick={async () => {
+                    setVersionBusy(true);
+                    try {
+                      const result = await api.onRestoreVersion!(versionPreview.snapshot);
+                      // 只說真話：離線時是「排隊中」，不是「已還原」
+                      showNotice(result.queued
+                        ? `已套用 ${result.applied} 筆，離線中會在回網後送出`
+                        : result.applied ? `已還原（${result.applied} 筆）` : "沒有需要變更的內容");
+                      resetHistory(); // 還原後舊的 undo/redo 不再對得上
+                      setSheet(null);
+                      setVersionPreview(null);
+                    } catch {
+                      showNotice("還原沒有完成，畫面維持現狀");
+                    } finally {
+                      setVersionBusy(false);
+                    }
+                  }}>確認還原</button>
+                  <button type="button" className="wb-card" onClick={() => setVersionPreview(null)}>看其他版本</button>
+                </>
+              ) : (
+                <>
+                  <p className="project-muted">存一張快照，之後可以整塊板回到那時候。還原是逐筆寫回，走一樣的版本檢查。</p>
+                  {canEdit && api.onSnapshotBoard && (
+                    <button type="button" className="project-save-button project-submit" data-testid="wb-snapshot" disabled={versionBusy} onClick={async () => {
                       setVersionBusy(true);
                       try {
-                        await api.onRestoreVersion?.(version);
-                        showNotice("已還原到這個版本");
-                        setSheet(null);
-                      } catch {
-                        showNotice("還原沒有完成，畫面維持現狀");
+                        await api.onSnapshotBoard!(`${new Date().toLocaleString("zh-TW", { hour12: false })} 的快照`);
+                        setVersions(await api.onListVersions!());
+                        showNotice("已存下這一刻的快照");
+                      } catch (error) {
+                        showNotice(error instanceof Error && error.message === "snapshot-too-large"
+                          ? "這塊板超過 2000 個內容，存不了快照"
+                          : "快照沒存成功，請再試一次");
                       } finally {
                         setVersionBusy(false);
                       }
-                    }}>
-                      <span>
-                        <strong>{version.label || "快照"}</strong>
-                        <small>{relative(version.createdAt)} · {describeRestore(plan)}</small>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                    }}>存一張快照</button>
+                  )}
+                  <div className="wb-options">
+                    {versions === null && <p className="project-muted">載入中…</p>}
+                    {versions?.length === 0 && <p className="project-muted">還沒有快照。先存一張，之後才有得回去。</p>}
+                    {(versions ?? []).map((version) => (
+                      <button type="button" className="wb-card" key={version.id} data-testid={`wb-version-${version.id}`} disabled={versionBusy} onClick={async () => {
+                        setVersionBusy(true);
+                        try {
+                          const loaded = await api.onLoadVersion!(version.id);
+                          setVersionPreview({ version, ...loaded });
+                        } catch {
+                          showNotice("這個版本讀不出來");
+                        } finally {
+                          setVersionBusy(false);
+                        }
+                      }}>
+                        <span>
+                          <strong>{version.label || "快照"}</strong>
+                          <small>{relative(version.createdAt)}</small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
-            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>關閉</button>
+            <button type="button" className="project-sheet-close" onClick={() => { setSheet(null); setVersionPreview(null); }}>關閉</button>
           </section>
         </div>
       )}
@@ -1284,7 +1324,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         )}
         <span className="wb-online" data-testid="wb-presence" title={boardPeopleLabel}>
           {api.online > 0 ? `${api.online}` : "1"} 人
-          {boardPeople.length ? <em data-testid="wb-board-people">{boardPeople.length + 1} 在板上</em> : null}
+          {/* 名字要看得見（P11）：手機沒有 hover，只放 title 等於沒做。
+              數字與名單同語意 — 都是「除了我以外還有誰」。 */}
+          {boardPeople.length ? (
+            <em data-testid="wb-board-people">{boardPeopleLabel}</em>
+          ) : null}
         </span>
         <button type="button" onClick={runUndo} disabled={!history.undo.length} aria-label="復原" data-testid="wb-undo">↺</button>
         <button type="button" onClick={runRedo} disabled={!history.redo.length} aria-label="重做" data-testid="wb-redo">↻</button>

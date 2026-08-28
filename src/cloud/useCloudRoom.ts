@@ -103,6 +103,7 @@ import {
   frameFromRow,
   upsertFrame as repoUpsertFrame,
   deleteFrame as repoDeleteFrame,
+  restoreDeletedNode as repoRestoreDeletedNode,
   insertOperation as repoInsertOperation,
 } from "./collaborationRepository";
 import { decideNodeWriteRetry } from "../features/collaboration/offline";
@@ -146,8 +147,12 @@ export type CloudWrites = {
   upsertFrame?: (
     frame: import("../features/collaboration/types").WhiteboardFrame,
     onPersisted?: (frame: import("../features/collaboration/types").WhiteboardFrame) => void,
+    /** stale-write：這次寫入被丟棄，上層應重讀該板 frames 並提示。 */
+    onConflict?: () => void,
   ) => void;
   deleteFrame?: (id: string) => void;
+  /** 版本還原專用：復活被軟刪的節點（F1）。 */
+  restoreNode?: (node: import("../features/collaboration/types").WhiteboardNode) => void;
   insertOperation?: (op: import("../features/collaboration/types").WhiteboardOperation) => void;
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
@@ -466,9 +471,12 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   /** Run a cloud write with optimistic UI already done; queue + degrade on failure. */
   // ---- WB04 realtime ----
   const [presencePeople, setPresencePeople] = useState<import("./roomSync").PresencePerson[]>([]);
+  const sessionUserIdRef = useRef<string | null>(null);
   /** frames 即時事件出口（App 掛上）。 */
   const onFrameEventRef = useRef<FrameEventHandler | null>(null);
   const displayNameRef = useRef("");
+  /** 重連／回前景時要一起自癒的東西（App 掛 frames 重讀）。 */
+  const reviveExtraRef = useRef<(() => void) | null>(null);
   // frame 的「執行時最新值」— 見 writes.upsertFrame（S6 版本簿記）
   const frameLatest = useRef(new Map<string, import("../features/collaboration/types").WhiteboardFrame>());
   const run = useCallback(
@@ -595,7 +603,9 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     setInviteInvalid(false);
     (async () => {
       try {
-        setUserId(await ensureSession(supabase));
+        const sessionUserId = await ensureSession(supabase);
+        setUserId(sessionUserId);
+        sessionUserIdRef.current = sessionUserId;
         if (isGuestSession && token) {
           await joinRoom(supabase, targetRoomId, token, guest);
         }
@@ -630,7 +640,10 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
             }
           });
         });
-        unsubRef.current = subscribeRoom(supabase, targetRoomId, (await supabase.auth.getUser()).data.user?.id ?? "anon", {
+        // presence key 必須與 cloud.userId 同源（P8）：舊寫法用 getUser()
+        // （會打網路，失敗回 "anon"），自我過濾卻比對 ensureSession 的 id —
+        // 兩者分歧時使用者會在「也在這塊板」看到自己。
+        unsubRef.current = subscribeRoom(supabase, targetRoomId, sessionUserIdRef.current ?? "anon", {
           onRoom: scheduleReload,
           onCommentUpsert: scheduleReload,
           onStrokeInsert: scheduleReload,
@@ -669,13 +682,15 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
           onBoardFrameDelete: (id) => onFrameEventRef.current?.({ type: "delete", id }),
           onPresence: setOnline,
           onPresenceList: (people) => setPresencePeople(people),
-          displayName: displayNameRef.current,
+          // 重訂閱時 track 的初值現查（F3）
+          getPresenceIdentity: () => ({ boardId: activeWhiteboardRef.current }),
           onStatus: (connected) => {
             if (connected) {
               void flushPending();
               // row-patch 拿掉了 nudge 的意外自癒：重連時對開著的板
               // 刻意 loadWhiteboard 補齊斷線期間漏掉的增量。
               if (activeWhiteboardRef.current) void loadWhiteboard(activeWhiteboardRef.current);
+              reviveExtraRef.current?.(); // frames 不在 graph 裡，另外補（R2）
             }
             setStatus((s) => (connected ? (pending.current.length ? "offline-pending" : "synced") : "connecting"));
           },
@@ -696,6 +711,10 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       unsubRef.current?.();
       unsubRef.current = null;
       boundRef.current = null;
+      // 在場名單只由 sync 事件推進，channel 一收掉就再也不會更新 —
+      // 不清空的話「N 在板上」會凍結在最後一次 sync（P10）。
+      setPresencePeople([]);
+      setOnline(0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, guest?.id, isGuestSession, room?.id, bindNonce]);
@@ -1113,16 +1132,30 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     // stale-write 拒絕，且 run() 的重試 closure 捕捉的是同一份過期
     // payload，重放永遠失敗（佇列中毒）。改為：送出前查 latest（重試時
     // 自動用到已 ack 的版本），ack 後把 persisted 版本回報給呼叫端。
-    upsertFrame: (frame, onPersisted) => {
+    upsertFrame: (frame, onPersisted, onConflict) => {
       frameLatest.current.set(frame.id, frame);
       run(`frame:${frame.id}`, async () => {
         const latest = frameLatest.current.get(frame.id) ?? frame;
-        const persisted = await repoUpsertFrame(supabase!, { ...latest, roomId: boundRef.current! });
-        frameLatest.current.set(persisted.id, persisted);
-        onPersisted?.(persisted);
+        try {
+          const persisted = await repoUpsertFrame(supabase!, { ...latest, roomId: boundRef.current! });
+          frameLatest.current.set(persisted.id, persisted);
+          onPersisted?.(persisted);
+        } catch (error) {
+          // stale-write：別人已存了較新版本。**不能進重試佇列** — 同一份
+          // 過期 payload 重放永遠 409（節點路徑早就是這個紀律）。丟棄這次
+          // 寫入、要求上層重讀，並誠實告訴使用者。
+          if (isStaleWrite(error)) {
+            frameLatest.current.delete(frame.id);
+            onConflict?.();
+            return;
+          }
+          throw error;
+        }
       });
     },
     deleteFrame: (id) => run(`frame:${id}`, () => repoDeleteFrame(supabase!, boundRef.current!, id)),
+    restoreNode: (node) =>
+      run(`node:${node.id}`, () => repoRestoreDeletedNode(supabase!, boundRef.current!, node).then(() => undefined)),
     // op 入帳 best-effort：duplicate（重試）在 repository 折成成功；
     // 失敗只損 undo 粒度不損資料 — 不進佇列、不擋操作（ADR-014）。
     insertOperation: (op) => run(`op:${op.opId}`, () => repoInsertOperation(supabase!, { ...op, roomId: boundRef.current! })),
@@ -1141,11 +1174,15 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     setFrameEventHandler: (handler: FrameEventHandler | null) => {
       onFrameEventRef.current = handler;
     },
+    /** 重連/回前景的額外自癒（frames 不在 loadWhiteboardGraph 裡）。 */
+    setReviveHandler: (handler: (() => void) | null) => {
+      reviveExtraRef.current = handler;
+    },
     /** 在場身分／所在板變了就重新 track（開關板時呼叫）。 */
-    retrackPresence: (next: { name?: string; boardId?: string | null }) => {
+    retrackPresence: (next: { name?: string }) => {
       if (next.name !== undefined) displayNameRef.current = next.name;
-      const sub = unsubRef.current as unknown as { retrack?: (n: { name?: string; boardId?: string | null }) => void } | null;
-      sub?.retrack?.(next);
+      const sub = unsubRef.current as unknown as { retrack?: () => void } | null;
+      sub?.retrack?.();
     },
     status,
     online,

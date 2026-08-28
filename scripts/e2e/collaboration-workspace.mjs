@@ -428,11 +428,16 @@ try {
         await page.getByTestId("whiteboard-more").click();
         await page.getByTestId("wb-open-versions").click();
         await page.waitForSelector("[data-testid^='wb-version-']", { timeout: 8000 });
+        // 兩步流程：點版本 → 取快照＋顯示「還原會發生什麼」→ 確認
         await page.locator("[data-testid^='wb-version-']").first().click();
+        await page.waitForSelector('[data-testid="wb-restore-summary"]', { timeout: 10000 });
+        const summary = await page.getByTestId("wb-restore-summary").innerText();
+        check("還原前先說清楚會發生什麼", summary.includes("還原會："), summary.slice(0, 80));
+        await page.getByTestId("wb-restore-confirm").click();
         await page.waitForFunction(
           () => !document.querySelector('[data-testid="wb-versions"]'),
           null,
-          { timeout: 8000 },
+          { timeout: 10000 },
         );
         await page.waitForTimeout(400);
         const restored = await page.evaluate(() =>

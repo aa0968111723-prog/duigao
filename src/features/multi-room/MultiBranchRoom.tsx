@@ -113,9 +113,11 @@ export type MultiBranchRoomApi = {
   editors: PresenceEditor[];
   /** WB04：開著同一塊板的其他人（具名在場，無游標）。 */
   boardPeople?: { userId: string; name: string }[];
-  onSnapshotBoard?: (label: string) => Promise<void> | void;
-  onListVersions?: () => Promise<import("../whiteboard/versions").BoardVersion[]>;
-  onRestoreVersion?: (version: import("../whiteboard/versions").BoardVersion) => Promise<void> | void;
+  onFrameDragState?: (id: string | null) => void;
+  onSnapshotBoard?: (label: string) => Promise<void>;
+  onListVersions?: () => Promise<import("../whiteboard/versions").BoardVersionSummary[]>;
+  onLoadVersion?: (versionId: string) => Promise<{ snapshot: import("../whiteboard/versions").BoardSnapshot; dropped: number }>;
+  onRestoreVersion?: (snapshot: import("../whiteboard/versions").BoardSnapshot) => Promise<{ applied: number; queued: boolean }>;
   onShare: () => void;
   /** 改房間名字。刻意與 setTitle 分開：setTitle 在有 activeBranchId 時改的是分支名。 */
   onRenameRoom: (title: string) => void;
@@ -956,8 +958,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     online: api.online,
                     editors: api.editors,
                     boardPeople: api.boardPeople,
+                    onFrameDragState: api.onFrameDragState,
                     onSnapshotBoard: api.onSnapshotBoard,
                     onListVersions: api.onListVersions,
+                    onLoadVersion: api.onLoadVersion,
                     onRestoreVersion: api.onRestoreVersion,
                     isMobile,
                     focusNodeId: api.focusNodeId,

@@ -320,6 +320,42 @@ export async function upsertNode(supabase: SupabaseClient, node: WhiteboardNode)
   return requireNodeFromRow(data as NodeRow | null, node);
 }
 
+/**
+ * 復活被軟刪的節點（WB04/F1）— **只給版本還原用**。
+ *
+ * 一般 upsert 的 payload 刻意不含 deleted_at（墓碑紀律：編輯路徑永遠碰
+ * 不到那一欄），所以「還原一張含有『之後被刪掉的節點』的快照」原本做不到：
+ * 節點樂觀出現、tombstone 的 realtime echo 一到就再度消失。這支是明確的
+ * 反向動作：先讀現況 version（含墓碑列）再帶著它 update，OCC 照走。
+ */
+export async function restoreDeletedNode(
+  supabase: SupabaseClient,
+  roomId: string,
+  node: WhiteboardNode,
+): Promise<WhiteboardNode> {
+  const { data: existing, error: readError } = await supabase
+    .from("whiteboard_nodes")
+    .select("version")
+    .eq("id", node.id)
+    .eq("room_id", roomId)
+    .maybeSingle();
+  if (readError) throw new CloudError(readError.message, "whiteboard-node");
+  if (!existing) {
+    // 列真的不見了（硬刪或跨房）→ 當新節點插入
+    return upsertNode(supabase, { ...node, version: 1 });
+  }
+  const currentVersion = Number((existing as { version?: number }).version ?? 1);
+  const { data, error } = await supabase
+    .from("whiteboard_nodes")
+    .update({ ...nodeRowPayload({ ...node, version: currentVersion }), deleted_at: null })
+    .eq("id", node.id)
+    .eq("room_id", roomId)
+    .select("*")
+    .maybeSingle();
+  if (error) throw new CloudError(error.message, "whiteboard-node");
+  return requireNodeFromRow(data as NodeRow | null, { ...node, version: currentVersion });
+}
+
 export async function persistNodePosition(supabase: SupabaseClient, node: WhiteboardNode): Promise<WhiteboardNode> {
   const { data, error } = await supabase.from("whiteboard_nodes").update({
     x: node.x,
@@ -549,37 +585,56 @@ export async function createBoardVersion(
   if (error) throw new CloudError(error.message, "whiteboard-version");
 }
 
-/** 版本清單（WB04）：不取 snapshot 以外的東西，快照本身可能不小。 */
+/**
+ * 版本清單（WB04/P6）：**真的不取 snapshot**。舊版寫著這句註解卻
+ * `.select("*")` — 開一次版本歷史就下載 20 份完整快照（每份最多 2000 個
+ * 節點含 content）。清單只要 metadata，快照在使用者點下去時才取。
+ */
 export async function listBoardVersions(
   supabase: SupabaseClient,
   roomId: string,
   whiteboardId: string,
   limit = 20,
-): Promise<import("../features/whiteboard/versions").BoardVersion[]> {
+): Promise<import("../features/whiteboard/versions").BoardVersionSummary[]> {
   const { data, error } = await supabase
     .from("whiteboard_versions")
-    .select("*")
+    .select("id, whiteboard_id, room_id, label, created_by, created_at")
     .eq("room_id", roomId)
     .eq("whiteboard_id", whiteboardId)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new CloudError(error.message, "whiteboard-version");
-  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => {
-    const snapshot = (row.snapshot ?? {}) as { nodes?: unknown; edges?: unknown; frames?: unknown };
-    return {
-      id: String(row.id),
-      whiteboardId: String(row.whiteboard_id),
-      roomId: String(row.room_id),
-      label: typeof row.label === "string" ? row.label : "",
-      createdBy: String(row.created_by ?? ""),
-      createdAt: row.created_at ? new Date(String(row.created_at)).getTime() : 0,
-      snapshot: {
-        nodes: Array.isArray(snapshot.nodes) ? (snapshot.nodes as never[]) : [],
-        edges: Array.isArray(snapshot.edges) ? (snapshot.edges as never[]) : [],
-        frames: Array.isArray(snapshot.frames) ? (snapshot.frames as never[]) : [],
-      },
-    };
-  });
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: String(row.id),
+    whiteboardId: String(row.whiteboard_id),
+    roomId: String(row.room_id),
+    label: typeof row.label === "string" ? row.label : "",
+    createdBy: String(row.created_by ?? ""),
+    createdAt: row.created_at ? new Date(String(row.created_at)).getTime() : 0,
+    nodeCount: 0,
+  }));
+}
+
+/** 單一版本的完整快照（點下去才取；形狀不合的元素會被丟掉並回報）。 */
+export async function loadBoardVersion(
+  supabase: SupabaseClient,
+  roomId: string,
+  versionId: string,
+): Promise<{ snapshot: import("../features/whiteboard/versions").BoardSnapshot; dropped: number }> {
+  const { data, error } = await supabase
+    .from("whiteboard_versions")
+    .select("snapshot")
+    .eq("room_id", roomId)
+    .eq("id", versionId)
+    .maybeSingle();
+  if (error) throw new CloudError(error.message, "whiteboard-version");
+  const raw = ((data as { snapshot?: unknown } | null)?.snapshot ?? {}) as {
+    nodes?: unknown;
+    edges?: unknown;
+    frames?: unknown;
+  };
+  const { sanitizeSnapshot } = await import("../features/whiteboard/versions");
+  return sanitizeSnapshot(raw);
 }
 
 export async function deleteEdge(supabase: SupabaseClient, roomId: string, edgeId: string): Promise<void> {

@@ -9,9 +9,9 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { createLayerStack } from "../../src/lib/historyLayers";
 
-function harness() {
+function harness(options: { initialState?: unknown; clock?: { now: () => number; advance: (ms: number) => void } } = {}) {
   const log: string[] = [];
-  const entries: unknown[] = [null]; // 基準格
+  const entries: unknown[] = [options.initialState ?? null]; // 基準格
   let index = 0;
   const pending: unknown[] = [];
   const history = {
@@ -29,7 +29,9 @@ function harness() {
       }
     },
   };
-  const stack = createLayerStack(history);
+  let clockNow = 0;
+  const clock = options.clock ?? { now: () => clockNow, advance: (ms: number) => { clockNow += ms; } };
+  const stack = createLayerStack({ ...history, getState: () => entries[index] }, () => clock.now());
   /** 派送已排隊的 popstate（模擬瀏覽器非同步送達）。 */
   const flush = () => {
     while (pending.length) stack.handlePop(pending.shift());
@@ -43,7 +45,9 @@ function harness() {
     index += 1;
     stack.handlePop(entries[index]);
   };
-  return { log, stack, userBack, userForward, flush };
+  /** 模擬「back() 沒有產生 popstate」（已在最舊一格／導覽被取消）。 */
+  const swallowNextBack = () => { pending.length = 0; };
+  return { log, stack, userBack, userForward, flush, clock, swallowNextBack };
 }
 
 test("單層：back → onBack closed → 層消失、外層不受擾", () => {
@@ -160,6 +164,29 @@ test("Escape：repush 的層（白板有 sheet 開著）不消耗 history、層�
   assert.equal(stack.depth(), 1, "關 sheet 不退層");
   assert.equal(log.filter((entry) => entry === "back").length, backsBefore, "repush 不得動 history");
   stack.handleEscape();
+  assert.equal(stack.depth(), 0);
+});
+
+test("H1：程式性 back 沒有產生 popstate 時，過期的期待不得吞掉之後真正的返回", () => {
+  const { stack, clock, swallowNextBack, userBack } = harness();
+  const hits: string[] = [];
+  stack.push("board-focus", () => { hits.push("focus"); return "closed"; });
+  const removeOverlay = stack.push("content-overlay", () => { hits.push("overlay"); return "closed"; });
+  removeOverlay(false);   // 程式性關閉：會 back()
+  swallowNextBack();      // 但這次 traversal 沒送出 popstate
+  assert.deepEqual(hits, []);
+  clock.advance(5000);    // 過了一段時間，使用者真的按返回
+  userBack();
+  assert.deepEqual(hits, ["focus"], "過期的 selfConsume 不得吞掉真正的 back（舊版兩層都關不掉）");
+});
+
+test("H2：重新整理後接續舊序號 — 返回鍵仍然有效（不被誤判成 forward）", () => {
+  // 重整前的頁面留下 __seq=5 的那一格
+  const { stack, userBack } = harness({ initialState: { __layer: "board-focus", __seq: 5 } });
+  const hits: string[] = [];
+  stack.push("board-focus", () => { hits.push("focus"); return "closed"; });
+  userBack();
+  assert.deepEqual(hits, ["focus"], "新層的序號必須大於重整前留下的舊格（舊版從 0 起算 → 被判成 forward、按了沒反應）");
   assert.equal(stack.depth(), 0);
 });
 
