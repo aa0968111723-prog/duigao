@@ -1,3 +1,4 @@
+import type { WhiteboardFrame } from "../features/collaboration/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ContentRelation,
@@ -99,6 +100,7 @@ import {
   updateWhiteboard as repoUpdateWhiteboard,
   upsertNode as repoUpsertNode,
   softDeleteNode as repoSoftDeleteNode,
+  frameFromRow,
   upsertFrame as repoUpsertFrame,
   deleteFrame as repoDeleteFrame,
   insertOperation as repoInsertOperation,
@@ -110,6 +112,12 @@ import {
   flushPendingWrites,
   type PendingWrite,
 } from "./pendingWrites";
+
+/** frames 即時事件（WB04）：別人建/移/刪的區塊。 */
+export type FrameEvent =
+  | { type: "upsert"; frame: WhiteboardFrame }
+  | { type: "delete"; id: string };
+export type FrameEventHandler = (event: FrameEvent) => void;
 
 export type CloudWrites = {
   setTitle: (title: string) => void;
@@ -456,6 +464,11 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   }, []);
 
   /** Run a cloud write with optimistic UI already done; queue + degrade on failure. */
+  // ---- WB04 realtime ----
+  const [presencePeople, setPresencePeople] = useState<import("./roomSync").PresencePerson[]>([]);
+  /** frames 即時事件出口（App 掛上）。 */
+  const onFrameEventRef = useRef<FrameEventHandler | null>(null);
+  const displayNameRef = useRef("");
   // frame 的「執行時最新值」— 見 writes.upsertFrame（S6 版本簿記）
   const frameLatest = useRef(new Map<string, import("../features/collaboration/types").WhiteboardFrame>());
   const run = useCallback(
@@ -648,7 +661,15 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
             if (edge) onBoardPatchRef.current?.({ type: "edge-insert", edge });
           },
           onBoardEdgeDelete: (id) => onBoardPatchRef.current?.({ type: "edge-delete", id }),
+          // frames 即時（WB04）：別人建/移/刪的區塊直接進畫面
+          onBoardFrameUpsert: (row) => {
+            const frame = frameFromRow(row);
+            if (frame) onFrameEventRef.current?.({ type: "upsert", frame });
+          },
+          onBoardFrameDelete: (id) => onFrameEventRef.current?.({ type: "delete", id }),
           onPresence: setOnline,
+          onPresenceList: (people) => setPresencePeople(people),
+          displayName: displayNameRef.current,
           onStatus: (connected) => {
             if (connected) {
               void flushPending();
@@ -1114,6 +1135,18 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   };
 
   return {
+    // ---- WB04 realtime ----
+    presencePeople,
+    /** frames 即時事件出口：App 掛一個 handler 進來。 */
+    setFrameEventHandler: (handler: FrameEventHandler | null) => {
+      onFrameEventRef.current = handler;
+    },
+    /** 在場身分／所在板變了就重新 track（開關板時呼叫）。 */
+    retrackPresence: (next: { name?: string; boardId?: string | null }) => {
+      if (next.name !== undefined) displayNameRef.current = next.name;
+      const sub = unsubRef.current as unknown as { retrack?: (n: { name?: string; boardId?: string | null }) => void } | null;
+      sub?.retrack?.(next);
+    },
     status,
     online,
     inviteUrl,

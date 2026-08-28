@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T14:04:55.000Z",
+  "generatedAt": "2026-08-28T14:54:50.000Z",
   "git": {
-    "branch": "agent/wb03-bidirectional-links",
-    "sha": "d5d71df223db347c3479067d5401f5a37d8d567c",
+    "branch": "agent/wb04-realtime",
+    "sha": "d1f8d3d0ee30de90254d2a2b0359dd079bc830ca",
     "mainSha": "361bec04be944d36cb1c6a3e9e62572caecc54c7",
     "dirty": true
   },

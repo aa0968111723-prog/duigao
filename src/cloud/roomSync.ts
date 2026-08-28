@@ -1,6 +1,6 @@
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import type { BranchRow, CommentRow, MessageRow, PlanRow, PollRow, PollVoteRow, ProposalRow, RelationRow, RoomRow, StrokeRow, VersionRow } from "./types";
-import type { EdgeRow, NodeRow } from "./collaborationRepository";
+import type { EdgeRow, NodeRow, FrameRow } from "./collaborationRepository";
 
 export type SyncHandlers = {
   onRoom?: (row: RoomRow) => void;
@@ -15,9 +15,16 @@ export type SyncHandlers = {
   /** 開著的白板即時 row-patch（PR-02c）：不再整房 reload。 */
   onBoardNodeUpsert?: (row: NodeRow) => void;
   onBoardNodeDelete?: (id: string) => void;
+  /** frames 即時（WB04）：WB03 只在開板時載一次，別人建的區塊看不到。 */
+  onBoardFrameUpsert?: (row: FrameRow) => void;
+  onBoardFrameDelete?: (id: string) => void;
   onBoardEdgeInsert?: (row: EdgeRow) => void;
   onBoardEdgeDelete?: (id: string) => void;
   onPresence?: (count: number) => void;
+  /** 具名在場者（WB04）：誰在線上、各自開著哪塊板。無游標流。 */
+  onPresenceList?: (people: PresencePerson[]) => void;
+  /** 自己的顯示名稱（track 用）。 */
+  displayName?: string;
   onStatus?: (connected: boolean) => void;
 };
 
@@ -28,16 +35,31 @@ export type Unsubscribe = () => void;
  * count. Realtime is transient: the source of truth stays in Postgres, so a
  * missed event is healed by the next loadRoom.
  */
+export type PresencePerson = {
+  userId: string;
+  name: string;
+  /** 這個人此刻開著的白板 id（null＝不在白板上）。 */
+  boardId: string | null;
+  at: number;
+};
+
+export type RoomSubscription = Unsubscribe & {
+  /** 身分或所在板變了：重新 track（開關板時呼叫，不是每次移動）。 */
+  retrack: (next: { name?: string; boardId?: string | null }) => void;
+};
+
 export function subscribeRoom(
   supabase: SupabaseClient,
   roomId: string,
   userId: string,
   handlers: SyncHandlers,
-): Unsubscribe {
+): RoomSubscription {
   const filter = `room_id=eq.${roomId}`;
   const channel: RealtimeChannel = supabase.channel(`room:${roomId}`, {
     config: { presence: { key: userId } },
   });
+  const identity: { name: string; boardId: string | null } = { name: handlers.displayName ?? "", boardId: null };
+  const trackPayload = () => ({ at: Date.now(), name: identity.name, boardId: identity.boardId });
 
   channel
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, (p) =>
@@ -110,7 +132,23 @@ export function subscribeRoom(
       const id = (p.old as { id?: string })?.id;
       if (id) handlers.onBoardNodeDelete?.(id);
     })
+    // frames（0023）：與節點同樣走 row-patch — 不觸發整房快照
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "whiteboard_frames", filter }, (p) =>
+      handlers.onBoardFrameUpsert?.(p.new as FrameRow),
+    )
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "whiteboard_frames", filter }, (p) =>
+      handlers.onBoardFrameUpsert?.(p.new as FrameRow),
+    )
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_frames", filter: undefined }, (p) => {
+      const id = (p.old as { id?: string })?.id;
+      if (id) handlers.onBoardFrameDelete?.(id);
+    })
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "whiteboard_edges", filter }, (p) =>
+      handlers.onBoardEdgeInsert?.(p.new as EdgeRow),
+    )
+    // edge UPDATE（WB04）：0022 之後 edges 有 label/handle/version 可以改，
+    // 但只訂了 INSERT/DELETE — 別人改的線標籤在對方重載前都看不到。
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "whiteboard_edges", filter }, (p) =>
       handlers.onBoardEdgeInsert?.(p.new as EdgeRow),
     )
     .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_edges", filter: undefined }, (p) => {
@@ -121,15 +159,38 @@ export function subscribeRoom(
     .on("postgres_changes", { event: "*", schema: "public", table: "room_discussion_supports", filter }, () => handlers.onProjectChange?.())
     .on("postgres_changes", { event: "*", schema: "public", table: "decision_records", filter }, () => handlers.onProjectChange?.())
     .on("presence", { event: "sync" }, () => {
-      handlers.onPresence?.(Object.keys(channel.presenceState()).length);
+      const state = channel.presenceState() as Record<string, Array<Record<string, unknown>>>;
+      handlers.onPresence?.(Object.keys(state).length);
+      const people: PresencePerson[] = [];
+      for (const [key, metas] of Object.entries(state)) {
+        const meta = metas[metas.length - 1] ?? {};
+        people.push({
+          userId: key,
+          name: typeof meta.name === "string" ? meta.name : "",
+          boardId: typeof meta.boardId === "string" ? meta.boardId : null,
+          at: typeof meta.at === "number" ? meta.at : 0,
+        });
+      }
+      handlers.onPresenceList?.(people);
     })
     .subscribe((status) => {
       const connected = status === "SUBSCRIBED";
       handlers.onStatus?.(connected);
-      if (connected) void channel.track({ at: Date.now() });
+      if (connected) void channel.track(trackPayload());
     });
 
-  return () => {
-    void supabase.removeChannel(channel);
+  // 身分／所在板變動時重新 track（**只在開關板時**，不是每次移動 —
+  // 「行動裝置友善的在場感：不送游標、不送 16ms 心跳」的既有紀律）。
+  const retrack = (next: { name?: string; boardId?: string | null }) => {
+    if (next.name !== undefined) identity.name = next.name;
+    if (next.boardId !== undefined) identity.boardId = next.boardId;
+    void channel.track(trackPayload());
   };
+
+  return Object.assign(
+    () => {
+      void supabase.removeChannel(channel);
+    },
+    { retrack },
+  );
 }

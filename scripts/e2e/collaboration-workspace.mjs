@@ -398,6 +398,50 @@ try {
         );
       }
 
+      // ---- WB04：版本快照與還原 ----
+      {
+        await dismissSelection(page);
+        await page.getByTestId("whiteboard-more").click();
+        await page.getByTestId("wb-open-versions").click();
+        await page.waitForSelector('[data-testid="wb-versions"]', { timeout: 8000 });
+        await page.getByTestId("wb-snapshot").click();
+        await page.waitForFunction(
+          () => document.querySelectorAll("[data-testid^='wb-version-']").length >= 1,
+          null,
+          { timeout: 10000 },
+        );
+        check("可存下白板快照並列在版本歷史", true);
+        // 快照真的寫進雲端（讀 mock 列，不是看呼叫成功）
+        const versionRow = (rows.whiteboard_versions ?? [])[0] ?? null;
+        check(
+          "快照有寫進 whiteboard_versions 且含節點",
+          Boolean(versionRow && Array.isArray(versionRow.snapshot?.nodes) && versionRow.snapshot.nodes.length > 0),
+          versionRow ? `nodes=${versionRow.snapshot?.nodes?.length}` : "no row",
+        );
+        await page.getByRole("button", { name: "關閉" }).click();
+        // 快照後改動一個節點，再還原 → 內容回到快照當時
+        await searchNode(page, "招生");
+        const beforeText = await page.locator(".wb-node.is-selected .wb-node-static, .wb-node.is-selected textarea").first().inputValue().catch(() => null);
+        await page.getByRole("button", { name: "編輯", exact: true }).click();
+        await fillEditing(page, "快照後改的字");
+        await dismissSelection(page);
+        await page.getByTestId("whiteboard-more").click();
+        await page.getByTestId("wb-open-versions").click();
+        await page.waitForSelector("[data-testid^='wb-version-']", { timeout: 8000 });
+        await page.locator("[data-testid^='wb-version-']").first().click();
+        await page.waitForFunction(
+          () => !document.querySelector('[data-testid="wb-versions"]'),
+          null,
+          { timeout: 8000 },
+        );
+        await page.waitForTimeout(400);
+        const restored = await page.evaluate(() =>
+          Array.from(document.querySelectorAll(".wb-node")).map((el) => el.textContent ?? "").join("|"),
+        );
+        check("還原後「快照後改的字」不再出現在板上", !restored.includes("快照後改的字"), restored.slice(0, 120));
+        void beforeText;
+      }
+
       // freehand：繪圖工具畫一筆 → 節點；undo 軟刪
       await dismissSelection(page);
       await page.getByTestId("wb-tool-draw").click();

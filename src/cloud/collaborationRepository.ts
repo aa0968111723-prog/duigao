@@ -549,6 +549,39 @@ export async function createBoardVersion(
   if (error) throw new CloudError(error.message, "whiteboard-version");
 }
 
+/** 版本清單（WB04）：不取 snapshot 以外的東西，快照本身可能不小。 */
+export async function listBoardVersions(
+  supabase: SupabaseClient,
+  roomId: string,
+  whiteboardId: string,
+  limit = 20,
+): Promise<import("../features/whiteboard/versions").BoardVersion[]> {
+  const { data, error } = await supabase
+    .from("whiteboard_versions")
+    .select("*")
+    .eq("room_id", roomId)
+    .eq("whiteboard_id", whiteboardId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new CloudError(error.message, "whiteboard-version");
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => {
+    const snapshot = (row.snapshot ?? {}) as { nodes?: unknown; edges?: unknown; frames?: unknown };
+    return {
+      id: String(row.id),
+      whiteboardId: String(row.whiteboard_id),
+      roomId: String(row.room_id),
+      label: typeof row.label === "string" ? row.label : "",
+      createdBy: String(row.created_by ?? ""),
+      createdAt: row.created_at ? new Date(String(row.created_at)).getTime() : 0,
+      snapshot: {
+        nodes: Array.isArray(snapshot.nodes) ? (snapshot.nodes as never[]) : [],
+        edges: Array.isArray(snapshot.edges) ? (snapshot.edges as never[]) : [],
+        frames: Array.isArray(snapshot.frames) ? (snapshot.frames as never[]) : [],
+      },
+    };
+  });
+}
+
 export async function deleteEdge(supabase: SupabaseClient, roomId: string, edgeId: string): Promise<void> {
   const { error } = await supabase.from("whiteboard_edges").delete().eq("id", edgeId).eq("room_id", roomId);
   if (error) throw new CloudError(error.message, "whiteboard-edge");

@@ -29,7 +29,8 @@ import {
 } from "./lib/types";
 import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
-import { loadFrames as loadBoardFrames, loadNodeRefs } from "./cloud/collaborationRepository";
+import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, createBoardVersion } from "./cloud/collaborationRepository";
+import { buildSnapshot, planRestore, type BoardVersion } from "./features/whiteboard/versions";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -259,6 +260,10 @@ export function App() {
   // WB02 Focus Mode：白板全螢幕時 AssetAiFab 條件不渲染（wireflow 疊加規則）
   const [boardFocused, setBoardFocused] = useState(false);
   const [boardFrames, setBoardFrames] = useState<import("./features/collaboration/types").WhiteboardFrame[]>([]);
+  const activeWhiteboardRef = useRef<string | null>(null);
+  activeWhiteboardRef.current = activeWhiteboardId;
+  const boardFramesRef = useRef<import("./features/collaboration/types").WhiteboardFrame[]>([]);
+  boardFramesRef.current = boardFrames;
   // 開板時載該板 frames — onOpenWhiteboard 與 WB03 反向鏈 chip 共用同一
   // 條路徑（S13：chip 直接設 activeWhiteboardId 會讓 frames 停在上一塊板
   // 的內容，使用者以為區塊被刪了）。
@@ -275,6 +280,26 @@ export function App() {
     branchId: string;
     refs: Array<{ id: string; whiteboardId: string }>;
   } | null>(null);
+  // frames 即時（WB04）：別人建/移/刪的區塊直接進畫面。版本較舊的 echo
+  // 丟棄 — 自己剛寫的樂觀值不會被自己那份較舊的廣播蓋回去。
+  useEffect(() => {
+    cloudRef.current.setFrameEventHandler?.((event) => {
+      if (event.type === "delete") {
+        setBoardFrames((current) => current.filter((item) => item.id !== event.id));
+        return;
+      }
+      const incoming = event.frame;
+      if (incoming.whiteboardId !== activeWhiteboardRef.current) return; // 不是開著的板
+      setBoardFrames((current) => {
+        const existing = current.find((item) => item.id === incoming.id);
+        if (!existing) return [...current, incoming];
+        if ((incoming.version ?? 1) < (existing.version ?? 1)) return current;
+        return current.map((item) => (item.id === incoming.id ? incoming : item));
+      });
+    });
+    return () => cloudRef.current.setFrameEventHandler?.(null);
+  }, []);
+
   const loadFramesForBoard = useCallback((boardId: string | null) => {
     setBoardFrames([]);
     if (!boardId) return;
@@ -285,6 +310,15 @@ export function App() {
       .then((frames) => setBoardFrames(frames))
       .catch(() => setBoardFrames([]));
   }, []);
+
+  // 在場身分（WB04）：開/關板時重新 track — 只在這兩個時機，不送游標、
+  // 不送心跳（presence.ts 既有的「行動裝置友善」紀律）。
+  useEffect(() => {
+    cloudRef.current.retrackPresence?.({
+      name: guest?.name ?? "",
+      boardId: activeWhiteboardId,
+    });
+  }, [activeWhiteboardId, guest?.name]);
 
   useEffect(() => {
     const branchId = activeBranchId;
@@ -2995,6 +3029,60 @@ export function App() {
             createdAt: Date.now(),
           });
         },
+        // ---- WB04 版本歷史（只在雲端房提供 — 本機房沒有快照表） ----
+        onSnapshotBoard: async (label) => {
+          const supabase = getSupabase();
+          const bound = cloudRef.current.boundRoomId;
+          const boardId = activeWhiteboardRef.current;
+          const actor = cloudRef.current.userId;
+          if (!supabase || !bound || !boardId || !actor) throw new Error("cloud-required");
+          const roomNow = roomRef.current;
+          const snapshot = buildSnapshot(
+            (roomNow?.whiteboardNodes ?? []).filter((node) => node.whiteboardId === boardId),
+            (roomNow?.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId === boardId),
+            boardFramesRef.current.filter((frame) => frame.whiteboardId === boardId),
+          );
+          await createBoardVersion(supabase, {
+            id: crypto.randomUUID(),
+            whiteboardId: boardId,
+            roomId: bound,
+            label,
+            createdBy: actor,
+            snapshot,
+          });
+        },
+        onListVersions: async () => {
+          const supabase = getSupabase();
+          const bound = cloudRef.current.boundRoomId;
+          const boardId = activeWhiteboardRef.current;
+          if (!supabase || !bound || !boardId) return [] as BoardVersion[];
+          return listBoardVersions(supabase, bound, boardId);
+        },
+        onRestoreVersion: async (version) => {
+          const boardId = activeWhiteboardRef.current;
+          if (!boardId) return;
+          const roomNow = roomRef.current;
+          const plan = planRestore(version.snapshot, {
+            nodes: (roomNow?.whiteboardNodes ?? []).filter((node) => node.whiteboardId === boardId),
+            edges: (roomNow?.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId === boardId),
+            frames: boardFramesRef.current.filter((frame) => frame.whiteboardId === boardId),
+          });
+          // 逐筆走既有管線：OCC、op 帳、離線佇列全部沿用（ADR-014：
+          // 還原不是整包覆蓋，也不繞過版本檢查）
+          if (plan.upsertNodes.length) upsertNodes(plan.upsertNodes);
+          for (const id of plan.deleteNodeIds) deleteNode(id);
+          for (const frame of plan.upsertFrames) {
+            setBoardFrames((current) => current.some((item) => item.id === frame.id)
+              ? current.map((item) => (item.id === frame.id ? frame : item))
+              : [...current, frame]);
+            cloudRef.current.writes.upsertFrame?.(frame, adoptFrameVersion);
+          }
+          for (const id of plan.deleteFrameIds) {
+            setBoardFrames((current) => current.filter((item) => item.id !== id));
+            cloudRef.current.writes.deleteFrame?.(id);
+          }
+          for (const edge of plan.createEdges) createEdge(edge);
+        },
         onBoardFocusChange: setBoardFocused,
         onRenameWhiteboard: (id, title) => {
           const target = (roomRef.current?.whiteboards ?? []).find((item) => item.id === id);
@@ -3018,6 +3106,9 @@ export function App() {
         focusNodeId,
         online: cloud.online || peerCount,
         editors: boardEditors,
+        boardPeople: (cloud.presencePeople ?? [])
+          .filter((person) => person.boardId && person.boardId === activeWhiteboardId && person.userId !== cloud.userId)
+          .map((person) => ({ userId: person.userId, name: person.name })),
         onShare: openShare,
         onRenameRoom: (title: string) => {
           updateRoom((r) => ({ ...r, title }));

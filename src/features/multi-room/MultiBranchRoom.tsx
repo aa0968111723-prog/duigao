@@ -111,6 +111,11 @@ export type MultiBranchRoomApi = {
   focusNodeId: string | null;
   online: number;
   editors: PresenceEditor[];
+  /** WB04：開著同一塊板的其他人（具名在場，無游標）。 */
+  boardPeople?: { userId: string; name: string }[];
+  onSnapshotBoard?: (label: string) => Promise<void> | void;
+  onListVersions?: () => Promise<import("../whiteboard/versions").BoardVersion[]>;
+  onRestoreVersion?: (version: import("../whiteboard/versions").BoardVersion) => Promise<void> | void;
   onShare: () => void;
   /** 改房間名字。刻意與 setTitle 分開：setTitle 在有 activeBranchId 時改的是分支名。 */
   onRenameRoom: (title: string) => void;
@@ -950,6 +955,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     roleAllowsEdit: api.canManage,
                     online: api.online,
                     editors: api.editors,
+                    boardPeople: api.boardPeople,
+                    onSnapshotBoard: api.onSnapshotBoard,
+                    onListVersions: api.onListVersions,
+                    onRestoreVersion: api.onRestoreVersion,
                     isMobile,
                     focusNodeId: api.focusNodeId,
                     activeBoardId: api.activeWhiteboardId,

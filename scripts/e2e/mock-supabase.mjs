@@ -315,6 +315,23 @@ function filterRows(rows, params) {
     if (v === "is.null") out = out.filter((r) => r[k] === null || r[k] === undefined);
     if (v === "not.is.null") out = out.filter((r) => r[k] !== null && r[k] !== undefined);
   }
+  // order/limit（WB04）：真的照做，不要靜默忽略 — 版本清單這種「最新在前」
+  // 的語意若只在 mock 裡自動成立，e2e 就測不出排序壞掉（假綠溫床）。
+  const order = params.get("order");
+  if (order) {
+    const [column, direction = "asc"] = order.split(".");
+    const sign = direction.startsWith("desc") ? -1 : 1;
+    out = [...out].sort((a, b) => {
+      const left = a[column];
+      const right = b[column];
+      if (left === right) return 0;
+      if (left === null || left === undefined) return 1;
+      if (right === null || right === undefined) return -1;
+      return (left < right ? -1 : 1) * sign;
+    });
+  }
+  const limit = Number(params.get("limit"));
+  if (Number.isFinite(limit) && limit > 0) out = out.slice(0, limit);
   return out;
 }
 
