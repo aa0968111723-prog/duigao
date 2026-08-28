@@ -143,6 +143,10 @@ export function gestureReducer(
 
     case "move": {
       const previous = next.pointers.get(input.pointerId);
+      // hover 防護（WB03 e2e 逼出的真 bug）：沒按下的滑鼠移動不是手勢 —
+      // 未追蹤的 pointer 一旦入 map，下一次真按下會被當成「第二指」進
+      // pinch，長按/點擊全滅。只更新已按下的 pointer。
+      if (!previous) return { state: next, effects };
       next.pointers.set(input.pointerId, input.point);
 
       // 長按 slop（缺陷 2）：只有位移超過 slop 才取消
@@ -195,6 +199,8 @@ export function gestureReducer(
     }
 
     case "up": {
+      // 對稱防護：非追蹤中的 pointer 放開（hover release）不進手勢
+      if (!next.pointers.has(input.pointerId)) return { state: next, effects };
       next.pointers.delete(input.pointerId);
       // tap 判定（Grok wb02 F2 修正）：up 時長按仍 armed ＝ 位移未超過
       // slop 且未到長按時限 — 這就是一次 tap，**與 mode 無關**（drag/pan

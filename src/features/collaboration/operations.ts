@@ -12,7 +12,7 @@
  *
  * 本層零 I/O、零 React：WB02 佈線進 persist 管線，WB04 供版本歷史。
  */
-import type { WhiteboardNode, WhiteboardOperation, WhiteboardOpType } from "./types";
+import type { WhiteboardFrame, WhiteboardNode, WhiteboardOperation, WhiteboardOpType } from "./types";
 
 /** 尚未入帳的 op 草稿（actor/room 由呼叫端在送出時補上）。 */
 export type OperationDraft = {
@@ -103,8 +103,28 @@ export function nodeUpdateDraft(
   };
 }
 
+/**
+ * create/delete 的 mask（S8 修復）：**全欄位快照**，不是 diff。
+ *
+ * 舊寫法拿「同一個 node 但 content 清空、x/y 設 NaN」當 before 做 diff —
+ * nodeType/width/height 與自己相同故永遠不進 mask，於是 delete 的 undo
+ * （recreate）只拿得到 x/y/content，節點被以預設 text/180×96 重建：
+ * freehand 筆畫復活成空白便利貼，而且會寫回雲端＝資料損毀。frame 側
+ * 當初用 FRAME_CREATE_FIELDS 全集避開了同一坑，node 側現在補上。
+ */
+function snapshotMask(node: WhiteboardNode): string[] {
+  const mask: string[] = [];
+  for (const field of MASKABLE_FIELDS) {
+    if (readPath(node as never, field) !== undefined) mask.push(field);
+  }
+  for (const key of Object.keys(node.content ?? {})) {
+    if (readPath(node as never, `content.${key}`) !== undefined) mask.push(`content.${key}`);
+  }
+  return mask;
+}
+
 export function nodeCreateDraft(opId: string, node: WhiteboardNode): OperationDraft {
-  const mask = diffMask({ ...node, content: {} as WhiteboardNode["content"], x: NaN, y: NaN } as WhiteboardNode, node);
+  const mask = snapshotMask(node);
   return {
     opId,
     whiteboardId: node.whiteboardId,
@@ -117,7 +137,7 @@ export function nodeCreateDraft(opId: string, node: WhiteboardNode): OperationDr
 }
 
 export function nodeDeleteDraft(opId: string, node: WhiteboardNode): OperationDraft {
-  const mask = diffMask({ ...node, content: {} as WhiteboardNode["content"], x: NaN, y: NaN } as WhiteboardNode, node);
+  const mask = snapshotMask(node);
   return {
     opId,
     whiteboardId: node.whiteboardId,
@@ -138,6 +158,66 @@ export function nodeDeleteDraft(opId: string, node: WhiteboardNode): OperationDr
  * undo（=create）需要執行層**分別呼叫 softDeleteNode / upsertNode（後者
  * 用 before 的 masked 欄位重建列）— WB01 不佈線執行層，WB02/WB04 接。
  */
+// ---- frame drafts（WB03）：frame 欄位是平面的（無 content.*） ----
+const FRAME_MASKABLE_FIELDS = ["x", "y", "width", "height", "title"] as const;
+const FRAME_CREATE_FIELDS = ["x", "y", "width", "height", "title", "kind", "zIndex"] as const;
+
+function pickFrame(frame: WhiteboardFrame, fields: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of fields) out[field] = (frame as unknown as Record<string, unknown>)[field];
+  return out;
+}
+
+export function frameUpdateDraft(opId: string, before: WhiteboardFrame, after: WhiteboardFrame): OperationDraft | null {
+  const mask = FRAME_MASKABLE_FIELDS.filter(
+    (field) => !valueEquals((before as unknown as Record<string, unknown>)[field], (after as unknown as Record<string, unknown>)[field]),
+  );
+  if (!mask.length) return null;
+  return {
+    opId,
+    whiteboardId: after.whiteboardId,
+    opType: "frame-update",
+    entityId: after.id,
+    fieldMask: [...mask],
+    before: pickFrame(before, mask),
+    after: pickFrame(after, mask),
+  };
+}
+
+export function frameCreateDraft(opId: string, frame: WhiteboardFrame): OperationDraft {
+  return {
+    opId,
+    whiteboardId: frame.whiteboardId,
+    opType: "frame-create",
+    entityId: frame.id,
+    fieldMask: [...FRAME_CREATE_FIELDS],
+    before: {},
+    after: pickFrame(frame, FRAME_CREATE_FIELDS),
+  };
+}
+
+export function frameDeleteDraft(opId: string, frame: WhiteboardFrame): OperationDraft {
+  return {
+    opId,
+    whiteboardId: frame.whiteboardId,
+    opType: "frame-delete",
+    entityId: frame.id,
+    fieldMask: [...FRAME_CREATE_FIELDS],
+    before: pickFrame(frame, FRAME_CREATE_FIELDS),
+    after: {},
+  };
+}
+
+/** frame 的 applyMasked（平面欄位版）：只動 mask 內、缺值保留現值。 */
+export function applyFrameMasked(frame: WhiteboardFrame, mask: string[], values: Record<string, unknown>): WhiteboardFrame {
+  const next = { ...frame } as unknown as Record<string, unknown>;
+  for (const path of mask) {
+    if (!(FRAME_CREATE_FIELDS as readonly string[]).includes(path)) continue;
+    if (path in values && values[path] !== undefined) next[path] = values[path];
+  }
+  return next as unknown as WhiteboardFrame;
+}
+
 export function inverseDraft(op: WhiteboardOperation | OperationDraft, newOpId: string): OperationDraft {
   const flipped: Record<WhiteboardOpType, WhiteboardOpType> = {
     "node-create": "node-delete",

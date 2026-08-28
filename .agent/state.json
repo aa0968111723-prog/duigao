@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T10:37:23.000Z",
+  "generatedAt": "2026-08-28T14:04:55.000Z",
   "git": {
-    "branch": "agent/wb02-focus-mode",
-    "sha": "d5f6c0f8e1b953016c12005da30756e887c188ef",
-    "mainSha": "4b971103cead57419087af9508e763f7df88d86d",
+    "branch": "agent/wb03-bidirectional-links",
+    "sha": "d5d71df223db347c3479067d5401f5a37d8d567c",
+    "mainSha": "361bec04be944d36cb1c6a3e9e62572caecc54c7",
     "dirty": true
   },
   "project": {
@@ -980,7 +980,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0024",
+    "repoMigrationHead": "0026",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -1002,13 +1002,15 @@
       "supabase/migrations/0018_discussion_attachments.sql",
       "supabase/migrations/0019_ai_apply_audit.sql",
       "supabase/migrations/0020_canva_bridge.sql",
-      "supabase/migrations/0021_whiteboard_canonical_columns.sql",
-      "supabase/migrations/0022_whiteboard_frames.sql",
-      "supabase/migrations/0023_whiteboard_operations.sql",
-      "supabase/migrations/0024_whiteboard_versions.sql"
+      "supabase/migrations/0021_canva_design_pages.sql",
+      "supabase/migrations/0022_whiteboard_canonical_columns.sql",
+      "supabase/migrations/0023_whiteboard_frames.sql",
+      "supabase/migrations/0024_whiteboard_operations.sql",
+      "supabase/migrations/0025_whiteboard_versions.sql",
+      "supabase/migrations/0026_whiteboard_freehand.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0024",
+    "productionMigrationExpectation": "0026",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1171,7 +1173,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0024_whiteboard_versions.sql."
+        "message": "Migration order is contiguous through 0026_whiteboard_freehand.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",

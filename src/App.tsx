@@ -29,7 +29,7 @@ import {
 } from "./lib/types";
 import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
-import { loadFrames as loadBoardFrames } from "./cloud/collaborationRepository";
+import { loadFrames as loadBoardFrames, loadNodeRefs } from "./cloud/collaborationRepository";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -259,6 +259,57 @@ export function App() {
   // WB02 Focus Mode：白板全螢幕時 AssetAiFab 條件不渲染（wireflow 疊加規則）
   const [boardFocused, setBoardFocused] = useState(false);
   const [boardFrames, setBoardFrames] = useState<import("./features/collaboration/types").WhiteboardFrame[]>([]);
+  // 開板時載該板 frames — onOpenWhiteboard 與 WB03 反向鏈 chip 共用同一
+  // 條路徑（S13：chip 直接設 activeWhiteboardId 會讓 frames 停在上一塊板
+  // 的內容，使用者以為區塊被刪了）。
+  // 雲端 ack 後採納 server 版本（S6）：只動 version，位置/標題以本地
+  // 樂觀值為準（使用者可能已經又拖了一下）。
+  const adoptFrameVersion = useCallback((persisted: import("./features/collaboration/types").WhiteboardFrame) => {
+    setBoardFrames((current) =>
+      current.map((item) => (item.id === persisted.id ? { ...item, version: persisted.version } : item)),
+    );
+  }, []);
+  // 反向鏈的雲端來源（S10）：對稿開啟時查「誰引用了這個 branch／它的
+  // 版本」，不依賴房內是否已載入該板節點。
+  const [remoteBranchRefs, setRemoteBranchRefs] = useState<{
+    branchId: string;
+    refs: Array<{ id: string; whiteboardId: string }>;
+  } | null>(null);
+  const loadFramesForBoard = useCallback((boardId: string | null) => {
+    setBoardFrames([]);
+    if (!boardId) return;
+    const supabase = getSupabase();
+    const bound = cloudRef.current.boundRoomId;
+    if (!supabase || !bound) return;
+    void loadBoardFrames(supabase, bound, boardId)
+      .then((frames) => setBoardFrames(frames))
+      .catch(() => setBoardFrames([]));
+  }, []);
+
+  useEffect(() => {
+    const branchId = activeBranchId;
+    if (!branchId) {
+      setRemoteBranchRefs(null);
+      return;
+    }
+    const supabase = getSupabase();
+    const bound = cloudRef.current.boundRoomId;
+    if (!supabase || !bound) return; // 本機房：房態裡的節點就是全部
+    const versionIds = (roomRef.current?.versions ?? [])
+      .filter((version) => version.branchId === branchId)
+      .map((version) => version.id);
+    let cancelled = false;
+    void loadNodeRefs(supabase, bound, [branchId, ...versionIds])
+      .then((refs) => {
+        if (!cancelled) setRemoteBranchRefs({ branchId, refs });
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteBranchRefs(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBranchId]);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
@@ -2881,18 +2932,9 @@ export function App() {
         onOpenWhiteboard: (id) => {
           setActiveWhiteboardId(id);
           if (!id) setFocusNodeId(null);
-          setBoardFrames([]);
+          // frames（0023）：開板載入；realtime 訂閱屬 WB04
+          loadFramesForBoard(id);
           if (!id) return;
-          // frames（0022）：開板載入；realtime 訂閱屬 WB04
-          {
-            const supabase = getSupabase();
-            const bound = cloudRef.current.boundRoomId;
-            if (supabase && bound) {
-              void loadBoardFrames(supabase, bound, id)
-                .then((frames) => setBoardFrames(frames))
-                .catch(() => setBoardFrames([]));
-            }
-          }
           // 順序刻意是「先快照、後雲端」（Grok wb01 F1）：兩者並發時雲端
           // 整替可能先落地，快照的過期活列（沒有 deletedAt 的舊列）接著以
           // 「remote 沒有這列」的路徑把已刪節點救回畫面。序列化後，雲端
@@ -2926,7 +2968,15 @@ export function App() {
         whiteboardFrames: boardFrames,
         onCreateFrame: (frame) => {
           setBoardFrames((current) => [...current, frame]);
-          cloudRef.current.writes.upsertFrame?.(frame);
+          cloudRef.current.writes.upsertFrame?.(frame, adoptFrameVersion);
+        },
+        onUpdateFrame: (frame) => {
+          setBoardFrames((current) => current.map((item) => (item.id === frame.id ? frame : item)));
+          cloudRef.current.writes.upsertFrame?.(frame, adoptFrameVersion);
+        },
+        onDeleteFrame: (id) => {
+          setBoardFrames((current) => current.filter((item) => item.id !== id));
+          cloudRef.current.writes.deleteFrame?.(id);
         },
         onEmitOperation: (draft) => {
           const actor = cloudRef.current.userId;
@@ -2996,12 +3046,47 @@ export function App() {
       api
         ? activeProjectBranch
         : undefined;
+    // WB03 反向鏈：這個 branch（含其版本）被哪些白板節點引用
+    const overlayBoardRefs = overlayBranch
+      ? (() => {
+          const versionIds = new Set(branchVersions(normalizedRoom!, overlayBranch.id).map((version) => version.id));
+          // 只算「還在的板」上的節點（S11）：封存板的節點列仍在，但點進去
+          // 會落到 boards.find(!archivedAt) 找不到板的空白畫面＝死路。
+          const liveBoardIds = new Set(
+            (normalizedRoom!.whiteboards ?? []).filter((board) => !board.archivedAt).map((board) => board.id),
+          );
+          const localRefs = (normalizedRoom!.whiteboardNodes ?? []).filter((node) =>
+            !node.deletedAt && node.linkedEntityId && liveBoardIds.has(node.whiteboardId) && (
+              (node.linkedEntityType === "branch" && node.linkedEntityId === overlayBranch.id) ||
+              (node.linkedEntityType === "version" && versionIds.has(node.linkedEntityId))
+            )).map((node) => ({ id: node.id, whiteboardId: node.whiteboardId }));
+          // 合併雲端查到的引用（S10）：本機房 remoteBranchRefs 為 null，
+          // 雲端冷啟動則本機那份是空的 — 兩邊以 node id 去重。
+          const remote = remoteBranchRefs?.branchId === overlayBranch.id
+            ? remoteBranchRefs.refs.filter((ref) => liveBoardIds.has(ref.whiteboardId))
+            : [];
+          const byId = new Map<string, { id: string; whiteboardId: string }>();
+          for (const ref of [...localRefs, ...remote]) byId.set(ref.id, ref);
+          const refs = [...byId.values()];
+          if (!refs.length) return undefined;
+          return {
+            count: refs.length,
+            open: () => {
+              const first = refs[0];
+              setActiveBranchId(null);
+              setActiveWhiteboardId(first.whiteboardId);
+              setFocusNodeId(first.id);
+              loadFramesForBoard(first.whiteboardId); // S13：與正常開板同路徑
+            },
+          };
+        })()
+      : undefined;
     const branchWorkspace = overlayBranch
       ? {
           branchId: overlayBranch.id,
           node: (
             <RoomWorkspaceShell
-              api={api!}
+              api={{ ...api!, boardRefs: overlayBoardRefs }}
               presence={{
                 status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
                 peers: cloudSession ? cloud.online : peerCount,

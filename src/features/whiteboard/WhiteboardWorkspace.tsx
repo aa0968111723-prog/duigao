@@ -21,7 +21,7 @@ import { arrangeBoard } from "../collaboration/layout";
 import { canEditBoard } from "../collaboration/permissions";
 import { formatEditorLine } from "../collaboration/presence";
 import type { NodeType, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardFrame, WhiteboardNode } from "../collaboration/types";
-import { nodeCreateDraft, nodeDeleteDraft, nodeUpdateDraft, applyMasked, type OperationDraft } from "../collaboration/operations";
+import { nodeCreateDraft, nodeDeleteDraft, nodeUpdateDraft, applyMasked, applyFrameMasked, frameCreateDraft, frameDeleteDraft, frameUpdateDraft, type OperationDraft } from "../collaboration/operations";
 import { fitCamera, focusCamera, marqueeHits, screenToWorld, visibleNodes, zoomAt, clampZoom, type Camera } from "./canvas";
 import { paintOrder, hitTest } from "./order";
 import {
@@ -33,6 +33,8 @@ import {
   type GestureState,
 } from "./gestures";
 import { emptyHistory, pushHistory, redoStep, undoStep, type HistoryStack } from "./history";
+import { historyLayers } from "../../lib/historyLayers";
+import { normalizeStroke, thinStroke, type StrokePoint } from "./freehand";
 import { rendererFor } from "./registry";
 import "./whiteboard.css";
 
@@ -74,6 +76,11 @@ export type WhiteboardApi = {
   onFocusChange?: (focused: boolean) => void;
   /** 操作事件入帳（0023，best-effort — 失敗只損 undo 粒度不擋操作）。 */
   onEmitOperation?: (draft: OperationDraft) => void;
+  // ---- WB03 ----
+  onUpdateFrame?: (frame: WhiteboardFrame) => void;
+  onDeleteFrame?: (id: string) => void;
+  /** 板節點「打開來源訊息」→ 切討論並捲動高亮。 */
+  onOpenDiscussionMessage?: (messageId: string) => void;
 };
 
 type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | null;
@@ -252,6 +259,10 @@ function nextOpId(): string {
   }
 }
 
+// Camera memory（WB03，WB02-F9 承諾的 keep-mounted 使用者可見目標）：
+// 切走再回來視角不歸零。模組級、粗 LRU 上限 24 板。
+const CAMERA_MEMORY = new Map<string, Camera>();
+
 export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const board = api.boards.find((item) => item.id === api.activeBoardId && !item.archivedAt) ?? null;
   const canEdit = board ? canEditBoard(api.roleAllowsEdit ? "editor" : "reviewer", api.allowBoardEdit, board) && api.canEdit : false;
@@ -274,6 +285,33 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [selectTool, setSelectTool] = useState<"off" | "marquee" | "lasso">("off");
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
   const [connectMode, setConnectMode] = useState(false);
+  // ---- WB03：繪圖模式（筆畫收集繞過手勢 reducer） ----
+  const [drawMode, setDrawMode] = useState(false);
+  const [strokePreview, setStrokePreview] = useState<StrokePoint[] | null>(null);
+  const strokeRef = useRef<StrokePoint[] | null>(null);
+  const strokePointerRef = useRef<number | null>(null);
+  const strokeDownRef = useRef<{ pointerId: number; point: { x: number; y: number }; time: number } | null>(null);
+  // S1：第一指的**當前**螢幕座標 — 轉 pinch 回放要用它，不是起筆點
+  const strokeScreenRef = useRef<{ x: number; y: number } | null>(null);
+  // ---- WB03：frame 選取/拖曳/縮放 ----
+  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
+  const [framePreview, setFramePreview] = useState<WhiteboardFrame | null>(null);
+  const framePreviewRef = useRef<WhiteboardFrame | null>(null);
+  const setFramePreviewSync = (frame: WhiteboardFrame | null) => {
+    framePreviewRef.current = frame;
+    setFramePreview(frame);
+  };
+  const frameDragRef = useRef<{
+    mode: "move" | "resize";
+    pointerId: number;
+    frame: WhiteboardFrame;
+    startClient: { x: number; y: number };
+    memberIds: string[];
+    startNodes: Map<string, WhiteboardNode>;
+    moved: boolean;
+  } | null>(null);
+  const [frameRenaming, setFrameRenaming] = useState(false);
+  const [frameTitleDraft, setFrameTitleDraft] = useState("");
   const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
   const [videoStart, setVideoStart] = useState("00:40");
   const [videoEnd, setVideoEnd] = useState("");
@@ -310,44 +348,29 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   // 這一層 history 就原地保留。
   const focused = Boolean(board);
   const poppingRef = useRef(false);
-  const pushedRef = useRef(false);
   const apiRef = useRef(api);
   apiRef.current = api;
   useEffect(() => {
     apiRef.current.onFocusChange?.(focused);
     if (!focused) return;
-    // 進 Focus：恰一層 history；back = 先關 sheet、再退出白板
-    pushedRef.current = true;
-    window.history.pushState({ layer: "board-focus" }, "");
-    const onPop = () => {
-      pushedRef.current = false;
+    // 進 Focus：改走 historyLayers 協調器（WB03）— 對稿 overlay 疊在
+    // Focus 上時 back 先關棧頂的 overlay，不再兩個 popstate listener
+    // 互踩（舊 bug：板被退、overlay 還在）。語意不變：back 先關 sheet
+    // （repush，層自留），再退出白板（closed）。
+    const remove = historyLayers().push("board-focus", () => {
       if (sheetRef.current) {
         setSheet(null);
-        pushedRef.current = true;
-        window.history.pushState({ layer: "board-focus" }, "");
-        return;
+        return "repush";
       }
       poppingRef.current = true;
       apiRef.current.onOpenBoard(null);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (sheetRef.current) {
-        setSheet(null);
-        return;
-      }
-      window.history.back();
-    };
-    window.addEventListener("popstate", onPop);
-    window.addEventListener("keydown", onKey);
+      return "closed";
+    });
+    // Escape 不自己監聽（S12）：協調器的單一 handler 會派給棧頂層 —
+    // 這層的 onBack 已經處理「先關 sheet、再退板」的階梯。
     return () => {
-      window.removeEventListener("popstate", onPop);
-      window.removeEventListener("keydown", onKey);
       apiRef.current.onFocusChange?.(false);
-      // 非 back 路徑離開（封存板、房間層直接切走）：吃掉自己 push 的那層。
-      // pushedRef 記帳 — 已被 pop 消耗就不補 back，避免多退一層。
-      if (pushedRef.current && !poppingRef.current) window.history.back();
-      pushedRef.current = false;
+      remove(poppingRef.current);
       poppingRef.current = false;
     };
   }, [focused, setSheet]);
@@ -362,11 +385,47 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     return () => observer.disconnect();
   }, [board?.id]);
 
+  // camera memory：開板還原、關板/切板時存（cameraRef 取最新值）
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
   useEffect(() => {
-    if (!api.focusNodeId) return;
-    const node = nodes.find((item) => item.id === api.focusNodeId);
+    const id = board?.id;
+    if (!id) return;
+    const saved = CAMERA_MEMORY.get(id);
+    if (saved) {
+      // cameraRef 同步跟上（S17）：StrictMode 的 create→destroy→create 中，
+      // destroy 會把 cameraRef.current 存回 memory — 若它還停在 useState
+      // 初始值，剛還原的視角當場被預設值覆寫（dev 永遠還原失敗）。
+      cameraRef.current = saved;
+      setCamera(saved);
+    }
+    return () => {
+      CAMERA_MEMORY.delete(id);
+      CAMERA_MEMORY.set(id, cameraRef.current);
+      if (CAMERA_MEMORY.size > 24) {
+        const oldest = CAMERA_MEMORY.keys().next().value;
+        if (oldest !== undefined) CAMERA_MEMORY.delete(oldest);
+      }
+    };
+  }, [board?.id]);
+
+  // 聚焦（深連結／討論卡／WB03 反向鏈）：每個 focusNodeId **只套一次**。
+  // 舊寫法 deps 含 nodes/viewport 且無記帳 — 編輯時每個 keystroke 都
+  // onUpsertNode("now") 換掉 nodes identity，相機就被拉回舊焦點、選取被
+  // 搶走（與 camera memory、鍵盤避讓直接打架）。節點還沒載入時不記帳，
+  // 下次 nodes 變動再試。
+  const appliedFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const focusId = api.focusNodeId;
+    if (!focusId) {
+      appliedFocusRef.current = null;
+      return;
+    }
+    if (appliedFocusRef.current === focusId) return;
+    const node = nodes.find((item) => item.id === focusId);
     if (!node) return;
-    setSelected([node.id]);
+    appliedFocusRef.current = focusId;
+    setSelected([focusId]);
     setCamera(focusCamera(node, viewport));
   }, [api.focusNodeId, nodes, viewport]);
 
@@ -457,6 +516,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             }
             const nextSelected = selected.includes(hit.id) ? selected : [hit.id];
             setSelected(nextSelected);
+            setSelectedFrameId(null);
             if (editingId !== hit.id) endEdit();
             if (canEdit && !hit.locked) {
               const world2 = screenToWorld(camera, effect.screen.x - rect.left, effect.screen.y - rect.top);
@@ -472,6 +532,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           // 空白處：工具態決定 框選/套索/平移
           endEdit();
           setSelected([]);
+          setSelectedFrameId(null);
           const world3 = screenToWorld(camera, effect.screen.x - rect.left, effect.screen.y - rect.top);
           if (selectTool === "marquee") {
             gesture.current = gestureReducer(gesture.current, { type: "begin-marquee", world: world3 }).state;
@@ -606,6 +667,37 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     runEffects(out.effects, event);
   };
 
+  // ---- 繪圖（WB03）：單指直接收筆畫、繞過 reducer；第二指落下＝取消
+  // 筆畫並把兩個 down 補進 reducer（轉 pinch 縮放）。 ----
+  const finalizeStroke = (discard: boolean) => {
+    const points = strokeRef.current;
+    strokeRef.current = null;
+    strokePointerRef.current = null;
+    strokeDownRef.current = null;
+    strokeScreenRef.current = null;
+    setStrokePreview(null);
+    if (discard || !points || !board) return;
+    const normalized = normalizeStroke(thinStroke(points, 2.5 / camera.zoom));
+    if (!normalized) return; // 誤觸（單點）不成節點
+    const node: WhiteboardNode = {
+      id: nextOpId(),
+      whiteboardId: board.id,
+      roomId: board.roomId,
+      nodeType: "freehand",
+      x: normalized.x,
+      y: normalized.y,
+      width: normalized.width,
+      height: normalized.height,
+      content: { points: normalized.points, color: "#e8c27a", strokeWidth: 3 },
+      createdBy: "local",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      version: 1,
+    };
+    api.onUpsertNode(node, "now");
+    record(nodeCreateDraft(nextOpId(), node));
+  };
+
   const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     if (target?.closest("textarea, input, button, a")) return;
@@ -614,13 +706,167 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     } catch {
       /* programmatic pointer events cannot capture */
     }
+    if (drawMode && canEdit) {
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      if (strokePointerRef.current === null) {
+        strokePointerRef.current = event.pointerId;
+        const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+        strokeRef.current = [world];
+        setStrokePreview([world]);
+        strokeDownRef.current = { pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() };
+        strokeScreenRef.current = { x: event.clientX, y: event.clientY };
+        return;
+      }
+      // 第二指：取消當前筆畫，轉 pinch。回放第一指用**當前**座標（S1 —
+      // 用起筆點會讓 pinch 基準距離錯到起筆位移那麼多，起手即暴縮），
+      // 且回放不經 runEffects（S2 — down 的 hit-test 副作用會誤選節點/
+      // 誤起 drag；回放只為重建 pointers map）。
+      const first = strokeDownRef.current;
+      const firstAt = strokeScreenRef.current ?? first?.point ?? null;
+      finalizeStroke(true);
+      if (first && firstAt) {
+        const restored = gestureReducer(gesture.current, {
+          type: "down",
+          pointerId: first.pointerId,
+          point: { x: firstAt.x, y: firstAt.y },
+          time: performance.now(),
+        });
+        gesture.current = restored.state; // 丟棄 effects：不 hit-test、不 arm 長按計時器
+      }
+      feed({ type: "down", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
+      return;
+    }
     feed({ type: "down", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
   };
   const onCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (strokePointerRef.current === event.pointerId && strokeRef.current) {
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      strokeScreenRef.current = { x: event.clientX, y: event.clientY };
+      const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+      const last = strokeRef.current[strokeRef.current.length - 1];
+      // 螢幕 2px 以下抖動不收（世界距離 × zoom）
+      if (Math.hypot(world.x - last.x, world.y - last.y) * camera.zoom < 2) return;
+      strokeRef.current = [...strokeRef.current, world];
+      setStrokePreview(strokeRef.current);
+      return;
+    }
     feed({ type: "move", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now(), zoom: camera.zoom }, event);
   };
   const onCanvasPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (strokePointerRef.current === event.pointerId) {
+      finalizeStroke(event.type === "pointercancel");
+      return;
+    }
     feed({ type: "up", pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, time: performance.now() }, event);
+  };
+
+  // ---- frame 拖曳/縮放（WB03）：把手自帶 handler＋pointer capture，
+  // stopPropagation 不進畫布手勢 reducer。成員判定凍結在起拖。 ----
+  const beginFrameDrag = (event: ReactPointerEvent<HTMLDivElement>, frame: WhiteboardFrame, mode: "move" | "resize") => {
+    // S4/S5：繪圖模式（筆要落在 frame 帶上）與唯讀者（把手＝平移死區）
+    // 都不攔 — 不 stopPropagation，事件冒泡回畫布走筆畫/平移。
+    if (drawMode || !canEdit) return;
+    // S3：已有進行中的 frame session 時，第二指不得覆寫（先到先贏）
+    if (frameDragRef.current) return;
+    event.stopPropagation();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* 程式性事件不能 capture */
+    }
+    const members = mode === "move" && canEdit
+      ? liveNodes.filter((node) =>
+          !node.deletedAt &&
+          node.x + node.width / 2 >= frame.x && node.x + node.width / 2 <= frame.x + frame.width &&
+          node.y + node.height / 2 >= frame.y && node.y + node.height / 2 <= frame.y + frame.height)
+      : [];
+    frameDragRef.current = {
+      mode,
+      pointerId: event.pointerId,
+      frame,
+      startClient: { x: event.clientX, y: event.clientY },
+      memberIds: members.map((node) => node.id),
+      startNodes: new Map(members.map((node) => [node.id, node])),
+      moved: false,
+    };
+    setFramePreviewSync(frame);
+  };
+  const onFramePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const session = frameDragRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    if (!canEdit) return;
+    if (!session.moved && Math.hypot(event.clientX - session.startClient.x, event.clientY - session.startClient.y) < 6) return;
+    session.moved = true;
+    const dx = (event.clientX - session.startClient.x) / camera.zoom;
+    const dy = (event.clientY - session.startClient.y) / camera.zoom;
+    if (session.mode === "move") {
+      setFramePreviewSync({ ...session.frame, x: session.frame.x + dx, y: session.frame.y + dy });
+      if (session.memberIds.length) {
+        // 成員節點跟著：以起拖快照為基準做**絕對**定位（不疊增量 — F4 教訓）
+        const movedById = new Map(
+          [...session.startNodes.values()].map((node) => [node.id, { ...node, x: node.x + dx, y: node.y + dy }]),
+        );
+        const merged = liveNodes.map((node) => movedById.get(node.id) ?? node);
+        previewRef.current = merged;
+        setPreviewNodes(merged);
+        api.onDragState?.(session.memberIds);
+      }
+    } else {
+      setFramePreviewSync({
+        ...session.frame,
+        width: Math.min(8000, Math.max(120, session.frame.width + dx)),
+        height: Math.min(8000, Math.max(90, session.frame.height + dy)),
+      });
+    }
+  };
+  const onFramePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const session = frameDragRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    frameDragRef.current = null;
+    event.stopPropagation();
+    const preview = framePreviewRef.current;
+    setFramePreviewSync(null);
+    if (!session.moved || !preview) {
+      // tap：選取 frame（與節點選取互斥）
+      endEdit();
+      setSelected([]);
+      setSelectedFrameId(session.frame.id);
+      api.onDragState?.(null);
+      return;
+    }
+    if (session.mode === "move") {
+      const dx = preview.x - session.frame.x;
+      const dy = preview.y - session.frame.y;
+      api.onUpdateFrame?.(preview);
+      if (session.memberIds.length) {
+        const movedNodes = [...session.startNodes.values()].map((node) => ({ ...node, x: node.x + dx, y: node.y + dy }));
+        api.onUpsertNodes(movedNodes);
+        for (const node of movedNodes) {
+          const before = session.startNodes.get(node.id);
+          if (before) record(nodeUpdateDraft(nextOpId(), before, node));
+        }
+      }
+      // frame 的 draft 最後入帳：單次 undo 先復原 frame（一個手勢多筆 op
+      // 的複合 undo 屬 WB04 — 誠實限制）
+      record(frameUpdateDraft(nextOpId(), session.frame, preview));
+    } else {
+      api.onUpdateFrame?.(preview);
+      record(frameUpdateDraft(nextOpId(), session.frame, preview));
+    }
+    previewRef.current = null;
+    setPreviewNodes(null);
+    api.onDragState?.(null);
+  };
+  const commitFrameRename = () => {
+    const frame = frames.find((item) => item.id === selectedFrameId);
+    setFrameRenaming(false);
+    if (!frame || !frameTitleDraft.trim() || frameTitleDraft.trim() === frame.title) return;
+    const next = { ...frame, title: frameTitleDraft.trim().slice(0, 120) };
+    api.onUpdateFrame?.(next);
+    record(frameUpdateDraft(nextOpId(), frame, next));
   };
 
   const addAt = (world: { x: number; y: number }, type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId">) => {
@@ -710,6 +956,31 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       api.onUpsertNode(applyMasked(base, draft.fieldMask, draft.after), "now");
     },
     findNode: (id: string) => liveNodes.find((item) => item.id === id),
+    // ---- frame（WB03） ----
+    upsertFrame: (frame: WhiteboardFrame) => api.onUpdateFrame?.(frame),
+    deleteFrame: (id: string) => api.onDeleteFrame?.(id),
+    recreateFrame: (draft: OperationDraft) => {
+      if (!board || !api.onCreateFrame) return;
+      const base: WhiteboardFrame = {
+        id: draft.entityId,
+        whiteboardId: board.id,
+        roomId: board.roomId,
+        title: "區塊",
+        x: 0,
+        y: 0,
+        width: 480,
+        height: 320,
+        kind: "frame",
+        style: {},
+        zIndex: -1,
+        createdBy: "local",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        version: 1,
+      };
+      api.onCreateFrame(applyFrameMasked(base, draft.fieldMask, draft.after));
+    },
+    findFrame: (id: string) => frames.find((item) => item.id === id),
   };
 
   const placeBranch = (branch: RoomBranch, range?: { startTime?: number; endTime?: number }) => {
@@ -831,7 +1102,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               {canEdit && api.onCreateFrame && (
                 <button type="button" className="wb-card" data-testid="wb-create-frame" onClick={() => {
                   const world = screenToWorld(camera, viewport.width / 2, viewport.height / 2);
-                  api.onCreateFrame!({
+                  const frame: WhiteboardFrame = {
                     id: nextOpId(),
                     whiteboardId: board.id,
                     roomId: board.roomId,
@@ -847,7 +1118,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
                     version: 1,
-                  });
+                  };
+                  api.onCreateFrame!(frame);
+                  record(frameCreateDraft(nextOpId(), frame));
                   setSheet(null);
                 }}>新增區塊（Frame）</button>
               )}
@@ -944,11 +1217,35 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         onPointerCancel={onCanvasPointerUp}
       >
         <div className="wb-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
-          {orderedFrames.map((frame) => (
-            <div key={frame.id} className={`wb-frame wb-frame-${frame.kind}`} style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }} data-testid={`wb-frame-${frame.id}`}>
-              <span className="wb-frame-title">{frame.title}</span>
-            </div>
-          ))}
+          {orderedFrames.map((rawFrame) => {
+            const frame = framePreview && framePreview.id === rawFrame.id ? framePreview : rawFrame;
+            const frameSelected = selectedFrameId === frame.id;
+            return (
+              <div key={frame.id} className={`wb-frame wb-frame-${frame.kind}${frameSelected ? " is-selected" : ""}`} style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }} data-testid={`wb-frame-${frame.id}`}>
+                <div
+                  className="wb-frame-handle"
+                  data-testid={`wb-frame-handle-${frame.id}`}
+                  onPointerDown={(event) => beginFrameDrag(event, rawFrame, "move")}
+                  onPointerMove={onFramePointerMove}
+                  onPointerUp={onFramePointerUp}
+                  onPointerCancel={onFramePointerUp}
+                >
+                  <span className="wb-frame-title">{frame.title}</span>
+                </div>
+                {canEdit && frameSelected && (
+                  <div
+                    className="wb-frame-resize"
+                    aria-label="調整區塊大小"
+                    data-testid={`wb-frame-resize-${frame.id}`}
+                    onPointerDown={(event) => beginFrameDrag(event, rawFrame, "resize")}
+                    onPointerMove={onFramePointerMove}
+                    onPointerUp={onFramePointerUp}
+                    onPointerCancel={onFramePointerUp}
+                  />
+                )}
+              </div>
+            );
+          })}
           <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
             {edges.map((edge) => {
               const source = liveNodes.find((node) => node.id === edge.sourceNodeId);
@@ -988,6 +1285,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               <polyline points={lassoPath.map((point) => `${point.x},${point.y}`).join(" ")} fill="rgba(196,92,74,0.08)" stroke="#c45c4a" strokeDasharray="6 4" strokeWidth={1.5} />
             </svg>
           )}
+          {strokePreview && strokePreview.length > 1 && (
+            <svg className="wb-edge" width={4000} height={4000} style={{ left: 0, top: 0 }}>
+              <polyline points={strokePreview.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#e8c27a" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" data-testid="wb-stroke-preview" />
+            </svg>
+          )}
         </div>
 
         {multiSelect && (
@@ -1005,8 +1307,34 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         )}
       </div>
 
-      {/* 底部：情境工具列（選取節點）或主工具列（三態，wireflow §11） */}
-      {selectedNode && canEdit && !multiSelect ? (
+      {/* 底部：frame 情境列 / 節點情境列 / 主工具列（wireflow §11） */}
+      {selectedFrameId && frames.some((frame) => frame.id === selectedFrameId) && canEdit && !multiSelect ? (
+        <nav className="wb-focus-bottom wb-context-bar" aria-label="區塊動作" data-testid="wb-frame-actions">
+          {frameRenaming ? (
+            <form className="wb-frame-rename" onSubmit={(event) => { event.preventDefault(); commitFrameRename(); }}>
+              <input autoFocus value={frameTitleDraft} onChange={(event) => setFrameTitleDraft(event.target.value)} aria-label="區塊名稱" />
+              <button type="submit">存</button>
+            </form>
+          ) : (
+            <>
+              <button type="button" data-testid="wb-frame-rename" onClick={() => {
+                const frame = frames.find((item) => item.id === selectedFrameId);
+                if (!frame) return;
+                setFrameTitleDraft(frame.title);
+                setFrameRenaming(true);
+              }}>改名</button>
+              <button type="button" data-testid="wb-frame-delete" onClick={() => {
+                const frame = frames.find((item) => item.id === selectedFrameId);
+                if (!frame) return;
+                record(frameDeleteDraft(nextOpId(), frame));
+                api.onDeleteFrame?.(frame.id);
+                setSelectedFrameId(null);
+              }}>刪除</button>
+            </>
+          )}
+          <button type="button" className="wb-context-dismiss" onClick={() => { setSelectedFrameId(null); setFrameRenaming(false); }} aria-label="取消選取">✕</button>
+        </nav>
+      ) : selectedNode && canEdit && !multiSelect ? (
         <nav className="wb-focus-bottom wb-context-bar" aria-label="節點動作" data-testid="wb-node-actions">
           <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
           <button type="button" onClick={() => { setConnectMode(true); setConnectFrom(selectedNode.id); }}>連線</button>
@@ -1042,6 +1370,18 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               }
             }}>打開內容</button>
           )}
+          {selectedNode.linkedEntityType === "discussion" && selectedNode.linkedEntityId && (
+            <button type="button" data-testid="wb-open-source-message" onClick={() => {
+              const target = openTarget(anchorFromNode(selectedNode));
+              if (target.surface !== "discussion") return;
+              const exists = (api.room.discussion ?? []).some((message) => message.id === target.messageId);
+              if (!exists) {
+                showNotice("來源訊息已不存在");
+                return;
+              }
+              api.onOpenDiscussionMessage?.(target.messageId);
+            }}>打開來源訊息</button>
+          )}
           <button type="button" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
           {selected.length > 1 && (
             <>
@@ -1064,7 +1404,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             type="button"
             className={selectTool !== "off" ? "is-active" : ""}
             data-testid="wb-tool-select"
-            onClick={() => setSelectTool((current) => (current === "off" ? "marquee" : current === "marquee" ? "lasso" : "off"))}
+            onClick={() => { setSelectTool((current) => (current === "off" ? "marquee" : current === "marquee" ? "lasso" : "off")); setDrawMode(false); }}
           ><span>▣</span>{selectTool === "lasso" ? "套索" : selectTool === "marquee" ? "框選" : "選取"}</button>
           <button type="button" data-testid="wb-tool-sticky" disabled={!canEdit} onClick={() => addAtView("text")}><span>📝</span>便利貼</button>
           <button
@@ -1072,8 +1412,15 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             className={connectMode ? "is-active" : ""}
             data-testid="wb-tool-connect"
             disabled={!canEdit}
-            onClick={() => { setConnectMode((current) => !current); setConnectFrom(null); }}
+            onClick={() => { setConnectMode((current) => !current); setConnectFrom(null); setDrawMode(false); }}
           ><span>↦</span>連線</button>
+          <button
+            type="button"
+            className={drawMode ? "is-active" : ""}
+            data-testid="wb-tool-draw"
+            disabled={!canEdit}
+            onClick={() => { setDrawMode((current) => !current); setConnectMode(false); setConnectFrom(null); setSelectTool("off"); }}
+          ><span>✎</span>繪圖</button>
           <button type="button" data-testid="wb-tool-material" onClick={() => { setContentKind("all"); setSheet("content"); }}><span>▤</span>素材</button>
           <button type="button" data-testid="whiteboard-add" onClick={() => setSheet("add")} disabled={!canEdit}><span>＋</span>更多</button>
         </nav>

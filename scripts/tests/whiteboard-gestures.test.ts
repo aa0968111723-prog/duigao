@@ -13,7 +13,7 @@ import {
 } from "../../src/features/whiteboard/gestures";
 import { hitTest, paintOrder, orderCompare } from "../../src/features/whiteboard/order";
 import { emptyHistory, pushHistory, undoStep, redoStep, HISTORY_LIMIT } from "../../src/features/whiteboard/history";
-import { nodeDeleteDraft, nodeUpdateDraft } from "../../src/features/collaboration/operations";
+import { applyMasked, nodeDeleteDraft, nodeUpdateDraft } from "../../src/features/collaboration/operations";
 import { registeredNodeTypes, rendererFor } from "../../src/features/whiteboard/registry";
 import { NODE_TYPES } from "../../src/features/collaboration/types";
 
@@ -130,6 +130,25 @@ test("Grok F2：節點上（begin-drag 回填）沒真的拖 — 雙擊仍要到
   assert.ok(dragged.effects.some((effect) => effect.kind === "commit-drag"));
 });
 
+test("WB03 hover 防護：未按下的滑鼠掠過畫布後，真按下仍是單指（不誤入 pinch）", () => {
+  let state = initialGestureState();
+  // 桌機 hover：move 事件先到（沒有 down）
+  state = gestureReducer(state, { type: "move", pointerId: 1, point: { x: 30, y: 30 }, time: 0, zoom: 1 }).state;
+  state = gestureReducer(state, { type: "move", pointerId: 1, point: { x: 60, y: 60 }, time: 10, zoom: 1 }).state;
+  assert.equal(state.pointers.size, 0, "hover 不得進 pointers map");
+  // 真按下（觸控 id 31）：必須是單指 — 長按要 armed、hit-test 要發
+  const down = gestureReducer(state, { type: "down", pointerId: 31, point: { x: 100, y: 100 }, time: 20 });
+  state = down.state;
+  assert.equal(state.mode, "idle");
+  assert.ok(state.longPress, "長按必須 armed（舊 bug：hover 殘影讓這裡變 pinch）");
+  assert.ok(down.effects.some((effect) => effect.kind === "hit-test"));
+  assert.ok(!down.effects.some((effect) => effect.kind === "long-press-cancelled"));
+  // 未追蹤 pointer 的 up 也不得干擾
+  const ghostUp = gestureReducer(state, { type: "up", pointerId: 99, point: { x: 0, y: 0 }, time: 30 });
+  assert.equal(ghostUp.state.mode, "idle");
+  assert.ok(ghostUp.state.longPress, "幽靈 up 不得取消長按");
+});
+
 test("Grok F1：pinch scale 是增量比 — 距離不變的 move 回報 1，不重複回報總比", () => {
   let state = initialGestureState();
   state = gestureReducer(state, { type: "down", pointerId: 1, point: { x: 100, y: 100 }, time: 0 }).state;
@@ -178,8 +197,12 @@ test("undo/redo：move 的 undo 只回位置、redo 復原；上限 50", () => {
   const executors = {
     upsert: (item: WhiteboardNode) => { store.set(item.id, item); },
     softDelete: (id: string) => { store.delete(id); },
+    // 與 WhiteboardWorkspace 的真實執行端同構（S8）：空白 text 基底 ＋
+    // applyMasked。原本直接 node(id) 忽略 draft — 掩蓋了「mask 沒帶
+    // nodeType/width/height 導致節點被以預設值重建」的資料損毀。
     recreate: (draft: import("../../src/features/collaboration/operations").OperationDraft) => {
-      store.set(draft.entityId, node(draft.entityId));
+      const base = node(draft.entityId, { nodeType: "text", width: 180, height: 96, content: {} });
+      store.set(draft.entityId, applyMasked(base, draft.fieldMask, draft.after));
     },
     findNode: (id: string) => store.get(id),
   };
@@ -224,6 +247,36 @@ test("Grok F8：undo 的欄位已被別人改走（drift）→ conflict-drift �
   const result = undoStep(stack, executors, "op-d2");
   assert.equal(result.skipped, "conflict-drift", "欄位 drift 必須誠實跳過");
   assert.equal(store.get("n9")!.content.text, "同事後來改的字", "不得靜默蓋掉別人的字");
+});
+
+test("S8：freehand 刪除後 undo 必須連 nodeType/尺寸一起復原（不得變成空白便利貼）", () => {
+  const stroke = node("s1", {
+    nodeType: "freehand",
+    x: 40,
+    y: 60,
+    width: 320,
+    height: 240,
+    content: { points: [[0, 0], [10, 12], [30, 8]], color: "#e8c27a", strokeWidth: 3 },
+  });
+  const store = new Map<string, WhiteboardNode>();
+  const executors = {
+    upsert: (item: WhiteboardNode) => { store.set(item.id, item); },
+    softDelete: (id: string) => { store.delete(id); },
+    // 真實執行端：空白 text 基底 ＋ applyMasked
+    recreate: (draft: import("../../src/features/collaboration/operations").OperationDraft) => {
+      const base = node(draft.entityId, { nodeType: "text", width: 180, height: 96, content: {} });
+      store.set(draft.entityId, applyMasked(base, draft.fieldMask, draft.after));
+    },
+    findNode: (id: string) => store.get(id),
+  };
+  const stack = pushHistory(emptyHistory(), nodeDeleteDraft("op-1", stroke));
+  undoStep(stack, executors, "op-2");
+  const restored = store.get("s1")!;
+  assert.equal(restored.nodeType, "freehand", "型別必須復原 — 否則筆畫變空白 text 卡並寫回雲端");
+  assert.equal(restored.width, 320);
+  assert.equal(restored.height, 240);
+  assert.deepEqual(restored.content.points, [[0, 0], [10, 12], [30, 8]]);
+  assert.equal(restored.content.strokeWidth, 3);
 });
 
 test("registry：全部 DB 詞彙都有 renderer 或 fallback；fallback 誠實標注", () => {

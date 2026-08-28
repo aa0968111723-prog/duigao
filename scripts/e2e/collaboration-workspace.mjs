@@ -323,6 +323,134 @@ try {
     await canvas.dispatchEvent("pointerup", { pointerId: 12 });
     check("雙指可 pinch zoom", true);
 
+    // ---- WB03：frame 互動／freehand／camera memory --------------------
+    {
+      await page.getByTestId("whiteboard-more").click();
+      await page.getByTestId("wb-create-frame").click();
+      await page.waitForSelector("[data-testid^='wb-frame-handle-']", { timeout: 5000 });
+      const frameHandle = page.locator("[data-testid^='wb-frame-handle-']").first();
+      await frameHandle.click();
+      await page.waitForSelector('[data-testid="wb-frame-actions"]', { timeout: 5000 });
+      check("frame 可選取（情境列出現）", true);
+      await page.getByTestId("wb-frame-rename").click();
+      await page.locator(".wb-frame-rename input").fill("招生排程區");
+      await page.locator(".wb-frame-rename button[type='submit']").click();
+      await page.waitForTimeout(150);
+      check("frame 可改名", (await page.locator(".wb-frame-title").first().innerText()) === "招生排程區");
+
+      const frameEl = page.locator(".wb-frame").first();
+      const beforeResize = await frameEl.boundingBox();
+      const resize = page.locator("[data-testid^='wb-frame-resize-']").first();
+      const rbox = await resize.boundingBox();
+      await resize.dispatchEvent("pointerdown", { clientX: rbox.x + 10, clientY: rbox.y + 10, pointerId: 41 });
+      await resize.dispatchEvent("pointermove", { clientX: rbox.x + 70, clientY: rbox.y + 50, pointerId: 41 });
+      await resize.dispatchEvent("pointerup", { clientX: rbox.x + 70, clientY: rbox.y + 50, pointerId: 41 });
+      await page.waitForTimeout(150);
+      const afterResize = await frameEl.boundingBox();
+      check("frame 可縮放（右下把手）", afterResize.width > beforeResize.width + 40, `${beforeResize.width}→${afterResize.width}`);
+
+      const hbox = await frameHandle.boundingBox();
+      await frameHandle.dispatchEvent("pointerdown", { clientX: hbox.x + 24, clientY: hbox.y + 10, pointerId: 42 });
+      await frameHandle.dispatchEvent("pointermove", { clientX: hbox.x + 84, clientY: hbox.y + 40, pointerId: 42 });
+      await frameHandle.dispatchEvent("pointerup", { clientX: hbox.x + 84, clientY: hbox.y + 40, pointerId: 42 });
+      await page.waitForTimeout(150);
+      const afterMove = await frameEl.boundingBox();
+      check("frame 可拖曳", Math.abs(afterMove.x - afterResize.x - 60) < 10, `x ${afterResize.x}→${afterMove.x}`);
+
+      await page.getByTestId("wb-undo").click();
+      await page.waitForTimeout(150);
+      const afterUndo = await frameEl.boundingBox();
+      check("frame 拖曳可 undo 回原位", Math.abs(afterUndo.x - afterResize.x) < 10, `x ${afterMove.x}→${afterUndo.x}`);
+
+      await frameHandle.click();
+      await page.waitForSelector('[data-testid="wb-frame-delete"]', { timeout: 5000 });
+      await page.getByTestId("wb-frame-delete").click();
+      await page.waitForTimeout(150);
+      check("frame 可刪除", (await page.locator(".wb-frame").count()) === 0);
+      await page.getByTestId("wb-undo").click();
+      await page.waitForFunction(() => document.querySelectorAll(".wb-frame").length === 1, null, { timeout: 5000 });
+      check("frame 刪除可 undo 重建（含名字）", (await page.locator(".wb-frame-title").first().innerText()) === "招生排程區");
+
+      // S6：同一板連續第二次 frame 寫入 — 版本沒採納的話會被 OCC 擋成
+      // stale-write（同步狀態卡 offline-pending、雲端停在第一次的值）
+      {
+        const handle2 = page.locator("[data-testid^='wb-frame-handle-']").first();
+        const b1 = await handle2.boundingBox();
+        await handle2.dispatchEvent("pointerdown", { clientX: b1.x + 20, clientY: b1.y + 8, pointerId: 81 });
+        await handle2.dispatchEvent("pointermove", { clientX: b1.x + 60, clientY: b1.y + 28, pointerId: 81 });
+        await handle2.dispatchEvent("pointerup", { clientX: b1.x + 60, clientY: b1.y + 28, pointerId: 81 });
+        await page.waitForTimeout(250);
+        const b2 = await page.locator(".wb-frame").first().boundingBox();
+        await handle2.dispatchEvent("pointerdown", { clientX: b2.x + 20, clientY: b2.y + 8, pointerId: 82 });
+        await handle2.dispatchEvent("pointermove", { clientX: b2.x + 55, clientY: b2.y + 30, pointerId: 82 });
+        await handle2.dispatchEvent("pointerup", { clientX: b2.x + 55, clientY: b2.y + 30, pointerId: 82 });
+        await page.waitForTimeout(400);
+        const b3 = await page.locator(".wb-frame").first().boundingBox();
+        check("frame 第二次拖曳也真的移動（S6 版本簿記）", Math.abs(b3.x - b2.x - 35) < 12, `${b2.x}→${b3.x}`);
+        // 直接讀 mock 的資料列（比 page fetch 可靠）：frame 必須真的
+        // 寫進去且版本前進 — 舊 mock 沒有 whiteboard_frames 的自然鍵，
+        // 更新走 insert→409→被 client 折成成功，列從未改變（S9 假綠）。
+        const frameRow = (rows.whiteboard_frames ?? [])[0] ?? null;
+        check(
+          "frame 更新有寫進雲端且版本前進（S6/S9 假綠修正）",
+          Boolean(frameRow && Number(frameRow.version) >= 2),
+          frameRow ? `version=${frameRow.version} x=${Math.round(frameRow.x)}` : "no row",
+        );
+      }
+
+      // freehand：繪圖工具畫一筆 → 節點；undo 軟刪
+      await dismissSelection(page);
+      await page.getByTestId("wb-tool-draw").click();
+      await canvas.dispatchEvent("pointerdown", { clientX: box.x + 200, clientY: box.y + 320, pointerId: 51 });
+      await canvas.dispatchEvent("pointermove", { clientX: box.x + 250, clientY: box.y + 355, pointerId: 51 });
+      await canvas.dispatchEvent("pointermove", { clientX: box.x + 300, clientY: box.y + 330, pointerId: 51 });
+      await canvas.dispatchEvent("pointerup", { clientX: box.x + 300, clientY: box.y + 330, pointerId: 51 });
+      await page.waitForFunction(() => document.querySelectorAll("[data-node-type='freehand']").length >= 1, null, { timeout: 5000 });
+      check("繪圖一筆成 freehand 節點（SVG path）", (await page.locator("[data-node-type='freehand'] svg path").count()) >= 1);
+      await page.getByTestId("wb-tool-draw").click();
+      await page.getByTestId("wb-undo").click();
+      await page.waitForFunction(() => document.querySelectorAll("[data-node-type='freehand']").length === 0, null, { timeout: 5000 });
+      check("freehand 可 undo（軟刪）", true);
+
+      // S1/S2 反例：畫到一半第二指落下轉 pinch — 不得誤選節點、zoom 不得暴衝
+      await page.getByTestId("wb-tool-draw").click();
+      const nodeBox = await page.locator(".wb-node").first().boundingBox();
+      const zoomBefore = await page.evaluate(() => {
+        const style = document.querySelector(".wb-layer")?.getAttribute("style") ?? "";
+        return Number(/scale\(([\d.]+)\)/.exec(style)?.[1] ?? 1);
+      });
+      // 起筆壓在節點上，畫出 200px，再落第二指
+      await canvas.dispatchEvent("pointerdown", { clientX: nodeBox.x + 10, clientY: nodeBox.y + 10, pointerId: 71 });
+      await canvas.dispatchEvent("pointermove", { clientX: nodeBox.x + 210, clientY: nodeBox.y + 60, pointerId: 71 });
+      await canvas.dispatchEvent("pointerdown", { clientX: nodeBox.x + 260, clientY: nodeBox.y + 80, pointerId: 72 });
+      await canvas.dispatchEvent("pointermove", { clientX: nodeBox.x + 215, clientY: nodeBox.y + 62, pointerId: 71 });
+      await canvas.dispatchEvent("pointerup", { clientX: nodeBox.x + 215, clientY: nodeBox.y + 62, pointerId: 71 });
+      await canvas.dispatchEvent("pointerup", { clientX: nodeBox.x + 260, clientY: nodeBox.y + 80, pointerId: 72 });
+      await page.waitForTimeout(150);
+      const zoomAfter = await page.evaluate(() => {
+        const style = document.querySelector(".wb-layer")?.getAttribute("style") ?? "";
+        return Number(/scale\(([\d.]+)\)/.exec(style)?.[1] ?? 1);
+      });
+      check("繪圖轉 pinch：zoom 不暴衝（S1）", zoomAfter > zoomBefore * 0.5 && zoomAfter < zoomBefore * 2, `${zoomBefore}→${zoomAfter}`);
+      check("繪圖轉 pinch：不誤選節點（S2）", (await page.getByTestId("wb-node-actions").count()) === 0);
+      check("繪圖轉 pinch：筆畫已取消不成節點", (await page.locator("[data-node-type='freehand']").count()) === 0);
+      await page.getByTestId("wb-tool-draw").click();
+
+      // camera memory：平移後離板重開，視角不歸零
+      await canvas.dispatchEvent("pointerdown", { clientX: box.x + 60, clientY: box.y + 420, pointerId: 61 });
+      await canvas.dispatchEvent("pointermove", { clientX: box.x + 150, clientY: box.y + 460, pointerId: 61 });
+      await canvas.dispatchEvent("pointerup", { pointerId: 61 });
+      await page.waitForTimeout(120);
+      const camBefore = await page.locator(".wb-layer").getAttribute("style");
+      await page.locator(".wb-focus-top .project-back-button").click();
+      await page.waitForSelector(".wb-list", { timeout: 10000 });
+      await page.locator(".wb-card").first().click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 10000 });
+      await page.waitForTimeout(120);
+      const camAfter = await page.locator(".wb-layer").getAttribute("style");
+      check("camera memory：重開板視角不歸零", camAfter === camBefore, `${camBefore} vs ${camAfter}`);
+    }
+
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("whiteboard-arrange").click();
     check("整理按鈕可按", true);
@@ -357,6 +485,79 @@ try {
     await page.getByRole("button", { name: "對話", exact: true }).click();
     check("討論與白板互相連得起來", (await page.getByTestId("discussion-feed").innerText()).length > 0);
     check("決策區看得到已決定", (await page.getByTestId("decision-area").innerText()).includes("採用 B 版"));
+
+    // ---- WB03：雙向連結 — 訊息⇄白板 provenance／內容側 chip／overlay back --
+    {
+      await page.getByLabel("房間討論").fill("擺攤動線要重排");
+      await page.locator(".rd-composer").getByRole("button", { name: "送出" }).click();
+      await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("擺攤動線要重排"), null, { timeout: 15000 });
+      const sourceMsg = page.locator(".rd-msg", { hasText: "擺攤動線要重排" }).first();
+      await sourceMsg.getByRole("button", { name: "加入白板" }).click();
+      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      check("訊息「加入白板」：開板並聚焦新節點", true);
+      check("節點帶 provenance（打開來源訊息鈕）", (await page.getByTestId("wb-open-source-message").count()) === 1);
+      await page.getByTestId("wb-open-source-message").click();
+      await page.waitForSelector(".rd-msg-flash", { timeout: 8000 });
+      check("打開來源訊息：跳回討論並高亮原文", (await page.locator(".rd-msg-flash").innerText()).includes("擺攤動線要重排"));
+
+      // 內容側反向 chip：開 擺攤文宣 對稿 → 白板引用 chip → 跳回引用節點
+      await page.getByTestId("open-content-pane").click();
+      await page.getByRole("button", { name: /擺攤文宣/ }).first().click();
+      await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
+      await page.waitForSelector('[data-testid="board-refs-chip"]', { timeout: 10000 });
+      check("對稿頂列出現「白板 N」引用 chip", (await page.getByTestId("board-refs-chip").first().innerText()).includes("白板"));
+      await page.getByTestId("board-refs-chip").first().click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      check("chip 跳回白板並聚焦引用節點", true);
+
+      // S14：焦點只套一次 — 之後任何節點變動（打字/新增）不得再搶相機
+      {
+        const canvas2 = page.getByTestId("wb-canvas");
+        const cbox = await canvas2.boundingBox();
+        await canvas2.dispatchEvent("pointerdown", { clientX: cbox.x + 60, clientY: cbox.y + 300, pointerId: 91 });
+        await canvas2.dispatchEvent("pointermove", { clientX: cbox.x + 170, clientY: cbox.y + 360, pointerId: 91 });
+        await canvas2.dispatchEvent("pointerup", { pointerId: 91 });
+        await page.waitForTimeout(150);
+        const camPanned = await page.locator(".wb-layer").getAttribute("style");
+        await page.getByTestId("wb-tool-sticky").click();
+        await fillEditing(page, "焦點後新增");
+        await page.waitForTimeout(300);
+        const camAfterEdit = await page.locator(".wb-layer").getAttribute("style");
+        check("焦點不再每次節點變動就搶相機（S14）", camAfterEdit === camPanned, `${camPanned} vs ${camAfterEdit}`);
+      }
+
+      // overlay 疊在 Focus 上：打開內容 → back 先關 overlay、板不退
+      // （S14 那段新增了便利貼＝選取已換人，先選回內容卡）
+      await dismissSelection(page);
+      await searchNode(page, "擺攤文宣");
+      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      await page.getByRole("button", { name: "打開內容" }).click();
+      await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
+      check("Focus 上可疊對稿 overlay（板不卸載）", (await page.getByTestId("wb-canvas").count()) === 1);
+      // S15：只驗 DOM 存在是假綠 — overlay z 若低於 Focus 會被整個蓋住，
+      // 畫面零變化但 back 卻先關那層看不見的。驗畫面中央實際命中誰。
+      const overlayOnTop = await page.evaluate(() => {
+        const overlay = document.querySelector('[data-testid="branch-workspace-overlay"]');
+        if (!overlay) return { ok: false, why: "no overlay" };
+        const hit = document.elementFromPoint(Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
+        return {
+          ok: Boolean(hit && overlay.contains(hit)),
+          why: hit ? (hit.closest(".wb-focus") ? "被白板 Focus 蓋住" : hit.className || hit.tagName) : "none",
+        };
+      });
+      check("對稿 overlay 真的在最上層可見（S15）", overlayOnTop.ok, overlayOnTop.why);
+      await page.goBack();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 8000 });
+      check("back 先關 overlay、板不退（WB03 修的 listener 互踩）", (await page.getByTestId("wb-canvas").count()) === 1);
+      // 收尾回對話，銜接後續章節
+      await page.locator(".wb-focus-top .project-back-button").click();
+      await page.waitForSelector(".wb-list", { timeout: 10000 });
+      await page.getByRole("button", { name: "對話", exact: true }).click();
+      await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 10000 });
+    }
 
     check("語音是架構邊界而不是半成品 MVP", (await page.getByTestId("voice-boundary").innerText()).includes("語音"));
 

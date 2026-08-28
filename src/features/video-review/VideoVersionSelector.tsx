@@ -11,6 +11,7 @@ import { UniversalIntake } from "../../components/UniversalIntake";
  */
 
 type Props = {
+  extraChip?: import("react").ReactNode;
   versions: Version[];
   currentId: string;
   onSelect: (versionId: string) => void;
@@ -19,7 +20,7 @@ type Props = {
   canAdd: boolean;
 };
 
-export function VideoVersionSelector({ versions, currentId, onSelect, onAddFiles, canAdd }: Props) {
+export function VideoVersionSelector({ versions, currentId, onSelect, onAddFiles, canAdd, extraChip }: Props) {
   return (
     <div className="m-versions">
       {versions.map((v) => (
@@ -38,6 +39,7 @@ export function VideoVersionSelector({ versions, currentId, onSelect, onAddFiles
           <span aria-hidden>＋</span>
         </UniversalIntake>
       )}
+      {extraChip}
     </div>
   );
 }

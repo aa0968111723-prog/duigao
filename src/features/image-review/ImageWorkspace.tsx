@@ -44,6 +44,11 @@ export function ImageWorkspace({ api, presence, cloud }: Props) {
           aria-label="文宣名稱"
         />
         <div className="topbar-right">
+          {api.boardRefs && (
+            <button type="button" className="m-vchip m-vchip-board" data-testid="board-refs-chip" onClick={api.boardRefs.open}>
+              ⊞ 白板 {api.boardRefs.count}
+            </button>
+          )}
           {api.saveState !== "idle" && (
             <span className={`save-status save-${api.saveState}`} title="資料自動保存在這台裝置">
               {api.saveState === "saving" ? "儲存中…" : api.saveState === "saved" ? "已儲存" : "儲存失敗"}

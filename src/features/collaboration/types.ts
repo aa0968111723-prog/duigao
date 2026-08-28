@@ -11,6 +11,8 @@ export const NODE_TYPES = [
   "link",
   "group",
   "ai_result",
+  // WB03（0026）：手繪筆畫 — content.points 是相對節點左上的 [x,y][]
+  "freehand",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
@@ -90,6 +92,9 @@ export type NodeContent = {
   /** Mobile-safe presence stamp. Never a cursor stream. */
   lastWriterId?: string;
   lastWriterName?: string;
+  /** freehand（WB03）：相對節點左上的筆畫點；搬節點＝搬筆畫。 */
+  points?: [number, number][];
+  strokeWidth?: number;
 };
 
 export type WhiteboardNode = {

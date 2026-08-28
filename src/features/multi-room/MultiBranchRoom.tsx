@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { historyLayers } from "../../lib/historyLayers";
+import { emptyPlan, shouldAdoptRemotePlan } from "./planDraft";
 import type {
   BranchStatus,
   BranchType,
@@ -90,6 +92,8 @@ export type MultiBranchRoomApi = {
   /** WB02：frames／op 入帳／focus 通知（App 據此抑制 AssetAiFab）。 */
   whiteboardFrames?: import("../collaboration/types").WhiteboardFrame[];
   onCreateFrame?: (frame: import("../collaboration/types").WhiteboardFrame) => void;
+  onUpdateFrame?: (frame: import("../collaboration/types").WhiteboardFrame) => void;
+  onDeleteFrame?: (id: string) => void;
   onEmitOperation?: (draft: import("../collaboration/operations").OperationDraft) => void;
   onBoardFocusChange?: (focused: boolean) => void;
   onRenameWhiteboard?: (id: string, title: string) => void;
@@ -183,10 +187,6 @@ const PANE_META: { id: PushedPane; label: string; icon: string }[] = [
   { id: "content", label: "內容", icon: "▧" },
   { id: "plan", label: "企劃", icon: "☷" },
 ];
-
-function emptyPlan(branch: RoomBranch): PlanDocument {
-  return { branchId: branch.id, title: branch.name, description: "", blocks: [], updatedAt: Date.now() };
-}
 
 function branchHasType(branch: RoomBranch, type: BranchType): boolean {
   return branch.branchType === type || (type === "plan" && branch.branchType === "copy");
@@ -322,14 +322,20 @@ function PlanEditor({
     () => room.plans?.find((item) => item.branchId === branch.id) ?? emptyPlan(branch),
     [branch.id, branch.name, room.plans],
   );
-  const [draft, setDraft] = useState<PlanDocument>(saved);
+  const [draft, setDraftState] = useState<PlanDocument>(saved);
   const [relationTarget, setRelationTarget] = useState("");
+  // 「有未存編輯」旗標：所有使用者操作都經 setDraft 立旗，存檔後落旗。
+  const dirtyRef = useRef(false);
+  const setDraft: typeof setDraftState = (value) => {
+    dirtyRef.current = true;
+    setDraftState(value);
+  };
 
   // room.plans 的陣列身分每次快照都會變；無條件 reset 會把「打字中、還沒按
   // 完成」的 blocks 洗掉（realtime nudge → branch reload → echo 快照）。
-  // 只有遠端真的比較新（別人存的）才接受，否則保留本地編輯。
+  // 規則：有未存編輯就不接受任何遠端；乾淨時遠端較新才接受。
   useEffect(() => {
-    setDraft((current) => (saved.updatedAt > current.updatedAt ? saved : current));
+    setDraftState((current) => (shouldAdoptRemotePlan(saved, current, dirtyRef.current) ? saved : current));
   }, [saved]);
 
   const relations = (room.relations ?? []).filter(
@@ -417,7 +423,12 @@ function PlanEditor({
           <button type="button" onClick={() => addBlock("list")}>＋清單</button>
           <button type="button" onClick={() => addBlock("checklist")}>＋待辦</button>
           <button type="button" onClick={() => addBlock("link")}>＋連結</button>
-          <button type="button" className="project-save-button" onClick={() => onSave({ ...draft, updatedAt: Date.now() })}>完成</button>
+          <button type="button" className="project-save-button" onClick={() => {
+            const stamped = { ...draft, updatedAt: Date.now() };
+            dirtyRef.current = false; // 存了就不再是未存編輯 — 之後可接受別人的新版
+            setDraftState(stamped);
+            onSave(stamped);
+          }}>完成</button>
         </div>
       )}
       <section className="project-related">
@@ -729,6 +740,24 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   // Focus Mode（WB02）：白板全螢幕時抑制 project-fab（條件不渲染，非蓋住）
   const [boardFocused, setBoardFocused] = useState(false);
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
+  // WB03「打開來源訊息」：關板→切對話→捲動到訊息＋1.6s 高亮。訊息元素
+  // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
+  const openDiscussionMessage = (messageId: string) => {
+    api.onOpenWhiteboard(null);
+    setDiscussPane("chat");
+    const started = performance.now();
+    const seek = () => {
+      const el = document.querySelector(`[data-testid="discussion-${messageId}"]`);
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("rd-msg-flash");
+        window.setTimeout(() => el.classList.remove("rd-msg-flash"), 1600);
+        return;
+      }
+      if (performance.now() - started < 1200) requestAnimationFrame(seek);
+    };
+    requestAnimationFrame(seek);
+  };
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
@@ -755,11 +784,33 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     }
   }, [api.activeWhiteboardId]);
 
+  // WB03 疊加規則 3：對稿 overlay 疊在（可能開著的）白板 Focus 上時，
+  // back 先關 overlay — 透過 historyLayers 協調器與白板 focus 層排隊，
+  // 不再兩個 popstate listener 互踩（舊 bug：back 退了板、overlay 還在）。
+  const workspaceOpen = Boolean(api.workspace);
+  const mbrApiRef = useRef(api);
+  mbrApiRef.current = api;
+  const overlayPoppingRef = useRef(false);
+  useEffect(() => {
+    if (!workspaceOpen) return;
+    const remove = historyLayers().push("content-overlay", () => {
+      overlayPoppingRef.current = true;
+      mbrApiRef.current.onBackToRoom();
+      return "closed";
+    });
+    return () => {
+      remove(overlayPoppingRef.current);
+      overlayPoppingRef.current = false;
+    };
+  }, [workspaceOpen]);
+
   // 桌機 Escape：對稿 overlay 是最外層的「可返回」，讓工作區自己的
   // ladder（modal/sheet）先吃；事件冒泡到 document 而沒被吃掉才關 overlay。
   // 推進面板同理。
   useEffect(() => {
-    if (!api.workspace && !pushedPane) return;
+    // overlay 的 Escape 交給 historyLayers 協調器（S12）— 這裡只留
+    // pushedPane（推進面板不在協調器棧上）。
+    if (!pushedPane) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       // 內層 ladder（pin/draft/modal…）消費時會 preventDefault，但監聽器
@@ -768,13 +819,15 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       // 只關一件事（Grok pr01a r2 N2）。
       setTimeout(() => {
         if (event.defaultPrevented) return;
-        if (api.workspace) api.onBackToRoom();
-        else setPushedPane(null);
+        // overlay 開著時棧頂是 content-overlay，協調器會關它；推進面板
+        // 只在沒有 overlay 時吃這次 Escape。
+        if (api.workspace) return;
+        setPushedPane(null);
       }, 0);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [api.workspace, pushedPane, api.onBackToRoom]);
+  }, [api.workspace, pushedPane]);
 
   const openBranch = (branchId: string, opts?: { startTime?: number }) => {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合
@@ -932,6 +985,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     canToggleOpenEdit: api.role === "owner" || (!api.role && api.canManage),
                     frames: api.whiteboardFrames,
                     onCreateFrame: api.onCreateFrame,
+                    onUpdateFrame: api.onUpdateFrame,
+                    onDeleteFrame: api.onDeleteFrame,
+                    onOpenDiscussionMessage: openDiscussionMessage,
                     onEmitOperation: api.onEmitOperation,
                     onFocusChange: (focused) => {
                       setBoardFocused(focused);

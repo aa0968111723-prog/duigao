@@ -855,6 +855,11 @@ export function VideoWorkspace({ api, presence }: Props) {
             onSelect={switchVersion}
             onAddFiles={api.addFiles}
             canAdd={!uploading}
+            extraChip={api.boardRefs ? (
+              <button type="button" className="m-vchip m-vchip-board" data-testid="board-refs-chip" onClick={api.boardRefs.open}>
+                ⊞ 白板 {api.boardRefs.count}
+              </button>
+            ) : null}
           />
           {uploadBar}
           {briefCard}
@@ -925,6 +930,11 @@ export function VideoWorkspace({ api, presence }: Props) {
         onSelect={switchVersion}
         onAddFiles={api.addFiles}
         canAdd={!uploading}
+        extraChip={api.boardRefs ? (
+          <button type="button" className="m-vchip m-vchip-board" data-testid="board-refs-chip" onClick={api.boardRefs.open}>
+            ⊞ 白板 {api.boardRefs.count}
+          </button>
+        ) : null}
       />
 
       <div className="v-stage-area">

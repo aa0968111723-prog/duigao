@@ -65,6 +65,9 @@ const CONFLICT_KEYS = {
   plan_documents: ["branch_id"],
   room_poll_votes: ["poll_id", "user_id"],
   whiteboard_nodes: ["id"],
+  // frames 也要有自然鍵（S9）：少了它，frame 更新走 insert → 409
+  // duplicate 被 client 折成成功，mock 資料列根本沒變＝e2e 全程假綠。
+  whiteboard_frames: ["id"],
   room_discussion_supports: ["message_id", "user_id"],
   presentation_state: ["room_id"],
   version_review_briefs: ["version_id"],
@@ -682,7 +685,9 @@ export const server = http.createServer(async (req, res) => {
         const keys = CONFLICT_KEYS[table];
         const existing = keys ? tables[table].find((r) => keys.every((k) => r[k] === filled[k])) : null;
         if (existing && upsert) {
-          if (table === "whiteboard_nodes") {
+          if (table === "whiteboard_nodes" || table === "whiteboard_frames") {
+            // frames 與 nodes 同樣走 OCC（S9）：0023 的 touch trigger 會
+            // bump version 並擋 stale-write，mock 不模擬就測不出版本簿記。
             const incoming = Number(filled.version ?? existing.version ?? 1);
             const current = Number(existing.version ?? 1);
             if (incoming !== current && incoming < current) {

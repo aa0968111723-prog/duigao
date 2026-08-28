@@ -264,6 +264,11 @@ export function MobileWorkspace({ api, presence }: Props) {
         <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="m-vchip m-vchip-add">
           <span aria-hidden>＋</span>
         </UniversalIntake>
+        {api.boardRefs && (
+          <button type="button" className="m-vchip m-vchip-board" data-testid="board-refs-chip" onClick={api.boardRefs.open}>
+            ⊞ 白板 {api.boardRefs.count}
+          </button>
+        )}
       </div>
 
       <div className="m-stage-area">
