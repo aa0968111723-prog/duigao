@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T00:58:46.000Z",
+  "generatedAt": "2026-08-28T03:25:02.000Z",
   "git": {
-    "branch": "feat/voice-room-livekit",
-    "sha": "22b0d1b07824e692d3caefab241f2d3e714ecad1",
-    "mainSha": "22b0d1b07824e692d3caefab241f2d3e714ecad1",
+    "branch": "fix/edge-cors-preflight",
+    "sha": "007713e45870a0338e22ee620c74cf84082befe8",
+    "mainSha": "007713e45870a0338e22ee620c74cf84082befe8",
     "dirty": true
   },
   "project": {
@@ -980,7 +980,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0019",
+    "repoMigrationHead": "0020",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -1000,10 +1000,11 @@
       "supabase/migrations/0016_asset_library.sql",
       "supabase/migrations/0017_author_acl.sql",
       "supabase/migrations/0018_discussion_attachments.sql",
-      "supabase/migrations/0019_ai_apply_audit.sql"
+      "supabase/migrations/0019_ai_apply_audit.sql",
+      "supabase/migrations/0020_canva_bridge.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0019",
+    "productionMigrationExpectation": "0020",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1013,6 +1014,7 @@
       "npm run test:asset-intelligence-e2e",
       "npm run test:collaboration",
       "npm run test:collaboration-e2e",
+      "npm run test:edge-cors",
       "npm run test:migrations",
       "npm run test:multi-branch",
       "npm run test:multi-branch-e2e",
@@ -1164,7 +1166,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0019_ai_apply_audit.sql."
+        "message": "Migration order is contiguous through 0020_canva_bridge.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",
