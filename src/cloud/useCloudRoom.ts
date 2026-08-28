@@ -83,6 +83,7 @@ import { signedVideoUrl } from "./videoAssets";
 import { subscribeRoom, type Unsubscribe } from "./roomSync";
 import type { SyncStatus } from "./types";
 import { mergeRoomBranch } from "../lib/roomBranches";
+import { uuid } from "../lib/id";
 import {
   edgeFromRow,
   insertDecision,
@@ -1010,7 +1011,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     addVersion: (label, sortOrder, imageDataUrl, branchId) => {
       // 穩定 id 在排隊當下鑄一次：run() 的 duplicate-key=acknowledge 因此
       // 對 replay 真正冪等（回應丟失的重送不會複製版本）。
-      const stableId = crypto.randomUUID();
+      const stableId = uuid();
       run(`version:${branchId ?? "room"}:${sortOrder}:${label}`, async () => {
         const v: Version = await repoAddVersion(supabase!, boundRef.current!, label, sortOrder, imageDataUrl, branchId, stableId);
         void v;

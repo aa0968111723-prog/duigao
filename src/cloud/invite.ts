@@ -4,6 +4,8 @@
  * only its sha256 hash (computed server-side in the join/create RPCs).
  */
 
+import { uuid } from "../lib/id";
+
 function base64url(bytes: Uint8Array): string {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
@@ -17,7 +19,10 @@ export function generateInviteToken(): string {
 }
 
 export function newRoomId(): string {
-  return crypto.randomUUID();
+  // 不是秘密（秘密是上面那個 token，走 getRandomValues），所以舊瀏覽器沒有
+  // crypto.randomUUID 時退回 uuid() 是安全的 — 但「拿不到 id 就整條建房
+  // 靜靜失敗」不是。
+  return uuid();
 }
 
 /**
