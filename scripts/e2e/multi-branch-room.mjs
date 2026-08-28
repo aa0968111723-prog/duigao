@@ -177,7 +177,7 @@ try {
       VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_e2e_mock_key_000000",
     },
   });
-  mock = await startMock(MOCK_PORT, { cutosBridge: true });
+  mock = await startMock(MOCK_PORT, { cutosBridge: true, voiceToken: true });
   app = await serveStatic(dist, APP_PORT);
   browser = await chromium.launch(browserOptions());
 
@@ -392,6 +392,78 @@ try {
       check("重試沿用同一條分支，不增生", branchesBefore === 1 && branchesAfter === 1, `before=${branchesBefore} after=${branchesAfter}`);
       faults.cutosOutputProjectId = "cutos-demo";
       await page.locator(".project-sheet-close").click();
+    }
+
+    // ---- PR-03：語音房（LiveKit）— token 契約與 UI 誠實性 ------------
+    {
+      // (1) health 過 → dock 出現（在討論根畫面）
+      await page.waitForSelector('[data-testid="voice-dock"]', { timeout: 20000 });
+      check("語音 dock 在健檢通過後出現", (await page.getByTestId("voice-dock").count()) === 1);
+      check("開場權限：owner 看到「開始語音」", (await page.getByTestId("voice-join").innerText()).includes("開始語音"));
+
+      // (2) token 契約：node 側以獨立使用者對真實 edge 源碼驗簽
+      //（HS256 簽名＋claims 形狀 — LiveKit token 的公開契約）
+      {
+        const mockOrigin = `http://127.0.0.1:${MOCK_PORT}`;
+        const tokenRes0 = await fetch(`${mockOrigin}/auth/v1/token?grant_type=password`, { method: "POST", body: "{}" });
+        const session = await tokenRes0.json();
+        const probeRoom = crypto.randomUUID();
+        await fetch(`${mockOrigin}/rest/v1/rpc/create_room_with_invite`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${session.access_token}`, "content-type": "application/json" },
+          body: JSON.stringify({ p_room_id: probeRoom, p_title: "voice-probe", p_invite_token: "tok-voice-probe-1", p_display_name: "P", p_color: "#111" }),
+        });
+        const vt = await fetch(`${mockOrigin}/functions/v1/voice-token`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${session.access_token}`, "content-type": "application/json" },
+          body: JSON.stringify({ action: "token", roomId: probeRoom, displayName: "契約探針" }),
+        });
+        const minted = await vt.json();
+        let claimsOk = false;
+        let signatureOk = false;
+        if (minted.ok && typeof minted.token === "string") {
+          const [h, pl, sig] = minted.token.split(".");
+          const payload = JSON.parse(Buffer.from(pl, "base64url").toString("utf8"));
+          claimsOk =
+            payload.iss === "e2e-livekit-key" &&
+            payload.video?.room === `duigao-${probeRoom}` &&
+            payload.video?.roomJoin === true &&
+            payload.video?.canPublish === true &&
+            payload.video?.canPublishData === false &&
+            Array.isArray(payload.video?.canPublishSources) &&
+            payload.video.canPublishSources.length === 1 &&
+            payload.video.canPublishSources[0] === "microphone" &&
+            payload.exp - payload.nbf <= 10 * 60 + 20;
+          const cryptoMod = await import("node:crypto");
+          const expected = cryptoMod.createHmac("sha256", "e2e-livekit-secret-for-harness-only").update(`${h}.${pl}`).digest("base64url");
+          signatureOk = expected === sig;
+        }
+        check("voice token：claims 契約（單房/音訊限定/TTL）", claimsOk, JSON.stringify(minted).slice(0, 100));
+        check("voice token：HS256 簽名以 harness secret 驗證通過", signatureOk);
+        // 非成員拿不到別房的 token
+        const other = await fetch(`${mockOrigin}/auth/v1/token?grant_type=password`, { method: "POST", body: "{}" }).then((r) => r.json());
+        const denied = await fetch(`${mockOrigin}/functions/v1/voice-token`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${other.access_token}`, "content-type": "application/json" },
+          body: JSON.stringify({ action: "token", roomId: probeRoom, displayName: "外人" }),
+        });
+        const deniedBody = await denied.json();
+        check("voice token：非成員 404 ROOM_NOT_FOUND", denied.status === 404 && deniedBody.code === "ROOM_NOT_FOUND", JSON.stringify(deniedBody).slice(0, 80));
+      }
+
+      // (3) 按「開始語音」：session＋參與者列落 DB；LiveKit 連線對假
+      //     wss 失敗 → 誠實錯誤文案（不是假裝已加入）
+      await page.getByTestId("voice-join").click();
+      const errShown = await page.waitForFunction(
+        () => document.querySelector(".rd-voice-error")?.textContent?.includes("失敗") ?? false,
+        null,
+        { timeout: 30000 },
+      ).then(() => true).catch(() => false);
+      const sessionRows = rows.voice_sessions.filter((row) => row.status === "live").length;
+      const participantRows = rows.voice_session_participants.length;
+      check("開始語音：voice_sessions live 列落地", sessionRows >= 1, `sessions=${sessionRows}`);
+      check("開始語音：自己的參與者列落地", participantRows >= 1, `participants=${participantRows}`);
+      check("假 LiveKit 連不上 → 誠實錯誤，不假裝已加入", errShown && (await page.getByTestId("voice-dock").innerText()).includes("失敗"));
     }
 
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
