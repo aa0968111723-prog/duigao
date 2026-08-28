@@ -16,7 +16,11 @@
 | #56 PR-01c | feat/mobile-upload-hardening | MERGED | 首上傳沿用同房；addVersion 冪等；HEVC 警告 | rounds/pr01c（Grok F1/F2 blocking 全修）；video check 24 ×7 |
 | #57 PR-08a | feat/bundle-code-split | MERGED | 進場 JS 902KB→404KB；殼 lazy＋chunk 失敗敘事＋peer 世代守衛 | rounds/pr08（Grok F1–F4 全修） |
 | #58 PR-06 | feat/planform-artifact | MERGED | planform artifact 契約：JSON 識別＋摘要卡＋planform-scene 錨臂 | rounds/pr06（Grok PASS）；unit 78、e2e 38 |
-| #59 PR-07 | feat/cutos-s2s-contract | DRAFT（CI＋Grok 中） | CUTOS S2S 契約＋cutos-bridge＋成品匯入 | rounds/pr07（進行中）；multi-branch e2e 25/25 |
+| #59 PR-07 | feat/cutos-s2s-contract | MERGED（automerge 搶跑，修復經 #60 補齊） | CUTOS S2S 契約＋cutos-bridge＋成品匯入 | rounds/pr07；multi-branch e2e 26/26 |
+| #60 | fix/cutos-grok-round | MERGED | Grok 07 安全修復（redirect 拒跟/串流計量 50MB/分支不增生/誠實敘事） | rounds/pr07/claude-adjudication.md |
+| #61 | fix/planform-identifier | MERGED | planform 識別器收緊（pr06 F2/F6 承諾） | 碰撞 fixture；e2e 負例強化 |
+| #62 | fix/harness-ws-stub | MERGED | Node 20 CI 無原生 WebSocket → harness stub（main browser 紅燈根因） | CI browser 回綠 |
+| #63 PR-08b | feat/offline-matrix | OPEN（CI 中；Grok PASS） | 離線矩陣 e2e＋死區懸掛修復（insert deadline＋回網自癒） | rounds/pr08（08b round）；collab e2e 43/43 |
 | PR-03 | feat/voice-context | BLOCKED_VOICE_PROVIDER | provider adapter＋誠實 unavailable | — |
 | PR-04 | （#44 已由第三 agent 合併核心） | 部分完成 | 剩餘：audit event migration、chunk cap 對齊（Grok pr00 F8） | #44 |
 | PR-05 | feat/canva-surface | BLOCKED_CANVA_CREDENTIALS | adapter+fixture 先行 | — |

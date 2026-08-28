@@ -29,7 +29,9 @@
 | pr04-audit | rounds/pr04/grok-findings-04-audit.json（PASS，全 low） | rounds/pr04/claude-adjudication-04-audit.md：F1 探針補強；F2 以 ECMA-262 反駁 |
 | pr01c | rounds/pr01c/grok-findings.json（MUST_FIX：F1 .mov 繞上限、F2 branch id 直通洞） | rounds/pr01c/claude-adjudication.md：全修＋F2 分兩半裁決（堵洞＋誠實化） |
 | pr08a | rounds/pr08/grok-findings-08a.json（MUST_FIX F1–F4 全 blocking） | rounds/pr08/claude-adjudication-08a.md：白屏三洞全補；F4 修正版被自己斷言抓到 heal 為 0-or-1 競態 → 靜默錨點 |
-| pr06 | rounds/pr06/grok-findings.json（PASS 全 low） | rounds/pr06/claude-adjudication.md：F2/F6 記入後續收緊 |
+| pr06 | rounds/pr06/grok-findings.json（PASS 全 low） | rounds/pr06/claude-adjudication.md：F2/F6 記入後續收緊（#61 落實） |
+| pr07 | rounds/pr07/grok-findings.json（MUST_FIX：F1 SSRF redirect、F2 記憶體、F4 分支增生、F5 說謊 toast） | rounds/pr07/claude-adjudication.md：全修（#60）；F8 誠實記錄殘餘 |
+| pr08b | rounds/pr08/grok-findings-08b.json（PASS） | rounds/pr08/claude-adjudication-08b.md：F1 acked 守衛；F2/F3 記錄為設計界限 |
 
 ## 紀律
 

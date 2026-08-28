@@ -314,11 +314,13 @@ try {
 
     // 失敗送出：mock 注入一次 insert 失敗 → 樂觀列顯示未送出，重試後恢復，
     // 且訊息只出現一次（id 冪等）。
-    faults.discussionInsert = true;
+    // 兩發 fault：第一次失敗會被 outbox 的一次性自動補送吃掉（onLine
+    // 時的死區恢復設計，PR-08b）；第二發也失敗 → 誠實 failed＋按鈕。
+    faults.discussionInsert = 2;
     await page.getByLabel("房間討論").fill("這句會先失敗");
     await page.getByRole("button", { name: "送出" }).click();
-    await page.waitForSelector(".rd-msg.is-failed [data-testid='discussion-retry'], .rd-msg.is-failed", { timeout: 15000 });
-    check("失敗的討論訊息看得到、可重試", await page.locator(".rd-msg.is-failed").count() === 1 && await page.getByTestId("discussion-retry").count() === 1);
+    await page.waitForSelector(".rd-msg.is-failed [data-testid='discussion-retry'], .rd-msg.is-failed", { timeout: 20000 });
+    check("失敗的討論訊息看得到、可重試（自動補送上限一次後）", await page.locator(".rd-msg.is-failed").count() === 1 && await page.getByTestId("discussion-retry").count() === 1);
     // wholesale 快照替換不能吃掉 ghost：先送一句成功的（觸發 realtime
     // reload → 整包快照不含失敗那句），失敗列必須還在（Grok pr01a F4/F7）。
     await page.getByLabel("房間討論").fill("這句會成功並觸發快照");
@@ -442,15 +444,91 @@ try {
           await ctxB.close();
         }
       }
+      // ---- PR-08b：離線矩陣 -------------------------------------------
+      // 真離線（Playwright setOffline），不是 mock fault：驗的是「斷網→
+      // 回網」的整條使用者旅程 — 誠實狀態、不掉資料、回網自癒。
+      {
+        const ctx = page.context();
+        // 前段停在白板 pane：先回對話，composer 才在。
+        await page.getByRole("button", { name: "對話", exact: true }).click();
+        await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
+
+        // (a) 離線發討論訊息 → 誠實「未送出」→ 回網手動重試 → 落地
+        await ctx.setOffline(true);
+        await page.getByLabel("房間討論").fill("斷網時打的話");
+        await page.locator(".rd-composer").getByRole("button", { name: "送出" }).click();
+        const ghostShown = await page.waitForFunction(
+          () => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("斷網時打的話") ?? false,
+          null,
+          { timeout: 15000 },
+        ).then(() => true).catch(() => false);
+        // 死區 fetch 是懸掛不是拒絕：failed 狀態要等 12 秒 abort deadline
+        // 之後才誠實出現（這正是本 PR 的產品修復）。
+        const retryAppeared = await page.waitForFunction(
+          () => Boolean(document.querySelector('[data-testid="discussion-retry"]')),
+          null,
+          { timeout: 25000 },
+        ).then(() => true).catch(() => false);
+        check("離線：訊息以未送出 ghost 誠實顯示（abort deadline 後可重試）", ghostShown && retryAppeared);
+        await ctx.setOffline(false);
+        // 回網後不需要手動點：outbox 的 online flush＋一次性自動補送會把
+        // 它送到（死區懸掛的第二發 fetch 也可能懸掛→abort→自動補一次 —
+        // 全程誠實狀態）。落地以 mock 列為準。
+        {
+          const landDeadline = Date.now() + 40000;
+          let msgRows = 0;
+          while (Date.now() < landDeadline) {
+            msgRows = rows.room_discussion_messages.filter((row) => row.body === "斷網時打的話").length;
+            if (msgRows >= 1) break;
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
+          check("回網自動補送：訊息落地恰好一列（無重複、無手動）", msgRows === 1, `rows=${msgRows}`);
+        }
+
+        // (b) 離線白板編輯 → pending 佇列 → 回網自動 flush → 恰好一列
+        await page.getByRole("button", { name: "白板", exact: true }).click();
+        if (!(await page.locator('[data-testid="wb-canvas"]').count())) {
+          await page.locator(".wb-card").first().click({ force: true }).catch(() => undefined);
+        }
+        await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 20000 });
+        await ctx.setOffline(true);
+        await page.getByTestId("whiteboard-add").click();
+        await page.getByRole("button", { name: "便利貼" }).click();
+        await page.waitForSelector("textarea.wb-node-text", { timeout: 15000 });
+        await page.locator("textarea.wb-node-text").last().fill("離線寫的節點");
+        await page.keyboard.press("Tab");
+        await page.waitForTimeout(800);
+        const offlineNodeRows = rows.whiteboard_nodes.filter((row) => row.content?.text === "離線寫的節點").length;
+        check("離線：節點寫入不出網（佇列持有）", offlineNodeRows === 0, `rows=${offlineNodeRows}`);
+        await ctx.setOffline(false);
+        // online 事件觸發 revive→flushPending；輪詢佇列 flush 的可觀測終態
+        const flushDeadline = Date.now() + 20000;
+        let flushedRows = 0;
+        while (Date.now() < flushDeadline) {
+          flushedRows = rows.whiteboard_nodes.filter((row) => row.content?.text === "離線寫的節點").length;
+          if (flushedRows >= 1) break;
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+        check("回網：pending 佇列自動 flush，節點恰好一列", flushedRows === 1, `rows=${flushedRows}`);
+
+        // (c) 節點在畫面上仍在（本地樂觀＋flush 後 ack，不閃不掉）
+        const stillVisible = await page.evaluate(() =>
+          [...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("離線寫的節點")),
+        );
+        check("離線寫的節點回網後仍在畫面上", stillVisible);
+      }
+
       await page.getByRole("button", { name: "對話", exact: true }).click();
     }
-    await page.getByTestId("discussion-retry").click();
+    // 舊 ghost 已被離線矩陣段的 online flush 自動送到（這正是 PR-08b 的
+    // 設計）：按鈕不該在了，訊息應恰好一列 — 手動 retry 改為驗證自癒。
     await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 });
     await page.waitForTimeout(400);
     {
       const feedText = await page.getByTestId("discussion-feed").innerText();
       const occurrences = feedText.split("這句會先失敗").length - 1;
-      check("重試後訊息恢復且只出現一次", occurrences === 1, "occurrences=" + occurrences);
+      const landedRows = rows.room_discussion_messages.filter((row) => row.body === "這句會先失敗").length;
+      check("online flush 自癒舊 ghost：恢復且只出現一次", occurrences === 1 && landedRows === 1, `occurrences=${occurrences} rows=${landedRows}`);
     }
 
     // --- PR-01b：Universal Intake 附件 ---------------------------------
@@ -501,7 +579,7 @@ try {
     check("純 URL 變成連結卡（http/https 白名單）", await page.getByTestId("link-card").count() >= 1);
 
     // 失敗重試不重新上傳：insert 失敗 → 附件卡進未送出；重試只補 insert。
-    faults.discussionInsert = true;
+    faults.discussionInsert = 2; // auto 補送吃一發，第二發落 failed
     const uploadsBefore = requestLog.filter((line) => line.startsWith("POST /storage/") && line.includes("/attachments/")).length;
     await attachInput.setInputFiles({ name: "retry.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 retry") });
     await page.waitForSelector(".rd-msg.is-failed [data-testid='discussion-retry'], .rd-msg.is-failed", { timeout: 20000 });

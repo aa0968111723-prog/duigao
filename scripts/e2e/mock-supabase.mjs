@@ -529,7 +529,9 @@ export const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req)).toString() || "[]");
       const rows = Array.isArray(body) ? body : [body];
       if (table === "room_discussion_messages" && faults.discussionInsert) {
-        faults.discussionInsert = false;
+        // true=1 發；數字=連續 N 發（auto-retry 上限測試用，PR-08b）
+        if (typeof faults.discussionInsert === "number" && faults.discussionInsert > 1) faults.discussionInsert -= 1;
+        else faults.discussionInsert = false;
         return json(res, 500, { message: "injected discussion insert failure" });
       }
       if (table === "room_branches" && faults.branchInsertRoomId) {
