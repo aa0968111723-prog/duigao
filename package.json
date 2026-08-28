@@ -23,6 +23,7 @@
     "test:collaboration-e2e": "node scripts/e2e/collaboration-workspace.mjs",
     "test:migrations": "node scripts/e2e/migrations.mjs",
     "test:agent": "node --test scripts/tests/agent-layer.test.mjs",
+    "test:edge-cors": "node --test scripts/tests/edge-cors.test.mjs",
     "agent:context": "node scripts/agent-context.mjs",
     "agent:state": "node scripts/agent-context.mjs --json",
     "agent:query": "node scripts/agent-context.mjs",

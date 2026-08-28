@@ -25,9 +25,22 @@ function responseHeaders(): Record<string, string> {
   return {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
-    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-headers": "authorization, x-client-info, apikey, content-type",
     "access-control-allow-methods": "POST, OPTIONS",
   };
+}
+
+/**
+ * 預檢：把瀏覽器問的標頭原樣答應。supabase-js 送 x-client-info / apikey，
+ * 版本更新還可能再加 — 回應請求裡的清單，之後不會再有「伺服器端測得過、
+ * 瀏覽器卻被擋」的落差（curl 不做預檢，所以這種錯只有真瀏覽器抓得到）。
+ */
+function preflightResponse(request: Request): Response {
+  const requested = request.headers.get("access-control-request-headers");
+  const headers = responseHeaders();
+  if (requested) headers["access-control-allow-headers"] = requested;
+  headers["access-control-max-age"] = "86400";
+  return new Response(null, { status: 204, headers });
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -93,7 +106,7 @@ async function mintLiveKitToken(
 }
 
 async function handle(request: Request): Promise<Response> {
-  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: responseHeaders() });
+  if (request.method === "OPTIONS") return preflightResponse(request);
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: responseHeaders() });
 
   const authHeader = request.headers.get("authorization") || "";

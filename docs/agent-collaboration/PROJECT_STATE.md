@@ -8,10 +8,12 @@
 
 ## 目前 phase
 
-PR-03 語音房已收尾（#64＋#65，Grok round pr03 五個 blocking 全修）。
-正式環境已同步（migrations 0011–0019＋五支 edge functions，見 BLOCKERS
-的 RESOLVED_PRODUCTION_STATE）。下一步：PR-05 canva-bridge（credentials
-已到手）；殘餘外部項見 BLOCKERS。
+PR-05 Canva 已合併（#69＋Grok pr05 四 blocking 全修）；share-preview
+真人 302 修復（#68＋#70 — 平台把 *.supabase.co 的 HTML 強制 text/plain，
+使用者真機回報）。正式環境：migrations 0011–**0020**、六支 edge
+functions（share-preview v2 / canva-bridge 新增，皆已部署驗證），前端
+Zeabur 自動部署 https://duigao-k7q2.zeabur.app。殘餘：使用者設 Dashboard
+secrets（CANVA_*、LIVEKIT_*、TKU_*）後真機驗收；見 BLOCKERS。
 
 ## 已合併（時序）
 
@@ -23,7 +25,9 @@ ContextAnchor 契約層 → #54 PR-04b AI 稽核 0019 → #55 round 收尾 →
 #56 PR-01c 手機上傳強化 → #57 PR-08a code-split（902KB→404KB）→
 #58 PR-06 planform artifact 契約 → #59+#60 PR-07 CUTOS S2S 契約（含
 搶跑修復）→ #61 e2e cutos 掛載 → #62 harness WebSocket stub → #63
-guard-test 修復 → #64 PR-03 語音房 MVP → #65 PR-03 Grok 修復輪。
+guard-test 修復 → #64 PR-03 語音房 MVP → #65 PR-03 Grok 修復輪 → #66 PR-03
+收尾文件 → #68 share-preview 真人 302 → #69 PR-05 Canva bridge →
+#70 APP_ORIGIN 預設。（#67 設計看板為另一 session 產出。）
 
 **PR-01/02/03/04/06/07 系列完成；PR-08 第一刀完成。branch protection
 enforce_admins=true＋四 required checks（ADR-012，根治 automerge 搶跑）。**

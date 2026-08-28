@@ -25,8 +25,10 @@ import { extname, join, normalize } from "node:path";
 import { faults, requestLog, rows, start as startMock } from "./mock-supabase.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
-const MOCK_PORT = 54408;
-const APP_PORT = 4180;
+// 共用機器上別的專案可能已經佔著這些 port（planform-iso 的 vite preview
+// 就用 4180）。預設值不變，需要時以環境變數讓路 — 不必去動別人的程序。
+const MOCK_PORT = Number(process.env.DUIGAO_E2E_MOCK_PORT || 54408);
+const APP_PORT = Number(process.env.DUIGAO_E2E_APP_PORT || 4180);
 const APP = `http://127.0.0.1:${APP_PORT}/`;
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 13; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
