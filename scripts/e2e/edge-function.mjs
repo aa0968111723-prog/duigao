@@ -50,11 +50,27 @@ export async function loadEdgeHandler(name, env) {
   // Deno 的 https import 在 Node ESM 走不動：supabase-js 換成 devDependency
   // 的同一套件（版本語意一致，程式碼不變）。
   source = source.replace(/from "https:\/\/esm\.sh\/@supabase\/supabase-js@[^"]+"/g, 'from "' + SUPABASE_JS_URL + '"');
+  const dir = await mkdtemp(join(tmpdir(), "duigao-fn-"));
+  // `../_shared/x.ts` 是真實部署會一起打包的檔（deploy 時逐支帶上）。
+  // 載入器同樣要把它轉譯出來，否則凡是用共用模組的函式在 harness 裡
+  // 根本載不起來 —— 那等於這些函式沒有被任何測試真正執行過。
+  const sharedNames = [...source.matchAll(/from "\.\.\/_shared\/([A-Za-z0-9_-]+)\.ts"/g)].map((m) => m[1]);
+  for (const shared of sharedNames) {
+    const sharedSource = await readFile(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "functions", "_shared", shared + ".ts"),
+      "utf8",
+    );
+    const sharedJs = ts.transpileModule(sharedSource, {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+      fileName: shared + ".ts",
+    }).outputText;
+    await writeFile(join(dir, shared + ".mjs"), sharedJs, "utf8");
+  }
+  source = source.replace(/from "\.\.\/_shared\/([A-Za-z0-9_-]+)\.ts"/g, 'from "./$1.mjs"');
   const js = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
     fileName: "index.ts",
   }).outputText;
-  const dir = await mkdtemp(join(tmpdir(), "duigao-fn-"));
   const file = join(dir, name + ".mjs");
   await writeFile(file, js, "utf8");
   let handler = null;
