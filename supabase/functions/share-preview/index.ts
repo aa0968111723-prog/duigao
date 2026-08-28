@@ -36,8 +36,14 @@
 
 const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
-/** Where a real person is sent, fragment intact. Set as a function secret. */
-const APP_ORIGIN = (Deno.env.get("APP_ORIGIN") ?? "").replace(/\/+$/, "");
+/**
+ * Where a real person is sent, fragment intact. The production origin is a
+ * public URL (it is in every share link), not a secret — so it lives here as
+ * the default and the APP_ORIGIN env var stays as the override for previews
+ * and future domain moves.
+ */
+const PRODUCTION_APP_ORIGIN = "https://duigao-k7q2.zeabur.app";
+const APP_ORIGIN = ((Deno.env.get("APP_ORIGIN") ?? "").trim() || PRODUCTION_APP_ORIGIN).replace(/\/+$/, "");
 
 /**
  * Media-aware fallbacks (PR #30).
