@@ -31,6 +31,7 @@ import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
 import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, loadBoardVersion, createBoardVersion } from "./cloud/collaborationRepository";
 import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type BoardVersionSummary } from "./features/whiteboard/versions";
+import { boardProposals, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -145,6 +146,7 @@ import {
   nodeFromAddWhiteboardAction,
   planDraftTitle,
   pollFromAction,
+  proposalsFromResponse,
   type AiProposal,
   type ApplyProposalResult,
 } from "./ai/proposals";
@@ -268,6 +270,14 @@ export function App() {
   const draggingFrameRef = useRef<string | null>(null);
   /** 版本還原進行中：壓住逐筆衝突提示，改成結束後一次重讀。 */
   const restoringRef = useRef(false);
+  /**
+   * 房間層 AI 面板的白板提案暫存區（F1）。
+   *
+   * 房間 AI 的 add_whiteboard_node 原本是**直接落板**的 —— WB06 在板內做了
+   * 預覽，卻把這條舊路留著，等於紅線只守了一半。現在改成：開板、把提案
+   * 交給 Workspace 預覽，使用者看到才決定。
+   */
+  const [stagedBoardAi, setStagedBoardAi] = useState<BoardAiPreview | null>(null);
   /** 有寫入在路上、尚未 ack 的 frame ids（遠端 echo 對它們讓路）。 */
   const inFlightFrameIds = useRef(new Set<string>());
   /** loadFramesForBoard 的請求序號：舊回應不得蓋掉新狀態（R3）。 */
@@ -2124,10 +2134,12 @@ export function App() {
             x: 80 + (count % 4) * 24,
             y: 80 + (count % 5) * 24,
           });
-          upsertNode(node);
+          // **不直接落板**（WB06/F1）：開板並交給白板預覽，使用者看到
+          // 它會擺在哪、長什麼樣，再決定要不要放上去。原本這條路徑會
+          // 讓「AI 不自動執行」的紅線只守住板內入口那一半。
           setActiveWhiteboardId(board.id);
-          setFocusNodeId(node.id);
-          audit(`已套用 AI 提案：${proposal.label}`);
+          setStagedBoardAi({ proposals: [proposal], nodes: [node], edges: [] });
+          return { ok: true, message: "已開白板並顯示 AI 的建議，確認後才會放上去。" };
         }
         appliedAiProposalIds.current.add(proposal.id);
         // 機器稽核列（0019）：cloud 房才寫；失敗不回滾套用（套用本身已
@@ -3186,6 +3198,136 @@ export function App() {
             return { applied, queued: !navigator.onLine || cloudRef.current.status === "offline-pending" };
           },
         } : {}),
+        // ---- WB06：板內 AI（提案→預覽→套用→稽核） ----
+        // 只在雲端房掛（房間 AI 需要 Supabase）— 本機房不擺按不動的入口。
+        ...(isCloudConfigured && cloud.boundRoomId ? {
+          onAskBoardAi: async (
+            question: string,
+            context: { nodes: WhiteboardNode[]; selectedIds: string[]; centerWorld: { x: number; y: number } },
+          ) => {
+            const boardId = activeWhiteboardRef.current;
+            const roomNow = roomRef.current;
+            if (!boardId || !roomNow) return { proposals: [], nodes: [], edges: [] } as BoardAiPreview;
+            // 板上下文：選取的節點優先，沒選就用整塊板的文字
+            const focusNodes = context.selectedIds.length
+              ? context.nodes.filter((node) => context.selectedIds.includes(node.id))
+              : context.nodes;
+            // 政策閘（自審實抓）：伺服器的 external_ai_allowed 只看
+            // `selected` 那批資產，而板上的素材節點不在其中 —— 直接把
+            // content.title 塞進 query 等於讓「已關掉 AI」的檔名照樣進外部
+            // 模型的 prompt。這裡先在客戶端濾掉：連到 version/asset 且該
+            // 素材不允許 AI 讀取的節點，文字一律不送。
+            const blockedVersionIds = new Set(
+              (assetIntelligence?.assets ?? [])
+                .filter((asset) => !asset.aiReadable || !asset.externalAiAllowed)
+                .map((asset) => asset.versionId ?? asset.id),
+            );
+            const sendable = focusNodes.filter((node) => {
+              if (node.linkedEntityType !== "version" && node.linkedEntityType !== "asset") return true;
+              return !node.linkedEntityId || !blockedVersionIds.has(node.linkedEntityId);
+            });
+            const boardText = sendable
+              .map((node) => node.content.text || node.content.title || "")
+              .filter(Boolean)
+              .slice(0, 40)
+              .join("\n");
+            const response = await askAi({
+              query: boardText ? `${question}\n\n（白板上目前的內容）\n${boardText}` : question,
+              selectedBranchIds: [...new Set(sendable
+                .filter((node) => node.linkedEntityType === "branch" && node.linkedEntityId)
+                .map((node) => node.linkedEntityId!))],
+            });
+            // 只取白板型別的提案；其餘（投票/企劃/留言）留給房間層的 AI 面板
+            const proposals = boardProposals(proposalsFromResponse(response));
+            const origin = context.centerWorld ?? { x: 120, y: 120 };
+            const spots = layoutPreview(proposals.length, origin);
+            const actor = cloudRef.current.userId ?? guest?.id ?? "local";
+            // AI payload 的 link 必須是 uuid（DB 欄位是 uuid）：不是就整個丟掉
+            // link。半截的 link 讀不出東西，但**格式錯的 link 會讓那筆寫入
+            // 永久失敗並常駐重試佇列**（與畸形快照同一種毒化）。
+            const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            const sanitizePayload = (payload: Record<string, unknown>) => {
+              const id = payload.linkedEntityId;
+              if (typeof id === "string" && UUID_RE.test(id)) return payload;
+              const { linkedEntityId: _dropId, linkedEntityType: _dropType, ...rest } = payload;
+              return rest;
+            };
+            const nodes = proposals.map((proposal, index) => nodeFromAddWhiteboardAction({
+              payload: sanitizePayload(proposal.payload),
+              whiteboardId: boardId,
+              roomId: roomNow.id,
+              createdBy: actor,
+              x: spots[index].x,
+              y: spots[index].y,
+            }));
+            return { proposals, nodes, edges: [] } as BoardAiPreview;
+          },
+          onApplyBoardAi: async (
+            plan: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] },
+            preview: BoardAiPreview,
+          ) => {
+            const supabase = getSupabase();
+            const bound = cloudRef.current.boundRoomId;
+            const boardId = activeWhiteboardRef.current;
+            const actor = cloudRef.current.userId;
+            // 寫錯板防護（F4）：預覽節點帶的是產生當時那塊板的 id。若使用者
+            // 在預覽期間換了板，快照存的是新板、節點卻會寫進舊板 —— 直接
+            // 拒絕，不做「猜使用者想要哪一塊」這種事。
+            if (plan.nodes.some((node) => node.whiteboardId !== boardId)) {
+              return { applied: 0, snapshotTaken: false };
+            }
+            // 套用前自動快照（0025 的註解就寫著「AI apply 前自動一張屬 WB06」）：
+            // AI 動的東西一定要有回得去的那一版。快照失敗不擋套用 —— 但要
+            // 誠實回報沒存到，UI 的訊息會跟著不一樣。
+            let snapshotTaken = false;
+            if (supabase && bound && boardId && actor) {
+              const roomNow = roomRef.current;
+              const snapshot = buildSnapshot(
+                (roomNow?.whiteboardNodes ?? []).filter((node) => node.whiteboardId === boardId),
+                (roomNow?.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId === boardId),
+                boardFramesRef.current.filter((frame) => frame.whiteboardId === boardId),
+              );
+              if (!snapshotTooLarge(snapshot)) {
+                snapshotTaken = await createBoardVersion(supabase, {
+                  id: crypto.randomUUID(),
+                  whiteboardId: boardId,
+                  roomId: bound,
+                  label: `AI 套用前（${new Date().toLocaleString("zh-TW", { hour12: false })}）`,
+                  createdBy: actor,
+                  snapshot,
+                }).then(() => true).catch(() => false);
+              }
+            }
+            // 寫入走既有節點管線：OCC、op 帳、離線佇列都不繞過
+            if (plan.nodes.length) upsertNodes(plan.nodes);
+            for (const edge of plan.edges) createEdge(edge);
+            // 稽核（0019）：每個提案一列。失敗不回滾套用，但**要說**（房間層
+            // 早就這樣做，白板層原本把這層告知拿掉了 — 自審抓到）。
+            const auditResults = await Promise.all(preview.proposals.map((proposal) =>
+              Promise.resolve(cloudRef.current.writes.recordAiApplyAudit?.({
+                proposalId: proposal.id,
+                proposalType: proposal.type,
+                label: proposal.label,
+              })).catch(() => false),
+            ));
+            const auditRecorded = preview.proposals.length === 0 || auditResults.every(Boolean);
+            if (preview.proposals.length) {
+              sendDiscussion({
+                kind: "text",
+                body: `已把 AI 的 ${plan.nodes.length} 個建議放上白板${snapshotTaken ? "（套用前已存快照）" : ""}`,
+                payload: { title: "AI 套用" },
+              });
+            }
+            // 離線時這些寫入是**進佇列**、不是已完成 —— WB04 的還原路徑早就
+            // 分得出這個差別，WB06 原本回報一律「已套用」（自審抓到）。
+            const queued = !navigator.onLine || cloudRef.current.status === "offline-pending";
+            return { applied: plan.nodes.length + plan.edges.length, snapshotTaken, queued, auditRecorded };
+          },
+        } : {}),
+        // 暫存預覽不能放在「僅雲端」的展開區塊裡：房間層 AI 的套用路徑本身
+        // 不是雲端限定的，放進去會讓提案被暫存卻永遠送不到白板（e2e 抓到）。
+        stagedAiPreview: stagedBoardAi,
+        onConsumeStagedAiPreview: () => setStagedBoardAi(null),
         onFrameDragState: (id) => { draggingFrameRef.current = id; },
         onBoardFocusChange: setBoardFocused,
         onRenameWhiteboard: (id, title) => {

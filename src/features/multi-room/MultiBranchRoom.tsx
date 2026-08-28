@@ -119,6 +119,20 @@ export type MultiBranchRoomApi = {
   onListVersions?: () => Promise<import("../whiteboard/versions").BoardVersionSummary[]>;
   onLoadVersion?: (versionId: string) => Promise<{ snapshot: import("../whiteboard/versions").BoardSnapshot; dropped: number }>;
   onRestoreVersion?: (snapshot: import("../whiteboard/versions").BoardSnapshot) => Promise<{ applied: number; queued: boolean }>;
+  onAskBoardAi?: (
+    question: string,
+    context: {
+      nodes: import("../collaboration/types").WhiteboardNode[];
+      selectedIds: string[];
+      centerWorld: { x: number; y: number };
+    },
+  ) => Promise<import("../whiteboard/aiPreview").BoardAiPreview>;
+  stagedAiPreview?: import("../whiteboard/aiPreview").BoardAiPreview | null;
+  onConsumeStagedAiPreview?: () => void;
+  onApplyBoardAi?: (
+    plan: { nodes: import("../collaboration/types").WhiteboardNode[]; edges: import("../collaboration/types").WhiteboardEdge[] },
+    preview: import("../whiteboard/aiPreview").BoardAiPreview,
+  ) => Promise<{ applied: number; snapshotTaken: boolean }>;
   onShare: () => void;
   /** 改房間名字。刻意與 setTitle 分開：setTitle 在有 activeBranchId 時改的是分支名。 */
   onRenameRoom: (title: string) => void;
@@ -1031,6 +1045,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onListVersions: api.onListVersions,
                     onLoadVersion: api.onLoadVersion,
                     onRestoreVersion: api.onRestoreVersion,
+                    onAskBoardAi: api.onAskBoardAi,
+                    stagedAiPreview: api.stagedAiPreview,
+                    onConsumeStagedAiPreview: api.onConsumeStagedAiPreview,
+                    onApplyBoardAi: api.onApplyBoardAi,
                     isMobile,
                     focusNodeId: api.focusNodeId,
                     activeBoardId: api.activeWhiteboardId,
