@@ -47,6 +47,9 @@ export function useDiscussionOutbox(args: {
     setEntries((current) => {
       const entry = current[message.id];
       if (!entry) return current;
+      // acked 永不降級（Grok 08b F1）：並行雙發（DEV updater 重跑）時
+      // 晚到的失敗回呼不得把已確認的列打回 failed。
+      if (entry.state === "acked") return current;
       if (ok) {
         // 成功 ≠ 快照已包含：轉 acked 留著當 ghost，等 serverIds 對帳。
         return { ...current, [message.id]: { message: stamped, state: "acked" } };
