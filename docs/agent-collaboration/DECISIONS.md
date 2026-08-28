@@ -110,3 +110,15 @@ PR-00 是 docs-only 的計畫 checkpoint（任務規範明定第一個 PR 為計
   相等會被接受並 +1 — 同版本並發是 LWW 覆寫，屬既有語意。
 - 離線 delete 無 OCC：重放的 delete 會刪掉別人已更新的列（與復活窗口對偶）。
   兩者都留給 tombstone 設計一併處理；delete 路徑不裝假的 conflict 分支。
+
+## ADR-012：branch protection 必要化四個 CI check（automerge 搶跑事故）
+
+日期：2026-08-28　狀態：**採納**
+
+#54/#59/#60 三次 automerge 在「round 修復 push 之前」或「browser 紅燈下」
+合併了舊 head — automerge 原本只 gate agent-release-gate。已把 main 的
+branch protection 設為 required：build＋browser＋migrations＋
+agent-read-layer，strict（head 必須 up-to-date）。效果：automerge 不能
+再搶跑晚到的 push、也不能帶著紅色 browser 合併。副作用：每個 PR 合併前
+若 main 前進需 update-branch（成本可接受）。三次事故皆已以 cherry-pick
+跟進 PR 補齊（#55/#60/#62），main 無缺失殘留。
