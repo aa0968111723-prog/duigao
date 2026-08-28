@@ -132,7 +132,7 @@ agent-read-layer，strict（head 必須 up-to-date）。效果：automerge 不�
 | 選項 | 授權/成本 | bundle(gzip) | 行動觸控 | 資料模型主權 | 判定 |
 |---|---|---|---|---|---|
 | A. 保留並強化自研引擎（**採納**） | 無 | 最小（+可選 use-gesture ~7KB） | 缺口明確可補（見下） | 完美（本來就是 entity model） | ✅ |
-| B. @xyflow/react 12.11.5 | MIT | ~60KB | 中等；open issues：pinch 觸發瀏覽器縮放 #5066、pinch 中斷拖曳 #5475、panOnScroll 觸控 #5341 | 最佳（fully controlled 一級模式） | 後備 |
+| B. @xyflow/react 12.11.5 | MIT | ~60KB | 中等（Grok 覆核修正：#5066 已關閉且屬 v10 時代、#5475 已修；僅 #5341 仍開且限 panOnScroll 桌機情境 — 原始研究的證據**過時，已撤回**） | 最佳（fully controlled 一級模式） | 後備 |
 | C. tldraw 5.3.2 | **專有＋production license key＋年費** | ~524KB | 業界最佳 | **相抵觸**（自帶 reactive store 為 session truth） | ✗ |
 | D. excalidraw 0.18.1 | MIT | ~353KB+lazy | 桌面優先、stylus issues | 弱（自有 scene/element 格式）；**無 custom node renderer** | ✗ |
 | E. konva+react-konva | MIT | ~96KB | 手勢全自建 | 最佳（純 view） | 次備（若節點轉向自由繪圖） |
@@ -151,9 +151,14 @@ agent-read-layer，strict（head 必須 up-to-date）。效果：automerge 不�
    斷裂＋殼佔用（版面）；手勢缺口（pinch 不清 drag、長按無 slop、雙指
    平移、套索、鍵盤避讓、pointer 雙擊）是 104 行 canvas.ts＋749 行
    workspace 內的具體修補，每一項都有測試掛點。
-3. **B 的弱項正是本任務的主戰場**：xyflow 的行動觸控 open-issue 清單
-   （#5066/#5475/#5341）意味著導入後仍要在別人的手勢層裡修行動端 —
-   成本不省，主權還讓渡。「不得只因 library 熱門就導入」。
+3. **誠實的成本對比（Grok F1 修正後）**：xyflow 的行動觸控 issue 清單
+   經覆核大多已修 — 「導入仍要修別人手勢層」的論據**弱於原稿**。同時
+   PR-02 本來就要重寫自研手勢層（分層拆解），兩案的手勢工程量級相近。
+   決策的真正裁量點只剩兩個：(a) 同步管線（shield/echo/OCC）縫進
+   zustand 派生 state 的 churn 與風險；(b) 資料模型主權的長期成本。
+   這兩點仍偏向 A，但**差距比原稿窄** — 因此檢查點從「參考」升為
+   「強制」（見下）。另：畫布外 pinch 縮放整頁是我們自己的 viewport
+   缺口（audit §2），與 library 無關，兩案都要修。
 4. **成本誠實面**：自研的隱性成本是手勢邊角（iOS Safari 慣性、palm
    rejection、stylus 區分）。對策：(a) PR-02 允許引入 @use-gesture
    （~7KB，MIT，純手勢辨識、零資料模型）承擔仲裁數學，PR-02 spike 時
@@ -170,13 +175,19 @@ agent-read-layer，strict（head 必須 up-to-date）。效果：automerge 不�
 - presence（cursor/selection）走 Realtime channel broadcast（暫態），
   **不落表**（沿 0014:783 的既有邊界）；throttle 於 client。
 
-### 重評檢查點（PR-02 結束，量化）
+### 重評檢查點（PR-02 結束，量化，防 game 版 — Grok F1）
 
-在真機（Android Chrome＋iPhone Safari）以下列驗收跑：pinch 縮放錨點
-漂移 <8px、pinch↔drag 切換零節點跳動、長按成功率（10 次帶自然抖動）
-≥9、雙指平移可用、鍵盤彈出時編輯節點可見。**任兩項不達標且修補
-超過一週** → 啟動 B（xyflow）作為 view layer 的替換 spike，
-同步管線與 entity model 不動。
+**通過定義 = 五項全過**，缺一即「不過」：pinch 縮放錨點漂移 <8px、
+pinch↔drag 切換零節點跳動、長按成功率（10 次帶自然抖動）≥9、雙指
+平移可用、鍵盤彈出時編輯節點完整可見（在鍵盤上緣之上）。
+
+防 game 條款：
+- 量測**只認真機**（Android Chrome＋iPhone Safari 各一輪），證據 =
+  錄影檔＋逐項數據表存 rounds/wb02/，CDP/模擬器數據不得替代。
+- 任一項不過 → 修補窗**七個日曆天**（起算日寫入 rounds/wb02）；到期
+  重測仍有**任一項**不過 → **無條件啟動 xyflow spike**（一週 timebox，
+  同步管線與 entity model 不動），spike 結果與 A 並排比較後由人類裁決。
+- 不允許「持續修補不觸發」：修補窗只有一次。
 
 ## ADR-014：白板多人寫入 = entity-level OCC ＋ append-only operations，不做整包覆蓋、不做 CRDT
 
@@ -187,6 +198,15 @@ agent-read-layer，strict（head 必須 up-to-date）。效果：automerge 不�
   歷史的基礎），**不是**第二個 truth — 套用順序仍由 row state 決定。
 - edges 補 version/updated_at/created_by＋touch trigger（現況 edges 零
   OCC，audit §4）；delete 補 tombstone 語意（ADR-011 缺口在 PR-01 併決）。
+- **undo 契約（Grok F2 修訂）**：operations 帶 client 產 `op_id`
+（unique，重試冪等）＋ `field_mask`＋僅 mask 欄位的 before/after；
+undo 永不整列還原 — inverse 只回寫 mask 內欄位、帶當前 acked version
+走同一條 OCC 管線，衝突即可見。row 與 op 非原子的兩種缺口（op 缺=
+undo 粒度損失；幽靈 op=被 mask 限制傷害面）均為明示取捨。
 - 衝突永遠可見（既有誠實 toast＋drop-refetch 模式延續），禁止靜默
-  last-write-wins；整包 Room JSON 覆蓋僅存的 P2P legacy 路徑（App.tsx:772）
-  在 PR-04 收斂（cloud 房停用 P2P snapshot 覆蓋）。
+last-write-wins。P2P 整包 Room JSON 路徑經覆核（Grok F7）：cloud 房
+collabRef 為 null、該路徑僅在本機/PeerJS 房活躍 — 嚴重度下修，PR-04
+仍收斂之（cloud 房斷言 P2P snapshot 不可達）。
+- 繪製/命中全序 =`(z_index, created_at, id)` 三鍵（Grok F5），render
+與 hit-test 共用同一排序 util；frame `z_index<0`、node `z_index>=0`
+是 DB CHECK 不變式，非慣例。

@@ -71,6 +71,36 @@
 手勢）＋viewport meta 不動（可及性：不禁用頁面縮放，畫布內以
 touch-action 隔離）。
 
+## 疊加規則（Grok F6 — Focus Mode 與既有生態的明確契約）
+
+z-index 階梯（新增 token `--z-board-focus: 45`）：
+`push-pane 32 < workspace-overlay 40 < **board-focus 45** < scrim 80
+< ai-scrim/toast 120`。板內 sheet 沿用 scrim 80（蓋過 Focus ✓）。
+
+FAB 抑制不是 z-index 蓋住、是**條件不渲染**，且需跨層：
+- `.project-fab`：MultiBranchRoom 自己知道 focus 態 → 不渲染。
+- `.asset-ai-fab`：**掛在 App.tsx:2888、板內做不到** — WB02 必須
+  新增 `onBoardFocusChange` 上拋（MultiBranchRoom → App），App 以
+  `boardFocused && ` 抑制 AssetAiFab。這是 WB02 對 App.tsx 的最小
+  必要觸點（與 #71 衝突面之一，入衝突報告）。
+- 房間 header/搜尋列/膠囊列：Focus 為 fixed 全屏層，天然覆蓋 —
+  但 sticky header z-10 < 45，仍需確認 focus 層背景不透明。
+
+history 疊加規則（現況全 src 無 pushState，這是第一個使用者）：
+1. 進 Focus：`pushState({layer:'board-focus'})` 恰一層。
+2. Focus 內開 sheet（scrim 層）：**不再 push** — popstate 時先關
+   最上層 UI（sheet）並 `pushState` 回填，Focus 不退（F6 repro 3）。
+3. Focus 內「打開內容」進對稿 overlay：再 push 一層
+   `{layer:'content-overlay'}`；back 先關 overlay 回 Focus（repro 4）。
+4. 離開 Focus（返回鈕或 back 到底）：popstate 清層，房間層級導航
+   維持既有 in-memory 模式不變（不為房間導航補 history — 範圍紀律）。
+5. Escape 鍵順序（桌機）：sheet → overlay → Focus，與 back 一致。
+
+keep-mounted 具體化：切「對話」tab 時白板容器 `display:none`（不
+unmount）；**重新顯示時 ResizeObserver 需手動觸發重量測**（display:none
+期間 rect 為 0 — F6 repro 5 的 viewport 歸零），re-show 時 dispatch
+一次 measure。
+
 ## 平板（768×1024+，PR-05 預告，PR-02 不做）
 
 Split View（討論｜白板）、可收合側欄、Pencil；PR-02 僅保證 Focus Mode

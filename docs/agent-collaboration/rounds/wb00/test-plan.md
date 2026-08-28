@@ -12,22 +12,31 @@ migrations.mjs 真 PG 五角色探針）；新增視覺回歸與真機清單。�
 - unit：operation payload 逆操作 round-trip；tombstone 讀側過濾；
   anchor 新臂（message/plan-section）adapter round-trip（契約層 26 條
   基礎上擴充）；edge version client mirror。
-- 負向控制：reviewer 寫 operations 403、anon 全拒、z_index/rotation
-  超界 CHECK 擋下。
+- 負向控制（Grok F8 修正 reviewer 語意）：allow_board_edit=false 時
+  reviewer 寫 operations 被拒；=true 時 reviewer 可寫但 actor 冒名仍
+  拒（can_collaborate_on_board 的真實語意兩態都測）；anon 全拒；
+  z_index/rotation 超界 CHECK；tombstone 探針**必含
+  get_whiteboard_context 不回墓碑**。
 
 ## PR-02（手機 Focus Mode）
 
 - unit：手勢仲裁狀態機（pinch 起手清 drag、slop 內長按存活、slop 外
   取消、雙指位移→camera、pointer 雙擊窗口）；registry（node 型別→
   renderer 對映完整、未知型別 fallback）；工具列三態 reducer。
-- e2e（collaboration-workspace.mjs 擴充＋新 focus-mode 章）：
-  進出 Focus Mode（back 手勢層）、畫布面積斷言（`wb-canvas-wrap`
-  rect ≥ 視窗 75%）、FAB 在 Focus Mode 不存在、拖節點/雙指縮放平移
-  （CDP touch 合成）、長按選單、框選/套索多選、鍵盤避讓（focus 節點
-  可見斷言）、undo/redo。
-- 視覺回歸（新 `test:visual` 套件，Playwright screenshot 比對，
-  容差 maxDiffPixelRatio 0.01）：390×844、412×915、768×1024、
-  1024×1366 × light/dark = 8 基準圖（空板/20 節點/選取態）。
+- e2e（collaboration-workspace.mjs 擴充＋新 focus-mode 章，斷言防
+  假綠版 — Grok F8）：
+  - 畫布面積：量**有效畫布** = focus 層 rect 減去頂/底工具列與任何
+    疊加元素的聯集，斷言 ≥ 視窗 75%（不量含疊加物的 wrap）。
+  - FAB：`count() === 0`（**unmount**，display:none 不算過）。
+  - 鍵盤避讓：斷言編輯節點 rect.bottom < (視窗高 − --kb 值)，不是
+    「element visible」。
+  - 拖節點/雙指縮放平移/長按/框選/套索/undo（CDP touch 合成）——
+    **CI 綠 ≠ ADR-013 檢查點過**：檢查點只認真機錄影＋數據
+    （rounds/wb02），本行只作迴歸保護。
+- 視覺回歸（新 `test:visual` 套件，Playwright screenshot 比對）：
+  4 尺寸 × light/dark × 3 狀態（空板/20 節點/選取態）= **24 張基準圖**
+  （Grok F8：原稿 8 張蓋不住宣稱）；容差 maxDiffPixels 上限 800
+  （絕對值，非比例 — 0.01 比例在 390×844 可藏 3k px 差異）。
 
 ## PR-03（雙向連結）
 

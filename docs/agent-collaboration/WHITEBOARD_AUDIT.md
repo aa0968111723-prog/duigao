@@ -54,16 +54,19 @@ clamp 0.35–2.4）、長按 420ms 進多選、桌機 shift 框選/shift 點擊 
 
 缺陷（皆讀碼實證）：
 
-- **[major] pinch 不清 drag**：第二指落下只設 pinch 就 return，一指抬起後
-  殘留手指沿用 pinch 前的 `drag.current.last` — 按在節點上時節點跳整段
-  pinch 位移（WhiteboardWorkspace.tsx:320-325 vs 378-383）。
+- **[major→PARTIAL] pinch 與 drag 的交互**（Grok F7 對機制表述有異議：
+  pointerup 路徑會清 drag 並 persist previewNodes）：「第二指落下不清
+  drag」屬實（:320-325 只設 pinch 即 return），但殘留手指的實際故障
+  形態（節點跳動 vs 提前 persist）**待 WB02 以測試釘住**再定修法 —
+  兩種形態都是缺陷，僅機制描述存疑。
 - **[major] 長按無位移門檻**：任何 pointermove 即取消計時器（無 slop），
   手指微抖就進不了多選 — 而長按是行動端唯一多選入口。
 - **[major] text 節點永遠渲染 textarea**（非編輯時也是），textarea
   stopPropagation → 只能靠 10-12px 邊框環拖曳，觸控幾乎抓不到。
 - **[major] 虛擬鍵盤零避讓**：WhiteboardWorkspace 不用 useViewport；
-  `--kb` 全庫只有 `.m-bottom`/`.m-modal` 消費 — 下半畫面節點編輯時被
-  鍵盤蓋住，無 camera 調整、無 scrollIntoView。
+  `--kb` 的消費者是 `.m-bottom`/`.m-modal` 與部分 `.rd-*` 行動樣式
+  （Grok F7 修正：原稿「只有兩個」過窄）— 重點不變：**白板全鏈零
+  消費**，下半畫面節點編輯時被鍵盤蓋住。
 - **[minor] 雙指平移未實作**（zoom 不變時 zoomAt 數學上不動 camera）；
   雙擊靠原生 dblclick 合成（iOS 穩定性 UNVERIFIED）；套索不存在；
   雙擊縮放/邊緣 back swipe 無防護（viewport meta 無限制；畫布外起手的
@@ -93,9 +96,10 @@ clamp 0.35–2.4）、長按 420ms 進多選、桌機 shift 框選/shift 點擊 
   0014 的 whiteboards/whiteboard_nodes/whiteboard_edges；型別來自
   `src/features/collaboration/types.ts`。
 - 寫入是 **row 級 upsert**（collaborationRepository.upsertNode），無雲端
-  整包覆蓋路徑。**但 P2P（PeerJS legacy）整包 Room JSON 廣播仍活著**
-  （App.tsx:772/2228，覆蓋本地 state＋IDB — 不寫 Supabase，但屬「整包
-  覆蓋」活路徑，[major]）。
+  整包覆蓋路徑。P2P（PeerJS legacy）整包 Room JSON 廣播路徑存在
+  （App.tsx:772/2228）**但 cloud 房 collabRef 為 null、僅本機/PeerJS 房
+  活躍**（Grok F7 覆核修正：原稿 [major] 下修 [minor]）；PR-04 以斷言
+  封死 cloud 房不可達。
 - OCC：`version` integer＋DB trigger（BEFORE UPDATE，stale 即 raise、
   否則 version:=old+1 伺服器自增）；client 有 lastAckedNodeVersion、
   in-flight shield、per-node persist chain、conflict→drop+refetch+誠實
