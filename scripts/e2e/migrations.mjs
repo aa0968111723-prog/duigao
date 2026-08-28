@@ -1500,11 +1500,11 @@ try {
   ok("重跑 0020 後 RLS / policy 形狀不變（true/true/0）", canvaBefore === canvaShape() && canvaBefore === "true/true/0", `${canvaBefore} → ${canvaShape()}`);
   ok("重跑後成員依然讀不到 token 表", as(owner, `select count(*) from public.canva_connections;`).failed);
 
-  section("0021–0024：canonical whiteboard schema（WB01）");
-  psqlFile(join(MIGRATIONS, "0021_whiteboard_canonical_columns.sql"));
-  psqlFile(join(MIGRATIONS, "0022_whiteboard_frames.sql"));
-  psqlFile(join(MIGRATIONS, "0023_whiteboard_operations.sql"));
-  psqlFile(join(MIGRATIONS, "0024_whiteboard_versions.sql"));
+  section("0022–0025：canonical whiteboard schema（WB01）");
+  psqlFile(join(MIGRATIONS, "0022_whiteboard_canonical_columns.sql"));
+  psqlFile(join(MIGRATIONS, "0023_whiteboard_frames.sql"));
+  psqlFile(join(MIGRATIONS, "0024_whiteboard_operations.sql"));
+  psqlFile(join(MIGRATIONS, "0025_whiteboard_versions.sql"));
 
   // (a) NOT VALID 約束必須真的 validate 過（Grok wb00 F4：只驗存在會假綠）
   ok(
@@ -1606,11 +1606,11 @@ try {
     (select bool_and(convalidated) from pg_constraint where conname in ('whiteboard_nodes_link_pair','whiteboard_nodes_parent_group_fk')) || '/' ||
     (select count(*) from pg_trigger where tgname in ('whiteboard_edges_touch','whiteboard_frames_touch','whiteboard_nodes_group_cycle'));`).out;
   const wbBefore = wbShape();
-  psqlFile(join(MIGRATIONS, "0021_whiteboard_canonical_columns.sql"));
-  psqlFile(join(MIGRATIONS, "0022_whiteboard_frames.sql"));
-  psqlFile(join(MIGRATIONS, "0023_whiteboard_operations.sql"));
-  psqlFile(join(MIGRATIONS, "0024_whiteboard_versions.sql"));
-  ok("重跑 0021–0024 後 shape 不變（9/true/3）", wbBefore === wbShape() && wbBefore === "9/true/3", `${wbBefore} → ${wbShape()}`);
+  psqlFile(join(MIGRATIONS, "0022_whiteboard_canonical_columns.sql"));
+  psqlFile(join(MIGRATIONS, "0023_whiteboard_frames.sql"));
+  psqlFile(join(MIGRATIONS, "0024_whiteboard_operations.sql"));
+  psqlFile(join(MIGRATIONS, "0025_whiteboard_versions.sql"));
+  ok("重跑 0022–0025 後 shape 不變（9/true/3）", wbBefore === wbShape() && wbBefore === "9/true/3", `${wbBefore} → ${wbShape()}`);
   ok("重跑後 REST 硬刪依然被 revoke", as(owner, `delete from public.whiteboard_nodes where id = '${tombNode}'::uuid;`).failed);
 
   console.log(`\n${checks - failures}/${checks} 通過`);
