@@ -60,6 +60,16 @@ export async function loadEdgeHandler(name, env) {
       return { finished: Promise.resolve() };
     },
   };
+  // Node 20（CI）沒有全域 WebSocket；supabase-js 的 realtime 在建立
+  // client 時偵測不到會直接 throw。bridge 從不開 realtime — 給一個
+  // 「存在但不能用」的 stub 滿足偵測即可（Node 22+ 原生存在，跳過）。
+  if (!globalThis.WebSocket) {
+    globalThis.WebSocket = class WebSocketStub {
+      constructor() {
+        throw new Error("harness: realtime websocket not supported");
+      }
+    };
+  }
   await import(pathToFileURL(file).href);
   if (!handler) throw new Error(name + " did not register a handler");
   return handler;
