@@ -37,6 +37,7 @@ import { historyLayers } from "../../lib/historyLayers";
 import { normalizeStroke, thinStroke, type StrokePoint } from "./freehand";
 import { initialPenState, penDown, penUp, segmentWidths, shouldRejectPointer, type PointerKind } from "./pen";
 import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
+import { describePreview, planApply, type BoardAiPreview } from "./aiPreview";
 import { rendererFor } from "./registry";
 import "./whiteboard.css";
 
@@ -98,9 +99,17 @@ export type WhiteboardApi = {
   onLoadVersion?: (versionId: string) => Promise<{ snapshot: BoardSnapshot; dropped: number }>;
   /** 回傳實際結果：寫出去幾筆、是否離線排隊中 — UI 只能說真話。 */
   onRestoreVersion?: (snapshot: BoardSnapshot) => Promise<{ applied: number; queued: boolean }>;
+  // ---- WB06：板內 AI（提案→預覽→套用→稽核） ----
+  /**
+   * 問 AI（帶白板上下文）。回傳**預覽**，不寫任何東西 —— 未提供＝不顯示
+   * AI 入口（本機房沒有 AI）。
+   */
+  onAskBoardAi?: (question: string, context: { nodes: WhiteboardNode[]; selectedIds: string[] }) => Promise<BoardAiPreview>;
+  /** 使用者按下套用：呼叫端負責快照、寫入、稽核。回傳實際結果。 */
+  onApplyBoardAi?: (plan: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] }, preview: BoardAiPreview) => Promise<{ applied: number; snapshotTaken: boolean }>;
 };
 
-type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "versions" | null;
+type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "versions" | "ai" | null;
 
 const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
@@ -335,6 +344,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [versionPreview, setVersionPreview] = useState<
     { version: BoardVersionSummary; snapshot: BoardSnapshot; dropped: number } | null
   >(null);
+  // ---- WB06：AI 預覽（只活在這裡，不進房態、不寫 DB） ----
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiPreview, setAiPreview] = useState<BoardAiPreview | null>(null);
   const [frameRenaming, setFrameRenaming] = useState(false);
   const [frameTitleDraft, setFrameTitleDraft] = useState("");
   const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
@@ -1242,6 +1255,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   setSheet(null);
                 }}>新增區塊（Frame）</button>
               )}
+              {api.onAskBoardAi && (
+                <button type="button" className="wb-card" data-testid="wb-open-ai" onClick={() => { setSheet("ai"); setAiQuestion(""); }}>
+                  問 AI（會先給你看，再決定要不要放上去）
+                </button>
+              )}
               {api.onListVersions && api.onLoadVersion && (
                 <button type="button" className="wb-card" data-testid="wb-open-versions" onClick={() => {
                   setSheet("versions");
@@ -1260,6 +1278,50 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               <button type="button" className="wb-card" onClick={() => setSheet("poll")}>放入既有投票</button>
               {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-create-poll" onClick={() => { const id = api.onCreatePoll("主視覺要不要換？", ["要，換成 B 版", "先維持 A 版"]); if (id) addAtView("poll", { pollQuestion: "主視覺要不要換？", voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) }); setSheet(null); }}>＋投票</button>}
               {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-write-decision" onClick={() => { api.onCreateDecision("已決定：採用 B 版", undefined, "decided"); addAtView("decision", { text: "已決定：採用 B 版", sourceLabel: "決策區" }); setSheet(null); }}>寫下決策</button>}
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+          </section>
+        </div>
+      )}
+      {sheet === "ai" && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="問 AI">
+            <div className="project-sheet-grip" />
+            <div className="wb-sheet" data-testid="wb-ai-sheet">
+              <h3>問 AI</h3>
+              <p className="project-muted">
+                AI 會依這塊板上的內容給建議，先以虛線顯示在板上 —— 你看過再決定要不要放上去。
+                {selected.length ? `目前會以選取的 ${selected.length} 個節點為重點。` : ""}
+              </p>
+              <input
+                className="text-input wb-search"
+                autoFocus
+                value={aiQuestion}
+                onChange={(event) => setAiQuestion(event.target.value)}
+                placeholder="例如：把這些點子整理成三個方向"
+                aria-label="想問 AI 什麼"
+              />
+              <button type="button" className="project-save-button project-submit" data-testid="wb-ai-ask" disabled={aiBusy || !aiQuestion.trim()} onClick={async () => {
+                if (!api.onAskBoardAi) return;
+                setAiBusy(true);
+                try {
+                  const preview = await api.onAskBoardAi(aiQuestion.trim(), {
+                    nodes: liveNodes.filter((node) => !node.deletedAt),
+                    selectedIds: selected,
+                  });
+                  setSheet(null);
+                  if (!preview.nodes.length) {
+                    showNotice("AI 這次沒有可以放上白板的建議");
+                    setAiPreview(null);
+                    return;
+                  }
+                  setAiPreview(preview);
+                } catch {
+                  showNotice("AI 沒有回應，白板沒有任何變動");
+                } finally {
+                  setAiBusy(false);
+                }
+              }}>{aiBusy ? "想一下…" : "看看建議"}</button>
             </div>
             <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
           </section>
@@ -1494,6 +1556,18 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               onChangeText={(text) => api.onUpsertNode(applyNodePatch(node, { content: { ...node.content, text } }), "now")}
             />
           ))}
+          {/* WB06 AI 預覽：虛線幽靈節點，pointer-events:none —— 它們還不是
+              板上的東西，點不到也拖不動，按「套用」才會變成真的。 */}
+          {aiPreview?.nodes.map((node) => (
+            <div
+              key={node.id}
+              className="wb-node wb-node-ai-preview"
+              style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
+              data-testid={`wb-ai-preview-${node.id}`}
+            >
+              <span className="wb-node-static">{node.content.text || node.content.title || "AI 建議"}</span>
+            </div>
+          ))}
           {marquee && (
             <div
               className="wb-marquee"
@@ -1547,9 +1621,30 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         )}
       </div>
 
-      {/* 底部：frame 情境列 / 節點情境列 / 主工具列（wireflow §11）
-          平板時 .wb-focus-main 讓它變成右側的一欄，而不是浮在畫布上 */}
-      {selectedFrameId && frames.some((frame) => frame.id === selectedFrameId) && canEdit && !multiSelect ? (
+      {/* 底部：AI 預覽確認列 / frame 情境列 / 節點情境列 / 主工具列
+          （wireflow §11）平板時 .wb-focus-main 讓它變成右側的一欄 */}
+      {aiPreview ? (
+        <nav className="wb-focus-bottom wb-context-bar wb-ai-bar" aria-label="AI 建議" data-testid="wb-ai-preview-bar">
+          <span className="wb-ai-summary" data-testid="wb-ai-summary">{describePreview(aiPreview)}</span>
+          <button type="button" className="project-save-button" data-testid="wb-ai-apply" disabled={!canEdit || aiBusy || !aiPreview.nodes.length} onClick={async () => {
+            if (!api.onApplyBoardAi) return;
+            setAiBusy(true);
+            try {
+              const plan = planApply(aiPreview, nextOpId);
+              const result = await api.onApplyBoardAi(plan, aiPreview);
+              showNotice(result.snapshotTaken
+                ? `已套用 ${result.applied} 項（套用前已存快照）`
+                : `已套用 ${result.applied} 項`);
+              setAiPreview(null);
+            } catch {
+              showNotice("套用沒有完成，白板維持原狀");
+            } finally {
+              setAiBusy(false);
+            }
+          }}>套用</button>
+          <button type="button" data-testid="wb-ai-discard" onClick={() => setAiPreview(null)}>取消</button>
+        </nav>
+      ) : selectedFrameId && frames.some((frame) => frame.id === selectedFrameId) && canEdit && !multiSelect ? (
         <nav className="wb-focus-bottom wb-context-bar" aria-label="區塊動作" data-testid="wb-frame-actions">
           {frameRenaming ? (
             <form className="wb-frame-rename" onSubmit={(event) => { event.preventDefault(); commitFrameRename(); }}>

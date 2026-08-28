@@ -31,6 +31,7 @@ import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
 import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, loadBoardVersion, createBoardVersion } from "./cloud/collaborationRepository";
 import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type BoardVersionSummary } from "./features/whiteboard/versions";
+import { boardProposals, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -145,6 +146,7 @@ import {
   nodeFromAddWhiteboardAction,
   planDraftTitle,
   pollFromAction,
+  proposalsFromResponse,
   type AiProposal,
   type ApplyProposalResult,
 } from "./ai/proposals";
@@ -268,6 +270,8 @@ export function App() {
   const draggingFrameRef = useRef<string | null>(null);
   /** 版本還原進行中：壓住逐筆衝突提示，改成結束後一次重讀。 */
   const restoringRef = useRef(false);
+  /** AI 預覽的擺放起點（Workspace 在問 AI 時回報目前視野中心）。 */
+  const screenCenterWorldRef = useRef<{ x: number; y: number } | null>(null);
   /** 有寫入在路上、尚未 ack 的 frame ids（遠端 echo 對它們讓路）。 */
   const inFlightFrameIds = useRef(new Set<string>());
   /** loadFramesForBoard 的請求序號：舊回應不得蓋掉新狀態（R3）。 */
@@ -3184,6 +3188,94 @@ export function App() {
               plan.upsertFrames.length + plan.deleteFrameIds.length + plan.createEdges.length;
             // 離線時這些寫入是進佇列、不是已完成 — UI 要說得出差別（P2）。
             return { applied, queued: !navigator.onLine || cloudRef.current.status === "offline-pending" };
+          },
+        } : {}),
+        // ---- WB06：板內 AI（提案→預覽→套用→稽核） ----
+        // 只在雲端房掛（房間 AI 需要 Supabase）— 本機房不擺按不動的入口。
+        ...(isCloudConfigured && cloud.boundRoomId ? {
+          onAskBoardAi: async (question: string, context: { nodes: WhiteboardNode[]; selectedIds: string[] }) => {
+            const boardId = activeWhiteboardRef.current;
+            const roomNow = roomRef.current;
+            if (!boardId || !roomNow) return { proposals: [], nodes: [], edges: [] } as BoardAiPreview;
+            // 板上下文：選取的節點優先，沒選就用整塊板的文字
+            const focusNodes = context.selectedIds.length
+              ? context.nodes.filter((node) => context.selectedIds.includes(node.id))
+              : context.nodes;
+            const boardText = focusNodes
+              .map((node) => node.content.text || node.content.title || "")
+              .filter(Boolean)
+              .slice(0, 40)
+              .join("\n");
+            const response = await askAi({
+              query: boardText ? `${question}\n\n（白板上目前的內容）\n${boardText}` : question,
+              selectedBranchIds: [...new Set(focusNodes
+                .filter((node) => node.linkedEntityType === "branch" && node.linkedEntityId)
+                .map((node) => node.linkedEntityId!))],
+            });
+            // 只取白板型別的提案；其餘（投票/企劃/留言）留給房間層的 AI 面板
+            const proposals = boardProposals(proposalsFromResponse(response));
+            const origin = screenCenterWorldRef.current ?? { x: 120, y: 120 };
+            const spots = layoutPreview(proposals.length, origin);
+            const actor = cloudRef.current.userId ?? guest?.id ?? "local";
+            const nodes = proposals.map((proposal, index) => nodeFromAddWhiteboardAction({
+              payload: proposal.payload,
+              whiteboardId: boardId,
+              roomId: roomNow.id,
+              createdBy: actor,
+              x: spots[index].x,
+              y: spots[index].y,
+            }));
+            return { proposals, nodes, edges: [] } as BoardAiPreview;
+          },
+          onApplyBoardAi: async (
+            plan: { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] },
+            preview: BoardAiPreview,
+          ) => {
+            const supabase = getSupabase();
+            const bound = cloudRef.current.boundRoomId;
+            const boardId = activeWhiteboardRef.current;
+            const actor = cloudRef.current.userId;
+            // 套用前自動快照（0025 的註解就寫著「AI apply 前自動一張屬 WB06」）：
+            // AI 動的東西一定要有回得去的那一版。快照失敗不擋套用 —— 但要
+            // 誠實回報沒存到，UI 的訊息會跟著不一樣。
+            let snapshotTaken = false;
+            if (supabase && bound && boardId && actor) {
+              const roomNow = roomRef.current;
+              const snapshot = buildSnapshot(
+                (roomNow?.whiteboardNodes ?? []).filter((node) => node.whiteboardId === boardId),
+                (roomNow?.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId === boardId),
+                boardFramesRef.current.filter((frame) => frame.whiteboardId === boardId),
+              );
+              if (!snapshotTooLarge(snapshot)) {
+                snapshotTaken = await createBoardVersion(supabase, {
+                  id: crypto.randomUUID(),
+                  whiteboardId: boardId,
+                  roomId: bound,
+                  label: `AI 套用前（${new Date().toLocaleString("zh-TW", { hour12: false })}）`,
+                  createdBy: actor,
+                  snapshot,
+                }).then(() => true).catch(() => false);
+              }
+            }
+            // 寫入走既有節點管線：OCC、op 帳、離線佇列都不繞過
+            if (plan.nodes.length) upsertNodes(plan.nodes);
+            for (const edge of plan.edges) createEdge(edge);
+            // 稽核（0019）：每個提案一列。失敗不回滾套用，但誠實留言。
+            for (const proposal of preview.proposals) {
+              void cloudRef.current.writes.recordAiApplyAudit?.({
+                proposalId: proposal.id,
+                proposalType: proposal.type,
+                label: proposal.label,
+              });
+            }
+            if (preview.proposals.length) {
+              sendDiscussion({
+                kind: "text",
+                body: `已把 AI 的 ${plan.nodes.length} 個建議放上白板${snapshotTaken ? "（套用前已存快照）" : ""}`,
+                payload: { title: "AI 套用" },
+              });
+            }
+            return { applied: plan.nodes.length + plan.edges.length, snapshotTaken };
           },
         } : {}),
         onFrameDragState: (id) => { draggingFrameRef.current = id; },

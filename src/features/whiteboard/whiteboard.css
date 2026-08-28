@@ -228,3 +228,14 @@
   flex: none;
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
 }
+
+/* ---- WB06：AI 預覽（虛線幽靈節點）與確認列 ---- */
+.wb-node-ai-preview {
+  border: 1.5px dashed var(--accent);
+  background: rgba(196, 92, 74, 0.10);
+  box-shadow: none;
+  pointer-events: none; /* 還不是板上的東西：點不到、拖不動 */
+  opacity: 0.92;
+}
+.wb-ai-bar { gap: 8px; align-items: center; }
+.wb-ai-summary { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-dim); padding-left: 6px; }

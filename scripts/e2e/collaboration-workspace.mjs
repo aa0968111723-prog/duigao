@@ -398,6 +398,86 @@ try {
         );
       }
 
+      // ---- WB06：板內 AI（提案 → 預覽 → 套用 → 稽核）----------------
+      {
+        await dismissSelection(page);
+        await page.route("**/functions/v1/room-ai-context", async (route) => {
+          const body = JSON.parse(route.request().postData() || "{}");
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              room: { id: body.roomId, title: "e2e 房" },
+              query: body.query,
+              context: [], sources: [], relations: [],
+              permissions: { role: "owner", canAsk: true, selectedCount: 0 },
+              truncated: false,
+              answer: {
+                text: "可以分成三個方向。",
+                citations: [],
+                actions: [
+                  { type: "add_whiteboard_node", label: "方向一", payload: { text: "AI：先做校內宣傳", nodeType: "text" } },
+                  { type: "add_whiteboard_node", label: "方向二", payload: { text: "AI：再談異業合作", nodeType: "mindmap" } },
+                  { type: "create_comment", label: "留到討論", payload: { body: "這個之後再說" } },
+                ],
+              },
+              agent: { provider: "none", status: "unconfigured" },
+            }),
+          });
+        });
+
+        const nodesBefore = await page.locator(".wb-node:not(.wb-node-ai-preview)").count();
+        const versionsBefore = (rows.whiteboard_versions ?? []).length;
+        await page.getByTestId("whiteboard-more").click();
+        await page.getByTestId("wb-open-ai").click();
+        await page.waitForSelector('[data-testid="wb-ai-sheet"]', { timeout: 8000 });
+        await page.getByLabel("想問 AI 什麼").fill("把這些點子整理成方向");
+        await page.getByTestId("wb-ai-ask").click();
+
+        // 預覽：看得到、但**還沒**變成板上的節點
+        await page.waitForSelector('[data-testid="wb-ai-preview-bar"]', { timeout: 10000 });
+        const previewCount = await page.locator(".wb-node-ai-preview").count();
+        check("AI 建議先以預覽出現（不是直接落板）", previewCount === 2, `preview=${previewCount}`);
+        check("預覽期間真節點數沒有變", (await page.locator(".wb-node:not(.wb-node-ai-preview)").count()) === nodesBefore);
+        check("預覽點不到（pointer-events:none）", (await page.evaluate(() => {
+          const ghost = document.querySelector(".wb-node-ai-preview");
+          return ghost ? getComputedStyle(ghost).pointerEvents : "missing";
+        })) === "none");
+        const summary = await page.getByTestId("wb-ai-summary").innerText();
+        check("預覽有說會發生什麼", summary.includes("會加上"), summary);
+        check("非白板提案（留言）不會混進板上預覽", previewCount === 2);
+
+        // 取消：什麼都沒發生
+        await page.getByTestId("wb-ai-discard").click();
+        await page.waitForFunction(() => !document.querySelector('[data-testid="wb-ai-preview-bar"]'), null, { timeout: 5000 });
+        check("取消後預覽整批消失、板上沒有殘留", (await page.locator(".wb-node:not(.wb-node-ai-preview)").count()) === nodesBefore
+          && (await page.locator(".wb-node-ai-preview").count()) === 0);
+
+        // 再問一次並套用
+        await page.getByTestId("whiteboard-more").click();
+        await page.getByTestId("wb-open-ai").click();
+        await page.getByLabel("想問 AI 什麼").fill("再整理一次");
+        await page.getByTestId("wb-ai-ask").click();
+        await page.waitForSelector('[data-testid="wb-ai-preview-bar"]', { timeout: 10000 });
+        await page.getByTestId("wb-ai-apply").click();
+        await page.waitForFunction(
+          (before) => document.querySelectorAll(".wb-node:not(.wb-node-ai-preview)").length >= before + 2,
+          nodesBefore,
+          { timeout: 10000 },
+        );
+        check("套用後預覽變成真的節點", (await page.locator(".wb-node-ai-preview").count()) === 0);
+        const applied = await page.evaluate(() =>
+          Array.from(document.querySelectorAll(".wb-node")).map((el) => el.textContent ?? "").join("|"),
+        );
+        check("AI 的內容真的在板上", applied.includes("AI：先做校內宣傳") && applied.includes("AI：再談異業合作"), applied.slice(0, 120));
+        // 套用前必須自動存一張快照（0025 的 WB06 條款）
+        const versionsAfter = (rows.whiteboard_versions ?? []).length;
+        check("套用前自動存了快照（可以回得去）", versionsAfter > versionsBefore, `${versionsBefore}→${versionsAfter}`);
+        const aiSnapshot = (rows.whiteboard_versions ?? []).some((row) => String(row.label ?? "").includes("AI 套用前"));
+        check("快照標籤說明它是 AI 套用前存的", aiSnapshot);
+        await page.unroute("**/functions/v1/room-ai-context");
+      }
+
       // ---- WB04：版本快照與還原 ----
       {
         await dismissSelection(page);
@@ -867,8 +947,12 @@ try {
         check("回網：pending 佇列自動 flush，節點恰好一列", flushedRows === 1, `rows=${flushedRows}`);
 
         // (c) 節點在畫面上仍在（本地樂觀＋flush 後 ack，不閃不掉）
+        // 只查 textarea 是脆弱的：WB02 之後 textarea **只在編輯中**渲染，
+        // 編輯 session 一結束文字就搬到 .wb-node-static —— 那時這條會紅，
+        // 但節點其實好好地在畫面上。要驗的是「還在」，不是「還在編輯」。
         const stillVisible = await page.evaluate(() =>
-          [...document.querySelectorAll("textarea.wb-node-text")].some((el) => el.value.includes("離線寫的節點")),
+          [...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")]
+            .some((el) => (el.value ?? el.textContent ?? "").includes("離線寫的節點")),
         );
         check("離線寫的節點回網後仍在畫面上", stillVisible);
       }
