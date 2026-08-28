@@ -13,10 +13,14 @@
   --accent-hover: #5046dc;
   --accent-soft: rgba(97, 87, 239, 0.11);
   --accent-bright: #837cff;
+  --brand-start: #8b83ff;
+  --brand-end: #574be5;
   --mint: #16aa8a;
   --mint-soft: rgba(22, 170, 138, 0.1);
   --ok: #1a9b75;
   --danger: #d74f68;
+  --warning: #a96812;
+  --warning-soft: rgba(169, 104, 18, 0.11);
   --line-green: #06c755;
   --shadow-sm: 0 8px 24px rgba(31, 39, 65, 0.07);
   --shadow-md: 0 20px 60px rgba(51, 45, 125, 0.12);
@@ -57,7 +61,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .brand-lockup { display: inline-flex; align-items: center; gap: 11px; width: fit-content; }
 .brand-mark {
   width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px;
-  color: #fff; background: linear-gradient(145deg, var(--accent-bright), var(--accent));
+  color: #fff; background: linear-gradient(145deg, var(--brand-start), var(--brand-end));
   box-shadow: 0 9px 22px rgba(97, 87, 239, .24);
 }
 .brand-mark svg { width: 30px; height: 30px; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -65,6 +69,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .brand-copy strong { font-size: 20px; line-height: 1.05; letter-spacing: .08em; }
 .brand-copy small { color: var(--ink-faint); font-size: 9px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
 .brand-lockup.is-compact .brand-mark { width: 36px; height: 36px; border-radius: 12px; }
+.brand-lockup.is-compact .brand-mark svg { width: 25px; height: 25px; }
+.brand-context { display: inline-flex; align-items: center; min-height: 24px; margin-left: 1px; padding: 0 9px; border: 1px solid rgba(97,87,239,.16); border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .06em; white-space: nowrap; }
 
 /* ---------- primitives ---------- */
 .text-input {
@@ -190,7 +196,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   padding: 44px 20px;
   border: 1.5px dashed var(--line);
   border-radius: var(--r-lg);
-  background: rgba(196, 92, 74, 0.05);
+  background: rgba(255, 255, 255, .72);
   color: var(--ink);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
@@ -232,24 +238,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: var(--bg-2);
   border-bottom: 1px solid var(--line);
 }
-.brand {
+.workspace-brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: none;
-  border: none;
-  padding: 0;
-  font-family: "Noto Serif TC", serif;
-  font-weight: 600;
-  font-size: 19px;
-  letter-spacing: 2px;
+  min-height: 42px;
+  background: transparent;
+  border: 0;
+  border-radius: 14px;
+  padding: 3px 6px 3px 3px;
   cursor: pointer;
+  transition: background .16s, transform .16s;
 }
-.brand-dot {
-  width: 12px; height: 12px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-soft);
-}
+.workspace-brand:hover { background: var(--accent-soft); transform: translateY(-1px); }
 .title-input {
   max-width: 260px;
   background: transparent;
@@ -269,8 +269,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   font-weight: 600; color: #fff; font-size: 14px;
 }
 .badge { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-dim); }
-.badge-online { color: var(--ok); border-color: #2f4a30; }
-.badge-connecting, .badge-waiting { color: #d7b06a; }
+.badge-online { color: var(--ok); border-color: rgba(26,155,117,.28); background: var(--mint-soft); }
+.badge-connecting, .badge-waiting { color: var(--warning); border-color: rgba(169,104,18,.24); background: var(--warning-soft); }
 
 .workspace {
   flex: 1;
@@ -1113,7 +1113,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* ---------- project room / multi-branch shell ---------- */
 .project-room { min-height: 100%; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; }
 .project-room-header { display: flex; align-items: center; gap: 12px; padding: 18px max(20px, calc((100vw - 720px) / 2)) 12px; border-bottom: 1px solid var(--line-soft); }
-.project-home-button, .project-back-button { flex: none; width: 40px; height: 40px; border: 0; border-radius: 50%; background: var(--raise); color: var(--accent); font-size: 18px; cursor: pointer; }
+.project-home-button, .project-back-button { flex: none; width: 40px; height: 40px; border: 0; border-radius: 13px; background: var(--raise); color: var(--accent); font-size: 18px; cursor: pointer; }
+.project-home-button { padding: 0; background: transparent; overflow: visible; }
+.project-home-button .brand-mark { width: 40px; height: 40px; border-radius: 13px; }
+.project-home-button .brand-mark svg { width: 28px; height: 28px; }
 .project-back-button { font-size: 27px; line-height: 1; color: var(--ink); }
 .project-room-heading { min-width: 0; flex: 1; }
 .project-room-heading h1, .project-detail-head h2 { margin: 2px 0 0; font-size: 21px; font-weight: 750; letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1134,7 +1137,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .project-room-title-input::placeholder { color: var(--ink-faint); }
 .project-room-title-input:focus { border-bottom-color: var(--accent); }
-.project-kicker, .project-section-eyebrow { color: var(--ink-faint); font-size: 12px; letter-spacing: .08em; }
+.project-kicker, .project-section-eyebrow { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
 .project-head-actions { display: flex; align-items: center; gap: 7px; }
 .project-share-button, .project-ai-button { min-height: 40px; padding: 0 15px; border: 0; border-radius: 999px; background: var(--raise); color: var(--ink); cursor: pointer; }
 .project-ai-button { border: 1px solid rgba(97,87,239,.18); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
@@ -1204,7 +1207,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* 上傳狀態列：上傳期間活動房裡唯一會動的東西，所以它自己不能被捲走。
    寬度與其他區塊同一條 gutter，看起來才是同一個畫面的一部分。 */
 .project-upload-status { position: sticky; z-index: 18; top: 0; width: min(680px, calc(100% - 32px)); margin: 10px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 9px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line-soft); color: var(--ink); font-size: 13px; }
-.project-upload-status.is-error { border-color: var(--danger, #c2483a); }
+.project-upload-status.is-error { border-color: var(--danger); }
 .project-upload-status-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* 錯誤訊息是要照著做的一句話，寧可換行也不要被截掉。 */
 .project-upload-status.is-error .project-upload-status-text { flex: 1 1 100%; white-space: normal; overflow: visible; }
@@ -1273,7 +1276,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* CUTOS 匯入表單（PR-07） */
 .project-sheet-note { color: var(--ink-soft); font-size: 13px; margin: 4px 0 8px; }
-.project-sheet-error { color: var(--danger, #c2483a); font-size: 13px; margin: 6px 0 0; }
+.project-sheet-error { color: var(--danger); font-size: 13px; margin: 6px 0 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

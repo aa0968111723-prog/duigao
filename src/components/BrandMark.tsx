@@ -1,10 +1,14 @@
 type Props = {
   compact?: boolean;
   className?: string;
+  context?: "圖片" | "影片" | "活動房";
 };
 
-/** Shared brand lockup used on the welcome and home screens. */
-export function BrandMark({ compact = false, className = "" }: Props) {
+/**
+ * The single in-app brand lockup. Product surfaces may add a short context
+ * label, but the mark and 對稿 wordmark never change.
+ */
+export function BrandMark({ compact = false, className = "", context }: Props) {
   return (
     <span className={`brand-lockup${compact ? " is-compact" : ""}${className ? ` ${className}` : ""}`}>
       <span className="brand-mark" aria-hidden="true">
@@ -19,6 +23,7 @@ export function BrandMark({ compact = false, className = "" }: Props) {
           <small>Review together</small>
         </span>
       )}
+      {context && <span className="brand-context">{context}</span>}
     </span>
   );
 }

@@ -13,6 +13,7 @@ import { Viewer } from "./Stage";
 import { ImmersiveViewer } from "./ImmersiveViewer";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
 import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "../../components/api";
+import { BrandMark } from "../../components/BrandMark";
 
 const COLOR_MODES: { id: ColorMode; label: string }[] = [
   { id: "color", label: "彩色" },
@@ -223,7 +224,7 @@ export function MobileWorkspace({ api, presence }: Props) {
     >
       <header className="m-top">
         <button type="button" className="m-home" onClick={api.goHome} aria-label="回到文宣列表">
-          <span className="m-home-dot" />
+          <BrandMark compact />
         </button>
         <input
           className="m-title"

@@ -14,6 +14,7 @@ import { useViewport } from "../../hooks/useViewport";
 import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
 import { pinNumber, type WorkspaceApi } from "../../components/api";
+import { BrandMark } from "../../components/BrandMark";
 import { VideoPlayer, type PlayerHandle } from "./VideoPlayer";
 import { VideoTimeline, type ReactionCluster, type TimelineMarker } from "./VideoTimeline";
 import { ReviewBrief } from "./ReviewBrief";
@@ -808,9 +809,8 @@ export function VideoWorkspace({ api, presence }: Props) {
     return (
       <div className="app v-desktop-app">
         <header className="topbar">
-          <button className="brand" onClick={api.goHome}>
-            <span className="brand-dot" />
-            影片對稿
+          <button className="workspace-brand" onClick={api.goHome} aria-label="回到對稿首頁">
+            <BrandMark compact context="影片" />
           </button>
           <input
             className="title-input"
@@ -900,7 +900,7 @@ export function VideoWorkspace({ api, presence }: Props) {
     >
       <header className="m-top">
         <button type="button" className="m-home" onClick={api.goHome} aria-label="回到列表">
-          <span className="m-home-dot" />
+          <BrandMark compact />
         </button>
         <input className="m-title" value={room.title} onChange={(e) => api.setTitle(e.target.value)} aria-label="影片名稱" />
         {api.saveState !== "idle" && (

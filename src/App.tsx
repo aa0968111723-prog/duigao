@@ -65,6 +65,7 @@ function ChunkLoadError() {
   return (
     <div className="onboard">
       <div className="onboard-card">
+        <BrandMark />
         <h1 className="onboard-title">對稿討論區</h1>
         <p className="onboard-hint">這個畫面的程式沒載進來 — 可能是離線，或版本剛更新。</p>
         <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>重新整理</button>
@@ -78,6 +79,7 @@ function ShellLoading() {
   return (
     <div className="onboard">
       <div className="onboard-card">
+        <BrandMark />
         <h1 className="onboard-title">對稿討論區</h1>
         <p className="onboard-hint">正在載入…</p>
       </div>
@@ -2999,6 +3001,7 @@ export function App() {
     return (
       <div className="onboard">
         <div className="onboard-card">
+          <BrandMark context="影片" />
           <h1 className="onboard-title">影片對稿</h1>
           <p className="onboard-hint">
             {visibleVideoUpload.state === "uploading"
@@ -3061,6 +3064,7 @@ export function App() {
       return (
         <div className="onboard">
           <div className="onboard-card">
+            <BrandMark />
             {/* The link does not say what is behind it, so the title stays the
                 neutral one rather than promising a poster. */}
             <h1 className="onboard-title">對稿討論區</h1>
