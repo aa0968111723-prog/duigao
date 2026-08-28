@@ -171,8 +171,11 @@ const CRAWLERS = {
   facebook: "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
   twitter: "Twitterbot/1.0",
   line: "Mozilla/5.0 (compatible; LineBot/1.0; +https://line.me)",
-  generic: "curl/8.4.0",
 };
+// 不在爬蟲清單的未知 agent（curl、沒聽過的 unfurler）一律當真人 → 302。
+// 反向誤判的代價：未知 unfurler 只拿得到 App 首頁的通用 OG，不會拿到
+// 房間卡片 — 已知的 LINE/FB/Twitter/Telegram/Discord 等都在清單裡。
+const UNKNOWN_UA = "curl/8.4.0";
 
 const meta = (html, key) => {
   const re = new RegExp(`<meta (?:property|name)="${key}" content="([^"]*)"`, "i");
@@ -336,7 +339,7 @@ async function main() {
       ["不是 uuid", "not-a-uuid"],
       ["空的", ""],
     ]) {
-      const res = await get(id, CRAWLERS.generic);
+      const res = await get(id, CRAWLERS.facebook);
       const html = await res.text();
       ok(`${label}: 200 通用卡片`, res.status === 200 && meta(html, "og:title") === "文宣討論區");
     }
@@ -345,12 +348,15 @@ async function main() {
   // ------------------------------------------------------------- redirect
   section("真人點擊：fragment 原封不動帶回 App");
   {
+    // Supabase 在 *.supabase.co 上把 HTML 強制 text/plain＋sandbox（JS 也
+    // 死），所以真人的契約是「真 302」：Location 只有 APP_ORIGIN，
+    // fragment 由瀏覽器自動接回 — secret 從不經過伺服器。
     const res = await get(livePreview, "Mozilla/5.0 (Linux; Android 13) Chrome/120 Mobile");
-    const html = await res.text();
-    ok("一般瀏覽器會拿到 redirect script", html.includes("location.replace"));
-    ok("redirect 目標是 APP_ORIGIN", html.includes(JSON.stringify(APP_ORIGIN)));
-    ok("redirect 直接使用 location.hash，不重組", html.includes("location.hash"));
-    ok("整份 HTML 完全沒有 invite 這個字（含註解）", !/invite/i.test(html));
+    ok("一般瀏覽器拿到 302（不是會被平台變純文字的 HTML）", res.status === 302, `status=${res.status}`);
+    ok("Location 是 APP_ORIGIN（不帶 fragment、不帶任何參數）", res.headers.get("location") === `${APP_ORIGIN}/`, res.headers.get("location") ?? "");
+    const humanBody = await res.text();
+    ok("302 無 body（沒有任何可被平台改寫的內容）", humanBody === "");
+    ok("整個回應完全沒有 invite 這個字", !/invite/i.test(humanBody) && ![...res.headers.values()].some((v) => /invite/i.test(v)));
 
     const crawler = await get(livePreview, CRAWLERS.facebook);
     const crawlerHtml = await crawler.text();
@@ -367,8 +373,11 @@ async function main() {
       ["Pinterest App", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Pinterest for iOS/12.5"],
     ]) {
       const res = await get(livePreview, ua);
-      const html2 = await res.text();
-      ok(`${label} 會被當成真人（會自動導回 App）`, html2.includes("location.replace"));
+      ok(`${label} 會被當成真人（302 導回 App）`, res.status === 302 && res.headers.get("location") === `${APP_ORIGIN}/`, `status=${res.status}`);
+    }
+    {
+      const res = await get(livePreview, UNKNOWN_UA);
+      ok("未知 agent（curl）也當真人 302", res.status === 302 && res.headers.get("location") === `${APP_ORIGIN}/`, `status=${res.status}`);
     }
   }
 

@@ -308,13 +308,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
     : copy.cover;
 
   const ua = req.headers.get("user-agent") ?? "";
+  const isCrawler = CRAWLER_UA.test(ua);
+
+  // Supabase 在 *.supabase.co 網域把 edge function 的 HTML 回應強制改成
+  // text/plain＋sandbox CSP（反釣魚）：真人點開只會看到原始碼，頁內的
+  // JS 轉跳也被 sandbox 封死（2026-08-28 正式站實測）。所以真人直接吃
+  // 302 — Location 不帶 fragment，瀏覽器會把原網址的 #room=…&invite=…
+  // 原封接回去，secret 一樣從不經過伺服器。HTML 卡片只留給 OG 爬蟲：
+  // 它們不執行 JS、也不在乎 content-type，unfurl 照常。
+  if (!isCrawler && APP_ORIGIN) {
+    return new Response(null, {
+      status: 302,
+      headers: new Headers({
+        location: `${APP_ORIGIN}/`,
+        "cache-control": "public, max-age=60",
+        "referrer-policy": "no-referrer",
+        "access-control-allow-origin": "*",
+      }),
+    });
+  }
+
   const html = renderHtml({
     title,
     description,
     image,
     media,
     pageUrl: canonicalUrl(previewId, `${url.origin}${url.pathname}`),
-    redirect: !CRAWLER_UA.test(ua),
+    redirect: !isCrawler,
   });
 
   const headers = new Headers({
