@@ -147,3 +147,15 @@ test("D-09: 白板＋投票要人填題目與至少兩個選項，不能用罐�
   assert.match(wb, /wb-create-poll-save/);
   assert.match(wb, /boardPollWrite/);
 });
+
+test("D-10: 討論建立投票要人填題目，空正文不是投票", () => {
+  assert.equal(boardPollWrite("", ["贊成", "再想想"]), null);
+  assert.equal(isMemberActor("ai"), false);
+  const ws = src("src/features/room-discussion/RoomDiscussion.tsx");
+  assert.doesNotMatch(ws, /要不要這樣做？/);
+  assert.doesNotMatch(ws, /message\.body\s*\|\|/);
+  assert.match(ws, /discussion-create-poll/);
+  assert.match(ws, /discussion-poll-question/);
+  assert.match(ws, /discussion-create-poll-save/);
+  assert.match(ws, /boardPollWrite/);
+});
