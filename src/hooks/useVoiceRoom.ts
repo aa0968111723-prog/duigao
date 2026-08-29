@@ -182,7 +182,10 @@ export function useVoiceRoom({ supabase, boundRoomId, userId, displayName, canMa
     clearRefreshTimer();
     const connection = connectionRef.current;
     connectionRef.current = null;
-    if (connection) await connection.disconnect().catch(() => undefined);
+    if (connection) {
+      await connection.setMuted(true).catch(() => undefined);
+      await connection.disconnect().catch(() => undefined);
+    }
     const sessionId = sessionIdRef.current;
     if (markLeft && supabase && sessionId && userId && roomRef.current) {
       await supabase

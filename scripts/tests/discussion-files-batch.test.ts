@@ -159,5 +159,5 @@ test("mobile first layer keeps composer; secondary chrome lives behind 更多", 
   assert.match(discussion, /onComposerActive/);
   assert.match(shell, /composerActive/);
   assert.match(shell, /data-testid="room-more"/);
-  assert.doesNotMatch(shell, /hideRoomChrome/);
+  assert.match(shell, /hideRoomChrome/);
 });

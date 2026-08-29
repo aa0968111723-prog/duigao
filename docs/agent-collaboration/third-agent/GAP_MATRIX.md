@@ -139,7 +139,6 @@ Status key: OPEN / FIXED_THIS_PR / BLOCKED / PHYSICAL_DEVICE_PENDING
 - commit: —
 - test: AUTOMATED_VERIFIED for 390×844 Android Chrome emulation after this PR’s AI sheet path
 
-<<<<<<< HEAD
 ## TA-010
 
 - severity: P2 (privacy leak if metadata is copied into context)
@@ -154,7 +153,7 @@ Status key: OPEN / FIXED_THIS_PR / BLOCKED / PHYSICAL_DEVICE_PENDING
 - status: FIXED_THIS_PR
 - commit: this branch
 - test: `scripts/tests/room-context-strip.test.ts`
-=======
+
 ## TA-011
 
 - severity: P1
@@ -184,4 +183,3 @@ Status key: OPEN / FIXED_THIS_PR / BLOCKED / PHYSICAL_DEVICE_PENDING
 - status: FIXED_THIS_PR
 - commit: this branch
 - test: migrations 0017 section
->>>>>>> origin/main
