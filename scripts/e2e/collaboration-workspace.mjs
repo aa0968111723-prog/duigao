@@ -17,7 +17,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { faults, requestLog, rows, start as startMock } from "./mock-supabase.mjs";
-import { openRoomCreate } from "./room-more.mjs";
+import { ensureRoomMore, openRoomCreate } from "./room-more.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54418;
@@ -384,6 +384,7 @@ try {
       // --- PR-02c：兩分頁即時增量（無整房 reload） --------------------
       {
         // A 拿分享連結（殼 header 的分享 — PR-01a 抬升後兩路徑都渲染）
+        await ensureRoomMore(page);
         await page.locator(".project-share-button").click();
         await page.waitForSelector("input.m-share-url", { timeout: 30000 });
         const shareUrl = await page.locator("input.m-share-url").inputValue();
