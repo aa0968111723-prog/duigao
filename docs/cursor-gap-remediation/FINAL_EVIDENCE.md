@@ -22,7 +22,7 @@
 | **main** | `444ae9d` | — | — | — |
 | **#96** | `6c4ae6e` | main `444ae9d` | clean | build / migrations / agent-read-layer / **browser success**（run `33258294438`） |
 | **#98** | `54a6bd1` | main `444ae9d` | clean | 同上 **browser success**（run `33258266223`） |
-| **#95** | `26ad4a6`（本回合 merge main）先前 `07c1164` | 仍指向舊 main `398960d` 直到 GitHub 重算 | dirty→需重算 | 推送後待 CI |
+| **#95** | `26ad4a6`（本回合 merge main）先前 `07c1164` | main `444ae9d`（GitHub 已重算） | blocked（CI） | 推送後 CI 進行中 |
 | **#100** | 已 squash 進 #95（`07c1164`）；branch `bfa3d37` = 原 #100 + squash #101 | — | merged into stack | — |
 | **#101** | 已 squash 進 `cursor/p0-files-and-outbox-70d9` @ `bfa3d37`；原 branch `4f966a3` | — | merged into files-and-outbox | — |
 | **#102** | `3622181` | `cursor/p1-mobile-tablet-ux-70d9` @ `4f966a3` | clean vs stack base | 未合 main |
