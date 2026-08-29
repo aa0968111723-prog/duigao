@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { acceptHumanAssetMetadataAck } from "../../src/cloud/assetHumanMetadataAck";
 import {
   contextCacheKey,
   isNormalizedAssetRegion,
@@ -125,4 +128,19 @@ test("Room Context API adapter uses HMAC and bounded evidence", () => {
   assert.equal(signature.length, 64);
   assert.match("tku-zen-agent adapter / ai_os adapter HMAC", /adapter|HMAC/);
   assert.doesNotMatch(body, /storage_path|invite_token|service_role/i);
+});
+
+test("zero-row human metadata UPSERT is not 已保存人工素材標記", () => {
+  assert.throws(() => acceptHumanAssetMetadataAck(null), (err: Error & { code?: string }) => err.code === "METADATA_NOT_SAVED");
+  assert.throws(() => acceptHumanAssetMetadataAck({}), (err: Error & { code?: string }) => err.code === "METADATA_NOT_SAVED");
+  assert.throws(() => acceptHumanAssetMetadataAck({ asset_id: "  " }), (err: Error & { code?: string }) => err.code === "METADATA_NOT_SAVED");
+  assert.deepEqual(acceptHumanAssetMetadataAck({ asset_id: "asset-1" }), { assetId: "asset-1" });
+});
+
+test("setHumanAssetMetadata requires a returned asset_id (RLS no-op is not success)", () => {
+  const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const src = readFileSync(resolve(ROOT, "src/cloud/assetIntelligence.ts"), "utf8");
+  assert.match(src, /acceptHumanAssetMetadataAck/);
+  assert.match(src, /select\("asset_id"\)\.maybeSingle\(\)/);
+  assert.match(src, /setHumanAssetMetadata[\s\S]*acceptHumanAssetMetadataAck/);
 });

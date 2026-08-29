@@ -24,6 +24,7 @@ import {
 import { DocumentUnderstandingProvider, PdfReader } from "../ai/documentUnderstanding";
 import { VideoUnderstandingProvider } from "../ai/videoUnderstanding";
 import { answerDuigaoRoomContext } from "../ai/aiOsRoomContext";
+import { acceptHumanAssetMetadataAck } from "./assetHumanMetadataAck";
 import { ensureSession } from "./auth";
 import { getSupabase } from "./client";
 import { isCloudConfigured } from "./config";
@@ -412,7 +413,7 @@ export async function setHumanAssetMetadata(
   input: { assetId: string; roomId: string; title?: string; summary?: string; tags?: string[]; structuredData?: Record<string, unknown> },
 ): Promise<void> {
   const userId = await ensureSession(supabase);
-  const { error } = await supabase.from("asset_human_metadata").upsert({
+  const { data, error } = await supabase.from("asset_human_metadata").upsert({
     asset_id: input.assetId,
     room_id: input.roomId,
     title: input.title?.trim() || null,
@@ -420,8 +421,9 @@ export async function setHumanAssetMetadata(
     tags: (input.tags ?? []).map((tag) => tag.trim()).filter(Boolean).slice(0, 30),
     structured_data: input.structuredData ?? {},
     updated_by: userId,
-  }, { onConflict: "asset_id" });
+  }, { onConflict: "asset_id" }).select("asset_id").maybeSingle();
   if (error) throw error;
+  acceptHumanAssetMetadataAck(data);
 }
 
 /**
