@@ -347,6 +347,17 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
         });
       }
 
+      // 200 仍可能是 SPA catch-all 或缺欄。沒有字串 answer 就不是研究成功，
+      // 也不能把 provider 標成 perplexity（那會變成空答案的假成功）。
+      if (typeof response.body.answer !== "string") {
+        recordFailure(now);
+        return withMeta(emptyResult(query, now, {}), {
+          failure: "upstream-error",
+          failureDetail: "研究回應不是有效結果（SPA HTML 或缺欄不得當成成功）",
+          retryable: true,
+        });
+      }
+
       consecutiveFailures = 0;
       lastKnown = { state: "ready" };
 
