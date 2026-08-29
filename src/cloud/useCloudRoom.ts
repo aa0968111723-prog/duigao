@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isTitleNotSaved } from "./roomTitleAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -123,7 +124,7 @@ export type FrameEvent =
 export type FrameEventHandler = (event: FrameEvent) => void;
 
 export type CloudWrites = {
-  setTitle: (title: string) => void;
+  setTitle: (title: string) => Promise<void>;
   insertComment: (pin: import("../lib/types").CommentPin) => void;
   setResolved: (id: string, resolved: boolean) => void;
   insertStroke: (stroke: import("../lib/types").Stroke) => void;
@@ -1062,7 +1063,31 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   };
 
   const writes: CloudWrites = {
-    setTitle: (title) => run("room-title", () => setRoomTitle(supabase!, boundRef.current!, title)),
+    setTitle: async (title) => {
+      const rid = boundRef.current;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await setRoomTitle(supabase, rid, title);
+        pending.current = acknowledgePendingWrite(pending.current, "room-title");
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, "room-title");
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isTitleNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key: "room-title",
+          task: () => setRoomTitle(supabase, rid, title),
+        });
+        setStatus("offline-pending");
+      }
+    },
     insertComment: (pin) => run(`comment:${pin.id}`, () => insertComment(supabase!, boundRef.current!, pin)),
     setResolved: (id, resolved) => run(`comment-resolved:${id}`, () => setCommentResolved(supabase!, id, resolved)),
     insertStroke: (stroke) => run(`stroke:${stroke.id}`, () => insertStroke(supabase!, boundRef.current!, stroke)),

@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isTitleNotSaved } from "./cloud/roomTitleAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -995,6 +996,19 @@ export function App() {
       });
     },
     [persist],
+  );
+
+  const applyRoomTitle = useCallback(
+    (title: string) => {
+      const previous = roomRef.current?.title ?? "";
+      updateRoom((r) => ({ ...r, title }));
+      void cloudRef.current.writes.setTitle(title).catch((err) => {
+        if (!isTitleNotSaved(err)) return;
+        updateRoom((r) => (r.title === title ? { ...r, title: previous } : r));
+        showToast("名稱沒有存成，請再試一次。", { tone: "error" });
+      });
+    },
+    [showToast, updateRoom],
   );
 
   const undoLast = useCallback(() => {
@@ -3048,8 +3062,7 @@ export function App() {
           if (activeBranchId) {
             updateProjectBranch(activeBranchId, { name: title });
           } else {
-            updateRoom((r) => ({ ...r, title }));
-            cloudRef.current.writes.setTitle(title);
+            applyRoomTitle(title);
           }
         },
         copySummary,
@@ -3483,10 +3496,7 @@ export function App() {
           // 對照不到就留空，UI 顯示「夥伴」，不假裝知道。
           .map((person) => ({ userId: person.userId, name: nameByUserId.get(person.userId) ?? "" })),
         onShare: openShare,
-        onRenameRoom: (title: string) => {
-          updateRoom((r) => ({ ...r, title }));
-          cloudRef.current.writes.setTitle(title);
-        },
+        onRenameRoom: applyRoomTitle,
         onOpenAi: openAi,
         onGoHome: () => {
           clearUndo();

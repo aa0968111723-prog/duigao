@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptRoomTitleAck } from "./roomTitleAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -830,7 +831,14 @@ export async function setMemberRole(
 // ---- entity-level writes (never overwrite the whole room) ------------------
 
 export async function setRoomTitle(supabase: SupabaseClient, roomId: string, title: string) {
-  await supabase.from("rooms").update({ title, updated_at: new Date().toISOString() }).eq("id", roomId);
+  const { data, error } = await supabase
+    .from("rooms")
+    .update({ title, updated_at: new Date().toISOString() })
+    .eq("id", roomId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw new CloudError(error.message, "room");
+  acceptRoomTitleAck(data);
 }
 
 export async function insertComment(supabase: SupabaseClient, roomId: string, pin: CommentPin) {
