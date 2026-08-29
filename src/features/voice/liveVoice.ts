@@ -9,7 +9,12 @@
  * 聽不到聲音 — Grok 03 F3）**、mute、disconnect；並把參與者事件折成
  * 一個 roster 回呼。誰在房裡、誰在講話，以 LiveKit 的即時事實為準；
  * voice_session_participants 的 DB 列由 useVoiceRoom 維護。
+ *
+ * 空字串、SPA HTML、或缺欄 token 在連線前就被拒絕 — 永不把 HTTP 200
+ * 的 index.html 當成 LiveKit session。
  */
+
+import { looksLikeSpaHtml } from "./voiceState";
 
 export type VoiceParticipantInfo = {
   identity: string;
@@ -41,6 +46,14 @@ async function loadLiveKit(): Promise<LiveKitModule> {
 }
 
 export async function connectVoice(input: ConnectVoiceInput): Promise<VoiceConnection> {
+  if (
+    !input.url ||
+    !input.token ||
+    looksLikeSpaHtml(input.url) ||
+    looksLikeSpaHtml(input.token)
+  ) {
+    throw Object.assign(new Error("SPA_HTML"), { name: "VoicePayloadError" });
+  }
   const { Room, RoomEvent, Track } = await loadLiveKit();
   const room = new Room({
     adaptiveStream: false,
@@ -48,6 +61,10 @@ export async function connectVoice(input: ConnectVoiceInput): Promise<VoiceConne
   });
 
   let intentionalDisconnect = false;
+  // connect() 失敗也會打 Disconnected。那不是「已連上再掉線」——
+  // 若此時就 onDisconnected，UI 會先亮錯誤、join 的清場還沒跑完，
+  // 測試／使用者會看到 live 殘場。只有連線真正成立後才轉發。
+  let sessionEstablished = false;
   // 遠端音軌的 <audio> 元素（Grok 03 F3）：attach 才有聲音。統一收在
   // 這個集合，斷線時全部 detach＋移出 DOM，不留殭屍元素。
   const attachedAudio = new Set<HTMLMediaElement>();
@@ -118,7 +135,7 @@ export async function connectVoice(input: ConnectVoiceInput): Promise<VoiceConne
 
   room.on(RoomEvent.Disconnected, (reason) => {
     detachAll();
-    if (!intentionalDisconnect) input.onDisconnected(String(reason ?? "disconnected"));
+    if (!intentionalDisconnect && sessionEstablished) input.onDisconnected(String(reason ?? "disconnected"));
   });
 
   await room.connect(input.url, input.token);
@@ -133,6 +150,7 @@ export async function connectVoice(input: ConnectVoiceInput): Promise<VoiceConne
     detachAll();
     throw err;
   }
+  sessionEstablished = true;
   snapshotRoster();
 
   return {
