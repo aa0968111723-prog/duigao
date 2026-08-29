@@ -1,4 +1,4 @@
-# 全站目標未完成 — 完成度審計（`bad534b` tip）
+# 全站目標未完成 — 完成度審計（`2192774` + 本 harness 修補）
 
 本檔是對 **原始全站目標** 的完成度審計，不是「這條 stack 已做完」的證明。
 可信度：程式碼 → migrations → tests → Git / CI → production curl → 本檔。
@@ -7,14 +7,15 @@
 
 | 鍵 | 值 |
 |---|---|
-| 審計時間（UTC） | 2026-08-29 18:10 |
-| 本 tip SHA | `b17772c`（本審計檔）。產品／e2e 與 `bad534b` 相同。 |
-| 已核對 SHA | `bad534b`（`Harden video playerReady after the 81db260 CI timeout.`） |
+| 審計時間（UTC） | 2026-08-29 18:35 |
+| 本 tip SHA | 本檔落地後的 HEAD（harness 修補）。產品討論碼與 `2192774` 相同。 |
+| 已核對 SHA | `21927746ba7c5157961fca8b3ab4cdb05cff4c79` |
 | 本 PR | [#125](https://github.com/aa0968111723-prog/duigao/pull/125) `cursor/p0-discussion-mentions-todos-70d9` |
-| 底層 stack | [#124](https://github.com/aa0968111723-prog/duigao/pull/124) `10c9109` → [#120](https://github.com/aa0968111723-prog/duigao/pull/120) → `main` `cd7eb5f` |
-| `origin/main` | `cd7eb5f`（本回合未前進） |
-| 最新公開 migration | `0032_discussion_mentions_todos.sql`。**禁止 0033。** |
-| `agent:gate` | 本回合未跑。不得寫 AGENT_GATE_PASS。 |
+| 底層 stack | [#124](https://github.com/aa0968111723-prog/duigao/pull/124) `10c9109` → [#120](https://github.com/aa0968111723-prog/duigao/pull/120) `c5a61f1` → `main` `cd7eb5f` |
+| `origin/main` | `cd7eb5fcff13451b31447d64dc72dd58d534e18f`（本回合未前進） |
+| #113 / #114 | **已合進 main**：`6da2af7`（#113）、`3c0bf0c`（#114）。`git merge-base --is-ancestor` 皆 YES。 |
+| 最新公開 migration | stack tree：`0032_discussion_mentions_todos.sql`。main：`0030`。**禁止 0033。** |
+| `agent:gate` | 本機於 `2192774` **PASS**（`PASS: AUTOMERGE REQUIRES AGENT_GATE_PASS`）。不是 GitHub `agent-read-layer` job。 |
 | 生產 | `https://duigao-k7q2.zeabur.app/` — 見下方 curl。**404 JSON ≠ API 成功。** |
 
 狀態只能是 **evidenced** / **incomplete** / **unmodeled** / **deploy-blocked**。
@@ -100,7 +101,7 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | 0024–0028 在本 tree | evidenced | `0024_whiteboard_canonical_columns.sql` … `0028_whiteboard_freehand.sql`；`scripts/e2e/migrations.mjs` `0024–0028：canonical whiteboard schema（WB01）` |
 | 白板 OCC／tombstone／context 不含墓碑 | evidenced | 同上 migrations 段；`scripts/tests/whiteboard-operations.test.ts`；`scripts/tests/whiteboard-realtime.test.ts` |
 | 獨立 `whiteboard-rls.test.ts` / `whiteboard-client.test.ts` | unmodeled | **本 tip 無這兩個檔。** 不得用假路徑充證據。RLS 證據在 `migrations.mjs` 0024–0028。 |
-| #113 已 merge 進 `main` | incomplete | 本回合 `origin/main` 仍是 `cd7eb5f`。白板在 **這條 stack 的 tree**，不在已部署的 main。 |
+| #113 已 merge 進 `main` | evidenced | `origin/main` `cd7eb5f` 的祖先 `6da2af7` = `PR-RESOLVE-06 … (#113)`。**合進 main ≠ 已部署到生產 DB。** |
 | 生產白板 schema | deploy-blocked | 未對生產 DB 跑 0024–0028。禁止本 agent 改生產 DB。 |
 
 ---
@@ -113,7 +114,8 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | 不把 SPA HTML / 假 vision 當成功 | evidenced | `src/features/design-intelligence/honesty.ts` `looksLikeSpaHtml`、`NO_FAKE_VISION`；`scripts/tests/ai-external-handoff.test.ts` |
 | Canva / CUTOS client 走 `parseFunctionPayload` | evidenced | `src/cloud/canva.ts`、`src/cloud/cutos.ts` |
 | G7-07 契約（標題聲明未完成、禁止完成旗標） | evidenced | `scripts/tests/ai-external-handoff.test.ts` G7-07；本檔標題為「全站目標未完成」 |
-| #114 已 merge 進 `main` | incomplete | `origin/main` 仍 `cd7eb5f`。 |
+| #114 已 merge 進 `main` | evidenced | `origin/main` 祖先 `3c0bf0c` = `PR-RESOLVE-07 … (#114)`。**合進 main ≠ 生產 functions／secrets。** |
+| `asset-analysis` / `room-ai-context` client 走 `parseFunctionPayload` | incomplete | `src/cloud/assetIntelligence.ts` `enqueueAssetAnalysis` / `retryAssetAnalysis` / `askRoomContext` 只看 `error`，HTML／空物件可當成功。#125 修 video harness 時不混這條。另開分支。 |
 | 生產 Perplexity / Canva / CUTOS secrets 與 functions | deploy-blocked | 本回合未驗證任何 provider secret。origin `/functions/v1/*` 為 JSON 404。 |
 
 ---
@@ -137,9 +139,11 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 |---|---|---|
 | 函式／REST 404／HTML 不可當 JSON 成功 | evidenced（client） | `src/cloud/apiResponse.ts`；`scripts/tests/api-response.test.ts` |
 | 生產 origin 有 API | deploy-blocked | 本回合 18:06 UTC：`/functions/v1/voice-token`、`/rest/v1/`、`/api/health` 皆 **HTTP 404** + `application/json` + `code: NOT_FOUND`。`/` 為 SPA HTML 200。見 artifact。 |
-| CI `agent-gate` 全綠 | incomplete | 本回合未跑 `npm run agent:gate`。 |
-| CI browser @ `bad534b` | evidenced | run `33267190274` **success**。`test:video` **success**（18:04:57–18:06:12Z，真實 `video.v-video` / `playerReady`）。`test:collaboration-e2e` / `test:visual` / `test:share-e2e` 皆 success。 |
-| CI browser @ `b17772c` | incomplete | 本檔落地後另起 run。docs-only，尚未 terminal。 |
+| 本機 `npm run agent:gate` @ `2192774` | evidenced | 本回合跑過，exit 0，印出 `PASS: AUTOMERGE REQUIRES AGENT_GATE_PASS`。含 `build:local`。 |
+| GitHub `agent-read-layer` @ `2192774` | evidenced | run `33268176132` **success**。 |
+| CI browser @ `bad534b` | evidenced | run `33267190274` **success**（含 `test:video`）。 |
+| CI browser @ `2192774` | incomplete | run [`33268176148`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268176148) **failure**。`build` / `migrations` / `agent-read-layer` success。`test:collaboration-e2e` **success**（未讀跳轉）。`test:video` **failure**：`playerReady` `waitForSelector('video.v-video')` 45s。本 tip 把等待改成 90s + 誠實失敗卡 + dump，**本 tip 的 browser 尚未跑。不得寫綠。** |
+| CodeRabbit 1-check success | unmodeled | 「Review skipped: draft」不是產品 CI。 |
 | 已讀回條 UI | unmodeled | 禁止。 |
 
 ---
@@ -154,7 +158,7 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 
 ---
 
-## 本回合生產 curl（2026-08-29 18:06 UTC）
+## 本回合生產 curl（2026-08-29 18:27 UTC）
 
 ```
 GET https://duigao-k7q2.zeabur.app/functions/v1/voice-token
@@ -175,5 +179,6 @@ GET https://duigao-k7q2.zeabur.app/
 
 - 不 merge、不 deploy、不改生產 DB、不 force-push。
 - 不發明 0033。不發明已讀／雙藍勾。
-- `bad534b` browser 已 terminal success（含 `test:video`）。不把 `b17772c` 尚未結束的 CI 寫成綠。
-- 未發現需要 0033 以外、且無人認領的小產品洞（canned copy / 假成功 / 缺 error-retry）值得在本回合改程式；審計後停止。
+- `2192774` browser 已 terminal **紅**（`test:video`）。不把尚未重跑的 harness 修補寫成綠。
+- 不把 #113/#114「未合 main」寫進本檔；它們已在 `cd7eb5f` 祖先上。
+- `asset-analysis` invoke 誠實閘另開分支，不推進 in-flight／剛紅的 #125 產品討論碼。
