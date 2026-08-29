@@ -222,7 +222,7 @@ test("join failure must clear the live session before publishing 失敗", () => 
   assert.match(live, /sessionEstablished\) input\.onDisconnected/);
 });
 
-test("hook and liveVoice use the truthful machine; RoomDiscussion still reads legacy dock state", () => {
+test("hook and liveVoice use the truthful machine; RoomDiscussion Leave reads phase", () => {
   const hook = readFileSync(resolve(ROOT, "src/hooks/useVoiceRoom.ts"), "utf8");
   const live = readFileSync(resolve(ROOT, "src/features/voice/liveVoice.ts"), "utf8");
   const token = readFileSync(resolve(ROOT, "src/cloud/voiceToken.ts"), "utf8");
@@ -236,9 +236,11 @@ test("hook and liveVoice use the truthful machine; RoomDiscussion still reads le
   assert.match(token, /parseVoiceTokenPayload/);
   assert.match(token, /parseVoiceHealthPayload/);
   assert.match(live, /assertConnectableToken|looksLikeSpaHtml/);
-  // #95 owns this file — we keep the live/connecting contract so the dock still works.
-  assert.match(discussion, /state === "live"/);
+  // V-04: Leave stays up while live/connected/reconnecting. Join still uses dock connecting.
+  assert.match(discussion, /voiceDockShowsLeave/);
+  assert.match(discussion, /voice\.phase/);
   assert.match(discussion, /state === "connecting"/);
+  assert.doesNotMatch(discussion, /voice\.state === "live" \?/);
 });
 
 test("voiceUnavailableReason is 語音服務尚未設定 (not a fake upcoming room)", () => {
