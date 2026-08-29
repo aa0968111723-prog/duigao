@@ -351,7 +351,24 @@ try {
 
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-create-poll").click();
+    await page.waitForSelector('[data-testid="wb-poll-draft"]', { timeout: 8000 });
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_poll_question_390.png"), fullPage: true });
+    await page.getByTestId("wb-poll-question").fill("主視覺要不要換？");
+    await page.getByTestId("wb-poll-option-0").fill("要，換成 B 版");
+    await page.getByTestId("wb-poll-option-1").fill("先維持 A 版");
+    await page.getByTestId("wb-create-poll-save").click();
     check("可引用投票節點", await page.locator("[data-node-type='poll']").count() >= 1);
+    check("投票題目是人填的，不是罐頭", (await page.locator("[data-node-type='poll']").first().innerText()).includes("主視覺要不要換？"));
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.getByTestId("whiteboard-more").click();
+    await page.getByTestId("wb-create-poll").click();
+    await page.waitForSelector('[data-testid="wb-poll-draft"]', { timeout: 8000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_poll_question_768.png"), fullPage: true });
+    await page.locator(".project-sheet-close").click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-write-decision").click();
     await page.waitForSelector('[data-testid="wb-decision-draft"]', { timeout: 8000 });

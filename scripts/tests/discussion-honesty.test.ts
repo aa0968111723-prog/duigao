@@ -10,6 +10,7 @@ import test from "node:test";
 import {
   attachmentCiteReply,
   boardDecisionWrite,
+  boardPollWrite,
   canEditDiscussion,
   decisionDraftTitle,
   discussionEditPatch,
@@ -129,4 +130,20 @@ test("D-08: 白板寫下決策要人填標題，不能用罐頭採用 B 版", ()
   assert.match(wb, /wb-decision-title/);
   assert.match(wb, /wb-write-decision-save/);
   assert.match(wb, /boardDecisionWrite|decisionDraftTitle/);
+});
+
+test("D-09: 白板＋投票要人填題目與至少兩個選項，不能用罐頭主視覺", () => {
+  assert.equal(boardPollWrite("", ["贊成", "再想想"]), null);
+  assert.equal(boardPollWrite("   ", ["贊成", "再想想"]), null);
+  assert.equal(boardPollWrite("主視覺要不要換？", ["贊成"]), null);
+  assert.deepEqual(boardPollWrite("  主視覺要不要換？  ", [" 要，換成 B 版 ", "先維持 A 版"]), {
+    question: "主視覺要不要換？",
+    options: ["要，換成 B 版", "先維持 A 版"],
+  });
+  assert.equal(isMemberActor("system"), false);
+  const wb = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  assert.doesNotMatch(wb, /onCreatePoll\("主視覺要不要換？"/);
+  assert.match(wb, /wb-poll-question/);
+  assert.match(wb, /wb-create-poll-save/);
+  assert.match(wb, /boardPollWrite/);
 });

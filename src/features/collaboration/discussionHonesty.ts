@@ -52,6 +52,15 @@ export function boardDecisionWrite(raw: string): { title: string; status: "decid
   return { title, status: "decided" };
 }
 
+/** 0013: question 1–240, options array length 2–6. Empty question is not a poll. */
+export function boardPollWrite(questionRaw: string, optionRaws: string[]): { question: string; options: string[] } | null {
+  const question = decisionDraftTitle(questionRaw);
+  if (!question) return null;
+  const options = optionRaws.map((item) => item.replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 6);
+  if (options.length < 2) return null;
+  return { question, options };
+}
+
 export type WorkCite = {
   kind: Extract<DiscussionKind, "poster" | "video" | "plan" | "whiteboard">;
   body: string;

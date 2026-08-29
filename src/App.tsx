@@ -141,7 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { canEditDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor } from "./features/collaboration/discussionHonesty";
+import { boardPollWrite, canEditDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -1674,11 +1674,21 @@ export function App() {
 
   const createProjectPoll = useCallback(
     (poll: RoomPoll) => {
+      const actor = cloud.userId ?? poll.createdBy;
+      if (!isMemberActor(actor)) {
+        showToast("AI 不能代替成員建立投票。", { tone: "error" });
+        return;
+      }
+      const write = boardPollWrite(poll.question, poll.options);
+      if (!write) {
+        showToast("投票要有題目和至少兩個選項。", { tone: "error" });
+        return;
+      }
       if (!cloud.canManageMedia && cloud.boundRoomId) {
         showToast("檢視者可以投票，但不能建立待決策。", { tone: "error" });
         return;
       }
-      const nextPoll = { ...poll, createdBy: cloud.userId ?? poll.createdBy };
+      const nextPoll = { ...poll, question: write.question, options: write.options, createdBy: actor };
       updateRoom((r) => ({ ...r, polls: [...(r.polls ?? []), nextPoll] }));
       cloudRef.current.writes.createPoll(nextPoll);
     },
