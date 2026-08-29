@@ -276,7 +276,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       list.push({ userId, name, color });
     };
     for (const member of api.room.members ?? []) add(member.userId, member.name, member.color);
-    add(api.userId, api.guest.name, api.guest.color);
+    add(api.userId, api.guest?.name, api.guest?.color);
     for (const message of api.messages) add(message.authorId, message.authorName, message.authorColor);
     return list;
   }, [api.room.members, api.userId, api.guest.name, api.guest.color, api.messages]);

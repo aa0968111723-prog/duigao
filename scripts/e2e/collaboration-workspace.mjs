@@ -176,6 +176,8 @@ try {
     userAgent: ANDROID_UA,
   });
   const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
   try {
     await page.goto(APP, { waitUntil: "domcontentloaded" });
     await page.fill("input.text-input", "招生企劃");
@@ -209,8 +211,9 @@ try {
     await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
 
     await page.getByRole("button", { name: "對話", exact: true }).click();
+    await page.waitForSelector('[data-testid="discussion-feed"]', { state: "visible", timeout: 10000 });
     await page.getByLabel("房間討論").fill("先把招生流程攤在白板上");
-    await page.getByRole("button", { name: "送出" }).click();
+    await page.getByTestId("discussion-composer").getByRole("button", { name: "送出" }).click();
     check("房間討論可送出文字", (await page.getByTestId("discussion-feed").innerText()).includes("先把招生流程攤在白板上"));
     check("送出後看得到最新一則", await page.locator('[data-testid="discussion-feed"] [data-latest="true"]').innerText().then((text) => text.includes("先把招生流程攤在白板上")));
     await page.getByTestId("discussion-edit").click();
@@ -1249,7 +1252,7 @@ try {
   } catch (error) {
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
     await page.screenshot({ path: join(ROOT, "output", "playwright", "collaboration-mobile-fail.png"), fullPage: true }).catch(() => undefined);
-    check("協作工作台手機 acceptance journey", false, error instanceof Error ? error.message : String(error));
+    check("協作工作台手機 acceptance journey", false, `${error instanceof Error ? error.message : String(error)}${pageErrors.length ? ` | pageerror: ${pageErrors.join(" | ")}` : ""}`);
   } finally {
     await context.close();
   }
