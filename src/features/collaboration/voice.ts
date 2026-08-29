@@ -6,8 +6,8 @@ import type { VoiceParticipant, VoiceSession } from "./types";
  * create/join/leave/mute 已由 useVoiceRoom＋voice-token edge＋LiveKit
  * 落地（本旗標翻 true 的證據：scripts/e2e 的 voice 檢查與 harness 對
  * voice-token 真實源碼的簽名驗證）。實際可用性仍由 runtime health 決定
- * — LIVEKIT_* env 未設定的部署顯示誠實的「還在準備」文案，
- * voiceUnavailableReason 因此保留。
+ * — LIVEKIT_* env 未設定的部署顯示誠實的「語音服務尚未設定」，
+ * voiceUnavailableReason 因此保留。永不假裝已連線或已有參與者。
  */
 export const VOICE_ROOM_MVP = true;
 
@@ -20,7 +20,7 @@ export type VoiceRoomApi = {
 };
 
 export function voiceUnavailableReason(): string {
-  return "語音房間還在準備，這一版先把討論和白板做好。";
+  return "語音服務尚未設定";
 }
 
 export const voiceRoomApi: VoiceRoomApi = {
