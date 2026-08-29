@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isWhiteboardNotSaved } from "./cloud/whiteboardAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -1875,8 +1876,17 @@ export function App() {
         version: 1,
       };
       updateRoom((r) => ({ ...r, whiteboards: [board, ...(r.whiteboards ?? [])] }));
-      cloudRef.current.writes.createWhiteboard?.(board);
       setActiveWhiteboardId(board.id);
+      void cloudRef.current.writes.createWhiteboard?.(board)?.catch((err) => {
+        if (!isWhiteboardNotSaved(err)) return;
+        updateRoom((r) => ({
+          ...r,
+          whiteboards: (r.whiteboards ?? []).filter((item) => item.id !== board.id),
+        }));
+        setActiveWhiteboardId((current) => (current === board.id ? null : current));
+        setStagedBoardAi((current) => (current?.nodes.some((node) => node.whiteboardId === board.id) ? null : current));
+        showToast("白板沒有建立，請再試一次。", { tone: "error" });
+      });
       return board;
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],

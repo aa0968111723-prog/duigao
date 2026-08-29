@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isWhiteboardNotSaved } from "./whiteboardAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -94,7 +95,7 @@ import {
   insertDiscussion,
   insertEdge,
   nodeFromRow,
-  insertWhiteboard,
+  insertWhiteboard as repoInsertWhiteboard,
   loadWhiteboardGraph,
   setAllowBoardEdit as repoSetAllowBoardEdit,
   setDiscussionSupport as repoSetDiscussionSupport,
@@ -142,7 +143,7 @@ export type CloudWrites = {
   /** AI 套用稽核列（0019）。回傳成敗；失敗不重試 — 討論串訊息是人看的 fallback。 */
   recordAiApplyAudit?: (entry: { proposalId: string; proposalType: string; label: string }) => Promise<boolean>;
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
-  createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
+  createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => Promise<void>;
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false | "conflict">;
   deleteNode?: (id: string, version: number) => Promise<boolean | "conflict">;
@@ -1121,7 +1122,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       }
     },
     setDiscussionSupport: (messageId, add) => run(`support:${messageId}`, () => repoSetDiscussionSupport(supabase!, boundRef.current!, messageId, add)),
-    createWhiteboard: (board) => run(`whiteboard-insert:${board.id}`, () => insertWhiteboard(supabase!, board)),
+    createWhiteboard: async (board) => {
+      const rid = boundRef.current;
+      const key = `whiteboard-insert:${board.id}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await repoInsertWhiteboard(supabase, board);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isWhiteboardNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => repoInsertWhiteboard(supabase, board),
+        });
+        setStatus("offline-pending");
+      }
+    },
     updateWhiteboard: (board) => run(`whiteboard:${board.id}`, () => repoUpdateWhiteboard(supabase!, board)),
     upsertNode: (node) => writeAck(() => repoUpsertNode(supabase!, { ...node, roomId: boundRef.current! })),
     // tombstone（0021）：帶最後 ack 的 version 走 OCC — stale 即 conflict，

@@ -13,6 +13,7 @@ import type {
 import { FRAME_KINDS } from "../features/collaboration/types";
 import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaboration/types";
 import { acceptDiscussionInsert } from "./discussionWrite";
+import { acceptWhiteboardInsertAck } from "./whiteboardAck";
 import { CloudError } from "./errors";
 
 type WhiteboardRow = {
@@ -267,15 +268,20 @@ export async function loadWhiteboardGraph(supabase: SupabaseClient, roomId: stri
 }
 
 export async function insertWhiteboard(supabase: SupabaseClient, board: Whiteboard): Promise<void> {
-  const { error } = await supabase.from("whiteboards").insert({
-    id: board.id,
-    room_id: board.roomId,
-    title: board.title,
-    description: board.description,
-    allow_edit: board.allowEdit,
-    created_by: isUuid(board.createdBy) ? board.createdBy : null,
-  });
+  const { data, error } = await supabase
+    .from("whiteboards")
+    .insert({
+      id: board.id,
+      room_id: board.roomId,
+      title: board.title,
+      description: board.description,
+      allow_edit: board.allowEdit,
+      created_by: isUuid(board.createdBy) ? board.createdBy : null,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "whiteboard");
+  acceptWhiteboardInsertAck(data);
 }
 
 export async function updateWhiteboard(
