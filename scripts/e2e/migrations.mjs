@@ -1500,11 +1500,11 @@ try {
   ok("重跑 0020 後 RLS / policy 形狀不變（true/true/0）", canvaBefore === canvaShape() && canvaBefore === "true/true/0", `${canvaBefore} → ${canvaShape()}`);
   ok("重跑後成員依然讀不到 token 表", as(owner, `select count(*) from public.canva_connections;`).failed);
 
-  section("0022–0025：canonical whiteboard schema（WB01）");
-  psqlFile(join(MIGRATIONS, "0022_whiteboard_canonical_columns.sql"));
-  psqlFile(join(MIGRATIONS, "0023_whiteboard_frames.sql"));
-  psqlFile(join(MIGRATIONS, "0024_whiteboard_operations.sql"));
-  psqlFile(join(MIGRATIONS, "0025_whiteboard_versions.sql"));
+  section("0024–0027：canonical whiteboard schema（WB01；renumbered off main 0022 / #95 0023）");
+  psqlFile(join(MIGRATIONS, "0024_whiteboard_canonical_columns.sql"));
+  psqlFile(join(MIGRATIONS, "0025_whiteboard_frames.sql"));
+  psqlFile(join(MIGRATIONS, "0026_whiteboard_operations.sql"));
+  psqlFile(join(MIGRATIONS, "0027_whiteboard_versions.sql"));
 
   // (a) NOT VALID 約束必須真的 validate 過（Grok wb00 F4：只驗存在會假綠）
   ok(
@@ -1606,15 +1606,15 @@ try {
     (select bool_and(convalidated) from pg_constraint where conname in ('whiteboard_nodes_link_pair','whiteboard_nodes_parent_group_fk')) || '/' ||
     (select count(*) from pg_trigger where tgname in ('whiteboard_edges_touch','whiteboard_frames_touch','whiteboard_nodes_group_cycle'));`).out;
   const wbBefore = wbShape();
-  psqlFile(join(MIGRATIONS, "0022_whiteboard_canonical_columns.sql"));
-  psqlFile(join(MIGRATIONS, "0023_whiteboard_frames.sql"));
-  psqlFile(join(MIGRATIONS, "0024_whiteboard_operations.sql"));
-  psqlFile(join(MIGRATIONS, "0025_whiteboard_versions.sql"));
-  ok("重跑 0022–0025 後 shape 不變（9/true/3）", wbBefore === wbShape() && wbBefore === "9/true/3", `${wbBefore} → ${wbShape()}`);
+  psqlFile(join(MIGRATIONS, "0024_whiteboard_canonical_columns.sql"));
+  psqlFile(join(MIGRATIONS, "0025_whiteboard_frames.sql"));
+  psqlFile(join(MIGRATIONS, "0026_whiteboard_operations.sql"));
+  psqlFile(join(MIGRATIONS, "0027_whiteboard_versions.sql"));
+  ok("重跑 0024–0027 後 shape 不變（9/true/3）", wbBefore === wbShape() && wbBefore === "9/true/3", `${wbBefore} → ${wbShape()}`);
   ok("重跑後 REST 硬刪依然被 revoke", as(owner, `delete from public.whiteboard_nodes where id = '${tombNode}'::uuid;`).failed);
 
-  section("0026：freehand 詞彙（WB03）");
-  psqlFile(join(MIGRATIONS, "0026_whiteboard_freehand.sql"));
+  section("0028：freehand 詞彙（WB03）");
+  psqlFile(join(MIGRATIONS, "0028_whiteboard_freehand.sql"));
   const fhNode = psql("select gen_random_uuid();").out;
   ok("freehand 節點可插入", !as(owner, `insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${fhNode}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'freehand', '{"points":[[0,0],[10,10]]}'::jsonb);`).failed);
   ok("詞彙外型別仍被 CHECK 擋下", as(owner, `insert into public.whiteboard_nodes (whiteboard_id, room_id, node_type, content) values ('${collabBoard}'::uuid, '${capRoom}'::uuid, 'scribble', '{}'::jsonb);`).failed);
@@ -1622,10 +1622,10 @@ try {
   psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
   const fhNode2 = psql("select gen_random_uuid();").out;
   ok("0014 重放後 freehand 仍可插入", !as(owner, `insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${fhNode2}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'freehand', '{}'::jsonb);`).failed);
-  // 0026 重放冪等
-  psqlFile(join(MIGRATIONS, "0026_whiteboard_freehand.sql"));
-  ok("0026 重放後 CHECK 恰一條", psql(`select count(*) from pg_constraint where conname = 'whiteboard_nodes_node_type_check';`).out === "1");
-  ok("0026 重放後 freehand 列仍在", psql(`select count(*) from public.whiteboard_nodes where id in ('${fhNode}'::uuid,'${fhNode2}'::uuid);`).out === "2");
+  // 0028 重放冪等
+  psqlFile(join(MIGRATIONS, "0028_whiteboard_freehand.sql"));
+  ok("0028 重放後 CHECK 恰一條", psql(`select count(*) from pg_constraint where conname = 'whiteboard_nodes_node_type_check';`).out === "1");
+  ok("0028 重放後 freehand 列仍在", psql(`select count(*) from public.whiteboard_nodes where id in ('${fhNode}'::uuid,'${fhNode2}'::uuid);`).out === "2");
 
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
