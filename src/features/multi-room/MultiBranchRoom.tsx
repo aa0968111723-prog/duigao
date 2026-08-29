@@ -948,7 +948,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
    * null（手機是 tab、同時只有一個）。平板的側欄是**同時**顯示，所以要
    * 明確傳 "chat" — 否則側欄是空的（e2e 抓到）。
    */
-  function renderDiscussion(paneOverride?: "chat" | "board") {
+  function renderDiscussion(paneOverride?: "chat" | "board", opts?: { showTodos?: boolean }) {
     return (
                     <RoomDiscussion api={{
                       room: normalized,
@@ -989,6 +989,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       onMarkRead: api.onMarkDiscussionRead,
                       onCreateTodo: api.onCreateTodo,
                       onCompleteTodo: api.onCompleteTodo,
+                      showTodos: opts?.showTodos,
                       typingLabel: api.typingLabel,
                       onTyping: api.onDiscussionTyping,
                       onCreatePoll: createPoll,
@@ -1311,7 +1312,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
             <strong>討論</strong>
             <button type="button" onClick={() => setRailCollapsed(true)} aria-label="收起討論">✕</button>
           </div>
-          <div className="wb-side-rail-body">{renderDiscussion("chat")}</div>
+          <div className="wb-side-rail-body">{renderDiscussion("chat", { showTodos: false })}</div>
         </aside>
       )}
       {api.workspace && (

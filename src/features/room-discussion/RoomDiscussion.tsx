@@ -5,7 +5,7 @@ import { indexMessages, replySnippet, resolveReply, type ReplyReference } from "
 import {
   attachmentCiteReply,
   boardPollWrite,
-  canCompleteTodo,
+  canCompleteRoomTodo,
   canEditDiscussion,
   canTombstoneDiscussion,
   canWriteTodo,
@@ -15,6 +15,8 @@ import {
   firstUnreadMessageId,
   mentionBodyParts,
   mentionedIdsFromDraft,
+  messageIsEdited,
+  messageIsTombstoned,
   parseMentionQuery,
   todoDraftTitle,
   unreadCount,
@@ -67,6 +69,8 @@ export type RoomDiscussionApi = {
   onRetry?: (messageId: string) => void;
   /** 決定條預設顯示；single 房 drawer 對 reviewer 關閉。 */
   showDecisions?: boolean;
+  /** 平板 Split View 側欄不掛待辦，避免第一層板 chrome 被撐開。 */
+  showTodos?: boolean;
   /** 白板/投票等房間層動作；single 房 drawer 對 reviewer 關閉。 */
   showRoomActions?: boolean;
   /** 語音邊界說明；single 房 drawer 不顯示（語音是房間殼的事）。 */
@@ -226,6 +230,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [todoDraftOpen, setTodoDraftOpen] = useState(false);
 
   const showDecisions = api.showDecisions ?? true;
+  const showTodos = api.showTodos ?? true;
   const showRoomActions = api.showRoomActions ?? true;
   const decided = api.decisions.filter((item) => item.status === "decided");
   const pending = api.decisions.filter((item) => item.status === "pending");
@@ -496,6 +501,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       </section>
       )}
 
+      {showTodos && (
       <section className="rd-todos" data-testid="discussion-todo">
         <div className="project-section-title-row">
           <h3>待辦</h3>
@@ -537,7 +543,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         {openTodos.map((item) => (
           <article className="rd-todo" key={item.id} data-status="open">
             <strong>{item.title}</strong>
-            {api.onCompleteTodo && canCompleteTodo(api.userId) && (
+            {api.onCompleteTodo && canCompleteRoomTodo(item, api.userId, api.canManage) && (
               <button type="button" className="project-text-button" data-testid="todo-complete" onClick={() => api.onCompleteTodo?.(item.id)}>完成</button>
             )}
           </article>
@@ -549,6 +555,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         ))}
         {!todos.length && <p className="project-muted">還沒有待辦</p>}
       </section>
+      )}
 
       <div className="rd-feed" data-testid="discussion-feed">
         {messages.map((message) => {
