@@ -129,6 +129,15 @@ test("asset-analysis SPA HTML and empty objects are not queued success", () => {
   assert.throws(() => acceptAssetAnalysisPayload({}), (err: Error & { code?: string }) => err.code === "INVALID_PAYLOAD");
   assert.throws(() => acceptAssetAnalysisPayload({ ok: true }), (err: Error & { code?: string }) => err.code === "INVALID_PAYLOAD");
   assert.throws(() => acceptAssetAnalysisPayload({ error: "QUEUE_FAILED" }), (err: Error & { code?: string }) => err.code === "QUEUE_FAILED");
+  assert.throws(() => acceptAssetAnalysisPayload({ jobId: "   " }), (err: Error & { code?: string }) => err.code === "INVALID_PAYLOAD");
+  assert.throws(
+    () => acceptAssetAnalysisPayload({ ok: true, jobId: "j1" }, "text/html"),
+    (err: Error & { code?: string }) => err.code === "SPA_HTML",
+  );
+  assert.throws(
+    () => acceptAssetAnalysisPayload({ ok: false, code: "ANALYSIS_UNAVAILABLE" }),
+    (err: Error & { code?: string }) => err.code === "ANALYSIS_UNAVAILABLE",
+  );
   assert.deepEqual(acceptAssetAnalysisPayload({ assetId: "a1", jobId: "j1", status: "queued" }), { jobId: "j1" });
 });
 
