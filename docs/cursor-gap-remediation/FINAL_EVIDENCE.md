@@ -185,3 +185,22 @@ Browser 390 / 768（`/opt/cursor/artifacts`）：
 - 先紅紀錄：`voice-state-fail.log`、`voice-dock-leave-fail.log`
 
 未做：未把 #78/#88 拆上來；未發明 typing/presence；未改正式庫；未 deploy；未 merge 任何 PR。
+
+---
+
+## 本回合：#115 ← origin/main（#105 Home）＋ #78 編號 stack
+
+| 項 | 證據 |
+|---|---|
+| `#115` merge | `f620ad5` parents `477da1a` + `196b3a3`；tip 證據 commit `c433535` |
+| 衝突 | 僅 `package.json`（restack scripts ∪ `test:home-entry`） |
+| 測試 | home-entry 6/6；voice-state 16/16；dock-leave 2/2；session-entry 9/9 |
+| 未推 merge 上 #95 | 是 |
+| 白板編號 | `cursor/p1-whiteboard-migration-renumber-70d9` @ `84e6808`；base **必須** `agent/wb01-canonical-schema` |
+| 映射 | 0022→0024 … 0026→0028；SQL 0-byte rename |
+| PG | `127.0.0.1:5432` 無回應；`test:migrations` 未跑 |
+| #88 | 0027–0028 現撞新白板檔名 → 之後 0029–0030 |
+| resolve drafts | #106–#110 **未碰**（#106 是 main 線替代 #98） |
+| PR create | 兩邊皆 **403** |
+
+**#115 base 必須維持** `cursor/p1-realtime-offline-restack-70d9`。**編號 PR base 必須** `agent/wb01-canonical-schema`。全站目標仍未完成。
