@@ -1,10 +1,14 @@
+import type { DiscussionMessage } from "../features/collaboration/types";
 import type { Guest, Room } from "./types";
 import type { RoomContextResponse } from "./assetIntelligence";
 
 const DB_NAME = "duigao";
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 const ROOMS = "rooms";
 const AI_CONTEXTS = "ai-contexts";
+const UPLOAD_SESSIONS = "upload-sessions";
+const DISCUSSION_OUTBOX = "discussion-outbox";
+const DISCUSSION_DRAFTS = "discussion-drafts";
 const GUEST_KEY = "duigao.guest";
 
 function openDb(): Promise<IDBDatabase> {
@@ -18,10 +22,165 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(AI_CONTEXTS)) {
         db.createObjectStore(AI_CONTEXTS, { keyPath: "key" });
       }
+      if (!db.objectStoreNames.contains(UPLOAD_SESSIONS)) {
+        db.createObjectStore(UPLOAD_SESSIONS, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(DISCUSSION_OUTBOX)) {
+        db.createObjectStore(DISCUSSION_OUTBOX, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(DISCUSSION_DRAFTS)) {
+        db.createObjectStore(DISCUSSION_DRAFTS, { keyPath: "roomKey" });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+export type VideoUploadSession = {
+  id: string;
+  roomId: string;
+  versionId: string;
+  objectName: string;
+  uploadUrl?: string;
+  fileName: string;
+  fileSize: number;
+  lastModified: number;
+  mime: string;
+  fingerprint: string;
+  createdAt: number;
+  updatedAt: number;
+  state: string;
+};
+
+export async function saveUploadSession(session: VideoUploadSession): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(UPLOAD_SESSIONS, "readwrite");
+      tx.objectStore(UPLOAD_SESSIONS).put({ ...session, updatedAt: Date.now() });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function listUploadSessions(): Promise<VideoUploadSession[]> {
+  const db = await openDb();
+  try {
+    return await new Promise<VideoUploadSession[]>((resolve, reject) => {
+      const tx = db.transaction(UPLOAD_SESSIONS, "readonly");
+      const req = tx.objectStore(UPLOAD_SESSIONS).getAll();
+      req.onsuccess = () => resolve((req.result as VideoUploadSession[]) ?? []);
+      req.onerror = () => reject(req.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function deleteUploadSession(id: string): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(UPLOAD_SESSIONS, "readwrite");
+      tx.objectStore(UPLOAD_SESSIONS).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export function uploadSessionMatchesFile(session: VideoUploadSession, file: File): boolean {
+  return session.fileName === file.name && session.fileSize === file.size && session.lastModified === file.lastModified;
+}
+
+type StoredOutboxRow = {
+  id: string;
+  message: DiscussionMessage;
+  state: "sending" | "failed" | "acked";
+  autoRetried?: boolean;
+};
+
+export async function saveOutboxEntries(entries: Record<string, Omit<StoredOutboxRow, "id">>): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(DISCUSSION_OUTBOX, "readwrite");
+      const store = tx.objectStore(DISCUSSION_OUTBOX);
+      const req = store.getAllKeys();
+      req.onsuccess = () => {
+        const keep = new Set(Object.keys(entries));
+        for (const key of req.result) {
+          if (!keep.has(String(key))) store.delete(key);
+        }
+        for (const [id, entry] of Object.entries(entries)) {
+          store.put({ id, message: entry.message, state: entry.state, autoRetried: entry.autoRetried } satisfies StoredOutboxRow);
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadOutboxEntries(): Promise<Record<string, Omit<StoredOutboxRow, "id">>> {
+  const db = await openDb();
+  try {
+    const rows = await new Promise<StoredOutboxRow[]>((resolve, reject) => {
+      const tx = db.transaction(DISCUSSION_OUTBOX, "readonly");
+      const req = tx.objectStore(DISCUSSION_OUTBOX).getAll();
+      req.onsuccess = () => resolve((req.result as StoredOutboxRow[]) ?? []);
+      req.onerror = () => reject(req.error);
+    });
+    const entries: Record<string, Omit<StoredOutboxRow, "id">> = {};
+    for (const row of rows) {
+      if (!row?.id || !row.message) continue;
+      entries[row.id] = { message: row.message, state: row.state, autoRetried: row.autoRetried };
+    }
+    return entries;
+  } finally {
+    db.close();
+  }
+}
+
+export async function saveDiscussionDraft(roomKey: string, body: string): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(DISCUSSION_DRAFTS, "readwrite");
+      if (body.trim()) {
+        tx.objectStore(DISCUSSION_DRAFTS).put({ roomKey, body, updatedAt: Date.now() });
+      } else {
+        tx.objectStore(DISCUSSION_DRAFTS).delete(roomKey);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadDiscussionDraft(roomKey: string): Promise<string> {
+  const db = await openDb();
+  try {
+    const row = await new Promise<{ roomKey: string; body: string } | undefined>((resolve, reject) => {
+      const tx = db.transaction(DISCUSSION_DRAFTS, "readonly");
+      const req = tx.objectStore(DISCUSSION_DRAFTS).get(roomKey);
+      req.onsuccess = () => resolve(req.result as { roomKey: string; body: string } | undefined);
+      req.onerror = () => reject(req.error);
+    });
+    return typeof row?.body === "string" ? row.body : "";
+  } finally {
+    db.close();
+  }
 }
 
 type CachedAiContext = { key: string; response: RoomContextResponse; savedAt: number };

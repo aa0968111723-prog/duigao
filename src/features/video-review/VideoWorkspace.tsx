@@ -7,6 +7,7 @@ import {
   type VideoAnchor,
   type VideoCategory,
   type Version,
+  activeVersions,
 } from "../../lib/types";
 import type { CollabStatus } from "../../lib/peer";
 import { useIsMobile } from "../../hooks/useIsMobile";
@@ -106,6 +107,11 @@ export function VideoWorkspace({ api, presence }: Props) {
     () => room.versions.find((v) => v.id === view.versionId) ?? room.versions[0],
     [room.versions, view.versionId],
   );
+  const compareVersion = useMemo(
+    () => room.versions.find((v) => v.id === view.compareId && v.id !== version?.id) ?? null,
+    [room.versions, view.compareId, version?.id],
+  );
+  const compareMode = view.compareMode !== "single" && Boolean(compareVersion);
 
   /**
    * The per-frame playhead bus.
@@ -410,6 +416,17 @@ export function VideoWorkspace({ api, presence }: Props) {
    * end instead of refusing, so 改二 being 10 seconds tighter never strands the
    * viewer past the end of the file.
    */
+  const toggleCompare = useCallback(
+    (versionId: string) => {
+      if (view.compareMode !== "single" && view.compareId === versionId) {
+        api.setView({ ...view, compareMode: "single" });
+        return;
+      }
+      api.setView({ ...view, compareId: versionId, compareMode: "side" });
+    },
+    [api, view],
+  );
+
   const switchVersion = useCallback(
     (versionId: string) => {
       if (versionId === view.versionId) return;
@@ -539,21 +556,36 @@ export function VideoWorkspace({ api, presence }: Props) {
   if (!version) return null;
 
   const player = (
-    <VideoPlayer
-      ref={playerRef}
-      src={version.videoUrl ?? ""}
-      // Identity, not the signed URL: see VideoPlayer's srcKey. Falling back to
-      // the version id keeps a locally-added cut stable before its row lands.
-      srcKey={version.videoPath ?? version.id}
-      poster={version.imageDataUrl}
-      mimeType={version.mimeType}
-      knownDuration={version.duration}
-      startAt={startAt}
-      onNeedsFreshUrl={api.video?.refreshVideoUrl}
-      onTimeUpdate={onTimeUpdate}
-      onDurationChange={setDuration}
-      onFrame={publishFrame}
-    />
+    <div
+      className={compareMode ? "v-compare" : undefined}
+      style={compareMode ? undefined : { display: "contents" }}
+      data-testid="version-comparison"
+    >
+      <VideoPlayer
+        ref={playerRef}
+        src={version.videoUrl ?? ""}
+        srcKey={version.videoPath ?? version.id}
+        poster={version.imageDataUrl}
+        mimeType={version.mimeType}
+        knownDuration={version.duration}
+        startAt={startAt}
+        onNeedsFreshUrl={api.video?.refreshVideoUrl}
+        onTimeUpdate={onTimeUpdate}
+        onDurationChange={setDuration}
+        onFrame={publishFrame}
+      />
+      {compareMode && compareVersion && (
+        <VideoPlayer
+          src={compareVersion.videoUrl ?? ""}
+          srcKey={compareVersion.videoPath ?? compareVersion.id}
+          poster={compareVersion.imageDataUrl}
+          mimeType={compareVersion.mimeType}
+          knownDuration={compareVersion.duration}
+          startAt={startAt}
+          onNeedsFreshUrl={api.video?.refreshVideoUrl}
+        />
+      )}
+    </div>
   );
 
   const timeline = (
@@ -703,6 +735,42 @@ export function VideoWorkspace({ api, presence }: Props) {
             ✦ 問房間 AI
           </button>
         )}
+        {canManageReview && api.video?.addToLibrary && (
+          <button
+            type="button"
+            className="m-row"
+            onClick={() => {
+              setMore(false);
+              api.video?.addToLibrary?.(version.id);
+            }}
+          >
+            加入素材庫
+          </button>
+        )}
+        {canManageReview && api.video?.archiveVersion && activeVersions(room.versions).length > 1 && !version.archivedAt && (
+          <button
+            type="button"
+            className="m-row"
+            onClick={() => {
+              setMore(false);
+              api.video?.archiveVersion?.(version.id);
+            }}
+          >
+            封存這一版
+          </button>
+        )}
+        {canManageReview && version.archivedAt && api.video?.restoreVersion && (
+          <button
+            type="button"
+            className="m-row"
+            onClick={() => {
+              setMore(false);
+              api.video?.restoreVersion?.(version.id);
+            }}
+          >
+            取消封存
+          </button>
+        )}
         <button type="button" className="m-row" onClick={api.undo} disabled={!api.canUndo}>
           復原上一個操作
         </button>
@@ -783,19 +851,34 @@ export function VideoWorkspace({ api, presence }: Props) {
       <span className="v-upload-text">
         {upload.state === "uploading"
           ? `正在上傳影片 ${Math.round(upload.progress * 100)}%`
-          : upload.state === "processing"
-            ? "正在處理影片…"
-            : upload.state === "error"
-              ? upload.message
-              : "正在準備影片…"}
+          : upload.state === "paused"
+            ? `已暫停 ${Math.round(upload.progress * 100)}%`
+            : upload.state === "optimizing"
+              ? `正在最佳化 ${Math.round(upload.progress * 100)}%`
+              : upload.state === "retrying"
+                ? "正在重新連線…"
+                : upload.state === "processing"
+                  ? "正在處理影片…"
+                  : upload.state === "error"
+                    ? upload.message
+                    : "正在準備影片…"}
       </span>
-      {upload.state === "uploading" && (
+      {(upload.state === "uploading" || upload.state === "paused" || upload.state === "optimizing") && (
         <span className="v-upload-bar" aria-hidden>
           <span className="v-upload-fill" style={{ width: `${Math.round(upload.progress * 100)}%` }} />
         </span>
       )}
-      {/* A banner with no way to dismiss it is a banner that stays forever. */}
-      {(upload.state === "uploading" || upload.state === "preparing" || upload.state === "error") && (
+      {upload.state === "uploading" && upload.pause && (
+        <button type="button" className="m-status-cancel" onClick={upload.pause}>
+          暫停
+        </button>
+      )}
+      {upload.state === "paused" && (
+        <button type="button" className="m-status-cancel" onClick={upload.resume}>
+          繼續
+        </button>
+      )}
+      {(upload.state === "uploading" || upload.state === "preparing" || upload.state === "optimizing" || upload.state === "paused" || upload.state === "error") && (
         <button type="button" className="m-status-cancel" onClick={upload.cancel}>
           {upload.state === "error" ? "知道了" : "取消"}
         </button>
@@ -855,6 +938,12 @@ export function VideoWorkspace({ api, presence }: Props) {
             onSelect={switchVersion}
             onAddFiles={api.addFiles}
             canAdd={!uploading}
+            canArchive={canManageReview}
+            onArchive={api.video?.archiveVersion}
+            onRestore={api.video?.restoreVersion}
+            compareMode={compareMode}
+            compareId={view.compareId}
+            onToggleCompare={toggleCompare}
           />
           {uploadBar}
           {briefCard}
@@ -925,6 +1014,12 @@ export function VideoWorkspace({ api, presence }: Props) {
         onSelect={switchVersion}
         onAddFiles={api.addFiles}
         canAdd={!uploading}
+        canArchive={canManageReview}
+        onArchive={api.video?.archiveVersion}
+        onRestore={api.video?.restoreVersion}
+        compareMode={compareMode}
+        compareId={view.compareId}
+        onToggleCompare={toggleCompare}
       />
 
       <div className="v-stage-area">

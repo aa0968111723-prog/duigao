@@ -81,6 +81,10 @@ export type VersionRow = {
   content_hash?: string | null;
   /** PR #25. Absent when reading a database that has not run 0008 yet. */
   archived_at?: string | null;
+  /** PR #29. Compatible proxy; original video_path stays immutable. */
+  optimized_video_path?: string | null;
+  optimized?: boolean | null;
+  source_file_size?: number | null;
   created_at: string;
 };
 

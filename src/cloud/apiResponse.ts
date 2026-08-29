@@ -1,15 +1,18 @@
 /**
  * Edge / HTTP payload honesty.
  *
- * Production Zeabur (`https://duigao-k7q2.zeabur.app/`) is a Vite SPA: Caddy
- * + `vercel.json` rewrite every unknown path — including `/functions/v1/*`
- * and `/rest/v1/*` — to `index.html` with HTTP 200 and `text/html`.
+ * Production Zeabur (`https://duigao-k7q2.zeabur.app/`) is a Vite SPA.
+ * `vercel.json` and `Caddyfile` must not rewrite `/functions`, `/api`, or
+ * `/rest` to `index.html` (see `spaFallback.ts`). If the platform still
+ * catch-alls those paths, this parser still rejects HTML.
  *
  * A client that only checks `response.ok` / status 200 would treat that
  * catch-all as a successful API. This module is the shared rejection gate:
  * HTML is never a function payload, and `{ ok: true }` without the keys the
  * caller said it needs is never success.
  */
+
+export { isAppOriginApiPath, shouldSpaFallback } from "./spaFallback";
 
 export type FunctionPayloadReject = {
   kind: "reject";

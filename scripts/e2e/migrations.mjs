@@ -1602,6 +1602,16 @@ try {
   ok("重跑 0020 後 RLS / policy 形狀不變（true/true/0）", canvaBefore === canvaShape() && canvaBefore === "true/true/0", `${canvaBefore} → ${canvaShape()}`);
   ok("重跑後成員依然讀不到 token 表", as(owner, `select count(*) from public.canva_connections;`).failed);
 
+  section("0023 影片最佳化欄位");
+  ok(
+    "versions 有 optimized_video_path / source_file_size / optimized",
+    psql(`select count(*) from information_schema.columns where table_name = 'versions' and column_name in ('optimized_video_path','source_file_size','optimized');`).out === "3",
+  );
+  const optimizeShape = () => psql(`select count(*) from information_schema.columns where table_name = 'versions' and column_name in ('optimized_video_path','source_file_size','optimized');`).out;
+  const optimizeBefore = optimizeShape();
+  psqlFile(join(MIGRATIONS, "0023_video_optimize.sql"));
+  ok("0023 可以重複套用且欄位數不變", optimizeBefore === optimizeShape() && optimizeBefore === "3", `${optimizeBefore} → ${optimizeShape()}`);
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

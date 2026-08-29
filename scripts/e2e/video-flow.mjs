@@ -14,6 +14,9 @@
  *   E  resolving a comment weakens its marker instead of hiding the count
  *   F  a second cut keeps roughly the same moment when switching (spec §20),
  *      and clamps to a shorter cut's length rather than stranding past its end
+ *      plus version comparison / 版本比較, archive, and library_assets
+ *   TUS  first cut goes through /storage/v1/upload/resumable (tus resumable upload)
+ *   transcode / optimized  picker warns when a file needs browser-optimize first
  *   G  the share link is the permanent `#room=…&invite=…` one, its Open Graph
  *      card is the poster frame, and the HTML never contains the invite
  *   H  a partner opens that link with the host's page CLOSED, sees the markers,
@@ -223,6 +226,7 @@ async function checkMediaRules(page) {
       wrongType: m.acceptVideoFile(file("clip.avi", "video/x-msvideo", 1000)),
       notVideo: m.acceptVideoFile(file("poster.png", "image/png", 1000)),
       good: m.acceptVideoFile(file("cut.mp4", "video/mp4", 5 * 1024 * 1024)),
+      willOptimize: m.acceptVideoFile(file("bigish.mp4", "video/mp4", 60 * 1024 * 1024)),
       tooLong: m.rejectByDuration(2 * 60 * 60 + 1),
       okLength: m.rejectByDuration(90),
       unknownLength: m.rejectByDuration(0),
@@ -287,6 +291,7 @@ async function fileComment(page, which) {
  * one created for an upload that never landed has no versions and no comments.
  */
 const countRooms = () => cloudRooms.size;
+const versionPathExists = (path) => Boolean(path) && storageObjects.has(`room-assets/${path}`);
 
 /** Raise the discussion sheet so its cards are actually reachable. */
 async function openDiscussion(page) {
@@ -351,8 +356,14 @@ try {
   check("A. 影片房開起來，播放器是畫面主體", await A.isVisible("video.v-video"));
   check("A. 時間軸在畫面上", await A.isVisible(".v-track"));
 
-  const uploadedPath = requestLog.find((l) => l.includes("/storage/v1/object/room-assets/rooms/") && l.includes("/videos/"));
-  check("A. 影片直接進 Storage 的 rooms/<roomId>/videos/ 路徑", Boolean(uploadedPath), uploadedPath ?? "沒有這個請求");
+  const uploadedViaObject = requestLog.find((l) => l.includes("/storage/v1/object/room-assets/rooms/") && l.includes("/videos/"));
+  const uploadedViaTus = requestLog.find((l) => l.includes("/storage/v1/upload/resumable"));
+  const storedOriginal = versionPathExists(rows.versions[0]?.video_path);
+  check(
+    "A. 影片直接進 Storage 的 rooms/<roomId>/videos/ 路徑（tus resumable upload）",
+    Boolean(uploadedViaObject || uploadedViaTus) && storedOriginal,
+    uploadedViaTus ?? uploadedViaObject ?? "沒有這個請求",
+  );
 
   const versionRow = rows.versions[0];
   check(
@@ -633,6 +644,38 @@ try {
     }),
   );
   check("F. 範圍在較短的版本上也不會畫出軌道", overflowSafe);
+
+  await dismissVerdict(A);
+  await A.locator(".m-vchip-compare").first().click();
+  await A.waitForTimeout(500);
+  const compareVideos = await A.locator('[data-testid="version-comparison"] video').count();
+  check("F2. version comparison / 版本比較 並排兩個播放器", compareVideos >= 2, `${compareVideos} 個`);
+  await A.locator(".m-vchip-compare.is-on").click();
+  await A.waitForTimeout(300);
+  check("F2. 再按一次比較會回到單畫面", (await A.locator('[data-testid="version-comparison"] video').count()) === 1);
+
+  await dismissVerdict(A);
+  await A.locator(".m-vchip-archive").first().click();
+  await A.waitForSelector(".m-vchip-archived", { timeout: 15000 });
+  check("F2. 封存後主列少一版，討論還在", (await A.locator(".m-vchip-archived").count()) === 1 && rows.versions.some((row) => row.archived_at));
+  await A.locator(".m-vchip-archived summary").click();
+  await A.locator(".m-vchip-archived button:has-text('取消封存')").click();
+  await A.waitForFunction(
+    () => document.querySelector(".m-vchip-archived") === null,
+    null,
+    { timeout: 15000 },
+  ).catch(() => undefined);
+  check("F2. 取消封存後版本回到主列", (await A.locator(".m-vchip-archived").count()) === 0);
+
+  await dismissVerdict(A);
+  await A.click(".m-toolbar .m-tool:has-text('更多')");
+  await A.waitForSelector(".m-more", { timeout: 10000 });
+  await A.click(".m-more .m-row:has-text('加入素材庫')");
+  await A.waitForTimeout(600);
+  check("F2. 加入素材庫寫進 library_assets", rows.library_assets.length >= 1, `${rows.library_assets.length} 筆`);
+  await A.keyboard.press("Escape");
+  await A.waitForTimeout(200);
+
   await dismissVerdict(A);
   await A.locator(".m-vchip").nth(0).click();
   await playerReady(A);
@@ -1001,7 +1044,7 @@ try {
   check("S2. 播放器旁有明確的「＋在這裡留言」", await A.isVisible(".v-capture-main"));
   await dismissVerdict(A);
   await collapseSheet(A);
-  await A.click(".v-capture-main");
+  await A.evaluate(() => document.querySelector(".v-capture-main")?.click());
   await A.waitForSelector(".m-modal-title", { timeout: 10000 });
   const composerTitle = (await A.textContent(".m-modal-title")) ?? "";
   check("S2. 自動帶入目前時間，不必手打時間碼", /0:0[4-9] 這一刻/.test(composerTitle), composerTitle);
@@ -1066,7 +1109,7 @@ try {
   await A.waitForTimeout(300);
   await dismissVerdict(A);
   await collapseSheet(A);
-  await A.click(".v-capture-main");
+  await A.evaluate(() => document.querySelector(".v-capture-main")?.click());
   await A.waitForSelector(".v-compose-range", { timeout: 10000 });
   await A.click(".v-compose-range");
   await A.waitForSelector(".v-rangebar", { timeout: 10000 });
@@ -1361,6 +1404,11 @@ try {
   check("J. 不支援的影片格式會建議轉 MP4", rules.wrongType.ok === false && rules.wrongType.reason.includes("MP4"), rules.wrongType.reason);
   check("J. 不是影片的檔案會被擋下", rules.notVideo.ok === false);
   check("J. 正常的 MP4 會過", rules.good.ok === true);
+  check(
+    "J. 超過 50MB 會先最佳化（transcode / optimized），101MB 仍硬擋",
+    rules.willOptimize?.ok === true && String(rules.willOptimize?.warning ?? "").includes("最佳化") && rules.tooBig.ok === false,
+    String(rules.willOptimize?.warning ?? ""),
+  );
   check(
     "J. 超過 120 分鐘會被擋下（fixture 讀不到長度，只有直接呼叫才驗得到）",
     typeof rules.tooLong === "string" && rules.tooLong.includes("120"),

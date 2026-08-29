@@ -175,6 +175,7 @@ try {
     // 討論就是房間殼（PR-01a）：第一屏是討論 feed + composer，
     // 總覽/內容/企劃是入口 chips，不再是互相競爭的四分頁。
     check("第一屏就是討論殼", await page.getByTestId("discussion-feed").count() === 1 && await page.getByLabel("房間討論").count() === 1);
+    check("討論輸入列在第一屏", await page.getByTestId("discussion-composer").count() === 1);
     check("入口 chips 取代四分頁", await page.locator(".project-entry-chips button").count() === 3 && await page.locator(".project-tabs").count() === 0);
     check("語音是一行邊界說明，不佔 pane", (await page.getByTestId("voice-boundary").innerText()).includes("語音") && await page.getByTestId("voice-boundary").locator("button").count() === 0);
 
@@ -199,6 +200,7 @@ try {
     await page.getByLabel("房間討論").fill("先把招生流程攤在白板上");
     await page.getByRole("button", { name: "送出" }).click();
     check("房間討論可送出文字", (await page.getByTestId("discussion-feed").innerText()).includes("先把招生流程攤在白板上"));
+    check("送出後看得到最新一則", await page.locator('[data-testid="discussion-feed"] [data-latest="true"]').innerText().then((text) => text.includes("先把招生流程攤在白板上")));
 
     await page.getByRole("button", { name: "白板", exact: true }).click();
     await page.getByLabel("白板名稱").fill("招生規劃");

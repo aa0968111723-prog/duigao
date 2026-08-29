@@ -876,3 +876,24 @@
 
 /* 房級討論的兩段切換（回饋｜房間討論）；沿用 m-sheet-tabs 視覺 */
 .v-discuss-tabs { margin: 8px 12px 0; }
+
+.v-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.v-compare .v-frame { max-height: 48vh; }
+.m-vchip-wrap { display: inline-flex; align-items: center; gap: 4px; flex: none; white-space: nowrap; }
+.m-vchip-archive,
+.m-vchip-compare {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  opacity: 0.72;
+  padding: 0 4px;
+}
+.m-vchip-compare.is-on,
+.m-vchip.is-compare { color: var(--accent, #c45c4a); }
+.m-vchip-archived { font-size: 12px; }

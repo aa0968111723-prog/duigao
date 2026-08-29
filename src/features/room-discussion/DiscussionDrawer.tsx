@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useDiscussionDraft } from "../../hooks/useDiscussionDraft";
 import type { Guest, Room } from "../../lib/types";
 import type { DiscussionMessage, DiscussionSupport } from "../collaboration/types";
 import { RoomDiscussion } from "./RoomDiscussion";
@@ -11,7 +12,7 @@ import { RoomDiscussion } from "./RoomDiscussion";
  * 讀：room_discussion_messages（新 SSOT）＋ legacy messages 唯讀併入
  * （ADR-008：不遷移、不雙寫，新寫入一律走 sendDiscussion）。
  * 寫：只走 onSend → room_discussion_messages。
- * 草稿：自己的 local state，不與對稿工作區的 chatInput 打架。
+ * 草稿：與對稿工作區的 chatInput 分開存（drawer:roomId），重整後還在。
  */
 export function DiscussionDrawer({
   room,
@@ -50,7 +51,7 @@ export function DiscussionDrawer({
   onSendLink?: (url: string, reply?: { replyToId: string; quotedBody: string }) => boolean;
   resolveAssetUrl?: (path: string) => Promise<string>;
 }) {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useDiscussionDraft(room.id ? `drawer:${room.id}` : null);
 
   const feed = useMemo(() => {
     const ids = new Set(messages.map((message) => message.id));

@@ -1,9 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Version } from "../lib/types";
+import { deleteUploadSession, saveUploadSession } from "../lib/store";
 import { sha256Blob, uploadAsset, versionPath } from "./assets";
+import { SUPABASE_URL } from "./config";
 import { CloudError } from "./errors";
 import { addVideoVersion } from "./roomRepository";
-import { isUploadCancelled, signedVideoUrl, uploadVideoWithProgress, videoPath } from "./videoAssets";
+import { classifyOptimizeNeed, transcodeVideoIfNeeded } from "./videoOptimize";
+import {
+  isUploadCancelled,
+  signedVideoUrl,
+  tusFingerprint,
+  uploadVideoWithProgress,
+  videoPath,
+  type UploadHandle,
+} from "./videoAssets";
 import {
   capturePoster,
   extForVideoMime,
@@ -20,16 +30,17 @@ import {
  *
  *   1. measure the file locally (never blocks on a missing number),
  *   2. take a cover frame from the LOCAL file — no CORS, no signed URL,
- *   3. upload the video, reporting real byte progress,
- *   4. upload the cover,
- *   5. only then write the row.
+ *   3. optimize / transcode only when needed (original bytes stay untouched),
+ *   4. TUS resumable upload, reporting real byte progress,
+ *   5. upload the cover,
+ *   6. only then write the row.
  *
  * The row lands last so a version can never exist without its video. If the row
  * fails anyway, the uploaded objects are removed rather than left as orphans in
  * a private bucket nobody will ever look at again.
  */
 
-export type VideoUploadPhase = "preparing" | "uploading" | "processing";
+export type VideoUploadPhase = "preparing" | "optimizing" | "uploading" | "paused" | "retrying" | "processing";
 
 export type VideoUploadInput = {
   roomId: string;
@@ -41,11 +52,15 @@ export type VideoUploadInput = {
   mime: string;
   /** Used only for the fallback cover when no frame can be captured. */
   roomTitle: string;
+  resumeUploadUrl?: string;
 };
 
 export type VideoUploadHandle = {
   done: Promise<Version>;
   cancel: () => void;
+  pause: () => void;
+  resume: () => void;
+  retry: () => void;
 };
 
 export function uploadVideoVersion(
@@ -54,7 +69,12 @@ export function uploadVideoVersion(
   onPhase: (phase: VideoUploadPhase, progress: number) => void,
 ): VideoUploadHandle {
   let cancelUpload: (() => void) | null = null;
+  let pauseUpload: (() => void) | null = null;
+  let resumeUpload: (() => void) | null = null;
+  let retryUpload: (() => void) | null = null;
   let cancelled = false;
+  let lastProgress = 0;
+  const optimizeSignal = { cancelled: false };
 
   const done = (async (): Promise<Version> => {
     const objectUrl = URL.createObjectURL(input.file);
@@ -62,35 +82,90 @@ export function uploadVideoVersion(
     const path = videoPath(input.roomId, input.versionId, ext);
     let rowLanded = false;
     let posterPath: string | null = null;
+    let uploadPayload: Blob = input.file;
+    let uploadMime = input.mime;
+    let optimized = false;
 
     try {
       onPhase("preparing", 0);
       const meta = await probeVideo(objectUrl);
       if (cancelled) throw new CloudError("upload-cancelled", "storage");
-      // The only check that needs the file's own metadata; refusing here costs
-      // the user nothing, refusing after a 100MB upload would cost them a lot.
       const tooLong = rejectByDuration(meta.duration);
       if (tooLong) throw new CloudError(tooLong, "storage");
 
-      // The cover comes from the local file: capturing it later from a signed
-      // URL would need CORS and would taint the canvas on some browsers.
       const poster =
         (await capturePoster(objectUrl, posterTimeFor(meta.duration))) ??
         (await fallbackPoster(input.roomTitle));
       if (cancelled) throw new CloudError("upload-cancelled", "storage");
 
+      const plan = classifyOptimizeNeed(input.file);
+      if (plan.plan !== "direct") {
+        onPhase("optimizing", 0);
+        const result = await transcodeVideoIfNeeded(input.file, (fraction) => onPhase("optimizing", fraction), {
+          duration: meta.duration,
+          signal: optimizeSignal,
+        });
+        uploadPayload = result.file;
+        uploadMime = result.mime;
+        optimized = result.optimized;
+      }
+
+      const fingerprint = tusFingerprint({
+        origin: SUPABASE_URL.replace(/\/+$/, ""),
+        objectName: path,
+        fileName: input.file.name,
+        fileSize: input.file.size,
+        lastModified: input.file.lastModified,
+      });
+      const session = {
+        id: input.versionId,
+        roomId: input.roomId,
+        versionId: input.versionId,
+        objectName: path,
+        fileName: input.file.name,
+        fileSize: input.file.size,
+        lastModified: input.file.lastModified,
+        mime: input.mime,
+        fingerprint,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        state: "uploading",
+      };
+      await saveUploadSession(session).catch(() => undefined);
+
       onPhase("uploading", 0);
-      const handle = uploadVideoWithProgress(supabase, path, input.file, input.mime, (fraction) =>
-        onPhase("uploading", fraction),
+      const handle: UploadHandle = uploadVideoWithProgress(
+        supabase,
+        path,
+        uploadPayload,
+        uploadMime,
+        (fraction) => {
+          lastProgress = fraction;
+          onPhase("uploading", fraction);
+        },
+        {
+          uploadUrl: input.resumeUploadUrl,
+          onUploadUrl: (url) => {
+            void saveUploadSession({ ...session, uploadUrl: url, state: "uploading" }).catch(() => undefined);
+          },
+        },
       );
       cancelUpload = handle.cancel;
+      pauseUpload = () => {
+        handle.pause();
+        onPhase("paused", lastProgress);
+      };
+      resumeUpload = () => {
+        handle.resume();
+        onPhase("uploading", 0);
+      };
+      retryUpload = handle.retry;
       await handle.done;
       cancelUpload = null;
 
       onPhase("processing", 1);
       if (cancelled) throw new CloudError("upload-cancelled", "storage");
       if (poster) {
-        // A cover that fails to upload costs a thumbnail, never the cut.
         posterPath = await uploadAsset(
           supabase,
           versionPath(input.roomId, input.versionId, poster.mime),
@@ -99,12 +174,7 @@ export function uploadVideoVersion(
         ).catch(() => null);
       }
 
-      // Last chance to honour a cancel: after this the row exists, and deleting
-      // a landed version to satisfy a cancel would be worse than keeping it.
       if (cancelled) throw new CloudError("upload-cancelled", "storage");
-      // Hash only small browser files. Large video hashing would duplicate a
-      // 100 MB buffer on a phone; those imports can still provide a hash from
-      // the server/importer and the intelligence layer remains optional.
       const contentHash = input.file.size <= 32 * 1024 * 1024
         ? await sha256Blob(input.file).catch(() => undefined)
         : undefined;
@@ -115,49 +185,38 @@ export function uploadVideoVersion(
         sortOrder: input.sortOrder,
         videoPath: path,
         posterPath,
-        mimeType: input.mime,
-        // Deliberately null, never 0: the column rejects a non-positive
-        // duration, and "we could not measure it" is a real answer.
+        mimeType: uploadMime,
         duration: meta.duration > 0 ? meta.duration : null,
-        fileSize: input.file.size,
+        fileSize: uploadPayload.size,
         width: meta.width || null,
         height: meta.height || null,
         contentHash,
+        optimized,
+        sourceFileSize: input.file.size,
       });
 
       rowLanded = true;
+      await deleteUploadSession(input.versionId).catch(() => undefined);
 
       return {
         id: input.versionId,
         label: input.label,
         kind: "video",
         imageDataUrl: posterPath ? await signedOrEmpty(supabase, posterPath) : "",
-        // Best-effort: the row already exists, so a signing hiccup must not be
-        // allowed to unwind an upload that succeeded. The player re-signs.
         videoUrl: await signedVideoUrl(supabase, path).catch(() => ""),
         videoPath: path,
         duration: meta.duration > 0 ? meta.duration : undefined,
-        mimeType: input.mime,
-        fileSize: input.file.size,
+        mimeType: uploadMime,
+        fileSize: uploadPayload.size,
         width: meta.width || undefined,
         height: meta.height || undefined,
+        optimized,
+        sourceFileSize: input.file.size,
       };
     } catch (err) {
-      // Nothing half-created survives: a stored object with no row is invisible
-      // to the app and would sit in the bucket forever. Once the row exists the
-      // opposite is true — deleting the object would leave a version pointing
-      // at nothing — so cleanup stops the moment the row lands.
-      //
-      // The condition deliberately is NOT `videoLanded`. Aborting an XHR only
-      // stops the client waiting for the response; Storage may already hold the
-      // complete object, and on a fast link (or a small file) it usually does.
-      // Keying cleanup on "we saw the 200" leaves exactly that window leaking —
-      // it is why cancelling mid-upload could still strand an object, which is
-      // reproducible on a CI runner even when a local machine never hits it.
-      // The path is deterministic and the row does not exist, so deleting is
-      // safe whether or not the bytes ever arrived.
       if (!rowLanded) {
         await removeQuietly(supabase, [path, ...(posterPath ? [posterPath] : [])]);
+        await deleteUploadSession(input.versionId).catch(() => undefined);
       }
       throw err;
     } finally {
@@ -169,8 +228,12 @@ export function uploadVideoVersion(
     done,
     cancel: () => {
       cancelled = true;
+      optimizeSignal.cancelled = true;
       cancelUpload?.();
     },
+    pause: () => pauseUpload?.(),
+    resume: () => resumeUpload?.(),
+    retry: () => retryUpload?.(),
   };
 }
 
@@ -195,7 +258,7 @@ async function removeQuietly(supabase: SupabaseClient, paths: string[]): Promise
       const { error } = await supabase.storage.from("room-assets").remove(paths);
       if (!error) return;
     } catch {
-      // Retry below; the original upload error remains the user-facing error.
+      /* Retry below; the original upload error remains the user-facing error. */
     }
     if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
   }

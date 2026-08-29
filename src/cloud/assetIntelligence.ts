@@ -21,6 +21,9 @@ import {
   type RoomContextRequest,
   type RoomContextResponse,
 } from "../lib/assetIntelligence";
+import { DocumentUnderstandingProvider, PdfReader } from "../ai/documentUnderstanding";
+import { VideoUnderstandingProvider } from "../ai/videoUnderstanding";
+import { answerDuigaoRoomContext } from "../ai/aiOsRoomContext";
 import { ensureSession } from "./auth";
 import { getSupabase } from "./client";
 import { isCloudConfigured } from "./config";
@@ -308,8 +311,56 @@ export async function listIntelligentAssets(
     asset.human = humans.get(asset.id);
     const job = latestJob.get(asset.id);
     if (job && (job.status === "processing" || job.status === "queued")) asset.status = "processing";
+    fillLocalUnderstanding(asset);
   }
   return { assets, jobs, relations: (relationsResult.data ?? []).map(relationFromRow) };
+}
+
+/**
+ * Client-side document / video understanding for assets that already have
+ * text or duration but no persisted chunks/segments yet. Original media is
+ * never fetched or rewritten.
+ */
+function fillLocalUnderstanding(asset: IntelligentAsset): void {
+  const extracted = typeof asset.metadata.extracted_text === "string"
+    ? PdfReader.extractText(asset.metadata.extracted_text)
+    : "";
+  const textContent = (asset.analysis?.detectedText || asset.human?.summary || extracted).trim();
+  if (!asset.documentChunks.length && textContent) {
+    const { chunks } = new DocumentUnderstandingProvider().understand({
+      assetId: asset.id,
+      title: asset.title,
+      mimeType: asset.mimeType,
+      textContent,
+    });
+    asset.documentChunks = chunks.map((chunk) => ({
+      id: `local-chunk-${asset.id}-${chunk.chunk_index}`,
+      assetId: chunk.asset_id,
+      chunkIndex: chunk.chunk_index,
+      content: chunk.content,
+      startOffset: chunk.start_offset,
+      endOffset: chunk.end_offset,
+    }));
+  }
+  if (!asset.videoSegments.length && (asset.assetType === "video" || (asset.mimeType ?? "").startsWith("video/"))) {
+    const duration = number(asset.metadata.duration_seconds ?? asset.metadata.duration, 0);
+    const { segments } = new VideoUnderstandingProvider().understand({
+      assetId: asset.id,
+      title: asset.title,
+      duration_seconds: duration,
+      transcript: asset.analysis?.detectedText,
+    });
+    asset.videoSegments = segments.map((segment, index) => ({
+      id: `local-seg-${asset.id}-${index}`,
+      assetId: segment.asset_id,
+      startSeconds: segment.start_seconds,
+      endSeconds: segment.end_seconds,
+      summary: segment.summary,
+      transcript: segment.transcript,
+      topics: segment.topics,
+      detectedText: segment.detected_text,
+    }));
+  }
 }
 
 export async function registerIntelligentAsset(supabase: SupabaseClient, input: RegisterAssetInput): Promise<IntelligentAsset> {
@@ -427,9 +478,29 @@ export async function askRoomContext(
   if (cached) return { ...cached, cached: true };
   const { data, error } = await supabase.functions.invoke("room-ai-context", { body: { roomId, ...request } });
   if (error) throw error;
-  const response = assertResponse(data);
+  const response = sanitizeRoomAnswer(request.query, assertResponse(data));
   await saveAiContext(key, response).catch(() => undefined);
   return response;
+}
+
+function sanitizeRoomAnswer(query: string, response: RoomContextResponse): RoomContextResponse {
+  if (!response.answer) return response;
+  const shaped = answerDuigaoRoomContext(
+    { query, context: response.context, sources: response.sources, relations: response.relations },
+    { text: response.answer.text, citations: response.answer.citations, actions: response.answer.actions },
+  );
+  if (!shaped) return { ...response, answer: null };
+  return {
+    ...response,
+    answer: {
+      ...response.answer,
+      text: shaped.text,
+      actions: shaped.actions.flatMap((action) => {
+        if (action.type !== "create_comment" && action.type !== "create_poll" && action.type !== "create_plan_draft" && action.type !== "add_whiteboard_node") return [];
+        return [{ type: action.type, label: action.label, payload: action.payload ?? {} }];
+      }),
+    },
+  };
 }
 
 export function subscribeAssetAnalysis(

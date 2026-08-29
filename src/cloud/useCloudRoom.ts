@@ -34,6 +34,7 @@ import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
   addVersion as repoAddVersion,
+  archiveVersion as repoArchiveVersion,
   completeRoomSetup,
   createRoom,
   deleteRelation,
@@ -48,6 +49,7 @@ import {
   joinRoom,
   canManageMedia,
   loadRoom,
+  restoreVersion as repoRestoreVersion,
   updateBranch,
   upsertPlan,
   votePoll,
@@ -139,6 +141,8 @@ export type CloudWrites = {
   toggleSupport: (commentId: string, add: boolean) => void;
   insertReply: (reply: import("../lib/types").CommentReply) => void;
   setProposalPref: (versionId: string, choice: string) => void;
+  archiveVersion?: (versionId: string) => Promise<void>;
+  restoreVersion?: (versionId: string) => Promise<void>;
 };
 
 /**
@@ -856,7 +860,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   const uploadVideo = useCallback(
     (
       input: Omit<VideoUploadInput, "roomId"> & { roomId?: string },
-      onPhase: (phase: "preparing" | "uploading" | "processing", progress: number) => void,
+      onPhase: (phase: "preparing" | "optimizing" | "uploading" | "paused" | "retrying" | "processing", progress: number) => void,
     ): VideoUploadHandle | null => {
       const rid = input.roomId ?? boundRef.current;
       if (!supabase || !rid) return null;
@@ -1075,6 +1079,16 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     toggleSupport: (commentId, add) => run(`comment-support:${commentId}`, () => setSupport(supabase!, boundRef.current!, commentId, add)),
     insertReply: (reply) => run(`reply:${reply.id}`, () => repoInsertReply(supabase!, boundRef.current!, reply)),
     setProposalPref: (versionId, choice) => run(`pref:${versionId}`, () => setPreference(supabase!, boundRef.current!, versionId, choice)),
+    archiveVersion: async (versionId) => {
+      if (!supabase) return;
+      await repoArchiveVersion(supabase, versionId);
+      scheduleReload();
+    },
+    restoreVersion: async (versionId) => {
+      if (!supabase) return;
+      await repoRestoreVersion(supabase, versionId);
+      scheduleReload();
+    },
   };
 
   return {
