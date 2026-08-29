@@ -50,7 +50,7 @@ export type MultiBranchRoomApi = {
   userId?: string | null;
   canManage: boolean;
   activeBranchId: string | null;
-  onOpenBranch: (branchId: string, opts?: { startTime?: number }) => void;
+  onOpenBranch: (branchId: string, opts?: { startTime?: number; endTime?: number; region?: import("../../lib/types").AnnotationRegion; versionId?: string; planSectionId?: string }) => void;
   loadingBranchId?: string | null;
   onBackToRoom: () => void;
   onCreateContent: (type: BranchType, name: string, files: FileList | null) => void;
@@ -926,7 +926,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [api.workspace, pushedPane, moreOpen, api.onBackToRoom]);
 
-  const openBranch = (branchId: string, opts?: { startTime?: number }) => {
+  const openBranch = (branchId: string, opts?: { startTime?: number; endTime?: number; region?: import("../../lib/types").AnnotationRegion; versionId?: string; planSectionId?: string }) => {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合
     api.onOpenBranch(branchId, opts);
   };

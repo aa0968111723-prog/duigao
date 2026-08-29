@@ -436,6 +436,7 @@ export function App() {
   }, [activeBranchId]);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
+  const [boardFocus, setBoardFocus] = useState<RoomContextFocus | null>(null);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(() => initialView(null));
   const [tool, setTool] = useState<Tool>("pan");
@@ -3070,7 +3071,7 @@ export function App() {
         ai: {
           assets: assetIntelligence?.assets ?? [],
           open: openAi,
-          focusTarget: aiFocus,
+          focusTarget: boardFocus ?? aiFocus,
         },
         openAtSeconds,
         ...(video ? { video } : {}),
@@ -3151,6 +3152,27 @@ export function App() {
           if (!target) return;
           setActiveBranchId(branchId);
           setOpenAtSeconds(opts?.startTime);
+          setBoardFocus(
+            opts?.region
+              ? {
+                  assetId: "board-anchor",
+                  branchId,
+                  versionId: opts.versionId,
+                  locator: {
+                    kind: "image-region",
+                    versionId: opts.versionId,
+                    region: {
+                      type: "box",
+                      label: "白板圈選",
+                      x: opts.region.x,
+                      y: opts.region.y,
+                      width: opts.region.width,
+                      height: opts.region.height,
+                    },
+                  },
+                }
+              : null,
+          );
           if (target.branchType === "poster" || target.branchType === "video") {
             setView(initialView(roomForBranch(roomRef.current!, branchId)));
           }
@@ -3165,6 +3187,7 @@ export function App() {
           setActiveBranchId(null);
           setLoadingBranchId(null);
           setOpenAtSeconds(undefined);
+          setBoardFocus(null);
           if (roomRef.current) setView(initialView(roomRef.current));
         },
         onCreateContent: createProjectContent,

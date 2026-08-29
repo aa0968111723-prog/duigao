@@ -11,7 +11,7 @@
 ## This branch
 
 - Branch: `cursor/p0-main-remainders-70d9`
-- Head after this turn: merge `origin/main` #114 + GAP-07 honesty (vision / SPA research)
+- Head after this turn: #113 extras (image-region / plan-section / compact toolbar) + `test:realtime-offline-e2e` + fail-closed external apply
 - Prior: `35ce691` collaboration regex, `a63e517` merge #113, `93c9d3e` leftover-channel honesty
 - Base **must stay `main`**
 - PR: https://github.com/aa0968111723-prog/duigao/pull/120
@@ -37,6 +37,10 @@
 | Presence tables / per-member online API | **missing as SQL** | No `presence` table in 0024–0030. Channel presence only: `{ at, boardId }` — **no name on the wire (P1)** |
 | Named presence UI | **partial / honest** | `PresencePerson` + `onPresenceList`; names from RLS member list + `lastWriter*` stamps in `presence.ts` (`collectBoardEditors`, 30s). Count UI: `wb-presence`, `room-presence`. **Do not invent typing.** |
 | Typing | **unmodeled** | No typing column / event. Do not fake. |
+| Image-region marks on board | **wired** | Existing `comments.region` + `node.anchor` (`image-region`). Sheet `wb-poster-region`. No new table. |
+| Video timestamp anchors | **already present** | `wb-video-range` + `content.startTime` — not rewritten |
+| Planning-paragraph links | **wired** | `plan-section` on `node.anchor`; `wb-plan-section` uses `plan.blocks` ids. `blocksOmitted` stays honest. |
+| Compact toolbar &lt;768 | **wired** | `data-compact` on `wb-focus-bottom`; labels hidden, icons kept |
 
 ## #114 file-level (shipped on main @ `3c0bf0c`)
 
@@ -61,6 +65,20 @@
 
 Did **not** copy #88 schema. Did **not** add 0031+.
 
+## This turn — typed extras + fail-closed + e2e script
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| Image-region / plan-section | **wired** | `src/features/collaboration/boardAnchors.ts`; sheets in `WhiteboardWorkspace.tsx` |
+| Video timestamps | **refused rewrite** | already on #113 |
+| Empty board / focus / LWW | **untouched** | |
+| Compact toolbar | **wired** | `data-compact` + CSS |
+| Canva/CUTOS/planform apply | **fail-closed** | `applyGate` blocks those adapters unless `adapterStatus.state === "ready"`; room import already `#97` + 「整合尚未設定」 |
+| Canva/CUTOS room import | **already honest** | health gate hides entry; codes `CANVA_NOT_CONFIGURED` / `CUTOS_NOT_CONFIGURED` |
+| `test:realtime-offline-e2e` | **added** | `scripts/e2e/realtime-offline.mjs` — two Playwright contexts, exactly one row after flush |
+| Typing / presence table | **unmodeled** | left listed |
+| 0031+ | **refused** | |
+
 ## #120 CI @ `35ce691` (pre-#114 merge)
 
 | Workflow | Run | Result |
@@ -68,7 +86,7 @@ Did **not** copy #88 schema. Did **not** add 0031+.
 | `agent-release-gate` | `33262145327` | **success** |
 | `build` (migrations + build + browser) | `33262145267` | **success** (browser included `test:collaboration`  after regex fix) |
 
-Post-#114+#121 merge + honesty head is later; CI for that SHA is a new run. `agent-release-gate` @ `b3c5b9d` already **success** (`33262459877`); `build` `33262459900` was still in progress when last checked.
+`8139879` (honesty + #121 merge): `agent-release-gate` **success**; `build` `33262546722` **success**. Intermediate `ebb00ae` `build` `33262538059` failed flake (video branch 52/54); superseded.
 
 ## Review classifications
 
@@ -95,8 +113,7 @@ Post-#114+#121 merge + honesty head is later; CI for that SHA is a new run. `age
 
 ### Won’t fix / leftover (not this PR)
 
-- Production SPA catch-all still HTML 200 (deploy #107 Caddyfile)
-- No `test:realtime-offline-e2e` script; two-client coverage is collaboration e2e
+- Production SPA catch-all still HTML 200 (this-turn curl Last-Modified `Sat, 29 Aug 2026 16:15:36 GMT`)
 - Typing / per-member presence **table** unmodeled (channel count + lastWriter stamps only; do not invent)
 - Canva / CUTOS / Perplexity production secrets unverified
 - Stale room stack `#95→#115` vs main
@@ -112,9 +129,9 @@ Post-#114+#121 merge + honesty head is later; CI for that SHA is a new run. `age
 | `test:mobile-tablet-ux-e2e` | **30/30** | **30/30** (`remainders-e2e-after-114.log`) |
 | `test:collaboration-e2e` | **117/117** | **117/117** |
 | `test:multi-branch-e2e` | **54/54** | **54/54** |
-| `test:realtime-offline-e2e` | **script missing** | still missing |
-| `test:ai-external-handoff` | n/a | **8/8** (`gap07-honesty-unit.log`) |
-| `test:collaboration` | 233 @ regex fix | **241/241** (includes G7-01…08) |
+| `test:realtime-offline-e2e` | **script missing** | **added** this turn (`scripts/e2e/realtime-offline.mjs`) |
+| `test:ai-external-handoff` | n/a | **8/8** |
+| `test:collaboration` | 233 @ regex fix | **245/245** |
 | `npm run agent:gate` | **PASS** through `0028` | **PASS** through `0030_design_research_usage.sql` |
 
 ## Session-entry screenshots (no PII)
@@ -132,4 +149,4 @@ Earlier `session_entry_*_{390,768}.png` without `_honest` raced a leftover-chann
 
 Re-curled 2026-08-29 16:14 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29.txt`):
 
-`https://duigao-k7q2.zeabur.app/functions/v1/voice-token` and `/rest/v1/` → HTTP **200**, `content-type: text/html; charset=utf-8`, body starts `<!doctype html>`. Last-Modified `Sat, 29 Aug 2026 16:09:14 GMT`. #107 Caddyfile on main ≠ production deployed. **Do not claim production is fixed.**
+`https://duigao-k7q2.zeabur.app/functions/v1/voice-token` and `/rest/v1/` → HTTP **200**, `content-type: text/html; charset=utf-8`, body starts `<!doctype html>`. Last-Modified `Sat, 29 Aug 2026 16:15:36 GMT`. #107 Caddyfile on main ≠ production deployed. **Do not claim production is fixed.**

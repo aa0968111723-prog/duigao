@@ -39,6 +39,14 @@ import { initialPenState, penDown, penUp, segmentWidths, shouldRejectPointer, ty
 import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
 import { describePreview, planApply, type BoardAiPreview } from "./aiPreview";
 import { rendererFor } from "./registry";
+import {
+  contentOpenFromNode,
+  nodeFromImageRegion,
+  nodeFromPlanSection,
+  planParagraphs,
+  posterRegionMarks,
+} from "../collaboration/boardAnchors";
+import type { AnnotationRegion, PlanBlock } from "../../lib/types";
 import "./whiteboard.css";
 
 export type WhiteboardApi = {
@@ -65,7 +73,7 @@ export type WhiteboardApi = {
   onUpsertNodes: (nodes: WhiteboardNode[], persist?: "now" | "end") => void;
   onCreateEdge: (edge: WhiteboardEdge) => void;
   onShareNode: (node: WhiteboardNode) => void;
-  onOpenContent: (branchId: string, opts?: { startTime?: number; endTime?: number }) => void;
+  onOpenContent: (branchId: string, opts?: { startTime?: number; endTime?: number; region?: AnnotationRegion; versionId?: string; planSectionId?: string }) => void;
   onCreatePoll: (question: string, options: string[]) => string | void;
   onCreateDecision: (title: string, source?: { type: "poll"; id: string }, status?: "pending" | "decided") => void;
   onToggleAllowEdit: () => void;
@@ -121,7 +129,7 @@ export type WhiteboardApi = {
   onConsumeStagedAiPreview?: () => void;
 };
 
-type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "versions" | "ai" | null;
+type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "poster-region" | "plan-section" | "versions" | "ai" | null;
 
 const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
@@ -367,6 +375,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [frameRenaming, setFrameRenaming] = useState(false);
   const [frameTitleDraft, setFrameTitleDraft] = useState("");
   const [pendingVideo, setPendingVideo] = useState<RoomBranch | null>(null);
+  const [pendingPoster, setPendingPoster] = useState<RoomBranch | null>(null);
+  const [pendingPlan, setPendingPlan] = useState<RoomBranch | null>(null);
   const [videoStart, setVideoStart] = useState("00:40");
   const [videoEnd, setVideoEnd] = useState("");
   const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan" | "asset">("all");
@@ -1037,7 +1047,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     record(frameUpdateDraft(nextOpId(), frame, next));
   };
 
-  const addAt = (world: { x: number; y: number }, type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId">) => {
+  const addAt = (world: { x: number; y: number }, type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId">) => {
     if (!board || !canEdit) return;
     const node = type === "text"
       ? createSticky({ whiteboardId: board.id, roomId: board.roomId, createdBy: "local", x: world.x - 90, y: world.y - 48 })
@@ -1059,7 +1069,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     return node;
   };
 
-  const addAtView = (type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId">) =>
+  const addAtView = (type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId">) =>
     addAt(screenToWorld(camera, viewport.width / 2, viewport.height / 2), type, content, linked);
 
   const deleteSelected = () => {
@@ -1172,6 +1182,44 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       endTime: range?.endTime,
     }, { linkedEntityType: "branch", linkedEntityId: branch.id });
     setPendingVideo(null);
+    setPendingPoster(null);
+    setPendingPlan(null);
+  };
+
+  const placePosterRegion = (branch: RoomBranch, mark?: { region: AnnotationRegion; versionId: string; label: string }) => {
+    const version = latestBranchVersion(api.room, branch.id);
+    const extra = mark
+      ? nodeFromImageRegion({ versionId: mark.versionId, region: mark.region, label: mark.label })
+      : null;
+    addAtView("room_content", {
+      title: branch.name,
+      mediaKind: "poster",
+      versionLabel: version?.label,
+      thumbnailUrl: version?.kind === "image" && version.imageDataUrl && !version.imageDataUrl.startsWith("data:")
+        ? version.imageDataUrl
+        : undefined,
+      subtitle: extra?.subtitle,
+    }, {
+      linkedEntityType: extra?.link.linkedEntityType ?? "branch",
+      linkedEntityId: extra?.link.linkedEntityId ?? branch.id,
+      ...(extra ? { anchor: extra.anchor, sourceVersionId: extra.sourceVersionId } : {}),
+    });
+    setPendingPoster(null);
+  };
+
+  const placePlanSection = (branch: RoomBranch, section?: PlanBlock) => {
+    const extra = nodeFromPlanSection({ branchId: branch.id, section: section ? { id: section.id, text: section.text } : undefined });
+    const plan = api.room.plans?.find((item) => item.branchId === branch.id);
+    addAtView("room_content", {
+      title: branch.name,
+      mediaKind: "plan",
+      subtitle: extra.subtitle ?? plan?.title,
+    }, {
+      linkedEntityType: extra.link.linkedEntityType ?? "plan",
+      linkedEntityId: extra.link.linkedEntityId ?? branch.id,
+      anchor: extra.anchor,
+    });
+    setPendingPlan(null);
   };
 
   const placeAsset = (version: import("../../lib/types").Version) => {
@@ -1193,6 +1241,16 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       setVideoStart("00:40");
       setVideoEnd("");
       setSheet("video-range");
+      return;
+    }
+    if (branch.branchType === "poster") {
+      setPendingPoster(branch);
+      setSheet("poster-region");
+      return;
+    }
+    if (branch.branchType === "plan" || branch.branchType === "copy") {
+      setPendingPlan(branch);
+      setSheet("plan-section");
       return;
     }
     placeBranch(branch);
@@ -1510,6 +1568,55 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           </section>
         </div>
       )}
+      {sheet === "poster-region" && pendingPoster && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="文宣範圍">
+            <div className="wb-sheet" data-testid="wb-poster-region">
+              <h3>{pendingPoster.name}</h3>
+              <p className="project-muted">整張放上白板，或放入文宣上已圈選的範圍。卡片只記座標，不改原稿。</p>
+              <button type="button" className="wb-card" data-testid="wb-poster-whole" onClick={() => placePosterRegion(pendingPoster)}>整張</button>
+              {posterRegionMarks(api.room, pendingPoster.id).map((mark) => (
+                <button type="button" className="wb-card" key={mark.pinId} data-testid={`wb-poster-region-${mark.pinId}`} onClick={() => placePosterRegion(pendingPoster, mark)}>
+                  {mark.label}
+                </button>
+              ))}
+              {!posterRegionMarks(api.room, pendingPoster.id).length && (
+                <p className="project-muted">這張文宣還沒有圈選範圍。到文宣上圈選後再放上白板。</p>
+              )}
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+          </section>
+        </div>
+      )}
+      {sheet === "plan-section" && pendingPlan && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="企劃段落">
+            <div className="wb-sheet" data-testid="wb-plan-section">
+              <h3>{pendingPlan.name}</h3>
+              {(() => {
+                const plan = api.room.plans?.find((item) => item.branchId === pendingPlan.id);
+                const paragraphs = planParagraphs(plan);
+                return (
+                  <>
+                    <p className="project-muted">
+                      {paragraphs.omitted
+                        ? "企劃段落還沒載入，先放整份企劃。"
+                        : "整份放上白板，或指定一個段落。"}
+                    </p>
+                    <button type="button" className="wb-card" data-testid="wb-plan-whole" onClick={() => placePlanSection(pendingPlan)}>整份企劃</button>
+                    {paragraphs.blocks.map((block) => (
+                      <button type="button" className="wb-card" key={block.id} data-testid={`wb-plan-section-${block.id}`} onClick={() => placePlanSection(pendingPlan, block)}>
+                        {block.text.slice(0, 48) || "空段落"}
+                      </button>
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+          </section>
+        </div>
+      )}
     </>
   );
 
@@ -1769,11 +1876,12 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           )}
           {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
             <button type="button" onClick={() => {
+              const open = contentOpenFromNode(selectedNode);
               const target = openTarget(anchorFromNode(selectedNode));
               if (target.surface === "content") {
-                api.onOpenContent(target.branchId, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime });
+                api.onOpenContent(target.branchId, open);
               } else {
-                api.onOpenContent(selectedNode.linkedEntityId!, { startTime: selectedNode.content.startTime, endTime: selectedNode.content.endTime });
+                api.onOpenContent(selectedNode.linkedEntityId!, open);
               }
             }}>打開內容</button>
           )}
@@ -1806,7 +1914,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
         </nav>
       ) : (
-        <nav className="wb-focus-bottom" aria-label="白板工具">
+        <nav className="wb-focus-bottom" aria-label="白板工具" data-compact={viewport.width < 768 ? "true" : "false"} data-testid="wb-compact-toolbar">
           <button
             type="button"
             className={selectTool !== "off" ? "is-active" : ""}

@@ -103,6 +103,8 @@
   font-size: 12px;
 }
 .wb-focus-bottom button span { display: block; font-size: 18px; line-height: 1; margin-bottom: 2px; }
+.wb-focus-bottom[data-compact="true"] button { min-width: 48px; font-size: 0; line-height: 0; }
+.wb-focus-bottom[data-compact="true"] button span { font-size: 18px; line-height: 1; margin-bottom: 0; }
 .wb-focus-bottom button.is-active { background: var(--raise); color: var(--accent); }
 .wb-focus-bottom button:disabled { color: var(--ink-faint); }
 .wb-context-bar { align-items: center; }
