@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blockedRepliesTo, failedBlockingParentId, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "../../src/hooks/discussionOutboxCore.ts";
+import { shouldFollowLatest } from "../../src/features/room-discussion/feed.ts";
+import { belongsToCurrentRoom, blockedRepliesTo, failedBlockingParentId, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "../../src/hooks/discussionOutboxCore.ts";
 import type { DiscussionMessage } from "../../src/features/collaboration/types.ts";
 
 function message(id: string, roomId: string): DiscussionMessage {
@@ -55,24 +56,25 @@ test("re-key 後 insert 失敗：failed entry 屬於本房，重試路徑存在�
   assert.equal(migrated.entries.m1.message.roomId, "cloud_y");
 });
 
-test("A→home：A 的 entry 立即被隔離，不殘留", () => {
-  const { entries } = reconcileOutbox(Object.fromEntries([entry("m1", "cloud_a", "failed"), entry("m2", "cloud_a", "sending")]), {
+test("A→home：A 的 entry 保留，回首頁也不丟掉未送出", () => {
+  const { entries, toFlush } = reconcileOutbox(Object.fromEntries([entry("m1", "cloud_a", "failed"), entry("m2", "cloud_a", "sending")]), {
     prevLocalRoomId: "cloud_a",
     prevBoundRoomId: "cloud_a",
     localRoomId: null,
     boundRoomId: null,
   });
-  assert.deepEqual(Object.keys(entries), []);
+  assert.deepEqual(Object.keys(entries).sort(), ["m1", "m2"]);
+  assert.deepEqual(toFlush, []);
 });
 
-test("A→B：A 的 entry 不遷移、不補送進 B", () => {
+test("A→B：A 的 entry 不遷移、不補送進 B，但還在（回 A 可重試）", () => {
   const { entries, toFlush } = reconcileOutbox(Object.fromEntries([entry("m1", "cloud_a", "sending")]), {
     prevLocalRoomId: "cloud_a",
     prevBoundRoomId: "cloud_a",
     localRoomId: "cloud_b",
     boundRoomId: "cloud_b",
   });
-  assert.deepEqual(Object.keys(entries), [], "A 的 sending 不得殘留");
+  assert.equal(entries.m1.message.roomId, "cloud_a");
   assert.deepEqual(toFlush, [], "絕不補送進 B");
 });
 
@@ -155,6 +157,20 @@ test("來源只是還在飛（sending）不算失敗：那時候「送出中」�
     r1: { message: replyMessage("r1", "r", "m1"), state: "sending" },
   };
   assert.equal(failedBlockingParentId(entries.r1.message, entries, new Set()), null);
+});
+
+test("別房訊息不屬於目前房，本房訊息算屬於", () => {
+  const foreign = message("m1", "cloud_a");
+  const local = message("m2", "cloud_b");
+  assert.equal(belongsToCurrentRoom(foreign, { localRoomId: "cloud_b", boundRoomId: "cloud_b" }), false);
+  assert.equal(belongsToCurrentRoom(local, { localRoomId: "cloud_b", boundRoomId: "cloud_b" }), true);
+});
+
+test("打開討論串或停在底部時跟著最新一則；往上讀舊訊息不硬拉", () => {
+  assert.equal(shouldFollowLatest({ previousCount: 0, nextCount: 4, pinnedToLatest: true, nextLastId: "d" }), true);
+  assert.equal(shouldFollowLatest({ previousCount: 3, nextCount: 4, pinnedToLatest: true, previousLastId: "c", nextLastId: "d" }), true);
+  assert.equal(shouldFollowLatest({ previousCount: 3, nextCount: 4, pinnedToLatest: false, previousLastId: "c", nextLastId: "d" }), false);
+  assert.equal(shouldFollowLatest({ previousCount: 3, nextCount: 3, pinnedToLatest: true, previousLastId: "c", nextLastId: "c" }), false);
 });
 
 test("來源失敗但其實已經在伺服器快照裡：不算擋路", () => {

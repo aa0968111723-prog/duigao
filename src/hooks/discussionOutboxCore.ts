@@ -28,9 +28,20 @@ export interface OutboxRoomContext {
  *    會無聲消失、無法重試。
  * 2. **補送**：綁定剛完成（prevBound null → 有值）時，屬於本房、仍在
  *    sending 的 entry 要補送（pre-bind 扣住的那些）。
- * 3. **隔離**：不屬於目前房（localRoomId／boundRoomId 都對不上）的 entry
- *    丟棄 — A 房的 ghost 不畫進 B 房、sending 不補送進 B 房。
+ * 3. **隔離**：不屬於目前房的 entry **保留**（IndexedDB 持久化），但不補送、
+ *    不畫進別房。換房或回首頁不得把 in-flight／failed 丟掉，否則重整或
+ *    切房會讓尚未送出的訊息永久消失。
  */
+export function belongsToCurrentRoom(
+  message: DiscussionMessage,
+  ctx: Pick<OutboxRoomContext, "localRoomId" | "boundRoomId">,
+): boolean {
+  return Boolean(
+    (ctx.boundRoomId && message.roomId === ctx.boundRoomId) ||
+    (ctx.localRoomId && message.roomId === ctx.localRoomId),
+  );
+}
+
 export function reconcileOutbox(
   entries: Record<string, OutboxEntry>,
   ctx: OutboxRoomContext,
@@ -58,11 +69,7 @@ export function reconcileOutbox(
     }
   }
 
-  const belongs = (message: DiscussionMessage) =>
-    Boolean(
-      (boundRoomId && message.roomId === boundRoomId) ||
-      (localRoomId && message.roomId === localRoomId),
-    );
+  const belongs = (message: DiscussionMessage) => belongsToCurrentRoom(message, { localRoomId, boundRoomId });
 
   // 2. 綁定剛完成：屬於本房、仍在 sending 的補送
   const justBound = Boolean(boundRoomId) && prevBoundRoomId !== boundRoomId;
@@ -73,14 +80,7 @@ export function reconcileOutbox(
     }
   }
 
-  // 3. 隔離：別房的殘留一律丟
-  for (const [id, entry] of Object.entries(next)) {
-    if (!belongs(entry.message)) {
-      ensureCopy();
-      delete next[id];
-    }
-  }
-
+  // 3. 別房 entry 留下：顯示層與 toFlush 已用 belongs 過濾。
   return { entries: next, toFlush };
 }
 

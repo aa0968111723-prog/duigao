@@ -80,3 +80,19 @@
 
 /* 長網址／長路徑不得撐爆訊息卡並讓整頁橫向捲動（360px 稽核 MSG-11）。 */
 .rd-msg p, .rd-msg .rd-attachment-name { overflow-wrap: anywhere; }
+
+.rd-feed-end { height: 1px; width: 100%; }
+.rd-jump-latest {
+  position: sticky;
+  bottom: calc(64px + var(--kb, 0px));
+  z-index: 20;
+  align-self: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .18);
+}
