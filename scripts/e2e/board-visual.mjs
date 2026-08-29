@@ -154,8 +154,24 @@ try {
     const roomRow = rows.room_branches[0];
     const roomId = roomRow?.room_id ?? rows.whiteboards[0]?.room_id ?? null;
 
-    await page.getByLabel("白板名稱").fill("視覺基準板");
-    await page.getByLabel("白板名稱").press("Enter");
+    // Split View (≥1024) keeps the discussion composer mounted. Enter in the
+    // name field can land there instead of submitting this form — CI 33268530465
+    // and local tablet-1024 both left「還沒有白板」. Click the list's submit.
+    const list = page.getByTestId("whiteboard-list");
+    await list.getByLabel("白板名稱").fill("視覺基準板");
+    await list.getByRole("button", { name: "建立白板" }).click();
+    try {
+      await page.waitForFunction(
+        () => Boolean(document.querySelector('[data-testid="wb-canvas"]') || document.querySelector(".wb-card")),
+        null,
+        { timeout: 45000 },
+      );
+    } catch {
+      throw new Error(`create board produced neither canvas nor card: ${JSON.stringify(await dumpVisualPage(page))}`);
+    }
+    if ((await page.locator('[data-testid="wb-canvas"]').count()) === 0) {
+      await page.locator(".wb-card").first().click();
+    }
     await waitForWbCanvas(page);
     // 回列表拍「板清單」狀態
     await page.locator(".wb-focus-top .project-back-button").click({ force: true });
@@ -230,7 +246,11 @@ async function shot(page, name) {
   if (diffPixels > MAX_DIFF_PIXELS) {
     writeFileSync(join(OUT_DIR, `${name}-diff.png`), PNG.sync.write(diff));
   }
-  check(`${name}：diff=${diffPixels}px（上限 ${MAX_DIFF_PIXELS}）`, diffPixels <= MAX_DIFF_PIXELS);
+  const ok = diffPixels <= MAX_DIFF_PIXELS;
+  check(`${name}：diff=${diffPixels}px（上限 ${MAX_DIFF_PIXELS}）`, ok);
+  if (!ok) {
+    throw new Error(`visual ${name} exceeded ${MAX_DIFF_PIXELS}px (got ${diffPixels})`);
+  }
 }
 
 const failed = results.filter((result) => !result.pass);

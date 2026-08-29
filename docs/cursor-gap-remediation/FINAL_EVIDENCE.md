@@ -143,7 +143,8 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | GitHub `agent-read-layer` @ `2192774` | evidenced | run `33268176132` **success**。 |
 | CI browser @ `bad534b` | evidenced | run `33267190274` **success**（含 `test:video`）。 |
 | CI browser @ `2192774` | incomplete | run [`33268176148`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268176148) **failure**。`test:collaboration-e2e` **success**。`test:video` 45s `video.v-video`。 |
-| CI browser @ `30f5e5a` | incomplete | run [`33268530465`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268530465) **failure**。`test:collaboration-e2e` **success**；`test:visual` 15s `wb-canvas` visible。本機 `test:video` **171/171**。本 tip 改 visual 等 45s + 非零 box + dump。**尚未重跑 CI。不得寫綠。** |
+| CI browser @ `30f5e5a` | incomplete | run [`33268530465`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268530465) **failure**。`test:visual` 15s `wb-canvas`。 |
+| CI browser @ `f8a7fc1` | incomplete | run [`33268679981`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268679981) **failure**。`phone-390` 三張過；`phone-412-list` diff=3372；接著 `.wb-card` timeout。本機 click-create 後 `test:visual` **15/15**、`test:video` **171/171**。**本 tip CI 尚未重跑。不得寫綠。** |
 | CodeRabbit 1-check success | unmodeled | 「Review skipped: draft」不是產品 CI。 |
 | 已讀回條 UI | unmodeled | 禁止。 |
 
