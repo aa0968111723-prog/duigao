@@ -57,6 +57,7 @@ import {
 import { addRoomTarget, readRoomLink } from "./cloud/invite";
 import { type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
+import { decisionDraftTitle } from "./features/collaboration/boardDecisionWrite";
 import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
 import { ToastStack, useToasts } from "./toast";
 import { useIsMobile } from "./hooks/useIsMobile";
@@ -2118,6 +2119,11 @@ export function App() {
 
   const createDecision = useCallback(
     (title: string, source?: { type: "poll"; id: string }, status: "pending" | "decided" = "pending") => {
+      const clean = decisionDraftTitle(title);
+      if (!clean) {
+        showToast("決策要有標題。", { tone: "error" });
+        return;
+      }
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者不能建立決策紀錄。", { tone: "error" });
         return;
@@ -2125,7 +2131,7 @@ export function App() {
       const decision = {
         id: uuid(),
         roomId: roomRef.current?.id ?? "",
-        title,
+        title: clean,
         body: "",
         status,
         sourceType: source ? "poll" as const : "manual" as const,

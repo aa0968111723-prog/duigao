@@ -18,6 +18,8 @@
 .is-discussion-root .rd-composer { position: fixed; z-index: 30; left: max(12px, calc((100vw - 680px) / 2 + 12px)); right: max(12px, calc((100vw - 680px) / 2 + 12px)); bottom: calc(var(--kb, 0px) + var(--rd-dock, 0px)); }
 .rd-composer input { flex: 1; }
 .rd-decisions { display: grid; gap: 16px; }
+.rd-decision-draft { display: flex; gap: 6px; align-items: center; }
+.rd-decision-draft .text-input { min-width: 0; flex: 1; }
 .rd-decision { border: 1px solid var(--line-soft); border-radius: 14px; padding: 12px; background: var(--panel); }
 .rd-decision.is-done { border-color: rgba(111,175,116,.4); }
 .rd-voice { padding: 28px 8px; text-align: center; color: var(--ink-dim); }

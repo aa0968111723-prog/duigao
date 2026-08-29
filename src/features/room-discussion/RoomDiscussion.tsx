@@ -3,6 +3,7 @@ import { UniversalIntake, type IntakeHandle } from "../../components/UniversalIn
 import { anchorFromDiscussion, openTarget } from "../../lib/contextAnchor";
 import { indexMessages, replySnippet, resolveReply, type ReplyReference } from "../collaboration/replies";
 import type { Guest, Room, RoomPoll } from "../../lib/types";
+import { decisionDraftTitle } from "../collaboration/boardDecisionWrite";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
 import { shouldFollowLatest } from "./feed";
@@ -173,6 +174,8 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [menuId, setMenuId] = useState<string | null>(null);
   const [boardPick, setBoardPick] = useState<DiscussionMessage | null>(null);
   const [reply, setReply] = useState<DiscussionMessage | null>(null);
+  const [decisionDraft, setDecisionDraft] = useState("");
+  const [decisionDraftOpen, setDecisionDraftOpen] = useState(false);
 
   const showDecisions = api.showDecisions ?? true;
   const showRoomActions = api.showRoomActions ?? true;
@@ -322,8 +325,42 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         <div>
           <div className="project-section-title-row">
             <h3>待決定</h3>
-            {api.canManage && <button type="button" className="project-text-button" aria-label="新增待決定" onClick={() => api.onCreateDecision("待決定：主視覺")}>新增</button>}
+            {api.canManage && !decisionDraftOpen && (
+              <button
+                type="button"
+                className="project-text-button"
+                aria-label="新增待決定"
+                data-testid="decision-draft-open"
+                onClick={() => setDecisionDraftOpen(true)}
+              >新增</button>
+            )}
           </div>
+          {api.canManage && decisionDraftOpen && (
+            <form
+              className="rd-decision-draft"
+              data-testid="decision-draft"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const title = decisionDraftTitle(decisionDraft);
+                if (!title) return;
+                api.onCreateDecision(title);
+                setDecisionDraft("");
+                setDecisionDraftOpen(false);
+              }}
+            >
+              <input
+                className="text-input"
+                value={decisionDraft}
+                onChange={(event) => setDecisionDraft(event.target.value)}
+                aria-label="待決定草稿"
+                placeholder="待決定標題"
+                data-testid="decision-draft-input"
+                autoFocus
+              />
+              <button type="submit" className="project-text-button" data-testid="decision-draft-add" disabled={!decisionDraftTitle(decisionDraft)}>新增</button>
+              <button type="button" className="project-text-button" onClick={() => { setDecisionDraft(""); setDecisionDraftOpen(false); }}>取消</button>
+            </form>
+          )}
           {pending.map((item) => (
             <article className="rd-decision" key={item.id} data-testid={`decision-${item.id}`}>
               <strong>{item.title}</strong>

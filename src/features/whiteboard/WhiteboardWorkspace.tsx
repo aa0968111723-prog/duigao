@@ -39,6 +39,7 @@ import { initialPenState, penDown, penUp, segmentWidths, shouldRejectPointer, ty
 import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
 import { describePreview, planApply, type BoardAiPreview } from "./aiPreview";
 import { rendererFor } from "./registry";
+import { boardDecisionWrite } from "../collaboration/boardDecisionWrite";
 import "./whiteboard.css";
 
 export type WhiteboardApi = {
@@ -121,7 +122,7 @@ export type WhiteboardApi = {
   onConsumeStagedAiPreview?: () => void;
 };
 
-type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "versions" | "ai" | null;
+type Sheet = "add" | "search" | "content" | "more" | "poll" | "decision" | "video-range" | "versions" | "ai" | null;
 
 const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
@@ -370,6 +371,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [videoStart, setVideoStart] = useState("00:40");
   const [videoEnd, setVideoEnd] = useState("");
   const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan" | "asset">("all");
+  const [decisionTitle, setDecisionTitle] = useState("");
   const [previewNodes, setPreviewNodes] = useState<WhiteboardNode[] | null>(null);
   // F4：拖曳 preview 的同步事實來源 — render 閉包的 previewNodes 在
   // 同批 pointermove 之間是舊值，增量會疊在過期基準上（節點抖動/丟步）
@@ -1330,7 +1332,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               )}
               <button type="button" className="wb-card" onClick={() => setSheet("poll")}>放入既有投票</button>
               {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-create-poll" onClick={() => { const id = api.onCreatePoll("主視覺要不要換？", ["要，換成 B 版", "先維持 A 版"]); if (id) addAtView("poll", { pollQuestion: "主視覺要不要換？", voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) }); setSheet(null); }}>＋投票</button>}
-              {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-write-decision" onClick={() => { api.onCreateDecision("已決定：採用 B 版", undefined, "decided"); addAtView("decision", { text: "已決定：採用 B 版", sourceLabel: "決策區" }); setSheet(null); }}>寫下決策</button>}
+              {api.canManageBoards && (
+                <button
+                  type="button"
+                  className="wb-card"
+                  data-testid="wb-write-decision"
+                  onClick={() => { setDecisionTitle(""); setSheet("decision"); }}
+                >寫下決策</button>
+              )}
             </div>
             <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
           </section>
@@ -1463,6 +1472,44 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               )}
             </div>
             <button type="button" className="project-sheet-close" onClick={() => { setSheet(null); setVersionPreview(null); }}>關閉</button>
+          </section>
+        </div>
+      )}
+      {sheet === "decision" && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="寫下決策">
+            <div className="wb-sheet" data-testid="wb-decision-draft">
+              <h3>寫下決策</h3>
+              <p className="project-muted">標題要人填。空標題不是決策。</p>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const write = boardDecisionWrite(decisionTitle);
+                  if (!write) return;
+                  api.onCreateDecision(write.title, undefined, write.status);
+                  addAtView("decision", { text: write.title, sourceLabel: "決策區" });
+                  setDecisionTitle("");
+                  setSheet(null);
+                }}
+              >
+                <input
+                  className="text-input wb-search"
+                  autoFocus
+                  value={decisionTitle}
+                  onChange={(event) => setDecisionTitle(event.target.value)}
+                  aria-label="決策標題"
+                  placeholder="例如：主視覺採 B"
+                  data-testid="wb-decision-title"
+                />
+                <button
+                  type="submit"
+                  className="project-save-button project-submit"
+                  data-testid="wb-write-decision-save"
+                  disabled={!boardDecisionWrite(decisionTitle)}
+                >寫下</button>
+              </form>
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => { setDecisionTitle(""); setSheet(null); }}>取消</button>
           </section>
         </div>
       )}
