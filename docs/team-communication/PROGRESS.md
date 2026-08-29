@@ -43,8 +43,14 @@ base：`origin/main` @ `2a9d7a0`
 
 測試補強（**不是純文件 PR**）：
 
-- `scripts/e2e/migrations.mjs` +9 條真角色 RLS 探針（作者完整性 6 條、
-  0014 replay 存活 2 條、跨房 reply FK 1 條）。
+- `scripts/e2e/migrations.mjs` +15 條真角色 RLS 探針（作者完整性、
+  0014 replay 存活、跨房 reply FK ＋正向對照、表情回應 RLS 6 條）。
+- 修掉**我自己新加的一條假綠探針**（欄位數與值數對不上，SQL 語法錯導致
+  永遠通過）——對抗審查抓到的，見 `TEST_EVIDENCE.md` §2.4。
+- 修掉 `collaboration-workspace.test.ts` 裡一條假測試：`buildInviteUrl` 被
+  import、被寫進三元判斷的條件（讀 `.call` 屬性永遠 truthy），但從來沒有被
+  呼叫過，結果還被 `void` 丟掉。改成 stub `location` 真的跑一遍，並與
+  `readInviteFromUrl` 對接成 round-trip。
 - `scripts/tests/discussion-replies.test.ts` +12 條引用解析測試，
   掛進 `npm run test:collaboration`（CI 第 90 行會跑到）。
 
@@ -67,7 +73,7 @@ P0 修復：
 
 | 指令 | base | 現在 |
 |---|---|---|
-| `PG_BIN=… npm run test:migrations` | 242/242 | **251/251** |
+| `PG_BIN=… npm run test:migrations` | 242/242 | **257/257** |
 | `npm run test:collaboration` | 79 pass | **106 pass** |
 | `npm run test:multi-branch` | 25 pass | 25 pass |
 | `npm run test:asset-intelligence` | 15 pass | 15 pass |

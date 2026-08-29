@@ -200,11 +200,42 @@ test("25-26 board/node deep links stay in the fragment with the invite", () => {
   const parsed = new URL(url);
   assert.equal(parsed.search, "");
   assert.equal(parsed.hash, "#room=r&invite=secret&board=wb1&node=n1");
-  const built = buildInviteUrl.call
-    ? "https://example.test/#room=r&invite=secret&board=wb1"
-    : "#room=r&invite=secret&board=wb1";
   assert.match(url, /board=wb1/);
-  void built;
+
+  // buildInviteUrl 需要 location（它組的是絕對網址），所以之前這裡寫成
+  // `buildInviteUrl.call ? "字串A" : "字串B"` —— 讀函式的 .call 屬性永遠是
+  // truthy，函式本身從來沒有被呼叫過，結果還被 `void` 丟掉。這條測試看起來
+  // 在測邀請網址，實際上什麼都沒測。改成 stub 掉 location 真的跑一遍，
+  // 並且和 readInviteFromUrl 對接成 round-trip：秘密只能待在 fragment，
+  // 目標參數要能原封不動被讀回來。
+  const priorLocation = (globalThis as { location?: unknown }).location;
+  try {
+    (globalThis as { location?: unknown }).location = {
+      origin: "https://duigao.test",
+      pathname: "/",
+      hash: "",
+      search: "",
+    };
+    const invite = buildInviteUrl("room-1", "secret-token", { whiteboardId: "wb1", nodeId: "n1" });
+    assert.equal(invite, "https://duigao.test/#room=room-1&invite=secret-token&board=wb1&node=n1");
+    // 秘密不得落到 query（query 會進伺服器 log 與 referrer）。
+    assert.equal(new URL(invite).search, "");
+
+    const parsedInvite = new URL(invite);
+    (globalThis as { location?: unknown }).location = {
+      origin: parsedInvite.origin,
+      pathname: parsedInvite.pathname,
+      hash: parsedInvite.hash,
+      search: parsedInvite.search,
+    };
+    const readBack = readInviteFromUrl();
+    assert.equal(readBack?.roomId, "room-1");
+    assert.equal(readBack?.invite, "secret-token");
+    assert.equal(readBack?.whiteboardId, "wb1");
+    assert.equal(readBack?.nodeId, "n1");
+  } finally {
+    (globalThis as { location?: unknown }).location = priorLocation;
+  }
 });
 
 test("27-30 camera pinch/pan, long-press multi-select and marquee", () => {

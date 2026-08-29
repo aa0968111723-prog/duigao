@@ -37,6 +37,7 @@ PG_BIN=/d/pgsql-dl/x/pgsql/bin npm run test:migrations
 | 加入 9 條作者完整性探針、尚未修 | **246/248 通過** — 2 條紅燈，都是真缺陷 |
 | 加入 `0029` 第一版（`security invoker`） | **243/251** — 8 條紅燈，**修錯了**（見下） |
 | 加入 `0029` 第二版（`security definer`） | **251/251 通過** |
+| 修掉自己寫的假綠探針＋補表情回應 RLS | **257/257 通過** |
 
 ### 2.1 缺陷存在的證據（修之前）
 
@@ -84,10 +85,48 @@ PG_BIN=/d/pgsql-dl/x/pgsql/bin npm run test:migrations
 251/251 通過
 ```
 
+### 2.4 我自己寫出來的假綠（對抗審查抓到的）
+
+第一版的跨房回覆探針欄位數與值數對不上：
+
+```js
+insert into ... (room_id, author_user_id, author_name, body, reply_to_id)   // 5 欄
+values ('<otherRoom>', '<otherRoom>', '<owner>', 'Owner', '跨房回覆', '<honestMsg>')  // 6 值
+```
+
+SQL 語法錯 → 每次都失敗 → `.failed` 永遠是 true → **探針永遠綠，而且通過的
+原因跟外鍵毫無關係**。這正是我在別處指出的那一類缺陷（白板三條 `check(…, true)`），
+出現在我自己新加的測試裡。
+
+修法不只是把欄位補對，而是**配一個正向對照**：同一句話拿掉 `reply_to_id`
+必須寫得進去。只驗負面的話，任何一種失敗都會讓探針變綠。
+
+```
+✓ reply_to_id 不能指向別的房間的訊息（且同一句話拿掉 reply_to_id 就寫得進去）
+```
+
+### 2.5 表情回應的 RLS（原本零探針）
+
+`room_discussion_supports` 是討論路徑上唯一一張完全沒有 RLS 探針的表。
+client 的「取消支持」是 `delete ... eq(message_id).eq(room_id)`，
+**沒有帶 `user_id`** —— 它靠的正是 delete policy 把範圍收斂到自己那列。
+沒有探針的話，policy 一旦鬆掉，「取消自己的支持」會變成「清掉所有人的支持」
+而沒有人會發現。
+
+```
+表情回應：0014 room_discussion_supports RLS
+  ✓ 成員可以支持一則訊息（user_id 由 default auth.uid() 填）
+  ✓ 同一人同一則不會重複計數（PK 擋住）
+  ✓ 不能以別人的身分支持
+  ✓ 取消支持只會刪掉自己那一列（client 的 delete 沒帶 user_id，靠 RLS 收斂）
+  ✓ 非成員讀不到也寫不了別房的表情回應
+  ✓ 支持不能指向別的房間的訊息（複合外鍵）
+```
+
 **RLS 驗證涵蓋**：跨房隔離（reviewer 讀不到另一間房）、匿名讀不到討論、
-非成員不能寫別房、作者綁定、作者不可變更、跨房 `reply_to_id` 被 FK 擋下。
-全部用 `set role authenticated; set request.jwt.claim.sub = '<uid>'`，
-**不是超級使用者**。
+非成員不能寫別房、作者綁定、作者不可變更、跨房 `reply_to_id` 被 FK 擋下、
+表情回應的身分綁定與取消範圍。全部用
+`set role authenticated; set request.jwt.claim.sub = '<uid>'`，**不是超級使用者**。
 
 ---
 
