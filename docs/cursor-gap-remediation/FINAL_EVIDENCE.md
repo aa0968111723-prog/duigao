@@ -4,8 +4,8 @@
 
 ## Main tip (VERIFY)
 
-- `origin/main` @ `3c0bf0c` — PR-RESOLVE-07 Design Intelligence (replaces #88) (#114)
-- Previous: `6da2af7` #113, `85755ff` #110, `105b89b` #108, `097a6af` #107, `698595b` #106, `196b3a3` #105, `444ae9d` #99, `3d8b2cf` #97
+- `origin/main` @ `39f3221` — docs(checkpoint) #113 #114 + production probe (#121)
+- Previous: `3c0bf0c` #114, `6da2af7` #113, `85755ff` #110, `105b89b` #108, `097a6af` #107, `698595b` #106, `196b3a3` #105, `444ae9d` #99, `3d8b2cf` #97
 - Migrations `0022+` on main after #114: `0022_discussion_author_integrity.sql`, `0023_video_optimize.sql`, `0024_whiteboard_canonical_columns.sql` … `0028_whiteboard_freehand.sql`, `0029_design_knowledge.sql`, `0030_design_research_usage.sql`
 
 ## This branch
@@ -109,12 +109,13 @@ Post-#114 merge + honesty head is later; CI for that SHA is a new run.
 
 | Suite | Result @ `a63e517` | After #114+honesty |
 |---|---|---|
-| `test:mobile-tablet-ux-e2e` | **30/30** | re-run this turn |
-| `test:collaboration-e2e` | **117/117** | re-run this turn |
-| `test:multi-branch-e2e` | **54/54** | re-run this turn |
+| `test:mobile-tablet-ux-e2e` | **30/30** | **30/30** (`remainders-e2e-after-114.log`) |
+| `test:collaboration-e2e` | **117/117** | **117/117** |
+| `test:multi-branch-e2e` | **54/54** | **54/54** |
 | `test:realtime-offline-e2e` | **script missing** | still missing |
-| `test:ai-external-handoff` | n/a | this turn |
-| `npm run agent:gate` | **PASS** through `0028` | must pass through `0030` |
+| `test:ai-external-handoff` | n/a | **8/8** (`gap07-honesty-unit.log`) |
+| `test:collaboration` | 233 @ regex fix | **241/241** (includes G7-01…08) |
+| `npm run agent:gate` | **PASS** through `0028` | **PASS** through `0030_design_research_usage.sql` |
 
 ## Session-entry screenshots (no PII)
 
