@@ -1,144 +1,77 @@
-# Gap remediation — main remainders evidence
+# Gap remediation — stacked tip evidence (incomplete)
 
-**全站目標未完成。** This branch ports leftover product fixes onto latest `origin/main`. It does not merge, deploy, or rebase #78/#88.
+**全站目標未完成。** Do not merge. Do not deploy. Do not apply 0031/0032 to production. Do not invent 0033. Do not show 已讀／雙藍勾. Unread watermark ≠ receipts.
 
-## Main tip (VERIFY)
+This file is on the stacked tip `#120 → #124 → #125`. Docs are not IMPLEMENTED without source / migration / test evidence below.
 
-- `origin/main` @ `cd7eb5f` — docs(checkpoint): production JSON 404 after origin server (#123)
-- Previous: `de4064b` #122 host JSON 404, `39f3221` #121 docs, `3c0bf0c` #114, `6da2af7` #113, `85755ff` #110, `105b89b` #108, `097a6af` #107
-- Migrations `0022+` on main after #114: `0022_discussion_author_integrity.sql`, `0023_video_optimize.sql`, `0024_whiteboard_canonical_columns.sql` … `0028_whiteboard_freehand.sql`, `0029_design_knowledge.sql`, `0030_design_research_usage.sql`
-- #122/#123 record **host origin JSON 404 in repo / checkpoint**. This PR does **not** deploy Zeabur.
+## Stack (VERIFY)
 
-## This branch
+| PR | Branch | Base | Head at this write | Role |
+|---|---|---|---|---|
+| #120 | `cursor/p0-main-remainders-70d9` | `main` | see that PR | session-entry, hideRoomChrome, GAP-05, V-04, human poll/decision titles |
+| #124 | `cursor/p0-discussion-tombstone-unread-70d9` | #120 | `10c9109` | 0031 tombstone + own unread watermark |
+| #125 | `cursor/p0-discussion-mentions-todos-70d9` | #124 | this tip | 0032 mentions + human todos + ephemeral typing; 0031 attribution fix |
 
-- Branch: `cursor/p0-main-remainders-70d9`
-- Code head: `19d7c60` discussion 「建立投票」human question (on `afbdd3a` board poll)
-- Evidence commit follows this file; do not treat docs as IMPLEMENTED without the source above
-- No `0031+` this turn. Mentions / unread / receipts / todo / typing / message tombstone stay unmodeled.
-- Base **must stay `main`**
-- PR: https://github.com/aa0968111723-prog/duigao/pull/120
-- Does not copy #88/#104 SQL names. Does not invent typing / mention / unread / receipt / todo tables. Does not restack #95.
+`origin/main` @ `cd7eb5f` — production origin JSON 404 is recorded, not fixed.
 
-## Four remainders kept after #113 + #114 merges
+## Evidenced on this stack
 
-1. **session-entry** — `src/cloud/sessionEntryStatus.ts`, `isPermissionDenied`, guest card `data-testid="session-entry-status"`. Invite-invalid wins over permission-denied. Cloud-guest `local-only` is load-error, not empty-room. Post-join rooms RLS sets `permissionDenied`.
-2. **hideRoomChrome** — phone composer focus hides first-layer chrome; tablet ≥768 keeps split (`roomChrome.ts`, `MultiBranchRoom.tsx`).
-3. **GAP-05 realtime + owner flush** — `acceptRealtimePayload` + discussion row-patch; leftover channel dropped before re-subscribe; bind subscribe failure after a snapshot does not fake load-error; `flushOutboxOnOnline` / `isolateOutboxForOwner`. Store API stays #108-scoped.
-4. **V-04 Leave** — `voiceDockShowsLeave` on `live|connected|reconnecting`. Leave teardown mutes then disconnects.
-
-## Discussion extras vs schema (0014 / 0018 / 0022)
-
-Inspected current tree after #107/#108/#113/#114. Do **not** invent tables. Do **not** show 已讀／雙藍勾.
-
-| Feature | Verdict | Evidence |
-|---|---|---|
-| reply | **present** | `reply_to_id` 0014; `replies.ts` resolve + jump; composer reply bar |
-| mention `@` | **unmodeled** | no mentions table / column |
-| reactions | **present as 支持 only** | `room_discussion_supports` binary; not six-emoji (would need a new table) |
-| composer draft | **present** | `useDiscussionDraft` + IndexedDB `DISCUSSION_DRAFTS` |
-| unread + first unread | **unmodeled** | no read/unread table; `jump-latest` is scroll, not unread |
-| message edit | **wired** | 0022 allows body+payload update; `updateDiscussion`; UI `discussion-edit` + `payload.edited` |
-| message tombstone | **unmodeled** | no `deleted_at` on `room_discussion_messages`; do not hard-delete as a fake tombstone |
-| attachment cite | **wired** | existing `attachment` kind; cite sets `reply_to_id` via `attachmentCiteReply` |
-| work cite | **wired** | existing kinds `poster`/`video`/`plan`/`whiteboard` + payload ids; composer `引` → `cite-work` |
-| decision draft | **wired** | `decision_records` pending/decided; discussion 新增 + board 「寫下決策」both require a human title; AI/`agent`/`system` cannot finalize |
-| board 寫下決策 | **wired** | `boardDecisionWrite`; sheet `wb-decision-draft` / `wb-decision-title`; no canned 「已決定：採用 B 版」 |
-| board ＋投票 | **wired** | `boardPollWrite`; sheet `wb-poll-draft` / `wb-poll-question`; 0013 options 2–6; no canned 「主視覺要不要換？」; AI cannot create |
-| discussion 建立投票 | **wired this turn** | sheet `discussion-poll-draft`; `boardPollWrite`; no `message.body || "要不要這樣做？"` |
-| todo draft | **unmodeled** | no todo/task table |
-| read receipts | **unmodeled** | no receipt table; UI must not show 已讀／雙藍勾 |
-| `kind: quote` | **unmodeled as producer** | CHECK allows it; zero honest producers — do not fake a cite type |
-| polls | **present** | `room_polls` 0013; board and discussion create both require a human question + ≥2 options |
-
-## This turn — discussion 建立投票 + `afbdd3a` CI
-
-Main still `cd7eb5f`; no merge needed. No `0031+`. `afbdd3a` agent-read-layer **success** `33264454473`; browser `33264454105` still in progress at evidence write (build + migrations already green).
-
-Discussion 「建立投票」no longer uses `message.body || "要不要這樣做？"`. D-10 failed first against that fallback. Sheet requires `boardPollWrite` (human question + ≥2 options). Empty body is not a poll. `createProjectPoll` still rejects AI/`agent`/`system`.
-
-## Prior turn — board ＋投票 + `dbe8882` CI
-
-`dbe8882` CI **green**: agent-read-layer success; browser `33264257587` success. Main still `cd7eb5f`; no merge needed. No `0031+`.
-
-Board 「＋投票」no longer inserts canned 「主視覺要不要換？」. D-09 failed first against `onCreatePoll("主視覺要不要換？", ...)`. Sheet requires a human question and ≥2 options (`boardPollWrite`). `createProjectPoll` rejects empty question / <2 options / non-member actors. `pollFromAction` no longer invents 「要不要這樣做？」.
-
-## Prior turn — board 寫下決策 title + `f61cd54` CI
-
-`f61cd54` CI **green**: agent-read-layer `33263983135` success; browser `33263983133` success (migrations + build + visual). Main still `cd7eb5f` (#123); no merge needed.
-
-Board 「寫下決策」no longer inserts canned 「已決定：採用 B 版」. D-08 failed first against the canned `onCreateDecision(...)`, then the sheet required a title. `createDecision` also rejects empty titles and non-member actors.
-
-## Prior turn — CI fix + compact extras
-
-`8f91286` browser **failed** `33263703226` on `test:visual`: tablet-1024-board-20 / desktop-1280-board-20 / desktop-1280-selected (~15k px). Cause: Split View discussion column showed a always-on decision title input + 「引用」 wrapping the composer.
-
-| Change | Why |
+| Item | Evidence |
 |---|---|
-| Decision draft behind `decision-draft-open` | First layer stays 「新增」(same as pre-extras). Click reveals title input. No hardcoded 「待決定：主視覺」 |
-| Composer cite label `引` | 44×44 like attach; does not wrap the Split View composer |
-| Visual baselines | Refresh the three Split View shots that now include `引` |
-| Honesty extras kept | edit / work cite / attachment cite / member-only decision |
+| session-entry / invite-invalid vs permission-denied | `sessionEntryStatus.ts`; guest `data-testid="session-entry-status"` |
+| hideRoomChrome | `roomChrome.ts` + `MultiBranchRoom.tsx` |
+| GAP-05 realtime + owner flush | `acceptRealtimePayload`; `flushOutboxOnOnline` / `isolateOutboxForOwner` |
+| V-04 Leave | `voiceDockShowsLeave` on `live\|connected\|reconnecting` |
+| discussion / board poll + decision human title | `boardPollWrite` / `boardDecisionWrite`; D-08…D-10 |
+| 0031 tombstone | `0031_discussion_tombstone_unread.sql`; soft-delete; hard DELETE revoked; trigger survives 0014 replay |
+| 0031 own unread watermark | `room_discussion_reads` own-row only; `jump-first-unread`; **not** a receipt |
+| 0031 `deleted_by` cannot be forged | `new.deleted_by := caller` in 0031 **and** 0032 replace; T-10; migrations probe |
+| 0032 mentions | author INSERT; mentioned user must be this room’s member; UPDATE forbidden |
+| 0032 todos | member SELECT; own INSERT; UPDATE author or `can_manage`; peer / stranger complete denied |
+| 0032 typing | presence `typing: boolean` only; no typing table |
+| UI todo complete aligned to RLS | `canCompleteRoomTodo` — author or `canManage`; AI/`agent`/`system` rejected |
+| Jump first-unread does not advance watermark | `suppressReadFromJump`; T-07; e2e 「未讀跳到水位之後」 |
+| No 0033 / no receipts | no `0033_*.sql`; UI / SQL must not show 已讀／雙藍勾 |
 
-## #120 CI
+Local suites on the 0032 feature commit `c841418` (before this RLS / jump fix): M-01…M-07 **7/7**; `test:collaboration` **271/271**; `test:migrations` **378/378**; `test:collaboration-e2e` **138/138** locally. CI browser on that SHA **failed 137/138** (`未讀跳到水位之後`) — this tip fixes that race.
 
-| SHA | agent-read-layer | browser | note |
-|---|---|---|---|
-| `8139879` honesty + #121 | **success** | **success** `33262546722` | requested first check |
-| `43a5b41` compact-width | **success** | **success** `33263240901` | 15/15 visual |
-| `5399833` evidence | **success** | **success** `33263357191` | 15/15 visual |
-| `0570218` extras | **success** | **failed** `33263623652` | visual Split View |
-| `8f91286` edit mark | **success** | **failed** `33263703226` | visual 11/15; fixed on `1416120` |
-| `f61cd54` compact + #123 | **success** `33263983135` | **success** `33263983133` | 15/15 visual |
-| `dbe8882` board decision title | **success** | **success** `33264257587` | 15/15 visual |
-| `afbdd3a` board poll question | **success** `33264454473` | in progress `33264454105` | build + migrations green at evidence write |
-| `19d7c60` discussion poll | (this push) | (pending) | do not claim green until terminal |
+#124 CI on `10c9109`: build / browser / migrations / agent-read-layer **success**.
 
-## Review classifications
+#125 CI on `c841418`: build / migrations / agent-read-layer **success**; browser **failure** `33266334828`. Re-check after this push; do not claim green until terminal.
 
-### Fixed on this branch (accepted)
+## Unmodeled (intentional — do not add)
 
-| Finding | Classification | Evidence |
+- Read receipts / 已讀／雙藍勾
+- Typing **table** (channel presence only)
+- `kind: quote` producer
+- Six-emoji reactions (`room_discussion_supports` is binary 支持)
+
+## Deploy-blocked
+
+- 0031 / 0032 are **not** applied to the production database. Do not apply.
+- Production origin JSON 404 ≠ success. `/functions/v1/voice-token`, `/rest/v1/`, `/api/health` return `{"ok":false,"code":"NOT_FOUND","message":"this origin has no API"}`. `/` is SPA HTML 200.
+- Canva / CUTOS / Perplexity production secrets unverified.
+- Stale drafts `#95→#115`, `#88`, `#104`, `#119` stay human rebase / CONFLICTING.
+- `#120` / `#124` / `#125` stay mergeable **in order**. `AUTOMERGE REQUIRES AGENT_GATE_PASS`.
+- This file is incomplete evidence. Goal remains open.
+
+## Adversarial RLS (0031 + 0032) — this tip
+
+| Attack | Verdict | Fix / probe |
 |---|---|---|
-| Invite-invalid vs permission-denied leak | Fixed | `sessionEntryStatus` checks inviteInvalid first |
-| Cloud-guest `local-only` as empty-room | Fixed | `local-only` → load-error |
-| Bind flush cross-account outbox | Fixed | `isolateOutboxForOwner` on reconcile flush |
-| Leave/mic still live after Leave | Fixed | `teardown` mutes then disconnects |
-| Post-join rooms RLS swallowed as retry | Fixed | `reload()` sets `permissionDenied` and rethrows |
-| Re-bind leftover realtime channel fakes load-error | Fixed | `subscribeRoom` removes leftovers; subscribe throw after snapshot stays synced |
-| SPA HTML as applied realtime | Accepted / already gated | `looksLikeSpaHtml` in `acceptRealtimePayload` |
-| Poster/video fake vision + research SPA 200 | Fixed on this branch | `honesty.ts` + analysis/research wiring |
-| Discussion edit / work cite / decision title | Wired | `discussionHonesty.ts` + RoomDiscussion |
-| Board canned 「已決定：採用 B 版」 | Fixed | `boardDecisionWrite` + `wb-decision-title` |
-| Board canned 「主視覺要不要換？」 | Fixed | `boardPollWrite` + `wb-poll-question` |
-| Discussion canned 「要不要這樣做？」 | Fixed this turn | `discussion-poll-draft` + `boardPollWrite` |
+| BOLA tombstone `deleted_by` forged to another uuid | **real hole** | `deleted_by := caller` (0031 + 0032 replace so 0031 replay cannot restore `coalesce`) |
+| Cross-room mention (owner in both rooms mentions capRoom-only reviewer on otherRoom message) | denied | WITH CHECK + trigger; e2e 「不能在這房提及只屬於另一房的人」 |
+| Mention UPDATE rehang `mentioned_user_id` | denied | GRANT insert-only + UPDATE trigger `discussion-mention-update-forbidden` |
+| Peer reviewer completes another member’s todo | denied | UPDATE USING author / `can_manage`; row stays `open` |
+| Stranger completes a todo in another room | denied | RLS + row stays `open` |
+| Unread watermark UPDATE / rehang `user_id` for another user | denied | own-row USING + WITH CHECK + trigger |
+| Jump first-unread forges “caught up” | **UX hole** | jump must not call `onMarkRead` on feed-end intersection |
 
-### Won’t fix / leftover (not this PR)
-
-- Mentions / unread / first-unread / read receipts / discussion tombstone / todo — **unmodeled**. No `0031+`.
-- Typing / per-member presence **table** unmodeled (channel count + lastWriter stamps only)
-- `kind: quote` has no producer
-- Canva / CUTOS / Perplexity production secrets unverified
-- Stale room stack `#95→#115` vs main
-- #88 / #104 / #119 drafts still CONFLICTING / human rebase
-- Production origin JSON 404 is a **probe**, not LiveKit / functions success
-- This push’s CI browser not yet terminal at evidence write
-
-## E2E (local this turn)
-
-`CHROMIUM_PATH=/usr/bin/google-chrome-stable`
-
-| Suite | Result |
-|---|---|
-| `test:visual` | **15/15** after baseline refresh (was 11/15 on `8f91286` CI) |
-| `discussion-honesty` | **10/10** D-01…D-10 |
-| `test:collaboration-e2e` | **129/129** (discussion poll sheet + human question) |
-| `test:collaboration` | **255/255** |
-
-390/768 discussion poll shots: `discussion_poll_390.png`, `discussion_poll_768.png`.
+Not holes: members reading room mentions (same chat, not a second inbox); owner/`can_manage` completing a member todo; unread SELECT own-row only (that is why it is not a receipt).
 
 ## Production (re-curl this turn)
 
-Re-curled 2026-08-29 17:02 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1705.txt`):
+Re-curled 2026-08-29 17:48 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1748.txt`):
 
 | Path | HTTP | Type | Body |
 |---|---|---|---|
@@ -147,4 +80,4 @@ Re-curled 2026-08-29 17:02 UTC (`/opt/cursor/artifacts/production-curl-2026-08-2
 | `/api/health` | **404** | `application/json` | same |
 | `/` | **200** | `text/html` | `<!doctype html>` SPA |
 
-This matches #122 origin JSON 404. **Do not claim production is fixed. Do not claim deploy.** Origin 404 ≠ LiveKit / Canva / CUTOS / research actually running.
+**404 JSON ≠ success.** Do not claim production is fixed. Do not claim deploy.
