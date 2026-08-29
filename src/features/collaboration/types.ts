@@ -256,6 +256,9 @@ export type DiscussionMessage = {
   replyToId?: string;
   createdAt: number;
   updatedAt: number;
+  /** 0031 tombstone：非空＝已刪。列還在，UI 畫墓碑，不默默消失。 */
+  deletedAt?: number;
+  deletedBy?: string;
 };
 
 export type DiscussionSupport = {

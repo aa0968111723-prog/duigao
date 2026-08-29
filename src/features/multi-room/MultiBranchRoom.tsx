@@ -90,6 +90,9 @@ export type MultiBranchRoomApi = {
   onSendDiscussion: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
   onSupportDiscussion: (messageId: string, add: boolean) => void;
   onEditDiscussion?: (messageId: string, body: string) => void;
+  onTombstoneDiscussion?: (messageId: string) => void;
+  discussionRead?: { lastReadMessageId?: string; lastReadAt?: number } | null;
+  onMarkDiscussionRead?: (messageId: string) => void;
   onCreateWhiteboard: (title: string) => void;
   onArchiveWhiteboard: (id: string) => void;
   onOpenWhiteboard: (id: string | null) => void;
@@ -977,6 +980,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       },
                       onSupport: api.onSupportDiscussion,
                       onEditMessage: api.onEditDiscussion,
+                      onTombstoneMessage: api.onTombstoneDiscussion,
+                      readWatermark: api.discussionRead,
+                      onMarkRead: api.onMarkDiscussionRead,
                       onCreatePoll: createPoll,
                       onAddToBoard: api.onAddMessageToBoard,
                       onOpenBoardNode: (whiteboardId, nodeId) => {
@@ -1024,6 +1030,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     <div
       className={`project-room${tabletSplit ? " is-tablet-split" : ""}`}
       data-testid="multi-branch-room"
+      data-room-id={normalized.id}
       data-more-open={moreOpen && !hideRoomChrome ? "true" : "false"}
       data-tablet-split={tabletSplit ? "true" : "false"}
       data-first-layer={!inShellBranch && !pushedPane ? "true" : "false"}

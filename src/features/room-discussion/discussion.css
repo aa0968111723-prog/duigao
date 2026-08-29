@@ -91,10 +91,26 @@
 .rd-msg p, .rd-msg .rd-attachment-name { overflow-wrap: anywhere; }
 
 .rd-feed-end { height: 1px; width: 100%; }
+.rd-msg.is-tombstone { opacity: .78; }
+.rd-tombstone { margin: 0; font-size: 14px; color: var(--ink-faint); font-style: italic; }
+.rd-jump-unread {
+  position: sticky;
+  bottom: calc(104px + var(--kb, 0px));
+  z-index: 35;
+  align-self: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--raise);
+  color: var(--ink);
+  font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
+}
 .rd-jump-latest {
   position: sticky;
   bottom: calc(64px + var(--kb, 0px));
-  z-index: 20;
+  z-index: 35;
   align-self: center;
   min-height: 36px;
   padding: 0 14px;

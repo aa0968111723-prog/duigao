@@ -27,6 +27,10 @@ export function DiscussionDrawer({
   onRetry,
   onSend,
   onSupport,
+  onEditMessage,
+  onTombstoneMessage,
+  readWatermark,
+  onMarkRead,
   onAttach,
   attachBusy,
   attachUpload,
@@ -46,6 +50,10 @@ export function DiscussionDrawer({
   onRetry: (messageId: string) => void;
   onSend: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
   onSupport: (messageId: string, add: boolean) => void;
+  onEditMessage?: (messageId: string, body: string) => void;
+  onTombstoneMessage?: (messageId: string) => void;
+  readWatermark?: { lastReadMessageId?: string; lastReadAt?: number } | null;
+  onMarkRead?: (messageId: string) => void;
   onAttach?: (files: File[]) => void;
   attachBusy?: boolean;
   attachUpload?: import("../../cloud/discussionWrite").DiscussionAttachUpload | null;
@@ -102,6 +110,10 @@ export function DiscussionDrawer({
             setDraft("");
           },
           onSupport,
+          onEditMessage,
+          onTombstoneMessage,
+          readWatermark,
+          onMarkRead,
           sendStates,
           onRetry,
           // single 房沒有投票/白板/決定的其他入口；一律隱藏（不留死按鈕），
