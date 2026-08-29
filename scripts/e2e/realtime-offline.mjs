@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { start as startMock } from "./mock-supabase.mjs";
-import { ensureRoomMore } from "./room-more.mjs";
+import { ensureRoomMore, openRoomCreate } from "./room-more.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = Number(process.env.DUIGAO_RT_MOCK_PORT || 54430);
@@ -84,13 +84,25 @@ try {
   await A.click("button.btn-primary");
   await A.waitForSelector(".home-picks", { timeout: 20000 });
   await A.getByRole("button", { name: /建立活動房/ }).click();
+  await A.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
+  await openRoomCreate(A);
+  await A.getByTestId("create-content-sheet").getByRole("button", { name: "企劃", exact: true }).click();
+  await A.getByTestId("create-content-sheet").locator('input:not([type="file"])').first().fill("同步企劃");
+  await A.getByTestId("create-content-sheet").locator("button.project-submit").click();
+  await A.waitForSelector('[data-testid="plan-editor"]', { timeout: 20000 });
+  await A.locator(".project-back-button").click();
   await A.waitForSelector('[data-testid="discussion-composer"]', { timeout: 15000 });
-  await A.getByTestId("discussion-composer").getByLabel("房間討論").fill("甲先說一句");
+  const composerA = A.getByTestId("discussion-composer").locator("input.text-input");
+  await composerA.click();
+  await composerA.pressSequentially("甲先說一句", { delay: 10 });
   await A.getByTestId("discussion-composer").getByRole("button", { name: "送出" }).click();
   await A.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("甲先說一句"), null, { timeout: 10000 });
 
   await ensureRoomMore(A);
-  await A.locator(".project-share-button").click();
+  await A.getByTestId("room-more-sheet").locator(".project-share-button").click();
+  const noCard = A.getByRole("button", { name: /仍要分享/ });
+  await noCard.waitFor({ timeout: 20000 }).catch(() => undefined);
+  if (await noCard.count()) await noCard.click();
   await A.waitForSelector("input.m-share-url", { timeout: 20000 });
   const shareUrl = await A.locator("input.m-share-url").inputValue();
   await A.locator(".m-modal").getByRole("button", { name: "關閉", exact: true }).click().catch(() => undefined);
@@ -112,7 +124,8 @@ try {
   check("同一則討論在乙只出現一次", countOnB === 1, `count=${countOnB}`);
 
   await ctxA.setOffline(true);
-  await A.getByTestId("discussion-composer").getByLabel("房間討論").fill("離線後補的一句");
+  await A.getByTestId("discussion-composer").locator("input.text-input").click();
+  await A.getByTestId("discussion-composer").locator("input.text-input").pressSequentially("離線後補的一句", { delay: 10 });
   await A.getByTestId("discussion-composer").getByRole("button", { name: "送出" }).click();
   await A.waitForTimeout(800);
   check("離線送出在甲仍看得到（ghost / failed）", (await A.getByTestId("discussion-feed").innerText()).includes("離線後補的一句"));
