@@ -24,6 +24,7 @@
 |---|---|---|
 | 稽核開始 | `3d8b2cf95e47f082f47c18aca704bbf35fac8106` | `PR-GAP-00: 真實稽核、測試基線與 SPA 假成功防護 (#97)` |
 | 本檔寫入時 | `444ae9d330e8be9636b3fd8ce4e2cdcc0327d616` | `Handoff: remaining gaps and merge order (#99)` squash 合併 |
+| 2026-08-29 23:06 +08 | `196b3a3672ca240e123ba530b5d7cb2eed8048a5` | `PR-RESOLVE-01: Home offline and cloud-unset truthful state (#105)` |
 
 本地在稽核前曾停在 `9b8d388`（遠古 main）。已 fast-forward 到含 #97 的 tip，並合併 #99。
 
@@ -34,7 +35,8 @@
 | PR | 標題 | merge 目標 | 合入 SHA / 時刻 |
 |---|---|---|---|
 | **#97** | PR-GAP-00: 真實稽核、測試基線與 SPA 假成功防護 | `main` | squash 成 `3d8b2cf`，2026-08-29 14:22:28Z |
-| **#99** | Handoff: 剩餘缺陷與合併順序（無新產品修復） | `main` | squash 成 `444ae9d`，本輪合併。GitHub `mergeable_state=clean`；`browser` / `build` / `migrations` / `agent-read-layer` 皆 **success**（browser 完成於 14:28:26Z）。純文件 + `remaining-gaps.test.ts`，無產品行為。 |
+| **#99** | Handoff: 剩餘缺陷與合併順序（無新產品修復） | `main` | squash 成 `444ae9d`，本輪合併。GitHub `mergeable_state=clean`；`browser` / `build` / `migrations` / `agent-read-layer` 皆 **success**。 |
+| **#105** | PR-RESOLVE-01: Home 離線／雲端未設定誠實狀態（替代 #96） | `main` | squash 成 `196b3a3`。GitHub required checks 全 success、`mergeable_state=clean` 後合併。 |
 
 ## 未進 main（即使 GitHub 顯示 merged）
 
@@ -163,6 +165,38 @@ GitHub required jobs：`build` / `migrations` / `browser` / `agent-read-layer`�
 
 先前 #97 已記錄：`https://duigao-k7q2.zeabur.app/functions/v1/voice-token` 等路徑 HTTP 200 `text/html`（SPA catch-all）。#97 只修 client parser，**平台路由仍會回 HTML**。本任務第十階段必須再探針，並對照 Zeabur deploy SHA 與 `origin/main`。
 
+## 本輪進度（2026-08-29 23:10 +08）
+
+Replacement PRs（原始 #78/#88/#95/#96/#98/#100/#101 **未刪**）：
+
+| 代號 | GitHub | 分支 | 狀態 |
+|---|---|---|---|
+| PR-RESOLVE-01 | **#105 merged** | `resolve/pr-01-home-entry` | 已進 main `196b3a3` |
+| PR-RESOLVE-02 | **#106** | `resolve/pr-02-voice-state` @ `2eb2b07` | rebase 到含 #105 的 main；draft→ready；等 CI。先前 browser 敗在 `:::54418` EADDRINUSE，已改 bind `127.0.0.1` |
+| PR-RESOLVE-03 | **#107** | `resolve/pr-03-video-library` | draft；0006 未改；0023_video_optimize additive。#105 之後 package.json 可能 dirty，需 rebase |
+| PR-RESOLVE-04 | **#108** | `resolve/pr-04-files-outbox` | draft；疊 03 |
+| PR-RESOLVE-05 | **#110** | `resolve/pr-05-mobile-tablet` | draft；疊 04 |
+| PR-RESOLVE-06 | **#113** | `resolve/pr-06-whiteboard` | draft；白板 migration 重編號 0024–0028 |
+| PR-RESOLVE-07 | **#114** | `resolve/pr-07-design-intelligence` | draft；DI migration 0029–0030；agent-gate 已因 fixture 合成密鑰而 PASS |
+
+### 正式站 HTTP（兩次，2026-08-29 15:06Z）
+
+證據：`{SCRATCH}/prod-http/*.txt`
+
+| URL | status | Content-Type | 判定 |
+|---|---|---|---|
+| `/` | 200 | text/html | 文件載入 OK。Last-Modified 15:03:57 GMT（#105 合入後 Caddy 有新物件） |
+| `/functions/v1/voice-token` | **200** | **text/html** | **失敗**：SPA catch-all，不是 API |
+| `/api/voice-token` | **200** | **text/html** | 同上 |
+| `/api/health` | **200** | **text/html** | 同上 |
+| `/rest/v1/rooms` | **200** | **text/html** | 同上 |
+
+Zeabur MCP `list-projects`：`ERROR_INVALID_TOKEN`。無法比對 deploy SHA。GitHub merge ≠ 正式站 API 修好。
+
+### 環境阻擋（不是程式沒寫）
+
+- Canva OAuth / AI vendor keys / LiveKit env / Zeabur 路由把 `/functions/v1/*` 指到真正 Edge Function
+
 ## 下一步（執行序）
 
 1. **本分支 `resolve/pr-01-home-entry`**：從 `origin/main`（含 #97+#99）重放 #96；語意合併 `package.json`；跑 `test:home-entry` / `build:local` / `agent:gate`；draft `PR-RESOLVE-01`。
@@ -181,6 +215,6 @@ GitHub required jobs：`build` / `migrations` / `browser` / `agent-read-layer`�
 - [x] fetch / merge-tree / PR 讀取
 - [x] 確認 #100 base=`cursor/complete-missing-features-0897`、#101 base=`cursor/p0-files-and-outbox-70d9`
 - [x] #99 browser success → 已 squash 合併到 main (`444ae9d`)
-- [ ] PR-RESOLVE-01 重放與測試
-- [ ] PR-RESOLVE-02 … 07
-- [ ] 正式站 HTTP 雙次探針
+- [x] PR-RESOLVE-01 重放、測試、GitHub checks、合併 `#105`
+- [x] PR-RESOLVE-02 … 07 已建立 replacement PR（02 等 CI；03–07 仍 draft 待 GitHub required checks）
+- [x] 正式站 HTTP 雙次探針（API 路徑仍 200 HTML）
