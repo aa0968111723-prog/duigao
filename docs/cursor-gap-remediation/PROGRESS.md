@@ -1,17 +1,24 @@
 # PROGRESS
 
-## 2026-08-29 — PR-RESOLVE-04 / PR-GAP-02 files + outbox (this branch)
+## 2026-08-29 — PR-RESOLVE-05 / PR-GAP-04 mobile + tablet
 
-Replayed onto latest `main` + `PR-RESOLVE-03` video (not the stale #95 agent branch).
+Replayed onto `PR-RESOLVE-04` (files/outbox) which sits on `PR-RESOLVE-03` video + latest `main`. Not the stale agent stack.
 
-### Done here
+### Done here (GAP-04)
+
+- First-layer chrome: back / title / presence / voice / more
+- 對話／白板 only on the first layer
+- 總覽 / 內容 / 企劃 / 搜尋 / AI / 新增 behind 更多
+- Tablet split at 768 / 820 when more is open
+- Safe area, `--kb`, 44px targets, overflow-x, reduced motion, orientation, Android back (`duigaoMore`)
+- Tests: `scripts/tests/mobile-tablet-ux.test.ts` + e2e helpers
+
+## 2026-08-29 — PR-RESOLVE-04 / PR-GAP-02 files + outbox
 
 - Honest discussion insert (SPA HTML / failed API ≠ sent)
 - Honest attachment upload (null data / wrong path / HTML ≠ complete)
 - Same `message.id` retry does not create two server rows
 - Outbox isolated per account (`ownerId` / `isolateOutboxForOwner`)
-- Mobile composer hides room chrome while the input is focused
-- Tests in `scripts/tests/discussion-files-batch.test.ts`
 
 ## 2026-08-29 — PR-GAP-00 shipped (merged as #97)
 
