@@ -27,6 +27,8 @@ import { answerDuigaoRoomContext } from "../ai/aiOsRoomContext";
 import { ensureSession } from "./auth";
 import { getSupabase } from "./client";
 import { isCloudConfigured } from "./config";
+import { acceptAssetAnalysisPayload } from "./assetAnalysisPayload";
+import { invokeErrorContentType, looksLikeSpaHtml, parseFunctionPayload } from "./apiResponse";
 import { loadAiContext, saveAiContext } from "../lib/store";
 
 type Row = Record<string, unknown>;
@@ -397,14 +399,23 @@ export async function registerIntelligentAsset(supabase: SupabaseClient, input: 
   return assetFromRow(data, undefined, []);
 }
 
+function throwInvokeError(error: unknown): never {
+  if (looksLikeSpaHtml(null, invokeErrorContentType(error))) {
+    throw Object.assign(new Error("SPA_HTML"), { code: "SPA_HTML" });
+  }
+  throw error instanceof Error ? error : Object.assign(new Error("FUNCTION_ERROR"), { cause: error });
+}
+
 export async function enqueueAssetAnalysis(supabase: SupabaseClient, assetId: string, tier: 0 | 1 | 2 | 3 = 1): Promise<void> {
-  const { error } = await supabase.functions.invoke("asset-analysis", { body: { assetId, action: "enqueue", tier } });
-  if (error) throw error;
+  const { data, error } = await supabase.functions.invoke("asset-analysis", { body: { assetId, action: "enqueue", tier } });
+  if (error) throwInvokeError(error);
+  acceptAssetAnalysisPayload(data);
 }
 
 export async function retryAssetAnalysis(supabase: SupabaseClient, assetId: string, tier: 0 | 1 | 2 | 3 = 1): Promise<void> {
-  const { error } = await supabase.functions.invoke("asset-analysis", { body: { assetId, action: "retry", tier } });
-  if (error) throw error;
+  const { data, error } = await supabase.functions.invoke("asset-analysis", { body: { assetId, action: "retry", tier } });
+  if (error) throwInvokeError(error);
+  acceptAssetAnalysisPayload(data);
 }
 
 export async function setHumanAssetMetadata(
@@ -477,8 +488,15 @@ export async function askRoomContext(
   const cached = await loadAiContext(key).catch(() => undefined);
   if (cached) return { ...cached, cached: true };
   const { data, error } = await supabase.functions.invoke("room-ai-context", { body: { roomId, ...request } });
-  if (error) throw error;
-  const response = sanitizeRoomAnswer(request.query, assertResponse(data));
+  if (error) throwInvokeError(error);
+  const parsed = parseFunctionPayload(data);
+  if (parsed.kind === "reject") {
+    throw Object.assign(new Error(parsed.code), { code: parsed.code });
+  }
+  if (typeof parsed.value.error === "string" && parsed.value.error) {
+    throw Object.assign(new Error(parsed.value.error), { code: parsed.value.error });
+  }
+  const response = sanitizeRoomAnswer(request.query, assertResponse(parsed.value));
   await saveAiContext(key, response).catch(() => undefined);
   return response;
 }

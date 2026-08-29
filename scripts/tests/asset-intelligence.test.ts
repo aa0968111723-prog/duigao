@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { acceptAssetAnalysisPayload } from "../../src/cloud/assetAnalysisPayload";
 import {
   contextCacheKey,
   isNormalizedAssetRegion,
@@ -13,6 +16,10 @@ import {
   type IntelligentAsset,
   type RoomContextItem,
 } from "../../src/lib/assetIntelligence";
+
+const SPA_HTML = "<!doctype html><html><body>duigao</body></html>";
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const cloudAssets = () => readFileSync(resolve(ROOT, "src/cloud/assetIntelligence.ts"), "utf8");
 
 const versions = [
   { id: "v-old", branchId: "poster-1", label: "初稿", archivedAt: undefined },
@@ -115,6 +122,25 @@ test("latest version and content hash are the analysis reuse boundary", () => {
   assert.match(source, /content_hash/);
   assert.match(source, /analysis_version/);
   assert.match(source, /stage:\s*"dedupe"/);
+});
+
+test("asset-analysis SPA HTML and empty objects are not queued success", () => {
+  assert.throws(() => acceptAssetAnalysisPayload(SPA_HTML), (err: Error & { code?: string }) => err.code === "SPA_HTML");
+  assert.throws(() => acceptAssetAnalysisPayload({}), (err: Error & { code?: string }) => err.code === "INVALID_PAYLOAD");
+  assert.throws(() => acceptAssetAnalysisPayload({ ok: true }), (err: Error & { code?: string }) => err.code === "INVALID_PAYLOAD");
+  assert.throws(() => acceptAssetAnalysisPayload({ error: "QUEUE_FAILED" }), (err: Error & { code?: string }) => err.code === "QUEUE_FAILED");
+  assert.deepEqual(acceptAssetAnalysisPayload({ assetId: "a1", jobId: "j1", status: "queued" }), { jobId: "j1" });
+});
+
+test("enqueue / retry / askRoomContext wire the shared SPA gate (no import.meta.env)", () => {
+  const src = cloudAssets();
+  assert.match(src, /acceptAssetAnalysisPayload/);
+  assert.match(src, /parseFunctionPayload/);
+  assert.match(src, /looksLikeSpaHtml|SPA_HTML/);
+  assert.match(src, /enqueueAssetAnalysis[\s\S]*acceptAssetAnalysisPayload/);
+  assert.match(src, /retryAssetAnalysis[\s\S]*acceptAssetAnalysisPayload/);
+  assert.match(src, /askRoomContext[\s\S]*parseFunctionPayload/);
+  assert.doesNotMatch(src, /if \(error\) throw error;\s*\n\s*const response = sanitizeRoomAnswer/);
 });
 
 test("Room Context API adapter uses HMAC and bounded evidence", () => {

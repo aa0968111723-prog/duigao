@@ -164,11 +164,13 @@ test("voiceUnavailableReason is 語音服務尚未設定 (not a fake connected s
   assert.doesNotMatch(voice, /語音房間還在準備，這一版先把討論和白板做好/);
 });
 
-test("voice / canva / cutos clients call parseFunctionPayload", () => {
+test("voice / canva / cutos / assetIntelligence clients call parseFunctionPayload", () => {
   const voice = readFileSync(resolve(ROOT, "src/cloud/voiceToken.ts"), "utf8");
   const canva = readFileSync(resolve(ROOT, "src/cloud/canva.ts"), "utf8");
   const cutos = readFileSync(resolve(ROOT, "src/cloud/cutos.ts"), "utf8");
-  for (const [name, src] of [["voiceToken", voice], ["canva", canva], ["cutos", cutos]] as const) {
+  const assets = readFileSync(resolve(ROOT, "src/cloud/assetIntelligence.ts"), "utf8");
+  const payload = readFileSync(resolve(ROOT, "src/cloud/assetAnalysisPayload.ts"), "utf8");
+  for (const [name, src] of [["voiceToken", voice], ["canva", canva], ["cutos", cutos], ["assetIntelligence", assets], ["assetAnalysisPayload", payload]] as const) {
     assert.match(src, /parseFunctionPayload/, `${name} must parse payloads`);
     assert.match(src, /looksLikeSpaHtml|SPA_HTML|contentType/, `${name} must reject HTML`);
   }
