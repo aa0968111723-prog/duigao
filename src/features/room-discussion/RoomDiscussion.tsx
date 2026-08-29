@@ -69,6 +69,8 @@ export type RoomDiscussionApi = {
   onRetry?: (messageId: string) => void;
   /** 決定條預設顯示；single 房 drawer 對 reviewer 關閉。 */
   showDecisions?: boolean;
+  /** 待辦預設顯示。平板 Split View 側欄關掉，避免第一層被待辦佔滿。 */
+  showTodos?: boolean;
   /** 白板/投票等房間層動作；single 房 drawer 對 reviewer 關閉。 */
   showRoomActions?: boolean;
   /** 語音邊界說明；single 房 drawer 不顯示（語音是房間殼的事）。 */
@@ -228,6 +230,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [todoDraftOpen, setTodoDraftOpen] = useState(false);
 
   const showDecisions = api.showDecisions ?? true;
+  const showTodos = api.showTodos ?? true;
   const showRoomActions = api.showRoomActions ?? true;
   const decided = api.decisions.filter((item) => item.status === "decided");
   const pending = api.decisions.filter((item) => item.status === "pending");
@@ -476,6 +479,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       </section>
       )}
 
+      {showTodos && (
       <section className="rd-todos" data-testid="discussion-todo">
         <div className="project-section-title-row">
           <h3>待辦</h3>
@@ -529,6 +533,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         ))}
         {!todos.length && <p className="project-muted">還沒有待辦</p>}
       </section>
+      )}
 
       <div className="rd-feed" data-testid="discussion-feed">
         {messages.map((message) => {

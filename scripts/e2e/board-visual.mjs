@@ -125,7 +125,7 @@ try {
     await page.getByRole("button", { name: "建立白板" }).click();
     await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
     // 回列表拍「板清單」狀態
-    await page.locator(".wb-focus-top .project-back-button").click();
+    await page.locator(".wb-focus-top .project-back-button").click({ force: true });
     await page.waitForSelector(".wb-list", { timeout: 10000 });
     await shot(page, `${size.name}-list`);
 

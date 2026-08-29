@@ -140,6 +140,7 @@ test("M-08 adversarial: 跨房提及、提及不可改、todo 非作者／非成
   assert.match(e2e, /檢視者不能完成別人的待辦/);
   assert.match(e2e, /非成員不能把別房待辦標完成/);
   assert.match(e2e, /不能改別人的未讀水位/);
+  assert.match(src("src/features/multi-room/MultiBranchRoom.tsx"), /showTodos: false/);
   assert.match(src("src/features/room-discussion/RoomDiscussion.tsx"), /canCompleteRoomTodo/);
   assert.doesNotMatch(src("src/features/room-discussion/RoomDiscussion.tsx"), /canCompleteTodo\(api\.userId\)/);
   assert.equal(existsSync(resolve(ROOT, "supabase/migrations/0033_discussion_receipts.sql")), false);
