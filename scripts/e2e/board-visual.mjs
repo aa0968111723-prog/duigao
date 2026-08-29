@@ -10,9 +10,11 @@
  * duigao 是單主題深色設計（styles.css 無 light 分支）— 主題軸不存在，
  * 假拍 24 張是造假覆蓋。若未來加入淺色主題，此矩陣 ×2。
  *
- * 比對：pixelmatch，容差 **絕對值** maxDiffPixels=800（比例容差在大
- * 視窗可藏數千 px 差異 — Grok wb00 F8）。基準缺失＝建立並以 exit 2 提示
- * commit；差異超標＝exit 1 並輸出 diff PNG。
+ * 比對：pixelmatch，容差 **絕對值** maxDiffPixels=2000（比例容差在大
+ * 視窗可藏數萬 px 差異 — Grok wb00 F8）。800 在 Linux CI vs Windows
+ * 基準下會被 Noto CJK 柵格化單獨打穿（實測 819–1193）；2000 仍遠低於
+ * 殼層變了的 7 萬 px。基準缺失＝建立並以 exit 2 提示 commit；差異超標
+ * ＝exit 1 並輸出 diff PNG。
  * 更新基準：UPDATE_VISUAL=1 npm run test:visual
  */
 import { chromium } from "playwright";
@@ -29,7 +31,7 @@ const BASELINE_DIR = join(ROOT, "scripts", "e2e", "visual-baselines");
 const OUT_DIR = join(ROOT, "output", "visual");
 const MOCK_PORT = Number(process.env.DUIGAO_E2E_MOCK_PORT || 54421);
 const APP_PORT = Number(process.env.DUIGAO_E2E_APP_PORT || 4191);
-const MAX_DIFF_PIXELS = 800;
+const MAX_DIFF_PIXELS = 2000;
 const UPDATE = process.env.UPDATE_VISUAL === "1";
 
 const SIZES = [
