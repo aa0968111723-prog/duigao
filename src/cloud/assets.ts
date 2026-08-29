@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { acceptStorageUpload } from "./discussionWrite";
 import { CloudError } from "./errors";
 
 export const ASSET_BUCKET = "room-assets";
@@ -68,8 +69,17 @@ export function attachmentPath(roomId: string, messageId: string, assetId: strin
 
 /** 附件上傳：upsert:false — 物件一旦落地不可被同名覆蓋（原稿不可變）。 */
 export async function uploadAttachment(supabase: SupabaseClient, path: string, blob: Blob, mime: string): Promise<string> {
-  const { error } = await supabase.storage.from(ASSET_BUCKET).upload(path, blob, { contentType: mime, upsert: false });
-  if (error) throw new CloudError(error.message, "storage");
+  const { data, error } = await supabase.storage.from(ASSET_BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+  const accepted = acceptStorageUpload({ error, data, expectedPath: path });
+  if (!accepted.ok) {
+    const text =
+      accepted.code === "SPA_HTML"
+        ? "SPA_HTML"
+        : accepted.code === "INCOMPLETE"
+          ? "upload incomplete"
+          : error?.message ?? "storage";
+    throw new CloudError(text, "storage");
+  }
   return path;
 }
 

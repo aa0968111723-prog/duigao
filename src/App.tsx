@@ -563,6 +563,7 @@ export function App() {
     boundRoomId: cloud.boundRoomId ?? null,
     localRoomId: room?.id ?? null,
     serverIds: serverDiscussionIds,
+    ownerId: cloud.userId ?? guest?.id ?? null,
   });
   const discussionOutboxRef = useRef(discussionOutbox);
   discussionOutboxRef.current = discussionOutbox;
@@ -1549,6 +1550,7 @@ export function App() {
   // 永不重新上傳）。上傳失敗 → 沒有任何列，重選檔會鑄新 assetId。
   const attachmentBusy = useRef(false);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachUpload, setAttachUpload] = useState<import("./cloud/discussionWrite").DiscussionAttachUpload | null>(null);
   const sendAttachment = useCallback(
     async (files: File[]) => {
       const file = files[0];
@@ -1566,9 +1568,22 @@ export function App() {
         showToast("還在連上雲端，稍等一下再附檔。", { tone: "error" });
         return;
       }
+      const supabase = getSupabase();
+      if (!supabase) {
+        showToast("雲端服務尚未設定，無法上傳附件。討論文字仍可使用。", { tone: "error" });
+        return;
+      }
       if (attachmentBusy.current) return; // 上傳中不接受第二件（防雙擊）
       attachmentBusy.current = true;
       setAttachmentUploading(true);
+      const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+      setAttachUpload({
+        phase: "uploading",
+        name: file.name,
+        previewUrl,
+        percent: 10,
+        message: "正在上傳…",
+      });
       try {
         const messageId = uuid();
         const mime = file.type || "application/octet-stream";
@@ -1585,7 +1600,7 @@ export function App() {
           }
         }
         const path = attachmentPath(roomId, messageId, uuid(), attachmentExt(mime, file.name));
-        await uploadAttachment(getSupabase()!, path, file, mime);
+        await uploadAttachment(supabase, path, file, mime);
         sendDiscussion({
           id: messageId,
           kind: "attachment",
@@ -1599,8 +1614,18 @@ export function App() {
             ...(planform ? { planform } : {}),
           },
         });
-      } catch {
-        showToast("附件沒有上傳成功，請再試一次。", { tone: "error" });
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        setAttachUpload(null);
+      } catch (err) {
+        const spa = err instanceof Error && err.message === "SPA_HTML";
+        setAttachUpload({
+          phase: "failed",
+          name: file.name,
+          previewUrl,
+          percent: 0,
+          message: spa ? "上傳失敗（不是有效的雲端回應）。" : "上傳失敗，請再試一次。",
+        });
+        showToast(spa ? "上傳失敗，沒有寫進雲端。" : "附件沒有上傳成功，請再試一次。", { tone: "error" });
       } finally {
         attachmentBusy.current = false;
         setAttachmentUploading(false);
@@ -2773,6 +2798,7 @@ export function App() {
           onSupport={supportDiscussion}
           onAttach={(files) => void sendAttachment(files)}
           attachBusy={attachmentUploading}
+          attachUpload={attachUpload}
           onReject={(reason) => showToast(reason, { tone: "error" })}
           onSendLink={sendLink}
           resolveAssetUrl={resolveAssetUrl}
@@ -3043,6 +3069,7 @@ export function App() {
           onBoardDragState: (ids) => { draggingNodeIds.current = ids ? new Set(ids) : null; },
           onAttachDiscussion: (files) => void sendAttachment(files),
           attachBusy: attachmentUploading,
+          attachUpload,
           onIntakeReject: (reason) => showToast(reason, { tone: "error" }),
           onSendDiscussionLink: sendLink,
           resolveAssetUrl,

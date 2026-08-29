@@ -29,6 +29,7 @@ export function DiscussionDrawer({
   onSupport,
   onAttach,
   attachBusy,
+  attachUpload,
   onReject,
   onSendLink,
   resolveAssetUrl,
@@ -47,6 +48,7 @@ export function DiscussionDrawer({
   onSupport: (messageId: string, add: boolean) => void;
   onAttach?: (files: File[]) => void;
   attachBusy?: boolean;
+  attachUpload?: import("../../cloud/discussionWrite").DiscussionAttachUpload | null;
   onReject?: (reason: string) => void;
   onSendLink?: (url: string, reply?: { replyToId: string; quotedBody: string }) => boolean;
   resolveAssetUrl?: (path: string) => Promise<string>;
@@ -109,6 +111,7 @@ export function DiscussionDrawer({
           showVoiceNote: false,
           onAttach,
           attachBusy,
+          attachUpload,
           onReject,
           onSendLink,
           resolveAssetUrl,

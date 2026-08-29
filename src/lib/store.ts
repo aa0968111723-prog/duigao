@@ -104,22 +104,40 @@ type StoredOutboxRow = {
   message: DiscussionMessage;
   state: "sending" | "failed" | "acked";
   autoRetried?: boolean;
+  ownerId?: string;
 };
 
-export async function saveOutboxEntries(entries: Record<string, Omit<StoredOutboxRow, "id">>): Promise<void> {
+function rowVisibleToOwner(row: StoredOutboxRow, ownerId: string | null): boolean {
+  if (!ownerId) return false;
+  if (row.ownerId) return row.ownerId === ownerId;
+  return row.message?.authorId === ownerId;
+}
+
+export async function saveOutboxEntries(
+  ownerId: string,
+  entries: Record<string, Omit<StoredOutboxRow, "id">>,
+): Promise<void> {
   const db = await openDb();
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(DISCUSSION_OUTBOX, "readwrite");
       const store = tx.objectStore(DISCUSSION_OUTBOX);
-      const req = store.getAllKeys();
+      const req = store.getAll();
       req.onsuccess = () => {
+        const rows = (req.result as StoredOutboxRow[]) ?? [];
         const keep = new Set(Object.keys(entries));
-        for (const key of req.result) {
-          if (!keep.has(String(key))) store.delete(key);
+        for (const row of rows) {
+          if (!rowVisibleToOwner(row, ownerId)) continue;
+          if (!keep.has(row.id)) store.delete(row.id);
         }
         for (const [id, entry] of Object.entries(entries)) {
-          store.put({ id, message: entry.message, state: entry.state, autoRetried: entry.autoRetried } satisfies StoredOutboxRow);
+          store.put({
+            id,
+            message: entry.message,
+            state: entry.state,
+            autoRetried: entry.autoRetried,
+            ownerId,
+          } satisfies StoredOutboxRow);
         }
       };
       tx.oncomplete = () => resolve();
@@ -130,7 +148,8 @@ export async function saveOutboxEntries(entries: Record<string, Omit<StoredOutbo
   }
 }
 
-export async function loadOutboxEntries(): Promise<Record<string, Omit<StoredOutboxRow, "id">>> {
+export async function loadOutboxEntries(ownerId: string | null): Promise<Record<string, Omit<StoredOutboxRow, "id">>> {
+  if (!ownerId) return {};
   const db = await openDb();
   try {
     const rows = await new Promise<StoredOutboxRow[]>((resolve, reject) => {
@@ -142,7 +161,8 @@ export async function loadOutboxEntries(): Promise<Record<string, Omit<StoredOut
     const entries: Record<string, Omit<StoredOutboxRow, "id">> = {};
     for (const row of rows) {
       if (!row?.id || !row.message) continue;
-      entries[row.id] = { message: row.message, state: row.state, autoRetried: row.autoRetried };
+      if (!rowVisibleToOwner(row, ownerId)) continue;
+      entries[row.id] = { message: row.message, state: row.state, autoRetried: row.autoRetried, ownerId: row.ownerId ?? ownerId };
     }
     return entries;
   } finally {
