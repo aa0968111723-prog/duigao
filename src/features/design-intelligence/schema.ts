@@ -546,7 +546,7 @@ function canonicalContent(title: string, summary: string, rules: readonly string
  *
  * 用途是偵測「同一份知識被重複匯入」與「內容被悄悄改掉」，**不是密碼學用途**，
  * 也不是資料庫的判重依據 —— DB 的 `content_hash` 由 trigger 自己算
- * （見 `0027_design_knowledge.sql`），呼叫端給什麼都會被覆蓋。兩者刻意分開：
+ * （見 `0029_design_knowledge.sql`），呼叫端給什麼都會被覆蓋。兩者刻意分開：
  * 這一個是本地變更偵測，那一個是唯一索引的權威來源，不互相比較。
  *
  * 不用 `crypto.subtle`：那是非同步的，會逼整個純函式層變 async。

@@ -1503,8 +1503,8 @@ try {
   ok("重跑 0020 後 RLS / policy 形狀不變（true/true/0）", canvaBefore === canvaShape() && canvaBefore === "true/true/0", `${canvaBefore} → ${canvaShape()}`);
   ok("重跑後成員依然讀不到 token 表", as(owner, `select count(*) from public.canva_connections;`).failed);
 
-  section("0027：設計知識庫（兩段式授權）");
-  psqlFile(join(MIGRATIONS, "0027_design_knowledge.sql"));
+  section("0029：設計知識庫（兩段式授權）");
+  psqlFile(join(MIGRATIONS, "0029_design_knowledge.sql"));
 
   // (a) seed：通用知識進得去，而且是 approved
   ok(
@@ -1648,11 +1648,11 @@ try {
     (select count(*) from pg_policies where tablename = 'design_knowledge') || '/' ||
     (select count(*) from public.design_knowledge where project_specific is null);`).out;
   const knBefore = knShape();
-  psqlFile(join(MIGRATIONS, "0027_design_knowledge.sql"));
-  ok("重跑 0027 後 policy 數與 seed 筆數不變", knBefore === knShape(), `${knBefore} → ${knShape()}`);
+  psqlFile(join(MIGRATIONS, "0029_design_knowledge.sql"));
+  ok("重跑 0029 後 policy 數與 seed 筆數不變", knBefore === knShape(), `${knBefore} → ${knShape()}`);
 
-  section("0028：外部研究使用量（append-only、後端才能寫）");
-  psqlFile(join(MIGRATIONS, "0028_design_research_usage.sql"));
+  section("0030：外部研究使用量（append-only、後端才能寫）");
+  psqlFile(join(MIGRATIONS, "0030_design_research_usage.sql"));
 
   // 用**真的 service_role**寫一筆（edge function 走的就是這條路）。
   //
@@ -1689,7 +1689,7 @@ try {
   );
 
   // 補一條：**只有 select 被 grant 給 authenticated**。
-  // 這是 0028 與 0019 的稽核表最大的差別，而檔頭原本抄錯了 0019 的說法。
+  // 這是 0030 與 0019 的稽核表最大的差別，而檔頭原本抄錯了 0019 的說法。
   // **RLS 不管 TRUNCATE。** 任何登入者能 truncate，等於所有 policy 都白寫。
   ok(
     "登入者 truncate 不掉使用量表",
@@ -1713,8 +1713,8 @@ try {
     (select count(*) from pg_policies where tablename = 'design_research_usage') || '/' ||
     (select count(*) from public.design_research_usage);`).out;
   const usageBefore = usageShape();
-  psqlFile(join(MIGRATIONS, "0028_design_research_usage.sql"));
-  ok("重跑 0028 後 policy 數與資料不變", usageBefore === usageShape(), `${usageBefore} → ${usageShape()}`);
+  psqlFile(join(MIGRATIONS, "0030_design_research_usage.sql"));
+  ok("重跑 0030 後 policy 數與資料不變", usageBefore === usageShape(), `${usageBefore} → ${usageShape()}`);
 
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
