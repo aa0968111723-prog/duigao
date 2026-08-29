@@ -30,7 +30,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isDuplicateKey, isInvalidInvite, isPermissionDenied, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -314,6 +314,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteInvalid, setInviteInvalid] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   /**
    * This visitor's capability in the bound room. Null until the first snapshot
    * lands (and in a local-only session); the UI treats "unknown" as "cannot
@@ -408,7 +409,14 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       // is exactly the "at least reload after reconnect" the spec asks for.
       const selectedMediaType = selectedBranch?.branchType === "video" ? "video" : roomMediaType(nextRoom);
       void reloadReview(rid, selectedMediaType);
-    } catch {
+    } catch (err) {
+      // Join already succeeded; a later rooms/versions RLS denial is not a
+      // flaky retry and must not look like an empty room.
+      if (isPermissionDenied(err)) {
+        setPermissionDenied(true);
+        setStatus("error");
+        throw err;
+      }
       setStatus("error");
     }
   }, [supabase, onSnapshot, reloadReview]);
@@ -605,6 +613,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     unsubRef.current = null;
     setStatus("connecting");
     setInviteInvalid(false);
+    setPermissionDenied(false);
     (async () => {
       try {
         const sessionUserId = await ensureSession(supabase);
@@ -644,10 +653,11 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
             }
           });
         });
+        try {
         // presence key 必須與 cloud.userId 同源（P8）：舊寫法用 getUser()
         // （會打網路，失敗回 "anon"），自我過濾卻比對 ensureSession 的 id —
         // 兩者分歧時使用者會在「也在這塊板」看到自己。
-        unsubRef.current = subscribeRoom(supabase, targetRoomId, sessionUserIdRef.current ?? "anon", {
+        unsubRef.current = await subscribeRoom(supabase, targetRoomId, sessionUserIdRef.current ?? "anon", {
           onRoom: scheduleReload,
           onCommentUpsert: scheduleReload,
           onStrokeInsert: scheduleReload,
@@ -696,14 +706,28 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
               if (activeWhiteboardRef.current) void loadWhiteboard(activeWhiteboardRef.current);
               reviveExtraRef.current?.(); // frames 不在 graph 裡，另外補（R2）
             }
-            setStatus((s) => (connected ? (pending.current.length ? "offline-pending" : "synced") : "connecting"));
+            setStatus((s) => {
+              if (connected) return pending.current.length ? "offline-pending" : "synced";
+              // A loaded snapshot is not "正在確認身分". Realtime drop stays
+              // on the last honest room state until the next successful bind.
+              if (s === "synced" || s === "offline-pending" || s === "error") return s;
+              return "connecting";
+            });
           },
         });
+        } catch {
+          // Snapshot already landed. Realtime is transient; a leftover channel
+          // must not turn a loaded empty room into a fake load-error.
+          unsubRef.current = () => undefined;
+        }
       } catch (err) {
         if (cancelled) return;
         if (isInvalidInvite(err)) {
           setInviteInvalid(true);
           showToast("這個分享連結已失效，請向主辦方取得新連結", { tone: "error" });
+        } else if (isPermissionDenied(err)) {
+          setPermissionDenied(true);
+          showToast("沒有權限進入這個房間", { tone: "error" });
         }
         setStatus("error");
       }
@@ -751,6 +775,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   /** 再試一次: reload when bound, otherwise redo auth + join + load from scratch. */
   const retry = useCallback(() => {
     setInviteInvalid(false);
+    setPermissionDenied(false);
     if (boundRef.current) {
       void (async () => {
         await flushPending();
@@ -1202,6 +1227,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     online,
     inviteUrl,
     inviteInvalid,
+    permissionDenied,
     boundRoomId: boundRef.current,
     role,
     // A local-only room has no membership row and no server to ask; it belongs
