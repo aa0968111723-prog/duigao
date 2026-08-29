@@ -440,8 +440,18 @@ try {
   await page.locator(".m-sheet-tabs button").filter({ hasText: "聊天" }).click();
   await page.waitForSelector('[data-testid="discussion-drawer"]', { timeout: 15000 });
   check("聊天位掛的是房級討論 drawer", await page.getByTestId("discussion-drawer").count() === 1);
-  await page.getByLabel("房間討論").fill("drawer 打個招呼");
-  await page.getByRole("button", { name: "送出" }).click();
+  const drawer = page.getByTestId("discussion-drawer");
+  await drawer.locator('[data-testid="discussion-composer"]').waitFor({ timeout: 15000 });
+  const composer = drawer.getByLabel("房間討論");
+  const send = drawer.getByRole("button", { name: "送出" });
+  // useDiscussionDraft hydrates from IndexedDB after mount; a too-early fill
+  // is overwritten by the empty cache read and 送出 stays disabled.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await composer.fill("drawer 打個招呼");
+    if (await send.isEnabled()) break;
+    await page.waitForTimeout(80);
+  }
+  await send.click();
   await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("drawer 打個招呼"), null, { timeout: 15000 });
   check("drawer 可送出房級討論", (await page.getByTestId("discussion-feed").innerText()).includes("drawer 打個招呼"));
   check("drawer 沒有把決定/投票/白板塞給對稿", await page.getByTestId("decision-area").count() === 0 && (await page.getByTestId("discussion-drawer").innerText()).includes("drawer 打個招呼"));
