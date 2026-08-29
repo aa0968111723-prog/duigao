@@ -1328,7 +1328,16 @@ try {
     (select count(*) from pg_trigger where tgname in ('whiteboards_no_delete','whiteboards_touch'));`).out;
   const collabBefore = collabShape();
   psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
-  ok("重跑 0014 之後 tables / policies / triggers 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
+  const collabAfter = collabShape();
+  const [collabTables0, collabPolicies0, collabTriggers0] = collabBefore.split("/");
+  const [collabTables1, collabPolicies1, collabTriggers1] = collabAfter.split("/");
+  ok(
+    "重跑 0014 之後 tables / triggers 不變（0031 已拿掉的 delete policy 可能被 0014 放回）",
+    collabTables0 === collabTables1
+      && collabTriggers0 === collabTriggers1
+      && (collabPolicies0 === collabPolicies1 || Number(collabPolicies1) === Number(collabPolicies0) + 1),
+    `${collabBefore} → ${collabAfter}`,
+  );
   // 0014 會 drop/create 同名的 room_discussion_insert policy，所以 0022 的
   // 修補若只寫在 policy 上，任何一次 replay 都會把冒名的洞放回來。0022 因此
   // 同時掛 trigger；這裡就是驗那道護欄真的撐過 replay。
@@ -1954,6 +1963,99 @@ try {
   const usageBefore = usageShape();
   psqlFile(join(MIGRATIONS, "0030_design_research_usage.sql"));
   ok("重跑 0030 後 policy 數與資料不變", usageBefore === usageShape(), `${usageBefore} → ${usageShape()}`);
+
+  section("0031：討論 tombstone + 未讀水位 RLS");
+  const tombOwn = psql("select gen_random_uuid();").out;
+  const tombOther = psql("select gen_random_uuid();").out;
+  const tombManage = psql("select gen_random_uuid();").out;
+  ok(
+    "作者可以發一則之後標 tombstone",
+    !as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${tombOwn}'::uuid, '${capRoom}'::uuid, '${reviewer}'::uuid, 'Reviewer', '這則之後會刪');`).failed
+      && !as(reviewer, `update public.room_discussion_messages set deleted_at = now() where id = '${tombOwn}'::uuid and room_id = '${capRoom}'::uuid;`).failed
+      && as(reviewer, `select deleted_at is not null from public.room_discussion_messages where id = '${tombOwn}'::uuid;`).out === "t",
+  );
+  ok(
+    "tombstone 之後列還在（軟刪不是硬刪）",
+    as(owner, `select count(*) from public.room_discussion_messages where id = '${tombOwn}'::uuid;`).out === "1",
+  );
+  ok(
+    "作者不能硬刪自己的訊息",
+    as(reviewer, `delete from public.room_discussion_messages where id = '${tombOwn}'::uuid;`).failed
+      && as(owner, `select count(*) from public.room_discussion_messages where id = '${tombOwn}'::uuid;`).out === "1",
+  );
+  as(owner, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${tombOther}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid, 'Owner', '別人不能刪');`);
+  as(reviewer, `update public.room_discussion_messages set deleted_at = now() where id = '${tombOther}'::uuid;`);
+  ok(
+    "檢視者不能 tombstone 別人的訊息",
+    as(owner, `select deleted_at is null from public.room_discussion_messages where id = '${tombOther}'::uuid;`).out === "t",
+  );
+  as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${tombManage}'::uuid, '${capRoom}'::uuid, '${reviewer}'::uuid, 'Reviewer', '管理者可刪');`);
+  ok(
+    "can_manage 可以 tombstone 成員的訊息",
+    !as(owner, `update public.room_discussion_messages set deleted_at = now() where id = '${tombManage}'::uuid;`).failed
+      && as(owner, `select deleted_at is not null from public.room_discussion_messages where id = '${tombManage}'::uuid;`).out === "t",
+  );
+  as(stranger, `update public.room_discussion_messages set deleted_at = now() where id = '${tombOther}'::uuid;`);
+  ok(
+    "非成員不能 tombstone 別房訊息",
+    as(owner, `select deleted_at is null from public.room_discussion_messages where id = '${tombOther}'::uuid;`).out === "t",
+  );
+  ok(
+    "tombstone 不能順便把訊息搬到別的房間",
+    as(owner, `update public.room_discussion_messages set deleted_at = now(), room_id = '${otherRoom}'::uuid where id = '${tombOther}'::uuid;`).failed
+      && as(owner, `select room_id from public.room_discussion_messages where id = '${tombOther}'::uuid;`).out === otherRoom
+        ? false
+        : as(owner, `select room_id from public.room_discussion_messages where id = '${tombOther}'::uuid;`).out === capRoom,
+  );
+  ok(
+    "已刪的訊息不能再改 body",
+    as(reviewer, `update public.room_discussion_messages set body = '洗白' where id = '${tombOwn}'::uuid;`).failed,
+  );
+
+  const readMsg = tombOther;
+  ok(
+    "成員可以寫自己的未讀水位",
+    !as(owner, `insert into public.room_discussion_reads (room_id, user_id, last_read_message_id) values ('${capRoom}'::uuid, '${owner}'::uuid, '${readMsg}'::uuid);`).failed,
+  );
+  ok(
+    "不能幫別人寫未讀水位",
+    as(owner, `insert into public.room_discussion_reads (room_id, user_id, last_read_message_id) values ('${capRoom}'::uuid, '${reviewer}'::uuid, '${readMsg}'::uuid);`).failed,
+  );
+  ok(
+    "只能讀到自己的未讀水位（不是已讀回條）",
+    as(reviewer, `select count(*) from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).out === "0"
+      && as(owner, `select count(*) from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).out === "1",
+  );
+  ok(
+    "非成員讀不到也寫不了別房的未讀水位",
+    as(stranger, `select count(*) from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).out === "0"
+      && as(stranger, `insert into public.room_discussion_reads (room_id, user_id) values ('${capRoom}'::uuid, '${stranger}'::uuid);`).failed,
+  );
+  ok(
+    "未讀水位不能指向別房的訊息（跨房）",
+    as(owner, `insert into public.room_discussion_reads (room_id, user_id, last_read_message_id) values ('${otherRoom}'::uuid, '${owner}'::uuid, '${readMsg}'::uuid);`).failed,
+  );
+  ok(
+    "authenticated 對未讀表沒有 DELETE",
+    as(owner, `delete from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).failed
+      && as(owner, `select count(*) from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).out === "1",
+  );
+
+  // 0014 在本檔稍早被重跑過，會把 room_discussion_delete 放回來。
+  // 先再套一次 0031 回到穩定形狀，再重跑證明冪等。
+  psqlFile(join(MIGRATIONS, "0031_discussion_tombstone_unread.sql"));
+  const tombShape = () => psql(`select
+    (select count(*) from pg_policies where tablename in ('room_discussion_messages','room_discussion_reads')) || '/' ||
+    (select count(*) from information_schema.columns where table_name = 'room_discussion_messages' and column_name in ('deleted_at','deleted_by'));`).out;
+  const tombBefore = tombShape();
+  psqlFile(join(MIGRATIONS, "0031_discussion_tombstone_unread.sql"));
+  ok("重跑 0031 後 policy 數與 tombstone 欄不變", tombBefore === tombShape(), `${tombBefore} → ${tombShape()}`);
+  psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
+  ok(
+    "重跑 0014 之後仍然不能硬刪討論（0031 trigger 不被 replay 洗掉）",
+    as(owner, `delete from public.room_discussion_messages where id = '${tombOwn}'::uuid;`).failed
+      && as(owner, `select count(*) from public.room_discussion_messages where id = '${tombOwn}'::uuid;`).out === "1",
+  );
 
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {

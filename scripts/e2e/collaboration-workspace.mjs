@@ -251,6 +251,42 @@ try {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
+    await page.getByTestId("discussion-tombstone-btn").first().click();
+    check("tombstone 畫墓碑，不是消失", await page.getByTestId("discussion-tombstone").count() >= 1);
+    check("tombstone 之後列還在 feed", await page.locator('[data-testid^="discussion-"]').count() >= 1);
+    check("tombstone 畫面沒有已讀回條", !(await page.getByTestId("discussion-feed").innerText()).includes("已讀"));
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_tombstone_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_tombstone_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+
+    await page.locator("[data-tombstone='true']").first().scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => {
+      const end = document.querySelector('[data-testid="discussion-feed-end"]');
+      if (!end) return true;
+      return end.getBoundingClientRect().top > window.innerHeight - 40;
+    }, null, { timeout: 5000 }).catch(() => undefined);
+    await page.getByLabel("房間討論").fill("後到的一句");
+    await page.getByRole("button", { name: "送出" }).click();
+    await page.waitForFunction(() => document.body.innerText.includes("後到的一句"), null, { timeout: 8000 });
+    await page.getByLabel("房間討論").fill("再留一句");
+    await page.getByRole("button", { name: "送出" }).click();
+    await page.waitForFunction(() => document.body.innerText.includes("再留一句"), null, { timeout: 8000 });
+    const unreadJump = page.getByTestId("jump-first-unread");
+    check("第一則未讀可跳", await unreadJump.count() === 1);
+    if (await unreadJump.count()) {
+      await unreadJump.click({ force: true });
+      check("未讀跳到水位之後", await page.locator('[data-first-unread="true"]').count() === 1);
+    }
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_unread_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_unread_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+
     await page.getByRole("button", { name: "白板", exact: true }).click();
     await page.getByLabel("白板名稱").fill("招生規劃");
     await page.getByRole("button", { name: "建立白板" }).click();

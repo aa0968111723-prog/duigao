@@ -46,7 +46,7 @@ const tables = {
   // 同房多分支 1.0
   room_branches: [], plan_documents: [], content_relations: [], room_polls: [], room_poll_votes: [],
   whiteboards: [], whiteboard_nodes: [], whiteboard_edges: [],
-  room_discussion_messages: [], room_discussion_supports: [], decision_records: [],
+  room_discussion_messages: [], room_discussion_supports: [], room_discussion_reads: [], decision_records: [],
   voice_sessions: [], voice_session_participants: [], presentation_state: [],
   canva_connections: [], canva_oauth_states: [],
   whiteboard_frames: [], whiteboard_operations: [], whiteboard_versions: [],
@@ -70,6 +70,7 @@ const CONFLICT_KEYS = {
   // duplicate 被 client 折成成功，mock 資料列根本沒變＝e2e 全程假綠。
   whiteboard_frames: ["id"],
   room_discussion_supports: ["message_id", "user_id"],
+  room_discussion_reads: ["room_id", "user_id"],
   presentation_state: ["room_id"],
   version_review_briefs: ["version_id"],
   version_verdicts: ["version_id", "user_id"],
@@ -789,7 +790,7 @@ export const server = http.createServer(async (req, res) => {
       const rows = filterRows(tables[table], url.searchParams).filter((r) => isMember(r.room_id, uid));
       // Only the row's owner may edit their own verdict / progress, exactly as
       // the RLS policies say.
-      if (["version_verdicts", "version_review_progress", "video_reactions"].includes(table)) {
+      if (["version_verdicts", "version_review_progress", "video_reactions", "room_discussion_reads"].includes(table)) {
         if (rows.some((r) => r.user_id !== uid)) {
           return json(res, 403, { message: "new row violates row-level security policy" });
         }

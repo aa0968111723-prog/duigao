@@ -102,7 +102,7 @@ test("D-06: 附件引用走 reply_to_id，不是假的已讀", () => {
 
 test("D-07: 未建模的提及／未讀／回條／tombstone 不得假裝存在", () => {
   const ws = src("src/features/room-discussion/RoomDiscussion.tsx");
-  assert.doesNotMatch(ws, /已讀|雙藍勾|read receipt/i);
+  assert.doesNotMatch(ws, /雙藍勾|read receipt|(?<!未)已讀/i);
   assert.match(ws, /onEditMessage|discussion-edit|已編輯/);
   assert.match(ws, /composer-cite-work|cite-work/);
   assert.match(ws, /decision-draft/);

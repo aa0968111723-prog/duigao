@@ -3,12 +3,13 @@ import type { Guest, Room } from "./types";
 import type { RoomContextResponse } from "./assetIntelligence";
 
 const DB_NAME = "duigao";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const ROOMS = "rooms";
 const AI_CONTEXTS = "ai-contexts";
 const UPLOAD_SESSIONS = "upload-sessions";
 const DISCUSSION_OUTBOX = "discussion-outbox";
 const DISCUSSION_DRAFTS = "discussion-drafts";
+const DISCUSSION_READS = "discussion-reads";
 const GUEST_KEY = "duigao.guest";
 
 function openDb(): Promise<IDBDatabase> {
@@ -30,6 +31,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(DISCUSSION_DRAFTS)) {
         db.createObjectStore(DISCUSSION_DRAFTS, { keyPath: "roomKey" });
+      }
+      if (!db.objectStoreNames.contains(DISCUSSION_READS)) {
+        db.createObjectStore(DISCUSSION_READS, { keyPath: "key" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -182,6 +186,49 @@ export async function saveDiscussionDraft(roomKey: string, body: string): Promis
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export type StoredDiscussionRead = {
+  key: string;
+  roomId: string;
+  userId: string;
+  lastReadMessageId?: string;
+  lastReadAt: number;
+};
+
+function discussionReadKey(roomId: string, userId: string): string {
+  return `${roomId}:${userId}`;
+}
+
+export async function saveDiscussionRead(entry: Omit<StoredDiscussionRead, "key">): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(DISCUSSION_READS, "readwrite");
+      tx.objectStore(DISCUSSION_READS).put({
+        key: discussionReadKey(entry.roomId, entry.userId),
+        ...entry,
+      } satisfies StoredDiscussionRead);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadDiscussionReadLocal(roomId: string, userId: string): Promise<StoredDiscussionRead | null> {
+  const db = await openDb();
+  try {
+    return await new Promise<StoredDiscussionRead | null>((resolve, reject) => {
+      const tx = db.transaction(DISCUSSION_READS, "readonly");
+      const req = tx.objectStore(DISCUSSION_READS).get(discussionReadKey(roomId, userId));
+      req.onsuccess = () => resolve((req.result as StoredDiscussionRead | undefined) ?? null);
+      req.onerror = () => reject(req.error);
     });
   } finally {
     db.close();
