@@ -2,9 +2,10 @@ import type { Guest, Room } from "./types";
 import type { RoomContextResponse } from "./assetIntelligence";
 
 const DB_NAME = "duigao";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const ROOMS = "rooms";
 const AI_CONTEXTS = "ai-contexts";
+const UPLOAD_SESSIONS = "upload-sessions";
 const GUEST_KEY = "duigao.guest";
 
 function openDb(): Promise<IDBDatabase> {
@@ -18,10 +19,75 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(AI_CONTEXTS)) {
         db.createObjectStore(AI_CONTEXTS, { keyPath: "key" });
       }
+      if (!db.objectStoreNames.contains(UPLOAD_SESSIONS)) {
+        db.createObjectStore(UPLOAD_SESSIONS, { keyPath: "id" });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+export type VideoUploadSession = {
+  id: string;
+  roomId: string;
+  versionId: string;
+  objectName: string;
+  uploadUrl?: string;
+  fileName: string;
+  fileSize: number;
+  lastModified: number;
+  mime: string;
+  fingerprint: string;
+  createdAt: number;
+  updatedAt: number;
+  state: string;
+};
+
+export async function saveUploadSession(session: VideoUploadSession): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(UPLOAD_SESSIONS, "readwrite");
+      tx.objectStore(UPLOAD_SESSIONS).put({ ...session, updatedAt: Date.now() });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function listUploadSessions(): Promise<VideoUploadSession[]> {
+  const db = await openDb();
+  try {
+    return await new Promise<VideoUploadSession[]>((resolve, reject) => {
+      const tx = db.transaction(UPLOAD_SESSIONS, "readonly");
+      const req = tx.objectStore(UPLOAD_SESSIONS).getAll();
+      req.onsuccess = () => resolve((req.result as VideoUploadSession[]) ?? []);
+      req.onerror = () => reject(req.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function deleteUploadSession(id: string): Promise<void> {
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(UPLOAD_SESSIONS, "readwrite");
+      tx.objectStore(UPLOAD_SESSIONS).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export function uploadSessionMatchesFile(session: VideoUploadSession, file: File): boolean {
+  return session.fileName === file.name && session.fileSize === file.size && session.lastModified === file.lastModified;
 }
 
 type CachedAiContext = { key: string; response: RoomContextResponse; savedAt: number };

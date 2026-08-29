@@ -25,10 +25,14 @@ export const VIDEO_ACCEPT = "video/mp4,video/webm,video/quicktime,video/*";
  * (200MB, set in 0006), and the Supabase project's global limit — which is
  * 50MB on the free plan. This number is deliberately NOT the bucket ceiling:
  * the upload is a single POST with no resume, so a file big enough to take
- * several minutes on mobile data is a file likely to fail. Resumable (TUS)
- * uploads are what would earn a bigger number, and they are a later PR.
+ * several minutes on mobile data is a file likely to fail. Files above the
+ * 50MB direct-upload ceiling still pass this gate and are optimized / sent
+ * through TUS resumable upload; only this 100MB app ceiling is a hard reject.
  */
 export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+
+/** Production-safe direct upload ceiling. Larger files are optimized first. */
+export const DIRECT_UPLOAD_HINT_BYTES = 50 * 1024 * 1024;
 
 /**
  * Anything longer is a film, not a cut under review; also bounds the timeline.
@@ -126,6 +130,14 @@ export function acceptVideoFile(file: File): VideoAcceptance | VideoRejection {
       file,
       mime,
       warning: "iPhone 的 .mov 若是 HEVC 編碼，部分對稿對象的瀏覽器會播不出來；保險做法是轉成 MP4（H.264）再上傳。",
+    };
+  }
+  if (file.size > DIRECT_UPLOAD_HINT_BYTES) {
+    return {
+      ok: true,
+      file,
+      mime,
+      warning: `這支影片較大（${formatBytes(file.size)}），會先最佳化後再上傳。`,
     };
   }
   return { ok: true, file, mime };

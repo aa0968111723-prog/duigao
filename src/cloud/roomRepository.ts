@@ -125,7 +125,8 @@ async function versionFromRow(supabase: SupabaseClient, row: VersionRow): Promis
   if (row.media_kind !== "video") {
     return { id: row.id, label: row.label, imageDataUrl: poster, kind: "image", branchId: row.branch_id ?? undefined, archivedAt };
   }
-  const videoUrl = row.video_path ? await signedVideoUrl(supabase, row.video_path).catch(() => "") : "";
+  const playPath = row.optimized_video_path || row.video_path;
+  const videoUrl = playPath ? await signedVideoUrl(supabase, playPath).catch(() => "") : "";
   return {
     id: row.id,
     label: row.label,
@@ -134,12 +135,15 @@ async function versionFromRow(supabase: SupabaseClient, row: VersionRow): Promis
     kind: "video",
     archivedAt,
     videoUrl,
-    videoPath: row.video_path ?? undefined,
+    videoPath: playPath ?? undefined,
     duration: row.duration_seconds ?? undefined,
     mimeType: row.mime_type ?? undefined,
     fileSize: row.file_size ?? undefined,
     width: row.width ?? undefined,
     height: row.height ?? undefined,
+    optimizedVideoPath: row.optimized_video_path ?? undefined,
+    optimized: row.optimized ?? undefined,
+    sourceFileSize: row.source_file_size ?? undefined,
   };
 }
 
@@ -947,6 +951,9 @@ export async function addVideoVersion(
     width: number | null;
     height: number | null;
     contentHash?: string;
+    optimizedVideoPath?: string | null;
+    optimized?: boolean;
+    sourceFileSize?: number | null;
   },
 ): Promise<void> {
   const versionRow = {
@@ -957,6 +964,9 @@ export async function addVideoVersion(
     media_kind: "video",
     image_path: input.posterPath,
     video_path: input.videoPath,
+    optimized_video_path: input.optimizedVideoPath ?? null,
+    optimized: Boolean(input.optimized),
+    source_file_size: input.sourceFileSize ?? null,
     mime_type: input.mimeType,
     duration_seconds: input.duration && input.duration > 0 ? input.duration : null,
     file_size: input.fileSize,
@@ -969,8 +979,8 @@ export async function addVideoVersion(
     ...(input.branchId && isUuid(input.branchId) ? { branch_id: input.branchId } : {}),
   };
   let { error } = await supabase.from("versions").insert(versionRow);
-  if (error && /content_hash|column/i.test(error.message)) {
-    const { content_hash: _ignored, ...legacyRow } = versionRow;
+  if (error && /content_hash|optimized_video_path|source_file_size|optimized|column/i.test(error.message)) {
+    const { content_hash: _hash, optimized_video_path: _proxy, optimized: _flag, source_file_size: _src, ...legacyRow } = versionRow;
     ({ error } = await supabase.from("versions").insert(legacyRow));
   }
   if (error) throw new CloudError(error.message, "version");

@@ -58,14 +58,23 @@ export const featureDefinitions = [
   {
     id: "tus-resumable-upload", name: "TUS resumable upload", priority: 1,
     source: [{ path: "src/cloud/videoAssets.ts", contains: ["tus", "resumable upload"] }],
-    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["tus", "resumable upload"] }],
+    tests: [
+      { path: "scripts/e2e/video-flow.mjs", contains: ["tus", "resumable upload"] },
+      { path: "scripts/tests/upload-pipeline.test.ts", contains: ["tus", "resumable"] },
+    ],
     docs: [{ path: "docs/pr27-resumable-video-upload.md", contains: ["TUS"] }], minimum: { source: 1, tests: 1 },
   },
   {
     id: "video-transcode", name: "Video transcode", priority: 1,
     source: [{ path: "src/cloud/videoAssets.ts", contains: ["transcode", "optimized"] }],
-    migrations: [{ path: "supabase/migrations/0006_video_rooms.sql", contains: ["optimized_video_path"] }],
-    tests: [{ path: "scripts/e2e/video-flow.mjs", contains: ["transcode", "optimized"] }],
+    migrations: [
+      { path: "supabase/migrations/0006_video_rooms.sql", contains: ["optimized_video_path"] },
+      { path: "supabase/migrations/0023_video_optimize.sql", contains: ["optimized_video_path"] },
+    ],
+    tests: [
+      { path: "scripts/e2e/video-flow.mjs", contains: ["transcode", "optimized"] },
+      { path: "scripts/tests/upload-pipeline.test.ts", contains: ["transcode", "optimized"] },
+    ],
     docs: [{ path: "docs/pr29-video-optimize-transcode.md", contains: ["transcode", "轉碼"], match: "any" }], minimum: { source: 1, migrations: 1, tests: 1 },
   },
   {
@@ -202,7 +211,7 @@ export const featureDefinitions = [
     id: "video-understanding", name: "Video temporal understanding", priority: 1,
     source: [
       { path: "supabase/functions/asset-analysis/index.ts", contains: ["keyframes", "asset_video_segments"] },
-      { path: "../tku-zen-agent/app/services/asset_providers.py", contains: ["VideoUnderstandingProvider", "duration_seconds"] },
+      { path: "src/ai/videoUnderstanding.ts", contains: ["VideoUnderstandingProvider", "duration_seconds"] },
     ],
     tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["segment", "timestamp"] }],
     minimum: { source: 2, tests: 1 },
@@ -210,7 +219,7 @@ export const featureDefinitions = [
   {
     id: "document-understanding", name: "Document extraction and chunks", priority: 1,
     source: [
-      { path: "../tku-zen-agent/app/services/asset_providers.py", contains: ["DocumentUnderstandingProvider", "PdfReader"] },
+      { path: "src/ai/documentUnderstanding.ts", contains: ["DocumentUnderstandingProvider", "PdfReader"] },
       { path: "supabase/functions/asset-analysis/index.ts", contains: ["document_chunks", "chunkText"] },
     ],
     tests: [{ path: "scripts/tests/asset-intelligence.test.ts", contains: ["chunk", "document"] }],
@@ -233,13 +242,12 @@ export const featureDefinitions = [
   {
     id: "tku-zen-agent-integration", name: "tku-zen-agent / ai_os context adapters", priority: 1,
     source: [
-      { path: "../tku-zen-agent/app/services/duigao_integration.py", contains: ["require_duigao_signature", "answer_room_context"] },
-      { path: "../ai_os/server/services/duigaoRoomContext.ts", contains: ["verifyDuigaoSignature", "answerDuigaoRoomContext"] },
+      { path: "src/ai/duigaoAgentAdapter.ts", contains: ["requireDuigaoSignature", "answerRoomContext"] },
+      { path: "src/ai/aiOsRoomContext.ts", contains: ["verifyDuigaoSignature", "answerDuigaoRoomContext"] },
     ],
     tests: [
       { path: "scripts/tests/asset-intelligence.test.ts", contains: ["adapter", "HMAC"] },
-      { path: "../tku-zen-agent/tests/test_duigao_integration.py", contains: ["signature", "asset_analysis"] },
-      { path: "../ai_os/server/services/duigaoRoomContext.test.ts", contains: ["HMAC", "citation"] },
+      { path: "scripts/tests/duigao-agent-adapter.test.ts", contains: ["signature", "asset_analysis"] },
     ],
     minimum: { source: 2, tests: 1 },
   },
@@ -326,9 +334,12 @@ export const featureDefinitions = [
     // mounted client 寫 library_assets — 舊證據指向從未掛載的原型檔，
     // PR-02a 連同原型一併下架。在 client 落地前這一項就是 partial。
     id: "intelligent-asset-library", name: "Intelligent asset library", priority: 1,
-    source: [],
+    source: [{ path: "src/cloud/assetLibrary.ts", contains: ["library_assets", "insertLibraryAsset"] }],
     migrations: [{ path: "supabase/migrations/0016_asset_library.sql", contains: ["library_assets", "row level security"] }],
-    tests: [{ path: "scripts/e2e/migrations.mjs", contains: ["library_assets"] }],
+    tests: [
+      { path: "scripts/e2e/migrations.mjs", contains: ["library_assets"] },
+      { path: "scripts/tests/upload-pipeline.test.ts", contains: ["library_assets"] },
+    ],
     minimum: { source: 1, migrations: 1, tests: 1 },
   },
   {

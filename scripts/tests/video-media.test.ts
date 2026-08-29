@@ -29,3 +29,9 @@ test("非白名單格式仍拒（警告只給 quicktime）", () => {
   const mkv = acceptVideoFile(fakeFile("a.mkv", "video/x-matroska", 1024));
   assert.equal(mkv.ok, false);
 });
+
+test("超過 50MB 仍可上傳，但先警告會最佳化", () => {
+  const large = acceptVideoFile(fakeFile("a.mp4", "video/mp4", 60 * 1024 * 1024));
+  assert.equal(large.ok, true);
+  assert.match((large as { warning?: string }).warning ?? "", /最佳化/);
+});

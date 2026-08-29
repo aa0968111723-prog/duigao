@@ -53,6 +53,7 @@ const tables = {
   // 影片對稿 2.0 (PR #32)
   version_review_briefs: [], video_reactions: [], version_verdicts: [],
   version_review_progress: [],
+  library_assets: [],
 };
 
 /**
@@ -230,7 +231,7 @@ function serveObject(req, res, obj) {
 function cors(res) {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-headers", "*");
-  res.setHeader("access-control-allow-methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  res.setHeader("access-control-allow-methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
   res.setHeader("access-control-expose-headers", "*");
 }
 function json(res, code, body) {
@@ -252,6 +253,29 @@ function isMember(roomId, uid) {
   if (uid === "service-role") return true;
   return Boolean(uid && members.get(roomId)?.has(uid));
 }
+function canManageMedia(roomId, uid) {
+  const role = memberRoles.get(roleKey(roomId, uid));
+  return role === "owner" || role === "editor";
+}
+function decodeTusMetadata(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of String(header).split(",")) {
+    const idx = part.indexOf(" ");
+    if (idx < 0) continue;
+    const key = part.slice(0, idx).trim();
+    const b64 = part.slice(idx + 1).trim();
+    try {
+      out[key] = Buffer.from(b64, "base64").toString("utf8");
+    } catch {
+      out[key] = "";
+    }
+  }
+  return out;
+}
+
+/** In-flight TUS uploads: id -> { bucket, objectName, mime, length, buf, offset }. */
+const tusUploads = new Map();
 function session(uid) {
   const token = `tok_${randomUUID()}`;
   users.set(token, uid);
@@ -567,6 +591,16 @@ export const server = http.createServer(async (req, res) => {
     if (fn === "room_role") {
       return json(res, 200, memberRoles.get(roleKey(body.p_room_id, uid)) ?? null);
     }
+    if (fn === "archive_version" || fn === "restore_version") {
+      const version = tables.versions.find((row) => row.id === body.p_version_id);
+      if (!version) return json(res, 404, { message: "not found" });
+      if (!canManageMedia(version.room_id, uid)) return json(res, 403, { message: "not allowed" });
+      const before = { ...version };
+      version.archived_at = fn === "archive_version" ? now() : null;
+      version.updated_at = now();
+      emitChange({ table: "versions", type: "UPDATE", record: version, oldRecord: before });
+      return json(res, 200, null);
+    }
     if (fn === "upsert_visual_proposal") {
       const row = {
         id: body.p_id, room_id: body.p_room_id, version_id: body.p_version_id,
@@ -649,7 +683,12 @@ export const server = http.createServer(async (req, res) => {
       const upsert = prefer.includes("resolution=merge-duplicates");
       const written = [];
       for (const row of rows) {
-        if (!isMember(row.room_id, uid)) return json(res, 403, { message: "not a member" });
+        if (table === "library_assets") {
+          if (row.scope === "room" && !isMember(row.room_id, uid)) return json(res, 403, { message: "not a member" });
+          if (row.scope === "room" && !canManageMedia(row.room_id, uid)) return json(res, 403, { message: "not allowed" });
+        } else if (!isMember(row.room_id, uid)) {
+          return json(res, 403, { message: "not a member" });
+        }
         // `user_id uuid not null default auth.uid()`: the client never sends it
         // for reactions / verdicts / progress, so the server has to fill it —
         // and filling it here is also what makes "you can only write your own"
@@ -753,6 +792,77 @@ export const server = http.createServer(async (req, res) => {
         emitChange({ table, type: "DELETE", oldRecord: row });
       }
       cors(res); res.writeHead(204); return res.end();
+    }
+  }
+
+  // ---- TUS resumable upload (Supabase Storage /upload/resumable) ----
+  if (p === "/storage/v1/upload/resumable" || p.startsWith("/storage/v1/upload/resumable/")) {
+    const uid = userOf(req);
+    if (!uid) return json(res, 401, { message: "not authenticated" });
+    const tusHeaders = (extra = {}) => {
+      cors(res);
+      for (const [key, value] of Object.entries({
+        "tus-resumable": "1.0.0",
+        "access-control-expose-headers": "Location, Upload-Offset, Tus-Resumable, Upload-Length",
+        ...extra,
+      })) res.setHeader(key, value);
+    };
+
+    if (req.method === "POST" && p === "/storage/v1/upload/resumable") {
+      await readBody(req);
+      const meta = decodeTusMetadata(req.headers["upload-metadata"]);
+      const bucket = meta.bucketName || "room-assets";
+      const objectName = meta.objectName || "";
+      const mime = meta.contentType || "application/octet-stream";
+      const length = Number(req.headers["upload-length"] || 0);
+      if (bucket === "room-assets" && faults.videoUpload && objectName.includes("/videos/")) {
+        return json(res, 400, { message: "injected video upload failure" });
+      }
+      if (bucket === "room-assets" && faults.videoUploadDelayMs > 0 && objectName.includes("/videos/")) {
+        await new Promise((r) => setTimeout(r, faults.videoUploadDelayMs));
+      }
+      const id = randomUUID();
+      tusUploads.set(id, { bucket, objectName, mime, length, chunks: [], offset: 0 });
+      tusHeaders();
+      res.writeHead(201, { location: `/storage/v1/upload/resumable/${id}` });
+      return res.end();
+    }
+
+    const id = p.slice("/storage/v1/upload/resumable/".length);
+    const upload = tusUploads.get(id);
+    if (!upload) return json(res, 404, { message: "unknown tus upload" });
+
+    if (req.method === "HEAD") {
+      tusHeaders();
+      res.writeHead(200, { "upload-offset": String(upload.offset), "cache-control": "no-store" });
+      return res.end();
+    }
+
+    if (req.method === "PATCH") {
+      if (upload.bucket === "room-assets" && faults.videoUpload && upload.objectName.includes("/videos/")) {
+        return json(res, 400, { message: "injected video upload failure" });
+      }
+      if (upload.bucket === "room-assets" && faults.videoUploadDelayMs > 0 && upload.objectName.includes("/videos/")) {
+        await new Promise((r) => setTimeout(r, faults.videoUploadDelayMs));
+      }
+      const raw = await readBody(req);
+      const expected = Number(req.headers["upload-offset"] ?? upload.offset);
+      if (Number.isFinite(expected) && expected !== upload.offset) {
+        tusHeaders();
+        res.writeHead(409, { "upload-offset": String(upload.offset) });
+        return res.end();
+      }
+      upload.chunks.push(raw);
+      upload.offset += raw.length;
+      if (upload.length > 0 && upload.offset >= upload.length) {
+        objects.set(`${upload.bucket}/${upload.objectName}`, {
+          buf: Buffer.concat(upload.chunks),
+          mime: upload.mime,
+        });
+      }
+      tusHeaders();
+      res.writeHead(204, { "upload-offset": String(upload.offset) });
+      return res.end();
     }
   }
 

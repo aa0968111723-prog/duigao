@@ -62,6 +62,12 @@ alter table public.versions
   add column if not exists duration_seconds double precision;
 alter table public.versions
   add column if not exists file_size bigint;
+alter table public.versions
+  add column if not exists optimized_video_path text;
+alter table public.versions
+  add column if not exists source_file_size bigint;
+alter table public.versions
+  add column if not exists optimized boolean not null default false;
 
 -- A video version can exist before (or without) a usable poster: capturing a
 -- frame is a browser canvas operation that legitimately fails on some codecs
