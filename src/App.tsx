@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isMessageNotSaved } from "./cloud/messageAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -2477,9 +2478,16 @@ export function App() {
       createdAt: Date.now(),
     };
     updateRoom((r) => ({ ...r, messages: [...r.messages, msg] }));
-    cloudRef.current.writes.insertMessage(msg);
+    void cloudRef.current.writes.insertMessage(msg).catch((err) => {
+      if (!isMessageNotSaved(err)) return;
+      updateRoom((r) => ({
+        ...r,
+        messages: r.messages.filter((item) => item.id !== msg.id),
+      }));
+      showToast("這則訊息沒有送出，請再試一次。", { tone: "error" });
+    });
     setChatInput("");
-  }, [guest, chatInput, claim, updateRoom]);
+  }, [guest, chatInput, claim, showToast, updateRoom]);
 
   // "我也覺得": one per user per comment; tapping again removes it.
   const toggleSupport = useCallback(

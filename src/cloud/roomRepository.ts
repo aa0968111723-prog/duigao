@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptMessageInsertAck } from "./messageAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -876,14 +877,19 @@ export async function deleteStroke(supabase: SupabaseClient, id: string) {
 }
 
 export async function insertMessage(supabase: SupabaseClient, roomId: string, msg: ChatMessage) {
-  const { error } = await supabase.from("messages").insert({
-    id: msg.id.length === 36 ? msg.id : uuid(),
-    room_id: roomId,
-    author_name: msg.authorName,
-    author_color: msg.authorColor,
-    body: msg.body,
-  });
+  const { data, error } = await supabase
+    .from("messages")
+    .insert({
+      id: msg.id.length === 36 ? msg.id : uuid(),
+      room_id: roomId,
+      author_name: msg.authorName,
+      author_color: msg.authorColor,
+      body: msg.body,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "message");
+  acceptMessageInsertAck(data);
 }
 
 /** Upload one new poster version image and insert its row. */

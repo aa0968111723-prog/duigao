@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isMessageNotSaved } from "./messageAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -42,7 +43,7 @@ import {
   deleteStroke as repoDeleteStroke,
   insertBranch,
   insertComment,
-  insertMessage,
+  insertMessage as repoInsertMessage,
   insertPoll,
   insertReply as repoInsertReply,
   insertRelation,
@@ -128,7 +129,7 @@ export type CloudWrites = {
   setResolved: (id: string, resolved: boolean) => void;
   insertStroke: (stroke: import("../lib/types").Stroke) => void;
   deleteStroke: (id: string) => void;
-  insertMessage: (msg: import("../lib/types").ChatMessage) => void;
+  insertMessage: (msg: import("../lib/types").ChatMessage) => Promise<void>;
   addVersion: (label: string, sortOrder: number, imageDataUrl: string, branchId?: string) => void;
   /** Resolves after the branch FK exists, so a first version/plan can follow it. */
   createBranch: (branch: RoomBranch) => Promise<void>;
@@ -1067,7 +1068,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     setResolved: (id, resolved) => run(`comment-resolved:${id}`, () => setCommentResolved(supabase!, id, resolved)),
     insertStroke: (stroke) => run(`stroke:${stroke.id}`, () => insertStroke(supabase!, boundRef.current!, stroke)),
     deleteStroke: (id) => run(`stroke-del:${id}`, () => repoDeleteStroke(supabase!, id)),
-    insertMessage: (msg) => run(`message:${msg.id}`, () => insertMessage(supabase!, boundRef.current!, msg)),
+    insertMessage: async (msg) => {
+      const rid = boundRef.current;
+      const key = `message:${msg.id}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await repoInsertMessage(supabase, rid, msg);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isMessageNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => repoInsertMessage(supabase, rid, msg),
+        });
+        setStatus("offline-pending");
+      }
+    },
     addVersion: (label, sortOrder, imageDataUrl, branchId) => {
       // 穩定 id 在排隊當下鑄一次：run() 的 duplicate-key=acknowledge 因此
       // 對 replay 真正冪等（回應丟失的重送不會複製版本）。
