@@ -22,6 +22,7 @@ import { uuid } from "../lib/id";
 import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
+import { acceptBranchInsertAck } from "./branchInsertAck";
 import { CloudError } from "./errors";
 import {
   dataUrlToBlob,
@@ -989,16 +990,21 @@ export async function addVideoVersion(
 // ---- project-room branches / plans / relations / decisions ---------------
 
 export async function insertBranch(supabase: SupabaseClient, branch: RoomBranch): Promise<void> {
-  const { error } = await supabase.from("room_branches").insert({
-    id: branch.id,
-    room_id: branch.roomId,
-    name: branch.name,
-    branch_type: branch.branchType,
-    sort_order: branch.sortOrder,
-    status: branch.status,
-    created_by: isUuid(branch.createdBy) ? branch.createdBy : null,
-  });
+  const { data, error } = await supabase
+    .from("room_branches")
+    .insert({
+      id: branch.id,
+      room_id: branch.roomId,
+      name: branch.name,
+      branch_type: branch.branchType,
+      sort_order: branch.sortOrder,
+      status: branch.status,
+      created_by: isUuid(branch.createdBy) ? branch.createdBy : null,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "branch");
+  acceptBranchInsertAck(data);
 }
 
 export async function updateBranch(

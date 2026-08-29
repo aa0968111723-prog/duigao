@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isBranchNotCreated } from "./cloud/branchInsertAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -1567,6 +1568,7 @@ export function App() {
         plans: plan ? [...(normalized.plans ?? []), plan] : normalized.plans,
         updatedAt: now,
       };
+      const previousActive = activeBranchId;
       setRoom(next);
       persist(next);
       setActiveBranchId(branch.id);
@@ -1574,7 +1576,14 @@ export function App() {
         // Wait for the branch FK before writing its plan or first media version.
         // This matters on a slow phone: a fixed timeout cannot establish order.
         await cloudRef.current.writes.createBranch(branch);
-      } catch {
+      } catch (err) {
+        if (isBranchNotCreated(err)) {
+          setRoom(current);
+          persist(current);
+          setActiveBranchId(previousActive);
+          showToast("內容沒有建立，請再試一次。", { tone: "error" });
+          return;
+        }
         showToast("建立內容失敗，請確認連線後再試一次。", { tone: "error" });
         return;
       }
@@ -1585,7 +1594,7 @@ export function App() {
       }
       showToast(`已建立${type === "copy" ? "文案" : type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片"}`, { tone: "success" });
     },
-    [addImageFiles, addVideoFile, cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, persist, showToast],
+    [activeBranchId, addImageFiles, addVideoFile, cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, persist, showToast],
   );
 
   const addFilesToBranch = useCallback(

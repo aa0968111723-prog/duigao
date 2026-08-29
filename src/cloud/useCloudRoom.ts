@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isBranchNotCreated } from "./branchInsertAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -40,7 +41,7 @@ import {
   createRoom,
   deleteRelation,
   deleteStroke as repoDeleteStroke,
-  insertBranch,
+  insertBranch as repoInsertBranch,
   insertComment,
   insertMessage,
   insertPoll,
@@ -1078,7 +1079,33 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
         scheduleReload();
       });
     },
-    createBranch: (branch) => runAndWait(`branch-insert:${branch.id}`, () => insertBranch(supabase!, branch)),
+    createBranch: async (branch) => {
+      const rid = boundRef.current;
+      const key = `branch-insert:${branch.id}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await repoInsertBranch(supabase, branch);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isBranchNotCreated(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => repoInsertBranch(supabase, branch),
+        });
+        setStatus("offline-pending");
+        throw err;
+      }
+    },
     updateBranch: (branchId, patch) => run(`branch:${branchId}`, () => updateBranch(supabase!, boundRef.current!, branchId, patch)),
     savePlan: (plan) => run(`plan:${plan.branchId}`, () => upsertPlan(supabase!, plan, boundRef.current!)),
     createRelation: (relation) => run(`relation:${relation.id}`, () => insertRelation(supabase!, relation)),
