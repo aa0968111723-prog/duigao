@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "node scripts/serve-origin.mjs",
     "build": "node scripts/check-cloud-env.mjs --strict && tsc --noEmit && vite build",
     "build:local": "tsc --noEmit && vite build",
     "preview": "vite preview",
