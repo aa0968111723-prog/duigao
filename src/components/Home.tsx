@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
 import type { Room } from "../lib/types";
 import { roomMediaType } from "../lib/types";
 import { VIDEO_LIMIT_HINT } from "../features/video-review/media";
+import { isCloudConfigured, isProductionBuild } from "../cloud/config";
 import { BrandMark } from "./BrandMark";
 import { UniversalIntake } from "./UniversalIntake";
+import { homeEntryStatus } from "./homeEntryStatus";
 
 type Props = {
   recent: Room[];
@@ -46,12 +49,33 @@ function VideoIcon() {
 
 /** First screen: choose the collaboration space before choosing a file. */
 export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvailable, onOpen, onCreateProject }: Props) {
+  const [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine !== false);
+  useEffect(() => {
+    const sync = () => setOnline(navigator.onLine !== false);
+    window.addEventListener("online", sync);
+    window.addEventListener("offline", sync);
+    return () => {
+      window.removeEventListener("online", sync);
+      window.removeEventListener("offline", sync);
+    };
+  }, []);
+  const entry = homeEntryStatus({
+    online,
+    cloudConfigured: isCloudConfigured,
+    productionBuild: isProductionBuild,
+  });
+
   return (
     <main className="home">
       <header className="home-header">
         <BrandMark />
         <span className="home-safety"><span aria-hidden="true">●</span> 原稿安全，不會被修改</span>
       </header>
+      {entry.message && (
+        <p className="home-sub" data-testid="home-entry-status" data-kind={entry.kind} role="status">
+          {entry.message}
+        </p>
+      )}
 
       <section className="home-hero">
         <div className="home-hero-copy">
