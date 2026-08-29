@@ -252,9 +252,9 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const jumpToMessage = (sourceId: string) => {
     const el = typeof document !== "undefined" ? document.getElementById(`rd-msg-${sourceId}`) : null;
     pinnedToLatest.current = false;
-    // Stay suppressed until the person scrolls the feed or taps 最新訊息.
-    // A highlight timeout must not lift this — smooth-scroll can still
-    // expose feed-end after 1600ms and would fake "caught up".
+    // Stay suppressed until the person taps 最新訊息.
+    // A highlight timeout must not lift this — scrolling first-unread
+    // into view can expose feed-end and would fake "caught up".
     suppressReadFromJump.current = true;
     el?.scrollIntoView({ block: "center", behavior: "auto" });
     setHighlightId(sourceId);
@@ -336,25 +336,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       if (latest) api.onMarkRead?.(latest.id);
     }, { threshold: 0.01 });
     observer.observe(el);
-    const feed = el.parentElement;
-    const releaseJumpSuppress = () => {
-      if (!suppressReadFromJump.current) return;
-      suppressReadFromJump.current = false;
-      const end = feedEndRef.current;
-      if (!end) return;
-      const rect = end.getBoundingClientRect();
-      const visible = rect.top < (typeof window === "undefined" ? 0 : window.innerHeight) && rect.bottom > 0;
-      if (visible && lastMessageRef.current) api.onMarkRead?.(lastMessageRef.current.id);
-    };
-    feed?.addEventListener("wheel", releaseJumpSuppress, { passive: true });
-    feed?.addEventListener("touchstart", releaseJumpSuppress, { passive: true });
-    feed?.addEventListener("pointerdown", releaseJumpSuppress);
-    return () => {
-      observer.disconnect();
-      feed?.removeEventListener("wheel", releaseJumpSuppress);
-      feed?.removeEventListener("touchstart", releaseJumpSuppress);
-      feed?.removeEventListener("pointerdown", releaseJumpSuppress);
-    };
+    return () => observer.disconnect();
   }, [api.room.id, activePane]);
 
   useEffect(() => {

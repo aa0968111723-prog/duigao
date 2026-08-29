@@ -1,4 +1,4 @@
-.rd-shell { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.rd-shell { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .rd-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 4px; margin: 8px 0 12px; border-radius: 14px; background: var(--panel); }
 .rd-tabs button { min-height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-faint); }
 .rd-tabs button.is-active { background: var(--raise); color: var(--ink); font-weight: 600; }
@@ -94,10 +94,11 @@
 .rd-msg.is-tombstone { opacity: .78; }
 .rd-tombstone { margin: 0; font-size: 14px; color: var(--ink-faint); font-style: italic; }
 .rd-jump-unread {
-  position: sticky;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: calc(104px + var(--kb, 0px));
   z-index: 35;
-  align-self: center;
   min-height: 36px;
   padding: 0 14px;
   border: 0;
@@ -108,10 +109,11 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
 }
 .rd-jump-latest {
-  position: sticky;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: calc(64px + var(--kb, 0px));
   z-index: 35;
-  align-self: center;
   min-height: 36px;
   padding: 0 14px;
   border: 0;
