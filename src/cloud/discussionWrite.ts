@@ -7,6 +7,9 @@
  */
 
 import { isDuplicateKey } from "./errors";
+import { looksLikeSpaHtml } from "./apiResponse";
+
+export { looksLikeSpaHtml };
 
 export type DiscussionInsertAccept =
   | { ok: true; reason: "inserted" | "duplicate" }
@@ -25,12 +28,6 @@ export type DiscussionAttachUpload = {
   percent: number;
   message: string;
 };
-
-export function looksLikeSpaHtml(body: unknown, contentType?: string | null): boolean {
-  if (typeof contentType === "string" && /text\/html/i.test(contentType)) return true;
-  if (typeof body !== "string") return false;
-  return /^\s*<(!doctype\s+html|html[\s>])/i.test(body);
-}
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
