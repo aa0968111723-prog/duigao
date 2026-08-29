@@ -4,15 +4,17 @@
 
 ## Main tip (VERIFY)
 
-- `origin/main` @ `39f3221` — docs(checkpoint) #113 #114 + production probe (#121)
-- Previous: `3c0bf0c` #114, `6da2af7` #113, `85755ff` #110, `105b89b` #108, `097a6af` #107, `698595b` #106, `196b3a3` #105, `444ae9d` #99, `3d8b2cf` #97
+- `origin/main` @ `de4064b` — fix(host): Node origin so `/functions` `/api` `/rest` return JSON 404 (#122)
+- Previous: `39f3221` #121 docs, `3c0bf0c` #114, `6da2af7` #113, `85755ff` #110, `105b89b` #108, `097a6af` #107, `698595b` #106, `196b3a3` #105, `444ae9d` #99, `3d8b2cf` #97
 - Migrations `0022+` on main after #114: `0022_discussion_author_integrity.sql`, `0023_video_optimize.sql`, `0024_whiteboard_canonical_columns.sql` … `0028_whiteboard_freehand.sql`, `0029_design_knowledge.sql`, `0030_design_research_usage.sql`
+- #122 is **host origin JSON 404 in repo**. Production Zeabur was **not** redeployed this turn.
 
 ## This branch
 
 - Branch: `cursor/p0-main-remainders-70d9`
-- Head after this turn: #113 extras (image-region / plan-section / compact toolbar) + `test:realtime-offline-e2e` + fail-closed external apply
-- Prior: `35ce691` collaboration regex, `a63e517` merge #113, `93c9d3e` leftover-channel honesty
+- Head after this turn: `43a5b41` Compact toolbar follows window width, not the canvas wrap
+- Merge: `b91e655` merged `origin/main` #122 (merge commit, no rebase)
+- Prior extras: `53aac03` board anchors + fail-closed apply + `test:realtime-offline-e2e` script
 - Base **must stay `main`**
 - PR: https://github.com/aa0968111723-prog/duigao/pull/120
 - Does not copy #88/#104 SQL names (`0027_design_knowledge` / `0028_design_research_usage`). Does not invent typing. Does not restack #95.
@@ -40,7 +42,7 @@
 | Image-region marks on board | **wired** | Existing `comments.region` + `node.anchor` (`image-region`). Sheet `wb-poster-region`. No new table. |
 | Video timestamp anchors | **already present** | `wb-video-range` + `content.startTime` — not rewritten |
 | Planning-paragraph links | **wired** | `plan-section` on `node.anchor`; `wb-plan-section` uses `plan.blocks` ids. `blocksOmitted` stays honest. |
-| Compact toolbar &lt;768 | **wired** | `data-compact` on `wb-focus-bottom`; labels hidden, icons kept |
+| Compact toolbar &lt;768 | **wired** | `data-compact` on `wb-focus-bottom` from **window.innerWidth** (not canvas wrap). Split View wrap &lt;768 on a 1024 tablet still shows labels. |
 
 ## #114 file-level (shipped on main @ `3c0bf0c`)
 
@@ -69,24 +71,27 @@ Did **not** copy #88 schema. Did **not** add 0031+.
 
 | Item | Verdict | Evidence |
 |---|---|---|
-| Image-region / plan-section | **wired** | `src/features/collaboration/boardAnchors.ts`; sheets in `WhiteboardWorkspace.tsx` |
-| Video timestamps | **refused rewrite** | already on #113 |
+| Image-region / plan-section | **wired** | `src/features/collaboration/boardAnchors.ts`; sheets in `WhiteboardWorkspace.tsx`; e2e clicks `wb-poster-whole` / `wb-plan-whole` |
+| Video timestamps | **refused rewrite** | already on #113 (`wb-video-0040`) |
 | Empty board / focus / LWW | **untouched** | |
-| Compact toolbar | **wired** | `data-compact` + CSS |
+| Compact toolbar | **wired** | window width &lt;768; 390 icon-only, 768 labels, 1024 tablet not compact |
 | Canva/CUTOS/planform apply | **fail-closed** | `applyGate` blocks those adapters unless `adapterStatus.state === "ready"`; room import already `#97` + 「整合尚未設定」 |
 | Canva/CUTOS room import | **already honest** | health gate hides entry; codes `CANVA_NOT_CONFIGURED` / `CUTOS_NOT_CONFIGURED` |
-| `test:realtime-offline-e2e` | **added** | `scripts/e2e/realtime-offline.mjs` — two Playwright contexts, exactly one row after flush |
+| `test:realtime-offline-e2e` | **run 5/5** | two Playwright contexts (390+768); B joins via captured `create_room_with_invite` fragment; flush exactly one row, no duplicate replay |
 | Typing / presence table | **unmodeled** | left listed |
 | 0031+ | **refused** | |
+| #122 production deploy | **refused** | repo has origin JSON 404; live Zeabur still SPA HTML 200 |
 
-## #120 CI @ `35ce691` (pre-#114 merge)
+## #120 CI
 
-| Workflow | Run | Result |
-|---|---|---|
-| `agent-release-gate` | `33262145327` | **success** |
-| `build` (migrations + build + browser) | `33262145267` | **success** (browser included `test:collaboration`  after regex fix) |
+| SHA | What | agent-read-layer | browser | note |
+|---|---|---|---|---|
+| `8139879` honesty + #121 | requested first check | **success** (`33262546628`) | **success** (`33262546722`) | gate + migrations + build green |
+| `53aac03` extras (no e2e sheet clicks) | browser **failed** `33262930728` | success | fail | poster-region sheet intercepted `whiteboard-add` |
+| `dd8f0b4`…`90bf072` e2e join fixes | browser **failed** (superseded) | success | fail | empty-room ShareSheet hides `m-share-url`; invite now captured from create RPC |
+| `43a5b41` current head | `33263240901` | (gate `33263240911` **success**) | **in progress** at evidence write | local browser suites green |
 
-`8139879` (honesty + #121 merge): `agent-release-gate` **success**; `build` `33262546722` **success**. Intermediate `ebb00ae` `build` `33262538059` failed flake (video branch 52/54); superseded.
+`35ce691` earlier: gate `33262145327` + build `33262145267` **success**. Intermediate `ebb00ae` `33262538059` flake 52/54 superseded.
 
 ## Review classifications
 
@@ -113,26 +118,30 @@ Did **not** copy #88 schema. Did **not** add 0031+.
 
 ### Won’t fix / leftover (not this PR)
 
-- Production SPA catch-all still HTML 200 (this-turn curl Last-Modified `Sat, 29 Aug 2026 16:15:36 GMT`)
+- Production SPA catch-all still HTML 200 (re-curl 16:27 UTC Last-Modified `Sat, 29 Aug 2026 16:15:36 GMT`). #122 is on main, **not claimed deployed**.
 - Typing / per-member presence **table** unmodeled (channel count + lastWriter stamps only; do not invent)
 - Canva / CUTOS / Perplexity production secrets unverified
 - Stale room stack `#95→#115` vs main
 - #88 / #104 / #119 drafts still CONFLICTING / human rebase
 - Competing old drafts
+- Current head CI browser not yet terminal at evidence write
 
-## E2E (after #113 merge @ `a63e517`; re-run after #114+honesty)
+## E2E (local this turn @ `43a5b41`)
 
 `CHROMIUM_PATH=/usr/bin/google-chrome-stable`
 
-| Suite | Result @ `a63e517` | After #114+honesty |
-|---|---|---|
-| `test:mobile-tablet-ux-e2e` | **30/30** | **30/30** (`remainders-e2e-after-114.log`) |
-| `test:collaboration-e2e` | **117/117** | **117/117** |
-| `test:multi-branch-e2e` | **54/54** | **54/54** |
-| `test:realtime-offline-e2e` | **script missing** | **added** this turn (`scripts/e2e/realtime-offline.mjs`) |
-| `test:ai-external-handoff` | n/a | **8/8** |
-| `test:collaboration` | 233 @ regex fix | **245/245** |
-| `npm run agent:gate` | **PASS** through `0028` | **PASS** through `0030_design_research_usage.sql` |
+| Suite | Result |
+|---|---|
+| `test:mobile-tablet-ux-e2e` | **30/30** |
+| `test:collaboration-e2e` | **122/122** (was 117; +poster/plan sheets + compact 390/768) |
+| `test:realtime-offline-e2e` | **5/5** |
+| `test:ai-external-handoff` | **8/8** |
+| `test:collaboration` | **245/245** |
+| `test:design-intelligence` | **182/182** |
+| `test:api-response` | **24/24** (includes #122 origin JSON 404) |
+| `npm run agent:gate` | **PASS** through `0030_design_research_usage.sql` |
+
+390/768 shots: `wb_poster_region_390.png`, `wb_plan_section_390.png`, `wb_compact_toolbar_390.png`, `wb_toolbar_768.png`.
 
 ## Session-entry screenshots (no PII)
 
@@ -147,6 +156,6 @@ Earlier `session_entry_*_{390,768}.png` without `_honest` raced a leftover-chann
 
 ## Production (re-curl this turn)
 
-Re-curled 2026-08-29 16:14 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29.txt`):
+Re-curled 2026-08-29 16:27 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1627.txt`):
 
-`https://duigao-k7q2.zeabur.app/functions/v1/voice-token` and `/rest/v1/` → HTTP **200**, `content-type: text/html; charset=utf-8`, body starts `<!doctype html>`. Last-Modified `Sat, 29 Aug 2026 16:15:36 GMT`. #107 Caddyfile on main ≠ production deployed. **Do not claim production is fixed.**
+`https://duigao-k7q2.zeabur.app/functions/v1/voice-token`, `/rest/v1/`, `/api/health` → HTTP **200**, `content-type: text/html; charset=utf-8`, body starts `<!doctype html>`. Last-Modified still `Sat, 29 Aug 2026 16:15:36 GMT`. #122 origin JSON 404 is on `main` (`de4064b`) and merged into this PR; **live Zeabur is unchanged**. **Do not claim production is fixed. Do not claim deploy.**
