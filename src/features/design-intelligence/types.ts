@@ -296,7 +296,15 @@ export type ResearchResult = {
   conflicts: Array<{ claim: string; sourceIds: string[]; note: string }>;
   usage: { inputTokens: number | null; outputTokens: number | null; requests: number };
   cost: { amount: number | null; currency: string | null; estimated: boolean };
-  cacheStatus: "hit" | "miss" | "bypass";
+  /**
+   * 這次結果從哪裡來。四種狀態對使用者的意義完全不同：
+   *   hit    = 用了快取，沒有花錢
+   *   miss   = 真的問了一次
+   *   dedup  = 有人正在問同一件事，共用那一次（也沒有多花錢）
+   *   bypass = 根本沒問（沒設定、被擋下、斷路器開著）
+   * 把 bypass 和 miss 混在一起，UI 就沒辦法分辨「查不到」與「沒設定」。
+   */
+  cacheStatus: "hit" | "miss" | "dedup" | "bypass";
 };
 
 // ---------------------------------------------------------------------------
