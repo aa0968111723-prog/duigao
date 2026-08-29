@@ -53,7 +53,7 @@ export function DiscussionDrawer({
   onSendLink?: (url: string, reply?: { replyToId: string; quotedBody: string }) => boolean;
   resolveAssetUrl?: (path: string) => Promise<string>;
 }) {
-  const [draft, setDraft] = useDiscussionDraft(room.id ? `drawer:${room.id}` : null);
+  const [draft, setDraft, draftReady] = useDiscussionDraft(room.id ? `drawer:${room.id}` : null);
 
   const feed = useMemo(() => {
     const ids = new Set(messages.map((message) => message.id));
@@ -81,7 +81,7 @@ export function DiscussionDrawer({
   }, [messages, ghosts, legacyMessages, room.id]);
 
   return (
-    <div className="discussion-drawer" data-testid="discussion-drawer">
+    <div className="discussion-drawer" data-testid="discussion-drawer" data-draft-ready={draftReady ? "true" : "false"}>
       <RoomDiscussion
         api={{
           room,
