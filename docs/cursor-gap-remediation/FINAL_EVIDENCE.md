@@ -12,9 +12,9 @@
 ## This branch
 
 - Branch: `cursor/p0-main-remainders-70d9`
-- Code head: `1416120` compact extras + visual baselines (on merge `1a99253` of #123, extras `8f91286`)
+- Code head: `747f133` board 「寫下決策」human title (on `02e9387` + e2e locator; prior `f61cd54` compact extras)
 - Evidence commit follows this file; do not treat docs as IMPLEMENTED without the source above
-- This turn compact-discloses the decision draft and refreshes 1024/1280 visual baselines (cite button in Split View)
+- No `0031+` this turn. Mentions / unread / receipts / todo / typing / message tombstone stay unmodeled.
 - Base **must stay `main`**
 - PR: https://github.com/aa0968111723-prog/duigao/pull/120
 - Does not copy #88/#104 SQL names. Does not invent typing / mention / unread / receipt / todo tables. Does not restack #95.
@@ -41,13 +41,20 @@ Inspected current tree after #107/#108/#113/#114. Do **not** invent tables. Do *
 | message tombstone | **unmodeled** | no `deleted_at` on `room_discussion_messages`; do not hard-delete as a fake tombstone |
 | attachment cite | **wired** | existing `attachment` kind; cite sets `reply_to_id` via `attachmentCiteReply` |
 | work cite | **wired** | existing kinds `poster`/`video`/`plan`/`whiteboard` + payload ids; composer `引` → `cite-work` |
-| decision draft | **wired** | `decision_records` pending/decided; first layer is 新增, input is progressive disclosure; AI/`agent`/`system` cannot finalize (`isMemberActor`; `normalizeAiActions` drops create/finalize) |
+| decision draft | **wired** | `decision_records` pending/decided; discussion 新增 + board 「寫下決策」both require a human title; AI/`agent`/`system` cannot finalize |
+| board 寫下決策 | **wired this turn** | `boardDecisionWrite`; sheet `wb-decision-draft` / `wb-decision-title`; no canned 「已決定：採用 B 版」 |
 | todo draft | **unmodeled** | no todo/task table |
 | read receipts | **unmodeled** | no receipt table; UI must not show 已讀／雙藍勾 |
 | `kind: quote` | **unmodeled as producer** | CHECK allows it; zero honest producers — do not fake a cite type |
 | polls | **present** | `room_polls` + 「建立投票」; not a todo |
 
-## This turn — CI fix + compact extras
+## This turn — board 寫下決策 title + `f61cd54` CI
+
+`f61cd54` CI **green**: agent-read-layer `33263983135` success; browser `33263983133` success (migrations + build + visual). Main still `cd7eb5f` (#123); no merge needed.
+
+Board 「寫下決策」no longer inserts canned 「已決定：採用 B 版」. D-08 failed first against the canned `onCreateDecision(...)`, then the sheet required a title. `createDecision` also rejects empty titles and non-member actors.
+
+## Prior turn — CI fix + compact extras
 
 `8f91286` browser **failed** `33263703226` on `test:visual`: tablet-1024-board-20 / desktop-1280-board-20 / desktop-1280-selected (~15k px). Cause: Split View discussion column showed a always-on decision title input + 「引用」 wrapping the composer.
 
@@ -66,8 +73,9 @@ Inspected current tree after #107/#108/#113/#114. Do **not** invent tables. Do *
 | `43a5b41` compact-width | **success** | **success** `33263240901` | 15/15 visual |
 | `5399833` evidence | **success** | **success** `33263357191` | 15/15 visual |
 | `0570218` extras | **success** | **failed** `33263623652` | visual Split View |
-| `8f91286` edit mark | **success** | **failed** `33263703226` | same visual; `test:visual` 11/15. **Fixed this turn from these logs.** |
-| post-#123 merge + compact | (this push) | (pending) | do not claim green until terminal |
+| `8f91286` edit mark | **success** | **failed** `33263703226` | visual 11/15; fixed on `1416120` |
+| `f61cd54` compact + #123 | **success** `33263983135` | **success** `33263983133` | 15/15 visual |
+| `747f133` board decision title | (this push) | (pending) | do not claim green until terminal |
 
 ## Review classifications
 
@@ -84,17 +92,18 @@ Inspected current tree after #107/#108/#113/#114. Do **not** invent tables. Do *
 | SPA HTML as applied realtime | Accepted / already gated | `looksLikeSpaHtml` in `acceptRealtimePayload` |
 | Poster/video fake vision + research SPA 200 | Fixed on this branch | `honesty.ts` + analysis/research wiring |
 | Discussion edit / work cite / decision title | Wired | `discussionHonesty.ts` + RoomDiscussion |
+| Board canned 「已決定：採用 B 版」 | Fixed this turn | `boardDecisionWrite` + `wb-decision-title` |
 
 ### Won’t fix / leftover (not this PR)
 
-- Mentions / unread / first-unread / read receipts / discussion tombstone / todo — **unmodeled**
+- Mentions / unread / first-unread / read receipts / discussion tombstone / todo — **unmodeled**. No `0031+`.
 - Typing / per-member presence **table** unmodeled (channel count + lastWriter stamps only)
 - `kind: quote` has no producer
-- Whiteboard 「寫下決策」 still uses a canned title (`已決定：採用 B 版`) — board node helper, not a new table
+- Board 「＋投票」still uses a canned poll question (`主視覺要不要換？`) — not this turn
 - Canva / CUTOS / Perplexity production secrets unverified
 - Stale room stack `#95→#115` vs main
 - #88 / #104 / #119 drafts still CONFLICTING / human rebase
-- Production origin JSON 404 is a **probe**, not “functions work”
+- Production origin JSON 404 is a **probe**, not LiveKit / functions success
 - This push’s CI browser not yet terminal at evidence write
 
 ## E2E (local this turn)
@@ -104,15 +113,15 @@ Inspected current tree after #107/#108/#113/#114. Do **not** invent tables. Do *
 | Suite | Result |
 |---|---|
 | `test:visual` | **15/15** after baseline refresh (was 11/15 on `8f91286` CI) |
-| `discussion-honesty` | **7/7** D-01…D-07 |
-| `test:collaboration-e2e` | **126/126** (edit / 已編輯 / decision title / work cite) |
-| `test:collaboration` | **252/252** |
+| `discussion-honesty` | **8/8** D-01…D-08 |
+| `test:collaboration-e2e` | **127/127** (board title sheet + human 「採用 B 版」) |
+| `test:collaboration` | **253/253** |
 
-390/768 discussion shots: `discussion_edit_390.png`, `discussion_cite_work_390.png`, `discussion_cite_768.png` (from collaboration e2e this turn).
+390/768 board decision shots: `wb_decision_title_390.png`, `wb_decision_title_768.png`.
 
 ## Production (re-curl this turn)
 
-Re-curled 2026-08-29 16:47 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1650.txt`):
+Re-curled 2026-08-29 16:53 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1655.txt`):
 
 | Path | HTTP | Type | Body |
 |---|---|---|---|
