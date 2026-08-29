@@ -9,7 +9,12 @@
  * 聽不到聲音 — Grok 03 F3）**、mute、disconnect；並把參與者事件折成
  * 一個 roster 回呼。誰在房裡、誰在講話，以 LiveKit 的即時事實為準；
  * voice_session_participants 的 DB 列由 useVoiceRoom 維護。
+ *
+ * 空字串、SPA HTML、或缺欄 token 在連線前就被拒絕 — 永不把 HTTP 200
+ * 的 index.html 當成 LiveKit session。
  */
+
+import { looksLikeSpaHtml } from "./voiceState";
 
 export type VoiceParticipantInfo = {
   identity: string;
@@ -41,6 +46,14 @@ async function loadLiveKit(): Promise<LiveKitModule> {
 }
 
 export async function connectVoice(input: ConnectVoiceInput): Promise<VoiceConnection> {
+  if (
+    !input.url ||
+    !input.token ||
+    looksLikeSpaHtml(input.url) ||
+    looksLikeSpaHtml(input.token)
+  ) {
+    throw Object.assign(new Error("SPA_HTML"), { name: "VoicePayloadError" });
+  }
   const { Room, RoomEvent, Track } = await loadLiveKit();
   const room = new Room({
     adaptiveStream: false,

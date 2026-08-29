@@ -4,8 +4,16 @@
  * LIVEKIT_API_SECRET 永遠在 edge env；瀏覽器拿到的是短命（10 分鐘）、
  * 單房、音訊限定的 access token。health 正向快取 5 分鐘、負向 30 秒
  * （與 cutos 同一套語意：env 後補不用整頁重載）。
+ *
+ * SPA HTML / `{ ok: true }` 缺欄不得被當成已連線（PR-GAP-03）。
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  invokeErrorContentType,
+  parseVoiceHealthPayload,
+  parseVoiceTokenPayload,
+  type VoiceTokenReject,
+} from "../features/voice/voiceState";
 
 export type VoiceHealth = { ok: boolean; code?: "VOICE_NOT_CONFIGURED" | "VOICE_UNREACHABLE" };
 
@@ -17,6 +25,22 @@ let healthCache: { at: number; value: VoiceHealth } | null = null;
 const HEALTH_TTL_MS = 5 * 60 * 1000;
 const HEALTH_NEGATIVE_TTL_MS = 30 * 1000;
 
+function publicTokenReject(parsed: VoiceTokenReject): Extract<VoiceTokenResult, { ok: false }> {
+  if (
+    parsed.code === "VOICE_NOT_CONFIGURED" ||
+    parsed.code === "ROOM_NOT_FOUND" ||
+    parsed.code === "INVALID_REQUEST" ||
+    parsed.code === "VOICE_UNREACHABLE"
+  ) {
+    return { ok: false, code: parsed.code };
+  }
+  return { ok: false, code: "VOICE_UNREACHABLE" };
+}
+
+function responseContentType(error: unknown): string | null {
+  return invokeErrorContentType(error);
+}
+
 export async function voiceHealth(supabase: SupabaseClient): Promise<VoiceHealth> {
   if (healthCache) {
     const ttl = healthCache.value.ok ? HEALTH_TTL_MS : HEALTH_NEGATIVE_TTL_MS;
@@ -24,8 +48,17 @@ export async function voiceHealth(supabase: SupabaseClient): Promise<VoiceHealth
   }
   try {
     const { data, error } = await supabase.functions.invoke("voice-token", { body: { action: "health" } });
-    if (error) throw error;
-    const value = (data ?? { ok: false, code: "VOICE_UNREACHABLE" }) as VoiceHealth;
+    if (error) {
+      const parsed = parseVoiceHealthPayload(null, responseContentType(error));
+      if (!parsed.ok && parsed.code === "VOICE_UNREACHABLE" && /text\/html/i.test(responseContentType(error) || "")) {
+        const value: VoiceHealth = { ok: false, code: "VOICE_UNREACHABLE" };
+        healthCache = { at: Date.now(), value };
+        return value;
+      }
+      throw error;
+    }
+    const parsed = parseVoiceHealthPayload(data);
+    const value: VoiceHealth = parsed.ok ? { ok: true } : { ok: false, code: parsed.code };
     healthCache = { at: Date.now(), value };
     return value;
   } catch {
@@ -50,15 +83,21 @@ export async function fetchVoiceToken(
       body: { action: "token", roomId, displayName },
     });
     if (error) {
-      // 非 2xx 的 body 帶誠實碼（404 ROOM_NOT_FOUND）— 讀回來。
       const ctx = (error as { context?: Response }).context;
       if (ctx && typeof ctx.json === "function") {
-        const body = (await ctx.json().catch(() => null)) as VoiceTokenResult | null;
-        if (body && body.ok === false && body.code) return body;
+        const body = (await ctx.json().catch(() => null)) as unknown;
+        const parsed = parseVoiceTokenPayload(body, ctx.headers?.get?.("content-type"));
+        if (!parsed.ok) return publicTokenReject(parsed);
+      }
+      const contentType = responseContentType(error);
+      if (contentType && /text\/html/i.test(contentType)) {
+        return { ok: false, code: "VOICE_UNREACHABLE" };
       }
       throw error;
     }
-    return (data ?? { ok: false, code: "VOICE_UNREACHABLE" }) as VoiceTokenResult;
+    const parsed = parseVoiceTokenPayload(data);
+    if (!parsed.ok) return publicTokenReject(parsed);
+    return parsed;
   } catch {
     return { ok: false, code: "VOICE_UNREACHABLE" };
   }
