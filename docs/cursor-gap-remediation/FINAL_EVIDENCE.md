@@ -7,8 +7,9 @@
 
 | 鍵 | 值 |
 |---|---|
-| 審計時間（UTC） | 2026-08-29 18:08 |
-| 本 tip SHA（寫入時） | `bad534b`（`Harden video playerReady after the 81db260 CI timeout.`） |
+| 審計時間（UTC） | 2026-08-29 18:10 |
+| 本 tip SHA | `b17772c`（本審計檔）。產品／e2e 與 `bad534b` 相同。 |
+| 已核對 SHA | `bad534b`（`Harden video playerReady after the 81db260 CI timeout.`） |
 | 本 PR | [#125](https://github.com/aa0968111723-prog/duigao/pull/125) `cursor/p0-discussion-mentions-todos-70d9` |
 | 底層 stack | [#124](https://github.com/aa0968111723-prog/duigao/pull/124) `10c9109` → [#120](https://github.com/aa0968111723-prog/duigao/pull/120) → `main` `cd7eb5f` |
 | `origin/main` | `cd7eb5f`（本回合未前進） |
@@ -49,7 +50,7 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | 0032 `@` 提及（同房成員、作者 INSERT、禁 UPDATE） | evidenced | `supabase/migrations/0032_discussion_mentions_todos.sql`；M-01…M-05、M-08 `scripts/tests/discussion-mentions-todos.test.ts` |
 | 0032 待辦草稿（作者或 `can_manage` 完成、`isMemberActor`） | evidenced | 0032；`src/features/collaboration/discussionHonesty.ts` `canCompleteRoomTodo`；M-04…M-08 |
 | 0032 typing = ephemeral presence `typing: boolean` | evidenced | `src/cloud/useCloudRoom.ts` `setTyping`；`src/cloud/roomSync.ts` presence `typing`；M-06。**無 typing table。** |
-| Split View 討論軌不掛待辦欄 | evidenced（程式 + 前一 SHA CI） | `src/features/multi-room/MultiBranchRoom.tsx` `showTodos: false`；`test:visual` 15/15 @ `81db260`。`bad534b` browser **尚未結束**，本 SHA visual 不得標 evidenced。 |
+| Split View 討論軌不掛待辦欄 | evidenced | `src/features/multi-room/MultiBranchRoom.tsx` `showTodos: false`；`bad534b` CI `test:visual` **success**（run `33267190274` job `browser` 18:04:46Z） |
 | 討論表情（支持以外） | unmodeled | `room_discussion_supports` 只有存在列，無 `reaction_type`。第二種表情要 0033。D-11 `scripts/tests/discussion-honesty.test.ts` 鎖住。 |
 | `kind: quote` 獨立引用氣泡 | unmodeled | 0014/0018 CHECK 有 kind，**零 producer**。誠實引用 = `reply_to_id`。D-12 鎖住。 |
 | 已讀／雙藍勾／回條 | unmodeled | 禁止做。水位 ≠ 回條。D-06、T-03、T-07、M-06。 |
@@ -76,7 +77,7 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | 第一層只有 對話／白板；總覽／AI／檔案在「更多」 | evidenced | `src/features/multi-room/roomChrome.ts` `FIRST_LAYER_TABS` / `firstLayerChrome`；`src/features/multi-room/MultiBranchRoom.tsx` `data-testid=room-more-sheet`；`scripts/tests/mobile-tablet-ux.test.ts` |
 | 手機聚焦輸入時收起 chrome（`hideRoomChrome`） | evidenced | `roomChrome.ts`（`composerActive && width < 768`）；`mobile-tablet-ux.test.ts`「focused composer hides phone chrome」 |
 | Split View ≥768 | evidenced | `isTabletSplitWidth`；`scripts/e2e/mobile-tablet-ux.mjs` |
-| 視覺基線（本 tip 程式） | incomplete（本 SHA CI） | `81db260` CI `test:visual` 15/15。`bad534b` browser job run `33267190274` 寫入時 **in_progress**。本回合未重跑 visual。 |
+| 視覺基線 | evidenced（`bad534b` CI） | run `33267190274` `npm run test:visual` **success**。`b17772c` 只改本檔，其 browser 尚未結束，不得把該 SHA 的 visual 標 evidenced。 |
 | 實體手機／平板手勢 | incomplete | 無實機。e2e 是 Chromium 寬度。 |
 
 ---
@@ -87,7 +88,7 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 |---|---|---|
 | realtime payload 經驗證才進 store | evidenced | `src/cloud/realtimeApply.ts` `acceptRealtimePayload`；`src/cloud/roomSync.ts`；`scripts/tests/realtime-offline.test.ts` |
 | `online` 才 flush outbox | evidenced | `src/hooks/discussionOutboxCore.ts` `flushOutboxOnOnline`；`src/hooks/useDiscussionOutbox.ts`；同上 |
-| 本機 e2e 五條 | evidenced（前一 SHA CI） | `scripts/e2e/realtime-offline.mjs` **5/5** @ `81db260`。`bad534b` browser 未結束，本 SHA 不得標 CI evidenced。 |
+| 本機 e2e 五條 | evidenced（`bad534b` CI） | `scripts/e2e/realtime-offline.mjs`；run `33267190274` `test:realtime-offline-e2e` **success**。 |
 | 兩客戶端生產即時 | incomplete | 無生產雙端錄影。 |
 
 ---
@@ -137,7 +138,8 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | 函式／REST 404／HTML 不可當 JSON 成功 | evidenced（client） | `src/cloud/apiResponse.ts`；`scripts/tests/api-response.test.ts` |
 | 生產 origin 有 API | deploy-blocked | 本回合 18:06 UTC：`/functions/v1/voice-token`、`/rest/v1/`、`/api/health` 皆 **HTTP 404** + `application/json` + `code: NOT_FOUND`。`/` 為 SPA HTML 200。見 artifact。 |
 | CI `agent-gate` 全綠 | incomplete | 本回合未跑 `npm run agent:gate`。 |
-| CI browser @ `bad534b` | incomplete | run `33267190274` job `browser` 寫入時 **in_progress**。`81db260` video 曾因 `playerReady` 60s 失敗；`bad534b` 只是對該失敗的修復（`scripts/e2e/video-flow.mjs` 等真實 `video.v-video`），**修復尚未被該 SHA 的 CI 證實**。 |
+| CI browser @ `bad534b` | evidenced | run `33267190274` **success**。`test:video` **success**（18:04:57–18:06:12Z，真實 `video.v-video` / `playerReady`）。`test:collaboration-e2e` / `test:visual` / `test:share-e2e` 皆 success。 |
+| CI browser @ `b17772c` | incomplete | 本檔落地後另起 run。docs-only，尚未 terminal。 |
 | 已讀回條 UI | unmodeled | 禁止。 |
 
 ---
@@ -173,5 +175,5 @@ GET https://duigao-k7q2.zeabur.app/
 
 - 不 merge、不 deploy、不改生產 DB、不 force-push。
 - 不發明 0033。不發明已讀／雙藍勾。
-- 不把 `bad534b` 的 in-progress CI 寫成綠。
+- `bad534b` browser 已 terminal success（含 `test:video`）。不把 `b17772c` 尚未結束的 CI 寫成綠。
 - 未發現需要 0033 以外、且無人認領的小產品洞（canned copy / 假成功 / 缺 error-retry）值得在本回合改程式；審計後停止。
