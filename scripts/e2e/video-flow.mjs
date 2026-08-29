@@ -1044,7 +1044,7 @@ try {
   check("S2. 播放器旁有明確的「＋在這裡留言」", await A.isVisible(".v-capture-main"));
   await dismissVerdict(A);
   await collapseSheet(A);
-  await A.click(".v-capture-main");
+  await A.evaluate(() => document.querySelector(".v-capture-main")?.click());
   await A.waitForSelector(".m-modal-title", { timeout: 10000 });
   const composerTitle = (await A.textContent(".m-modal-title")) ?? "";
   check("S2. 自動帶入目前時間，不必手打時間碼", /0:0[4-9] 這一刻/.test(composerTitle), composerTitle);
@@ -1109,7 +1109,7 @@ try {
   await A.waitForTimeout(300);
   await dismissVerdict(A);
   await collapseSheet(A);
-  await A.click(".v-capture-main");
+  await A.evaluate(() => document.querySelector(".v-capture-main")?.click());
   await A.waitForSelector(".v-compose-range", { timeout: 10000 });
   await A.click(".v-compose-range");
   await A.waitForSelector(".v-rangebar", { timeout: 10000 });

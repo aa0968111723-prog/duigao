@@ -556,7 +556,11 @@ export function VideoWorkspace({ api, presence }: Props) {
   if (!version) return null;
 
   const player = (
-    <div className={compareMode ? "v-compare" : undefined} data-testid="version-comparison">
+    <div
+      className={compareMode ? "v-compare" : undefined}
+      style={compareMode ? undefined : { display: "contents" }}
+      data-testid="version-comparison"
+    >
       <VideoPlayer
         ref={playerRef}
         src={version.videoUrl ?? ""}

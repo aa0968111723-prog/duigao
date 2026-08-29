@@ -883,7 +883,7 @@
   gap: 6px;
 }
 .v-compare .v-frame { max-height: 48vh; }
-.m-vchip-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.m-vchip-wrap { display: inline-flex; align-items: center; gap: 4px; flex: none; white-space: nowrap; }
 .m-vchip-archive,
 .m-vchip-compare {
   border: 0;

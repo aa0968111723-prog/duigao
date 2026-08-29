@@ -1,6 +1,14 @@
 import { ASSET_BUCKET } from "./assets";
-import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "./config";
 import { CloudError } from "./errors";
+
+function envString(name: "VITE_SUPABASE_URL" | "VITE_SUPABASE_PUBLISHABLE_KEY"): string {
+  try {
+    const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+    return (env?.[name] ?? "").trim();
+  } catch {
+    return "";
+  }
+}
 
 /**
  * Minimal TUS 1.0 client for Supabase Storage `/storage/v1/upload/resumable`.
@@ -125,8 +133,8 @@ function sleep(ms: number, signal: { cancelled: boolean; paused: boolean }): Pro
  */
 export function uploadResumableVideo(input: TusUploadInput): TusUploadHandle {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const origin = (input.supabaseUrl ?? SUPABASE_URL).replace(/\/+$/, "");
-  const apiKey = input.apiKey ?? SUPABASE_PUBLISHABLE_KEY;
+  const origin = (input.supabaseUrl ?? envString("VITE_SUPABASE_URL")).replace(/\/+$/, "");
+  const apiKey = input.apiKey ?? envString("VITE_SUPABASE_PUBLISHABLE_KEY");
   const signal = { cancelled: false, paused: false };
   let state: TusUploadState = "preparing";
   let offset = 0;
