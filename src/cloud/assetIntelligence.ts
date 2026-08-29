@@ -24,6 +24,7 @@ import {
 import { DocumentUnderstandingProvider, PdfReader } from "../ai/documentUnderstanding";
 import { VideoUnderstandingProvider } from "../ai/videoUnderstanding";
 import { answerDuigaoRoomContext } from "../ai/aiOsRoomContext";
+import { acceptAssetAiPolicyAck } from "./assetAiPolicyAck";
 import { ensureSession } from "./auth";
 import { getSupabase } from "./client";
 import { isCloudConfigured } from "./config";
@@ -434,11 +435,12 @@ export async function setAssetAiPolicy(
   input: { assetId: string; aiReadable: boolean; externalAiAllowed: boolean },
 ): Promise<void> {
   await ensureSession(supabase);
-  const { error } = await supabase.from("intelligent_assets").update({
+  const { data, error } = await supabase.from("intelligent_assets").update({
     ai_readable: input.aiReadable,
     external_ai_allowed: input.aiReadable ? input.externalAiAllowed : false,
-  }).eq("id", input.assetId);
+  }).eq("id", input.assetId).select("id").maybeSingle();
   if (error) throw error;
+  acceptAssetAiPolicyAck(data);
 }
 
 export async function createAssetRelation(
