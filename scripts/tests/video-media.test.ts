@@ -1,7 +1,12 @@
 /** acceptVideoFile 的收檔契約（PR-01c，Grok 01c F1）。 */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { acceptVideoFile, MAX_VIDEO_BYTES } from "../../src/features/video-review/media";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const fakeFile = (name: string, type: string, size: number): File => {
   const file = new File([new Uint8Array(1)], name, { type });
@@ -34,4 +39,19 @@ test("超過 50MB 仍可上傳，但先警告會最佳化", () => {
   const large = acceptVideoFile(fakeFile("a.mp4", "video/mp4", 60 * 1024 * 1024));
   assert.equal(large.ok, true);
   assert.match((large as { warning?: string }).warning ?? "", /最佳化/);
+});
+
+test("反應與表態成功 toast 必須等雲端寫入，未綁定房要丟錯", () => {
+  const workspace = readFileSync(resolve(ROOT, "src/features/video-review/VideoWorkspace.tsx"), "utf8");
+  const hook = readFileSync(resolve(ROOT, "src/cloud/useCloudRoom.ts"), "utf8");
+  const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
+
+  assert.doesNotMatch(workspace, /api\.video\.react\([^)]*\);\s*\n\s*api\.showToast\(`已記在/);
+  assert.doesNotMatch(workspace, /api\.video\.setVerdict\([^)]*\);\s*\n\s*api\.showToast\("已記下你的看法/);
+  assert.match(workspace, /api\.video\.react\([^)]*\)\.then\(\(\) => \{\s*\n\s*api\.showToast\(`已記在/);
+  assert.match(workspace, /api\.video\.setVerdict\([^)]*\)\.then\(\(\) => \{\s*\n\s*api\.showToast\("已記下你的看法/);
+
+  assert.match(hook, /if \(!supabase \|\| !rid\) throw new CloudError\("review unavailable", "review"\)/);
+  assert.match(app, /reviewFail\("這個反應"\)\(err\);\s*\n\s*throw err;/);
+  assert.match(app, /reviewFail\("表態"\)\(err\);\s*\n\s*throw err;/);
 });

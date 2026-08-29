@@ -62,8 +62,8 @@ export type VideoApi = {
   /** Only meaningful in a cloud room; a local-only room cannot review. */
   reviewOnline: boolean;
   saveBrief: (versionId: string, input: BriefInput) => void;
-  react: (versionId: string, time: number, type: ReactionType) => void;
-  setVerdict: (versionId: string, verdict: Verdict, note?: string) => void;
+  react: (versionId: string, time: number, type: ReactionType) => Promise<void>;
+  setVerdict: (versionId: string, verdict: Verdict, note?: string) => Promise<void>;
   reportProgress: (versionId: string, maxWatched: number, completed: boolean) => void;
   setStatus: (commentId: string, status: ReviewStatus) => void;
   archiveVersion?: (versionId: string) => void;

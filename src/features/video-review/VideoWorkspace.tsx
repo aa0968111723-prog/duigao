@@ -315,8 +315,9 @@ export function VideoWorkspace({ api, presence }: Props) {
     (type: ReactionType) => {
       if (!version || !api.video) return;
       const at = playerRef.current?.currentTime() ?? liveTimeRef.current;
-      api.video.react(version.id, at, type);
-      api.showToast(`已記在 ${formatTime(at)}`);
+      void api.video.react(version.id, at, type).then(() => {
+        api.showToast(`已記在 ${formatTime(at)}`);
+      }).catch(() => undefined);
     },
     [version, api],
   );
@@ -324,8 +325,9 @@ export function VideoWorkspace({ api, presence }: Props) {
   const submitVerdict = useCallback(
     (verdict: Verdict, note?: string) => {
       if (!version || !api.video) return;
-      api.video.setVerdict(version.id, verdict, note);
-      api.showToast("已記下你的看法，謝謝！", { tone: "success" });
+      void api.video.setVerdict(version.id, verdict, note).then(() => {
+        api.showToast("已記下你的看法，謝謝！", { tone: "success" });
+      }).catch(() => undefined);
     },
     [version, api],
   );

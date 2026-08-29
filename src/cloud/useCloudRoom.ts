@@ -30,7 +30,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { CloudError, isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -1036,14 +1036,14 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     },
     react: async (versionId, time, type) => {
       const rid = boundRef.current;
-      if (!supabase || !rid) return false;
+      if (!supabase || !rid) throw new CloudError("review unavailable", "review");
       const added = await addReaction(supabase, rid, versionId, time, type);
       if (added) refreshReview();
       return Boolean(added);
     },
     setVerdict: async (versionId, verdict, note) => {
       const rid = boundRef.current;
-      if (!supabase || !rid) return;
+      if (!supabase || !rid) throw new CloudError("review unavailable", "review");
       await saveVerdict(supabase, rid, versionId, verdict, note);
       refreshReview();
     },

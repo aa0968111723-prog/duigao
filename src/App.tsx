@@ -2925,12 +2925,16 @@ export function App() {
           saveBrief: (versionId, input) => {
             cloud.reviewApi.saveBrief(versionId, input).catch(reviewFail("作者說明"));
           },
-          react: (versionId, time, type) => {
-            cloud.reviewApi.react(versionId, time, type).catch(reviewFail("這個反應"));
-          },
-          setVerdict: (versionId, verdict, note) => {
-            cloud.reviewApi.setVerdict(versionId, verdict, note).catch(reviewFail("表態"));
-          },
+          react: (versionId, time, type) =>
+            cloud.reviewApi.react(versionId, time, type).then(() => undefined).catch((err) => {
+              reviewFail("這個反應")(err);
+              throw err;
+            }),
+          setVerdict: (versionId, verdict, note) =>
+            cloud.reviewApi.setVerdict(versionId, verdict, note).catch((err) => {
+              reviewFail("表態")(err);
+              throw err;
+            }),
           reportProgress: (versionId, maxWatched, completed) => {
             // Deliberately silent: nobody asked for this, and a failed progress
             // ping is not worth a toast over a playing video.
