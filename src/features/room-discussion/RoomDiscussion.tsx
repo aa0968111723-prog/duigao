@@ -13,6 +13,8 @@ import {
   discussionEditPatch,
   filterMentionableMembers,
   firstUnreadMessageId,
+  messageIsEdited,
+  messageIsTombstoned,
   mentionBodyParts,
   mentionedIdsFromDraft,
   parseMentionQuery,
@@ -279,7 +281,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     add(api.userId, api.guest?.name, api.guest?.color);
     for (const message of api.messages) add(message.authorId, message.authorName, message.authorColor);
     return list;
-  }, [api.room.members, api.userId, api.guest.name, api.guest.color, api.messages]);
+  }, [api.room.members, api.userId, api.guest?.name, api.guest?.color, api.messages]);
   const mentionQuery = parseMentionQuery(api.draft);
   const mentionHits = mentionQuery ? filterMentionableMembers(mentionMembers, mentionQuery.query) : [];
   const nameById = useMemo(() => {
