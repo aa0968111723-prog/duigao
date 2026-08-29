@@ -19,7 +19,7 @@
 
 | PR | 舊 head | 新 head | 衝突 | 測試（本回合） |
 |---|---|---|---|---|
-| **#96** | `e163bb1` | `4d805cb`（merge）＋本檔 commit | 僅 `package.json`：保留 `test:home-entry` 與 `test:api-response` | `test:home-entry` 5/5；`test:api-response` 17/17 |
+| **#96** | `e163bb1` | `4d805cb`（merge）then `52bd0b8`（本檔） | 僅 `package.json`：保留 `test:home-entry` 與 `test:api-response` | `test:home-entry` 5/5；`test:api-response` 17/17 |
 | **#98** | `af8c2a4` | `54a6bd1`（merge） | `package.json`、`voiceToken.ts`、`voice.ts`。保留九態 `parseVoiceTokenPayload` **與** #97 `parseFunctionPayload` | `test:voice-state` 15/15；`test:api-response` 17/17；`remaining-gaps` 4/4 |
 | **#99** | — | 已在 main | 不需再 merge main 進該分支 | — |
 
