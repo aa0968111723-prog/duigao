@@ -254,8 +254,43 @@ async function uploadVideo(page, buffer, fileName = "cut.webm") {
   });
 }
 
+async function dumpPlayerWait(page) {
+  return page.evaluate(() => ({
+    href: location.href,
+    hasVideo: Boolean(document.querySelector("video.v-video")),
+    onboard: document.querySelector(".onboard-card")?.textContent?.replace(/\s+/g, " ").slice(0, 240) ?? null,
+    body: (document.body?.innerText || "").replace(/\s+/g, " ").slice(0, 280),
+  }));
+}
+
+/**
+ * The player mounts only after create-room + TUS + a version row
+ * (`VideoWorkspace` returns null when `!version`). `waitForSelector` default
+ * `visible` plus 45s timed out on CI run 33268176148 after this job had already
+ * run collaboration / visual e2e — the same locator with 90s passed in
+ * `test:collaboration-e2e` on that SHA. Wait for the element (not box-size)
+ * or an honest fail card; never treat a hung home screen as ready.
+ */
 async function playerReady(page) {
-  await page.waitForSelector("video.v-video", { timeout: 45000 });
+  let phase = "missing";
+  try {
+    const handle = await page.waitForFunction(
+      () => {
+        if (document.querySelector("video.v-video")) return "player";
+        const text = document.querySelector(".onboard-card")?.textContent ?? "";
+        if (/初始化沒完成|檢查網路|無法上傳|上傳失敗/.test(text)) return "fail";
+        return false;
+      },
+      null,
+      { timeout: 90000 },
+    );
+    phase = await handle.jsonValue();
+  } catch {
+    throw new Error(`playerReady: video.v-video never mounted: ${JSON.stringify(await dumpPlayerWait(page))}`);
+  }
+  if (phase !== "player") {
+    throw new Error(`playerReady: upload failed honestly: ${JSON.stringify(await dumpPlayerWait(page))}`);
+  }
   try {
     await page.waitForFunction(
       () => {
