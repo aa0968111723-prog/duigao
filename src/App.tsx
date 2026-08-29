@@ -33,7 +33,8 @@ import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformA
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
 import { roomCode, uid, uuid } from "./lib/id";
-import { deleteRoom, listRooms, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom } from "./lib/store";
+import { deleteRoom, listRooms, listUploadSessions, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
+import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
@@ -384,6 +385,16 @@ export function App() {
   useEffect(() => {
     listRooms().then(setRecent).catch(() => setRecent([]));
   }, [room]);
+
+  useEffect(() => {
+    void listUploadSessions()
+      .then((sessions) => {
+        if (sessions.length) {
+          showToast("上次有一支影片還沒傳完。重新選同一支影片，就能從上次進度繼續。");
+        }
+      })
+      .catch(() => undefined);
+  }, [showToast]);
 
   const roomLinkAppliedRef = useRef(false);
   // outbox 對帳只能看「伺服器快照裡有哪些討論訊息」。room.discussion 混著
@@ -1058,20 +1069,37 @@ export function App() {
         // therefore mean "still the room this upload belongs to".
         belongsToThisUpload.add(cloudRoom.roomId);
 
+        const pending = (await listUploadSessions().catch(() => [])).find(
+          (session) => session.roomId === cloudRoom.roomId && uploadSessionMatchesFile(session, check.file),
+        );
+        const resumeVersionId = pending?.versionId ?? versionId;
+        const uploadCtl = {
+          pause: () => undefined as void,
+          resume: () => undefined as void,
+        };
         const handle = cloudRef.current.uploadVideo(
           {
             roomId: cloudRoom.roomId,
-            versionId,
+            versionId: resumeVersionId,
             label,
             sortOrder: index,
             branchId: targetBranchId,
             file: check.file,
             mime: check.mime,
             roomTitle: base.title,
+            resumeUploadUrl: pending?.uploadUrl,
           },
-          (phase, progress) => setVideoUpload({ state: phase, progress, cancel }),
+          (phase, progress) => setVideoUpload({
+            state: phase,
+            progress,
+            cancel,
+            pause: phase === "uploading" ? () => uploadCtl.pause() : undefined,
+            resume: phase === "paused" ? () => uploadCtl.resume() : undefined,
+          } as VideoUploadState),
         );
         if (!handle) throw new Error("cloud-room-failed");
+        uploadCtl.pause = () => handle.pause();
+        uploadCtl.resume = () => handle.resume();
         handleCancel = handle.cancel;
 
         const version = await handle.done;
@@ -2679,6 +2707,47 @@ export function App() {
           setStatus: (commentId, status) => {
             cloud.reviewApi.setStatus(commentId, status).catch(reviewFail("更新狀態"));
           },
+          archiveVersion: (versionId) => {
+            void cloud.writes.archiveVersion?.(versionId)
+              .then(() => {
+                updateRoom((current) => ({
+                  ...current,
+                  versions: current.versions.map((item) => item.id === versionId ? { ...item, archivedAt: new Date().toISOString() } : item),
+                }));
+                showToast("這一版已封存，討論還在。", { tone: "success" });
+              })
+              .catch(reviewFail("封存"));
+          },
+          restoreVersion: (versionId) => {
+            void cloud.writes.restoreVersion?.(versionId)
+              .then(() => {
+                updateRoom((current) => ({
+                  ...current,
+                  versions: current.versions.map((item) => item.id === versionId ? { ...item, archivedAt: undefined } : item),
+                }));
+                showToast("已取消封存。", { tone: "success" });
+              })
+              .catch(reviewFail("取消封存"));
+          },
+          addToLibrary: (versionId) => {
+            const client = getSupabase();
+            const current = roomRef.current;
+            const item = current?.versions.find((version) => version.id === versionId);
+            if (!client || !current || !item || !cloud.boundRoomId) {
+              showToast("現在不能加入素材庫。", { tone: "error" });
+              return;
+            }
+            void insertLibraryAsset(client, {
+              scope: "room",
+              roomId: cloud.boundRoomId,
+              title: `${current.title} · ${item.label}`.slice(0, 160),
+              kind: item.kind === "video" ? "video" : "poster",
+              linkedVersionId: item.id,
+              summary: item.kind === "video" ? "房間影片版本" : "房間文宣版本",
+            })
+              .then(() => showToast("已加入素材庫", { tone: "success" }))
+              .catch(reviewFail("加入素材庫"));
+          },
         }
       : null;
 
@@ -3025,13 +3094,19 @@ export function App() {
           <p className="onboard-hint">
             {visibleVideoUpload.state === "uploading"
               ? `正在上傳影片 ${pct}%`
-              : visibleVideoUpload.state === "processing"
-                ? "正在處理影片…"
-                : visibleVideoUpload.state === "error"
-                  ? visibleVideoUpload.message
-                  : "正在準備影片…"}
+              : visibleVideoUpload.state === "paused"
+                ? `已暫停 ${pct}%`
+                : visibleVideoUpload.state === "optimizing"
+                  ? `正在最佳化 ${pct}%`
+                  : visibleVideoUpload.state === "retrying"
+                    ? "正在重新連線…"
+                    : visibleVideoUpload.state === "processing"
+                      ? "正在處理影片…"
+                      : visibleVideoUpload.state === "error"
+                        ? visibleVideoUpload.message
+                        : "正在準備影片…"}
           </p>
-          {visibleVideoUpload.state === "uploading" && (
+          {(visibleVideoUpload.state === "uploading" || visibleVideoUpload.state === "paused" || visibleVideoUpload.state === "optimizing") && (
             <span className="v-upload-bar" aria-hidden>
               <span className="v-upload-fill" style={{ width: `${pct}%` }} />
             </span>
@@ -3056,9 +3131,17 @@ export function App() {
               </button>
             </>
           ) : (
-            <button className="btn btn-block" onClick={visibleVideoUpload.cancel}>
-              取消
-            </button>
+            <>
+              {visibleVideoUpload.state === "uploading" && visibleVideoUpload.pause && (
+                <button className="btn btn-block" onClick={visibleVideoUpload.pause}>暫停</button>
+              )}
+              {visibleVideoUpload.state === "paused" && (
+                <button className="btn btn-primary btn-block" onClick={visibleVideoUpload.resume}>繼續上傳</button>
+              )}
+              <button className="btn btn-block" onClick={visibleVideoUpload.cancel}>
+                取消
+              </button>
+            </>
           )}
         </div>
         <ToastStack toasts={toasts} onDismiss={dismiss} />

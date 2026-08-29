@@ -62,6 +62,10 @@ export type Version = {
    * picker so the room shows what is current. ISO string, or absent.
    */
   archivedAt?: string;
+  /** Compatible / transcode proxy path. Playback prefers this when present. */
+  optimizedVideoPath?: string;
+  optimized?: boolean;
+  sourceFileSize?: number;
 };
 
 /** The versions a picker should offer: everything still on the table. */

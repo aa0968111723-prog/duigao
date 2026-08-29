@@ -30,7 +30,10 @@ export type SaveState = "idle" | "saving" | "saved" | "error";
 export type VideoUploadState =
   | { state: "idle" }
   | { state: "preparing"; progress: number; cancel: () => void }
-  | { state: "uploading"; progress: number; cancel: () => void }
+  | { state: "optimizing"; progress: number; cancel: () => void }
+  | { state: "uploading"; progress: number; cancel: () => void; pause?: () => void }
+  | { state: "paused"; progress: number; cancel: () => void; resume: () => void }
+  | { state: "retrying"; progress: number; cancel: () => void }
   | { state: "processing"; progress: number; cancel: () => void }
   | { state: "error"; message: string; progress: number; cancel: () => void };
 
@@ -63,6 +66,9 @@ export type VideoApi = {
   setVerdict: (versionId: string, verdict: Verdict, note?: string) => void;
   reportProgress: (versionId: string, maxWatched: number, completed: boolean) => void;
   setStatus: (commentId: string, status: ReviewStatus) => void;
+  archiveVersion?: (versionId: string) => void;
+  restoreVersion?: (versionId: string) => void;
+  addToLibrary?: (versionId: string) => void;
 };
 
 /** A pending piece of feedback. When it came from a 圈範圍 gesture, `region` is set and x/y are its center. */
