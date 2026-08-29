@@ -27,35 +27,45 @@ gh pr list --state open
 | 0026 | `0026_whiteboard_freehand.sql` | 未合併 | `agent/wb01-canonical-schema` | [#78](https://github.com/aa0968111723-prog/duigao/pull/78) |
 | 0027 | `0027_design_knowledge.sql` | 未合併 | `agent/design-intelligence-perplexity` | [#88](https://github.com/aa0968111723-prog/duigao/pull/88) |
 | 0028 | `0028_design_research_usage.sql` | 未合併、**無 PR** | `agent/di02-analysis-engine`、`di03`、`di04`、`di05`、`di06`（五條分支共用同一號） | 尚未開 PR |
-| **0029** | *（保留）* | **本線預約** | `agent/team-communication-mobile-tablet` | PR-COMM-* |
-| 0030+ | *（保留）* | 本線預約 | 同上 | PR-COMM-* |
+| **0029** | `0029_discussion_author_integrity.sql` | **本線已鑄**（見下方理由） | `agent/team-communication-mobile-tablet` | PR-COMM-00 |
+| 0030+ | *（保留）* | 本線預約，**尚未鑄號** | 同上 | PR-COMM-02 以後 |
 
 ## 本線（團隊溝通）的決定
 
-**PR-COMM-00 不新增任何 migration。**
+**PR-COMM-00 只鑄一個編號：`0029_discussion_author_integrity.sql`。**
 
-理由：0022–0028 全部尚未合併，且 0028 被五條 DI 分支同時宣告卻沒有任何 PR
-在追蹤它。在人類決定 #78／#88／DI 系列的合併順序之前，任何新編號都可能在
-rebase 時撞號。依 §二十三第 6–8 條：
+一開始的計畫是「本階段完全不新增 migration」，因為 0022–0028 全部未合併。
+稽核跑完之後改了決定，理由必須寫清楚：
 
-> 6. 若編號衝突，暫停 schema commit。
-> 7. 先完成不依賴 schema 的工作。
-> 8. 等人類決定合併順序後再重新編號。
+`0029` 修的是一個**用真 PostgreSQL、真角色實測出來的安全洞** —— 房間裡任何
+成員都能發出一則 `author_user_id` 指向別人的訊息，而訊息是決策與待辦往回指
+的原始證據（證據見 `TEST_EVIDENCE.md` §2.1）。把它延到「合併順序定案之後」
+等於讓正式站繼續帶著這個洞。
 
-因此 PR-COMM-00 的範圍限制在**不需要 schema 變更**就能落地的東西：既有
-migration 的行為稽核、能抓到真實缺陷的測試、以及純 client／policy-free 的
-P0 修復。需要新表的能力（mentions、receipts、typing、reactions 多表情、
-tasks、pins）留到 PR-COMM-02 以後，並在人類確認合併順序後才鑄編號。
+§二十三 第 6 條寫的是「**若編號衝突**，暫停 schema commit」。列舉全部 46 條
+remote 分支與 2 個 open PR 之後，`0029` **沒有任何人佔用** —— 不是猜的，是
+數出來的（指令見本檔開頭）。所以觸發條件不成立。
 
-## 交接條件
+**但是套用順序有風險，這件事必須由人類決定**：正式庫在 `0021`。若
+PR-COMM-00 先合併並套用 `0029`，之後 #78／#88／DI 合併時 `0022–0028` 會比
+已套用的 `0029` 舊，Supabase CLI 會回報 migration history mismatch。
 
-在下列任一情況成立之前，本線不會 commit 任何 `supabase/migrations/*.sql`：
+建議合併順序（由下而上）：
 
-1. #78 已合併進 `main`（0022–0026 落地），且
-2. #88 已合併進 `main`（0027 落地），且
-3. DI02–DI06 的 0028 有明確歸屬（單一 PR 或撤回）。
+```
+#78 (0022–0026)  →  #88 (0027)  →  DI (0028，需先開 PR)  →  PR-COMM-00 (0029)
+```
 
-滿足後，本線從 `main` 當下最大編號 +1 開始鑄號，並回頭更新這張表。
+若人類決定讓 PR-COMM-00 先合併，套 `0022–0028` 時需要 `--include-all`，或把
+`0029` 重新編號。**本線可以配合重新編號** —— `0029` 的內容只依賴 `0014`
+已存在，不依賴任何其他編號。
+
+## 其餘階段仍然凍結
+
+PR-COMM-02 之後每一階段都需要新表（mentions、receipts、reactions 多表情、
+tasks、pins）。那些**不會**在合併順序定案前鑄號 —— 它們不是安全洞，沒有
+理由承擔排序風險。PR-COMM-01（捲動、輸入列、草稿與 outbox 持久化）刻意
+排在前面，因為它整段不需要 schema。
 
 ## 不得做的事
 

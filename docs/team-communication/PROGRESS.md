@@ -58,13 +58,17 @@ P0 修復：
 - 回覆時貼純網址不再丟掉回覆對象。
 - composer 加回覆列與取消鈕。
 - 長網址不再撐爆訊息卡造成橫向捲動。
+- `loadCollaborationSummary` 不再把查詢失敗變成「這間房沒有訊息」；
+  `mergeDiscussionSnapshot` 讓空快照不覆蓋畫面上的對話（且換房不沿用）。
+- 回覆自己剛送出的訊息不再撞複合外鍵：outbox 先扣住回覆，來源 ack 之後才送；
+  來源失敗時回覆一起顯示失敗，重試從來源開始。
 
 ### 測試
 
 | 指令 | base | 現在 |
 |---|---|---|
 | `PG_BIN=… npm run test:migrations` | 242/242 | **251/251** |
-| `npm run test:collaboration` | 79 pass | **91 pass** |
+| `npm run test:collaboration` | 79 pass | **106 pass** |
 | `npm run test:multi-branch` | 25 pass | 25 pass |
 | `npm run test:asset-intelligence` | 15 pass | 15 pass |
 | `npm run test:edge-cors` | 5 pass | 5 pass |

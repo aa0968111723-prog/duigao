@@ -83,3 +83,74 @@ export function reconcileOutbox(
 
   return { entries: next, toFlush };
 }
+
+/**
+ * 這則訊息現在送得出去嗎？（PR-COMM-00）
+ *
+ * `room_discussion_messages` 的回覆外鍵是複合的：
+ * `(reply_to_id, room_id) references room_discussion_messages (id, room_id)`。
+ * 也就是**來源那一列必須已經在資料庫裡**，回覆才插得進去。
+ *
+ * 但是「回覆自己剛剛送出的那則」是最自然的操作之一，而 outbox 對每則訊息
+ * 各發各的 insert —— 回覆的請求可以比來源的請求先到伺服器，於是回覆撞上
+ * 外鍵、變成「未送出」。來源還停在 failed 的時候更是每次都撞。
+ *
+ * 所以送出前先確認來源已經落地。三種算落地：
+ *   1. 來源在伺服器快照裡（`serverIds`）——它本來就在資料庫。
+ *   2. 來源根本不在 outbox —— 那是既有的伺服器訊息。
+ *   3. 來源在 outbox 且已 `acked` —— insert 已被接受，row 存在。
+ *
+ * 其他情況（來源還在 sending／failed）先扣住，等來源 ack 之後再送。
+ * 扣住的 entry 維持 `sending`：對使用者仍然是「送出中」，因為它確實還在
+ * 排隊，而不是失敗。
+ */
+export function isReplyParentReady(
+  message: DiscussionMessage,
+  entries: Record<string, OutboxEntry>,
+  serverIds: ReadonlySet<string>,
+): boolean {
+  const parentId = message.replyToId;
+  if (!parentId) return true;
+  if (serverIds.has(parentId)) return true;
+  const parent = entries[parentId];
+  if (!parent) return true;
+  return parent.state === "acked";
+}
+
+/**
+ * 來源落地之後，被它擋住、還在等的回覆。
+ * 只回 `sending` 的：`failed` 由重試路徑負責，不在這裡偷偷重送。
+ */
+export function blockedRepliesTo(
+  parentId: string,
+  entries: Record<string, OutboxEntry>,
+): DiscussionMessage[] {
+  const waiting: DiscussionMessage[] = [];
+  for (const entry of Object.values(entries)) {
+    if (entry.state === "sending" && entry.message.replyToId === parentId) waiting.push(entry.message);
+  }
+  return waiting.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/**
+ * 擋住這則訊息、而且**自己已經失敗**的來源 id。
+ *
+ * `isReplyParentReady` 會把「來源還沒落地」的回覆扣住。如果來源是暫時在飛，
+ * 扣住是對的 —— 使用者看到「送出中」，因為它確實在排隊。但如果來源已經
+ * `failed`，扣住就變成永遠的「送出中」：一個不會前進、也給不出重試鈕的狀態，
+ * 那是假的送出中。
+ *
+ * 所以回覆要跟著來源一起顯示失敗，而且重試要從**來源**開始 —— 先重試回覆
+ * 沒有意義，外鍵一樣會擋。
+ */
+export function failedBlockingParentId(
+  message: DiscussionMessage,
+  entries: Record<string, OutboxEntry>,
+  serverIds: ReadonlySet<string>,
+): string | null {
+  const parentId = message.replyToId;
+  if (!parentId || serverIds.has(parentId)) return null;
+  const parent = entries[parentId];
+  if (!parent || parent.state !== "failed") return null;
+  return parentId;
+}
