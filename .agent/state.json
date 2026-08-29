@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-28T22:40:28.000Z",
+  "generatedAt": "2026-08-29T12:23:52.000Z",
   "git": {
-    "branch": "agent/design-intelligence-perplexity",
-    "sha": "2a17b7b133ae89e34f7d39a0a0a2f551b0b35f0f",
-    "mainSha": "2a17b7b133ae89e34f7d39a0a0a2f551b0b35f0f",
+    "branch": "cursor/complete-missing-features-0897",
+    "sha": "b560fd4772d79be8690f03e646ad167427c694ed",
+    "mainSha": "398960d4251d84bb906f04358a714bc2709791c2",
     "dirty": true
   },
   "project": {
@@ -34,7 +34,32 @@
     ],
     "openPrs": {
       "status": "available",
-      "items": []
+      "items": [
+        {
+          "baseRefName": "main",
+          "headRefName": "cursor/complete-missing-features-0897",
+          "isDraft": false,
+          "number": 95,
+          "title": "feat(video): complete TUS upload, transcode, compare, archive, and library",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/95"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "agent/design-intelligence-perplexity",
+          "isDraft": false,
+          "number": 88,
+          "title": "PR-DI-01～06: Design Intelligence 完整交付（設計知識、分析引擎、研究層、手機平板介面、外部工具契約、驗收評估）",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/88"
+        },
+        {
+          "baseRefName": "main",
+          "headRefName": "agent/wb01-canonical-schema",
+          "isDraft": false,
+          "number": 78,
+          "title": "PR-WB01: canonical whiteboard schema — 0021-0024＋tombstone 資料層＋operations＋anchors",
+          "url": "https://github.com/aa0968111723-prog/duigao/pull/78"
+        }
+      ]
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -171,10 +196,11 @@
       "missing": []
     },
     "document-understanding": {
-      "status": "partial",
-      "confidence": 0.67,
+      "status": "implemented",
+      "confidence": 0.9,
       "evidence": {
         "source": [
+          "src/ai/documentUnderstanding.ts",
           "supabase/functions/asset-analysis/index.ts"
         ],
         "unmountedSource": [],
@@ -186,11 +212,10 @@
       },
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
+        "src/ai/documentUnderstanding.ts",
         "supabase/functions/asset-analysis/index.ts"
       ],
-      "missing": [
-        "source: need 2, found 1"
-      ]
+      "missing": []
     },
     "flowchart": {
       "status": "implemented",
@@ -262,26 +287,29 @@
       "missing": []
     },
     "intelligent-asset-library": {
-      "status": "partial",
-      "confidence": 0.67,
+      "status": "implemented",
+      "confidence": 0.92,
       "evidence": {
-        "source": [],
+        "source": [
+          "src/cloud/assetLibrary.ts"
+        ],
         "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0016_asset_library.sql"
         ],
         "tests": [
-          "scripts/e2e/migrations.mjs"
+          "scripts/e2e/migrations.mjs",
+          "scripts/tests/upload-pipeline.test.ts"
         ],
         "docs": []
       },
       "relatedFiles": [
         "scripts/e2e/migrations.mjs",
+        "scripts/tests/upload-pipeline.test.ts",
+        "src/cloud/assetLibrary.ts",
         "supabase/migrations/0016_asset_library.sql"
       ],
-      "missing": [
-        "source: need 1, found 0"
-      ]
+      "missing": []
     },
     "line-preview": {
       "status": "implemented",
@@ -560,43 +588,53 @@
       "missing": []
     },
     "tku-zen-agent-integration": {
-      "status": "partial",
-      "confidence": 0.35,
+      "status": "implemented",
+      "confidence": 0.92,
       "evidence": {
-        "source": [],
+        "source": [
+          "src/ai/aiOsRoomContext.ts",
+          "src/ai/duigaoAgentAdapter.ts"
+        ],
         "unmountedSource": [],
         "migrations": [],
         "tests": [
-          "scripts/tests/asset-intelligence.test.ts"
+          "scripts/tests/asset-intelligence.test.ts",
+          "scripts/tests/duigao-agent-adapter.test.ts"
         ],
         "docs": []
       },
       "relatedFiles": [
-        "scripts/tests/asset-intelligence.test.ts"
+        "scripts/tests/asset-intelligence.test.ts",
+        "scripts/tests/duigao-agent-adapter.test.ts",
+        "src/ai/aiOsRoomContext.ts",
+        "src/ai/duigaoAgentAdapter.ts"
       ],
-      "missing": [
-        "source: need 2, found 0"
-      ]
+      "missing": []
     },
     "tus-resumable-upload": {
-      "status": "spec_only",
-      "confidence": 0.95,
+      "status": "implemented",
+      "confidence": 0.9,
       "evidence": {
-        "source": [],
+        "source": [
+          "src/cloud/videoAssets.ts"
+        ],
         "unmountedSource": [],
         "migrations": [],
-        "tests": [],
+        "tests": [
+          "scripts/e2e/video-flow.mjs",
+          "scripts/tests/upload-pipeline.test.ts"
+        ],
         "docs": [
           "docs/pr27-resumable-video-upload.md"
         ]
       },
       "relatedFiles": [
-        "docs/pr27-resumable-video-upload.md"
+        "docs/pr27-resumable-video-upload.md",
+        "scripts/e2e/video-flow.mjs",
+        "scripts/tests/upload-pipeline.test.ts",
+        "src/cloud/videoAssets.ts"
       ],
-      "missing": [
-        "source: need 1, found 0",
-        "tests: need 1, found 0"
-      ]
+      "missing": []
     },
     "verdict": {
       "status": "implemented",
@@ -627,10 +665,12 @@
       "missing": []
     },
     "version-archive": {
-      "status": "partial",
-      "confidence": 0.67,
+      "status": "implemented",
+      "confidence": 0.9,
       "evidence": {
-        "source": [],
+        "source": [
+          "src/features/video-review/VideoVersionSelector.tsx"
+        ],
         "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0008_version_archive.sql"
@@ -645,31 +685,33 @@
       "relatedFiles": [
         "docs/pr25-next-upload-pipeline.md",
         "scripts/e2e/migrations.mjs",
+        "src/features/video-review/VideoVersionSelector.tsx",
         "supabase/migrations/0008_version_archive.sql"
       ],
-      "missing": [
-        "source: need 1, found 0"
-      ]
+      "missing": []
     },
     "version-comparison": {
-      "status": "spec_only",
-      "confidence": 0.95,
+      "status": "implemented",
+      "confidence": 0.87,
       "evidence": {
-        "source": [],
+        "source": [
+          "src/features/video-review/VideoWorkspace.tsx"
+        ],
         "unmountedSource": [],
         "migrations": [],
-        "tests": [],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
         "docs": [
           "docs/pr32-video-review-feedback-2.md"
         ]
       },
       "relatedFiles": [
-        "docs/pr32-video-review-feedback-2.md"
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/VideoWorkspace.tsx"
       ],
-      "missing": [
-        "source: need 1, found 0",
-        "tests: need 1, found 0"
-      ]
+      "missing": []
     },
     "video-playback": {
       "status": "implemented",
@@ -809,31 +851,41 @@
       "missing": []
     },
     "video-transcode": {
-      "status": "spec_only",
-      "confidence": 0.95,
+      "status": "implemented",
+      "confidence": 0.94,
       "evidence": {
-        "source": [],
+        "source": [
+          "src/cloud/videoAssets.ts"
+        ],
         "unmountedSource": [],
-        "migrations": [],
-        "tests": [],
+        "migrations": [
+          "supabase/migrations/0006_video_rooms.sql",
+          "supabase/migrations/0023_video_optimize.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs",
+          "scripts/tests/upload-pipeline.test.ts"
+        ],
         "docs": [
           "docs/pr29-video-optimize-transcode.md"
         ]
       },
       "relatedFiles": [
-        "docs/pr29-video-optimize-transcode.md"
+        "docs/pr29-video-optimize-transcode.md",
+        "scripts/e2e/video-flow.mjs",
+        "scripts/tests/upload-pipeline.test.ts",
+        "src/cloud/videoAssets.ts",
+        "supabase/migrations/0006_video_rooms.sql",
+        "supabase/migrations/0023_video_optimize.sql"
       ],
-      "missing": [
-        "source: need 1, found 0",
-        "migrations: need 1, found 0",
-        "tests: need 1, found 0"
-      ]
+      "missing": []
     },
     "video-understanding": {
-      "status": "partial",
-      "confidence": 0.67,
+      "status": "implemented",
+      "confidence": 0.9,
       "evidence": {
         "source": [
+          "src/ai/videoUnderstanding.ts",
           "supabase/functions/asset-analysis/index.ts"
         ],
         "unmountedSource": [],
@@ -845,11 +897,10 @@
       },
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
+        "src/ai/videoUnderstanding.ts",
         "supabase/functions/asset-analysis/index.ts"
       ],
-      "missing": [
-        "source: need 2, found 1"
-      ]
+      "missing": []
     },
     "video-upload": {
       "status": "implemented",
@@ -980,7 +1031,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0021",
+    "repoMigrationHead": "0023",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -1002,10 +1053,12 @@
       "supabase/migrations/0018_discussion_attachments.sql",
       "supabase/migrations/0019_ai_apply_audit.sql",
       "supabase/migrations/0020_canva_bridge.sql",
-      "supabase/migrations/0021_canva_design_pages.sql"
+      "supabase/migrations/0021_canva_design_pages.sql",
+      "supabase/migrations/0022_discussion_author_integrity.sql",
+      "supabase/migrations/0023_video_optimize.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0021",
+    "productionMigrationExpectation": "0023",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1034,122 +1087,8 @@
     "latestResults": "not_run",
     "note": "Context generation discovers thresholds; agent:gate and CI execute them."
   },
-  "knownGaps": [
-    {
-      "id": "document-understanding",
-      "status": "partial",
-      "priority": 1,
-      "missing": [
-        "source: need 2, found 1"
-      ],
-      "relatedFiles": [
-        "scripts/tests/asset-intelligence.test.ts",
-        "supabase/functions/asset-analysis/index.ts"
-      ]
-    },
-    {
-      "id": "intelligent-asset-library",
-      "status": "partial",
-      "priority": 1,
-      "missing": [
-        "source: need 1, found 0"
-      ],
-      "relatedFiles": [
-        "scripts/e2e/migrations.mjs",
-        "supabase/migrations/0016_asset_library.sql"
-      ]
-    },
-    {
-      "id": "tku-zen-agent-integration",
-      "status": "partial",
-      "priority": 1,
-      "missing": [
-        "source: need 2, found 0"
-      ],
-      "relatedFiles": [
-        "scripts/tests/asset-intelligence.test.ts"
-      ]
-    },
-    {
-      "id": "tus-resumable-upload",
-      "status": "spec_only",
-      "priority": 1,
-      "missing": [
-        "source: need 1, found 0",
-        "tests: need 1, found 0"
-      ],
-      "relatedFiles": [
-        "docs/pr27-resumable-video-upload.md"
-      ]
-    },
-    {
-      "id": "version-comparison",
-      "status": "spec_only",
-      "priority": 1,
-      "missing": [
-        "source: need 1, found 0",
-        "tests: need 1, found 0"
-      ],
-      "relatedFiles": [
-        "docs/pr32-video-review-feedback-2.md"
-      ]
-    },
-    {
-      "id": "video-transcode",
-      "status": "spec_only",
-      "priority": 1,
-      "missing": [
-        "source: need 1, found 0",
-        "migrations: need 1, found 0",
-        "tests: need 1, found 0"
-      ],
-      "relatedFiles": [
-        "docs/pr29-video-optimize-transcode.md"
-      ]
-    },
-    {
-      "id": "video-understanding",
-      "status": "partial",
-      "priority": 1,
-      "missing": [
-        "source: need 2, found 1"
-      ],
-      "relatedFiles": [
-        "scripts/tests/asset-intelligence.test.ts",
-        "supabase/functions/asset-analysis/index.ts"
-      ]
-    },
-    {
-      "id": "version-archive",
-      "status": "partial",
-      "priority": 2,
-      "missing": [
-        "source: need 1, found 0"
-      ],
-      "relatedFiles": [
-        "docs/pr25-next-upload-pipeline.md",
-        "scripts/e2e/migrations.mjs",
-        "supabase/migrations/0008_version_archive.sql"
-      ]
-    }
-  ],
-  "warnings": [
-    {
-      "code": "FEATURE_CLAIM_MISMATCH",
-      "feature": "tus-resumable-upload",
-      "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
-    },
-    {
-      "code": "FEATURE_CLAIM_MISMATCH",
-      "feature": "version-comparison",
-      "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
-    },
-    {
-      "code": "FEATURE_CLAIM_MISMATCH",
-      "feature": "video-transcode",
-      "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
-    }
-  ],
+  "knownGaps": [],
+  "warnings": [],
   "releaseReadiness": {
     "status": "structurally_ready_tests_not_run",
     "automergeAllowed": false,
@@ -1168,7 +1107,7 @@
       {
         "code": "MIGRATION_ORDER",
         "ok": true,
-        "message": "Migration order is contiguous through 0021_canva_design_pages.sql."
+        "message": "Migration order is contiguous through 0023_video_optimize.sql."
       },
       {
         "code": "INVITE_FRAGMENT_ONLY",
@@ -1208,38 +1147,7 @@
     ],
     "requiredAction": "Run npm run agent:gate and all CI/E2E checks on the final diff."
   },
-  "nextRecommendedWork": [
-    {
-      "rank": 1,
-      "feature": "document-understanding",
-      "status": "partial",
-      "reason": "source: need 2, found 1"
-    },
-    {
-      "rank": 2,
-      "feature": "intelligent-asset-library",
-      "status": "partial",
-      "reason": "source: need 1, found 0"
-    },
-    {
-      "rank": 3,
-      "feature": "tku-zen-agent-integration",
-      "status": "partial",
-      "reason": "source: need 2, found 0"
-    },
-    {
-      "rank": 4,
-      "feature": "tus-resumable-upload",
-      "status": "spec_only",
-      "reason": "source: need 1, found 0; tests: need 1, found 0"
-    },
-    {
-      "rank": 5,
-      "feature": "version-comparison",
-      "status": "spec_only",
-      "reason": "source: need 1, found 0; tests: need 1, found 0"
-    }
-  ],
+  "nextRecommendedWork": [],
   "forbiddenActions": [
     "Modify original image/video bytes.",
     "Put invite secrets in query strings, logs, state files, or database plaintext.",

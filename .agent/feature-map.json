@@ -295,9 +295,10 @@
     {
       "id": "document-understanding",
       "name": "Document extraction and chunks",
-      "status": "partial",
+      "status": "implemented",
       "evidence": {
         "source": [
+          "src/ai/documentUnderstanding.ts",
           "supabase/functions/asset-analysis/index.ts"
         ],
         "unmountedSource": [],
@@ -311,8 +312,8 @@
         {
           "kind": "source",
           "required": 2,
-          "found": 1,
-          "satisfied": false
+          "found": 2,
+          "satisfied": true
         },
         {
           "kind": "tests",
@@ -321,21 +322,19 @@
           "satisfied": true
         }
       ],
-      "confidence": 0.67,
+      "confidence": 0.9,
       "implemented": [
+        "source",
         "tests"
       ],
-      "missing": [
-        "source: need 2, found 1"
-      ],
+      "missing": [],
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
+        "src/ai/documentUnderstanding.ts",
         "supabase/functions/asset-analysis/index.ts"
       ],
       "priority": 1,
-      "notes": [
-        "Executable evidence is incomplete: source: need 2, found 1."
-      ]
+      "notes": []
     },
     {
       "id": "flowchart",
@@ -477,15 +476,18 @@
     {
       "id": "intelligent-asset-library",
       "name": "Intelligent asset library",
-      "status": "partial",
+      "status": "implemented",
       "evidence": {
-        "source": [],
+        "source": [
+          "src/cloud/assetLibrary.ts"
+        ],
         "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0016_asset_library.sql"
         ],
         "tests": [
-          "scripts/e2e/migrations.mjs"
+          "scripts/e2e/migrations.mjs",
+          "scripts/tests/upload-pipeline.test.ts"
         ],
         "docs": []
       },
@@ -493,8 +495,8 @@
         {
           "kind": "source",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 1,
+          "satisfied": true
         },
         {
           "kind": "migrations",
@@ -505,26 +507,25 @@
         {
           "kind": "tests",
           "required": 1,
-          "found": 1,
+          "found": 2,
           "satisfied": true
         }
       ],
-      "confidence": 0.67,
+      "confidence": 0.92,
       "implemented": [
+        "source",
         "migrations",
         "tests"
       ],
-      "missing": [
-        "source: need 1, found 0"
-      ],
+      "missing": [],
       "relatedFiles": [
         "scripts/e2e/migrations.mjs",
+        "scripts/tests/upload-pipeline.test.ts",
+        "src/cloud/assetLibrary.ts",
         "supabase/migrations/0016_asset_library.sql"
       ],
       "priority": 1,
-      "notes": [
-        "Executable evidence is incomplete: source: need 1, found 0."
-      ]
+      "notes": []
     },
     {
       "id": "line-preview",
@@ -1115,13 +1116,17 @@
     {
       "id": "tku-zen-agent-integration",
       "name": "tku-zen-agent / ai_os context adapters",
-      "status": "partial",
+      "status": "implemented",
       "evidence": {
-        "source": [],
+        "source": [
+          "src/ai/aiOsRoomContext.ts",
+          "src/ai/duigaoAgentAdapter.ts"
+        ],
         "unmountedSource": [],
         "migrations": [],
         "tests": [
-          "scripts/tests/asset-intelligence.test.ts"
+          "scripts/tests/asset-intelligence.test.ts",
+          "scripts/tests/duigao-agent-adapter.test.ts"
         ],
         "docs": []
       },
@@ -1129,40 +1134,45 @@
         {
           "kind": "source",
           "required": 2,
-          "found": 0,
-          "satisfied": false
+          "found": 2,
+          "satisfied": true
         },
         {
           "kind": "tests",
           "required": 1,
-          "found": 1,
+          "found": 2,
           "satisfied": true
         }
       ],
-      "confidence": 0.35,
+      "confidence": 0.92,
       "implemented": [
+        "source",
         "tests"
       ],
-      "missing": [
-        "source: need 2, found 0"
-      ],
+      "missing": [],
       "relatedFiles": [
-        "scripts/tests/asset-intelligence.test.ts"
+        "scripts/tests/asset-intelligence.test.ts",
+        "scripts/tests/duigao-agent-adapter.test.ts",
+        "src/ai/aiOsRoomContext.ts",
+        "src/ai/duigaoAgentAdapter.ts"
       ],
       "priority": 1,
-      "notes": [
-        "Executable evidence is incomplete: source: need 2, found 0."
-      ]
+      "notes": []
     },
     {
       "id": "tus-resumable-upload",
       "name": "TUS resumable upload",
-      "status": "spec_only",
+      "status": "implemented",
       "evidence": {
-        "source": [],
+        "source": [
+          "src/cloud/videoAssets.ts"
+        ],
         "unmountedSource": [],
         "migrations": [],
-        "tests": [],
+        "tests": [
+          "scripts/e2e/video-flow.mjs",
+          "scripts/tests/upload-pipeline.test.ts"
+        ],
         "docs": [
           "docs/pr27-resumable-video-upload.md"
         ]
@@ -1171,28 +1181,31 @@
         {
           "kind": "source",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 1,
+          "satisfied": true
         },
         {
           "kind": "tests",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 2,
+          "satisfied": true
         }
       ],
-      "confidence": 0.95,
-      "implemented": [],
-      "missing": [
-        "source: need 1, found 0",
-        "tests: need 1, found 0"
+      "confidence": 0.9,
+      "implemented": [
+        "source",
+        "tests"
       ],
+      "missing": [],
       "relatedFiles": [
-        "docs/pr27-resumable-video-upload.md"
+        "docs/pr27-resumable-video-upload.md",
+        "scripts/e2e/video-flow.mjs",
+        "scripts/tests/upload-pipeline.test.ts",
+        "src/cloud/videoAssets.ts"
       ],
       "priority": 1,
       "notes": [
-        "Documentation exists, but executable source/migration/test evidence does not."
+        "Status is based on executable evidence, not documentation or PR metadata."
       ]
     },
     {
@@ -1257,9 +1270,11 @@
     {
       "id": "version-archive",
       "name": "Version archive",
-      "status": "partial",
+      "status": "implemented",
       "evidence": {
-        "source": [],
+        "source": [
+          "src/features/video-review/VideoVersionSelector.tsx"
+        ],
         "unmountedSource": [],
         "migrations": [
           "supabase/migrations/0008_version_archive.sql"
@@ -1275,8 +1290,8 @@
         {
           "kind": "source",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 1,
+          "satisfied": true
         },
         {
           "kind": "migrations",
@@ -1291,33 +1306,37 @@
           "satisfied": true
         }
       ],
-      "confidence": 0.67,
+      "confidence": 0.9,
       "implemented": [
+        "source",
         "migrations",
         "tests"
       ],
-      "missing": [
-        "source: need 1, found 0"
-      ],
+      "missing": [],
       "relatedFiles": [
         "docs/pr25-next-upload-pipeline.md",
         "scripts/e2e/migrations.mjs",
+        "src/features/video-review/VideoVersionSelector.tsx",
         "supabase/migrations/0008_version_archive.sql"
       ],
       "priority": 2,
       "notes": [
-        "Executable evidence is incomplete: source: need 1, found 0."
+        "Status is based on executable evidence, not documentation or PR metadata."
       ]
     },
     {
       "id": "version-comparison",
       "name": "Version comparison",
-      "status": "spec_only",
+      "status": "implemented",
       "evidence": {
-        "source": [],
+        "source": [
+          "src/features/video-review/VideoWorkspace.tsx"
+        ],
         "unmountedSource": [],
         "migrations": [],
-        "tests": [],
+        "tests": [
+          "scripts/e2e/video-flow.mjs"
+        ],
         "docs": [
           "docs/pr32-video-review-feedback-2.md"
         ]
@@ -1326,28 +1345,30 @@
         {
           "kind": "source",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 1,
+          "satisfied": true
         },
         {
           "kind": "tests",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 1,
+          "satisfied": true
         }
       ],
-      "confidence": 0.95,
-      "implemented": [],
-      "missing": [
-        "source: need 1, found 0",
-        "tests: need 1, found 0"
+      "confidence": 0.87,
+      "implemented": [
+        "source",
+        "tests"
       ],
+      "missing": [],
       "relatedFiles": [
-        "docs/pr32-video-review-feedback-2.md"
+        "docs/pr32-video-review-feedback-2.md",
+        "scripts/e2e/video-flow.mjs",
+        "src/features/video-review/VideoWorkspace.tsx"
       ],
       "priority": 1,
       "notes": [
-        "Documentation exists, but executable source/migration/test evidence does not."
+        "Status is based on executable evidence, not documentation or PR metadata."
       ]
     },
     {
@@ -1638,12 +1659,20 @@
     {
       "id": "video-transcode",
       "name": "Video transcode",
-      "status": "spec_only",
+      "status": "implemented",
       "evidence": {
-        "source": [],
+        "source": [
+          "src/cloud/videoAssets.ts"
+        ],
         "unmountedSource": [],
-        "migrations": [],
-        "tests": [],
+        "migrations": [
+          "supabase/migrations/0006_video_rooms.sql",
+          "supabase/migrations/0023_video_optimize.sql"
+        ],
+        "tests": [
+          "scripts/e2e/video-flow.mjs",
+          "scripts/tests/upload-pipeline.test.ts"
+        ],
         "docs": [
           "docs/pr29-video-optimize-transcode.md"
         ]
@@ -1652,43 +1681,49 @@
         {
           "kind": "source",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 1,
+          "satisfied": true
         },
         {
           "kind": "migrations",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 2,
+          "satisfied": true
         },
         {
           "kind": "tests",
           "required": 1,
-          "found": 0,
-          "satisfied": false
+          "found": 2,
+          "satisfied": true
         }
       ],
-      "confidence": 0.95,
-      "implemented": [],
-      "missing": [
-        "source: need 1, found 0",
-        "migrations: need 1, found 0",
-        "tests: need 1, found 0"
+      "confidence": 0.94,
+      "implemented": [
+        "source",
+        "migrations",
+        "tests"
       ],
+      "missing": [],
       "relatedFiles": [
-        "docs/pr29-video-optimize-transcode.md"
+        "docs/pr29-video-optimize-transcode.md",
+        "scripts/e2e/video-flow.mjs",
+        "scripts/tests/upload-pipeline.test.ts",
+        "src/cloud/videoAssets.ts",
+        "supabase/migrations/0006_video_rooms.sql",
+        "supabase/migrations/0023_video_optimize.sql"
       ],
       "priority": 1,
       "notes": [
-        "Documentation exists, but executable source/migration/test evidence does not."
+        "Status is based on executable evidence, not documentation or PR metadata."
       ]
     },
     {
       "id": "video-understanding",
       "name": "Video temporal understanding",
-      "status": "partial",
+      "status": "implemented",
       "evidence": {
         "source": [
+          "src/ai/videoUnderstanding.ts",
           "supabase/functions/asset-analysis/index.ts"
         ],
         "unmountedSource": [],
@@ -1702,8 +1737,8 @@
         {
           "kind": "source",
           "required": 2,
-          "found": 1,
-          "satisfied": false
+          "found": 2,
+          "satisfied": true
         },
         {
           "kind": "tests",
@@ -1712,21 +1747,19 @@
           "satisfied": true
         }
       ],
-      "confidence": 0.67,
+      "confidence": 0.9,
       "implemented": [
+        "source",
         "tests"
       ],
-      "missing": [
-        "source: need 2, found 1"
-      ],
+      "missing": [],
       "relatedFiles": [
         "scripts/tests/asset-intelligence.test.ts",
+        "src/ai/videoUnderstanding.ts",
         "supabase/functions/asset-analysis/index.ts"
       ],
       "priority": 1,
-      "notes": [
-        "Executable evidence is incomplete: source: need 2, found 1."
-      ]
+      "notes": []
     },
     {
       "id": "video-upload",
