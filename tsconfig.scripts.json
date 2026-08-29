@@ -1,8 +1,4 @@
 {
-  // 測試與探針也要型別檢查：WB04 自審抓到 whiteboard-realtime.test.ts 用
-  // 錯誤型別呼叫 applyBoardPatches（第 3 個參數該是 Map 卻傳 0、還漏了第
-  // 5 個參數）卻永遠不會紅 —— 測試本身沒被檢查，等於少一層保障。
-  // 只收 .ts（e2e 的 .mjs 沒有型別可檢）。
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
@@ -15,12 +11,11 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  // 範圍誠實：先只涵蓋白板這幾輪新增的測試。其餘既有測試檔有先前就存在
-  // 的型別錯誤（DiscussionMessage.kind 用 string、globalThis 索引等），
-  // 清乾淨屬獨立的整理工作，不混進本輪。
   "include": [
     "scripts/tests/whiteboard-*.ts",
     "scripts/tests/history-layers.test.ts",
-    "scripts/tests/plan-draft.test.ts"
+    "scripts/tests/plan-draft.test.ts",
+    "scripts/tests/design-intelligence-*.ts",
+    "src/features/design-intelligence"
   ]
 }
