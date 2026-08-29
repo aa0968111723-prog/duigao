@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptReplyInsertAck } from "./commentReplyAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -1110,15 +1111,20 @@ export async function setSupport(supabase: SupabaseClient, roomId: string, comme
 }
 
 export async function insertReply(supabase: SupabaseClient, roomId: string, reply: CommentReply) {
-  const { error } = await supabase.from("comment_replies").insert({
-    id: reply.id.length === 36 ? reply.id : uuid(),
-    room_id: roomId,
-    comment_id: reply.commentId,
-    author_name: reply.authorName,
-    author_color: reply.authorColor,
-    body: reply.body,
-  });
+  const { data, error } = await supabase
+    .from("comment_replies")
+    .insert({
+      id: reply.id.length === 36 ? reply.id : uuid(),
+      room_id: roomId,
+      comment_id: reply.commentId,
+      author_name: reply.authorName,
+      author_color: reply.authorColor,
+      body: reply.body,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "reply");
+  acceptReplyInsertAck(data);
 }
 
 export async function setPreference(supabase: SupabaseClient, roomId: string, versionId: string, choice: string) {

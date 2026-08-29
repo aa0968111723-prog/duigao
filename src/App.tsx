@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isReplyNotSaved } from "./cloud/commentReplyAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -2518,9 +2519,16 @@ export function App() {
         createdAt: Date.now(),
       };
       updateRoom((r) => ({ ...r, replies: [...(r.replies ?? []), reply] }));
-      cloudRef.current.writes.insertReply(reply);
+      void cloudRef.current.writes.insertReply(reply).catch((err) => {
+        if (!isReplyNotSaved(err)) return;
+        updateRoom((r) => ({
+          ...r,
+          replies: (r.replies ?? []).filter((item) => item.id !== reply.id),
+        }));
+        showToast("回覆沒有送出，請再試一次。", { tone: "error" });
+      });
     },
-    [guest, claim, updateRoom],
+    [guest, claim, showToast, updateRoom],
   );
 
   // One take per user per version; tapping the current choice clears it.
