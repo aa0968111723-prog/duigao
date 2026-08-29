@@ -87,7 +87,7 @@
   background: currentColor;
   flex: none;
 }
-.save-saving { color: #d7b06a; }
+.save-saving { color: var(--warning); }
 .save-saved { color: #7ac77f; }
 .save-error { color: #d98157; }
 

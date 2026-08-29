@@ -1303,7 +1303,7 @@ try {
   await D.click("button.btn-primary");
   await playerReady(D);
   check("M. 桌機影片工作區有播放器與時間軸", (await D.isVisible("video.v-video")) && (await D.isVisible(".v-track")));
-  check("M. 桌機有回首頁與標題", (await D.isVisible("header.topbar .brand")) && (await D.isVisible("header.topbar input.title-input")));
+  check("M. 桌機有品牌回首頁與標題", (await D.isVisible("header.topbar .workspace-brand")) && (await D.isVisible("header.topbar input.title-input")));
   check("M. 桌機討論在右側", await D.isVisible(".v-desktop-side"));
   {
     // PR-01a：single 雲端房的房級討論以「回饋｜房間討論」兩段掛在桌機側欄。

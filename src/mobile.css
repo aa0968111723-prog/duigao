@@ -69,17 +69,13 @@
   }
   .m-home {
     flex: none;
-    width: 32px; height: 32px;
+    width: 36px; height: 36px;
     display: grid; place-items: center;
     background: none; border: none; padding: 0;
     cursor: pointer;
   }
-  .m-home-dot {
-    width: 12px; height: 12px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 4px var(--accent-soft);
-  }
+  .m-home .brand-mark { width: 32px; height: 32px; border-radius: 11px; box-shadow: 0 6px 14px rgba(97,87,239,.2); }
+  .m-home .brand-mark svg { width: 23px; height: 23px; }
   .m-title {
     flex: 1;
     min-width: 0;
@@ -101,7 +97,7 @@
   }
   .m-presence.is-online { background: var(--ok); }
   .m-presence.is-connecting,
-  .m-presence.is-waiting { background: #d7b06a; }
+  .m-presence.is-waiting { background: var(--warning); }
   .m-icon-btn {
     flex: none;
     width: 40px; height: 40px;

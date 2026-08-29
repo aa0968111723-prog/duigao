@@ -37,6 +37,7 @@ import {
 import type { RoomRole } from "../../cloud/roomRepository";
 import type { VideoUploadState } from "../../components/api";
 import { UniversalIntake } from "../../components/UniversalIntake";
+import { BrandMark } from "../../components/BrandMark";
 
 export type MultiBranchRoomApi = {
   room: Room;
@@ -805,9 +806,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   return (
     <div className="project-room" data-testid="multi-branch-room">
       <header className="project-room-header">
-        <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="回到房間列表">●</button>
+        <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="回到對稿首頁"><BrandMark compact /></button>
         {inShellBranch ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
-        <div className="project-room-heading"><span className="project-kicker">活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
+        <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
         <div className="project-head-actions">
           <button type="button" className="project-ai-button" data-testid="room-ai-launcher" onClick={() => api.onOpenAi()}>✦ AI</button>
           <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>

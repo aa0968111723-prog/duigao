@@ -2,6 +2,7 @@ import type { CollabStatus } from "../../lib/peer";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { syncStatusLabel, type SyncStatus } from "../../cloud/types";
 import type { WorkspaceApi } from "../../components/api";
+import { BrandMark } from "../../components/BrandMark";
 import { MobileWorkspace } from "./MobileWorkspace";
 import { DesktopWorkspace } from "./DesktopWorkspace";
 
@@ -33,9 +34,8 @@ export function ImageWorkspace({ api, presence, cloud }: Props) {
   return (
     <div className="app">
       <header className="topbar">
-        <button className="brand" onClick={api.goHome}>
-          <span className="brand-dot" />
-          文宣討論區
+        <button className="workspace-brand" onClick={api.goHome} aria-label="回到對稿首頁">
+          <BrandMark compact context="圖片" />
         </button>
         <input
           className="title-input"

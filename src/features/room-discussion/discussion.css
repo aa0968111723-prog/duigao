@@ -41,7 +41,7 @@
 /* 場佈摘要 chip（PR-06）：一行資訊密度，跟 size 同層級的輔助文字。 */
 .rd-attachment-planform { display: block; width: 100%; color: var(--ink-soft); font-size: 12px; }
 .rd-attachment-audio { width: 100%; }
-.rd-attachment-broken { color: #d6a04c; font-size: 12px; }
+.rd-attachment-broken { color: var(--warning); font-size: 12px; }
 .rd-link { display: inline-block; text-decoration: none; word-break: break-all; }
 .rd-attach-button { min-width: 40px; min-height: 40px; border: 0; border-radius: 10px; background: var(--raise); color: var(--ink-dim); font-size: 17px; }
 .rd-attach-button:disabled { opacity: .5; }
@@ -52,5 +52,5 @@
 .rd-voice-roster { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .rd-voice-roster .is-speaking { color: #2e9e5b; font-weight: 600; }
 .rd-voice-btn { min-height: 32px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line, rgba(0,0,0,0.15)); background: transparent; color: inherit; cursor: pointer; }
-.rd-voice-btn.is-leave { color: #c2483a; border-color: rgba(194,72,58,0.4); }
-.rd-voice-error { color: #c2483a; width: 100%; }
+.rd-voice-btn.is-leave { color: var(--danger); border-color: rgba(215,79,104,.35); }
+.rd-voice-error { color: var(--danger); width: 100%; }

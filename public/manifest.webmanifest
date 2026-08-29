@@ -1,7 +1,7 @@
 {
   "name": "對稿｜團隊對稿空間",
   "short_name": "對稿",
-  "description": "手機優先的團隊文宣討論工具。標記需要修改的位置、整理建議、比對版本並分享給夥伴。",
+  "description": "手機優先的圖片與影片對稿空間。直接標記修改位置、整理建議、比對版本並和夥伴一起定稿。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -15,7 +15,13 @@
       "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }
