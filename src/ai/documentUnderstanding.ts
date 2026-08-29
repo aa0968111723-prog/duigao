@@ -32,15 +32,15 @@ export class PdfReader {
    */
   static extractText(bytes: Uint8Array | string): string {
     if (typeof bytes === "string") return bytes;
-    const ascii = new TextDecoder("latin1").decode(bytes);
-    if (ascii.startsWith("%PDF")) {
-      const strings = [...ascii.matchAll(/\((?:\\.|[^\\)]){2,400}\)/g)].map((match) =>
+    const utf8 = new TextDecoder("utf-8", { fatal: false }).decode(bytes).replace(/\u0000/g, "");
+    if (utf8.startsWith("%PDF")) {
+      const strings = [...utf8.matchAll(/\((?:\\.|[^\\)]){2,400}\)/g)].map((match) =>
         match[0].slice(1, -1).replace(/\\n/g, "\n").replace(/\\\)/g, ")").replace(/\\\(/g, "("),
       );
       const joined = strings.join("\n").trim();
       if (joined) return joined;
     }
-    return new TextDecoder("utf-8", { fatal: false }).decode(bytes).replace(/\u0000/g, "");
+    return utf8;
   }
 }
 

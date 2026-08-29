@@ -34,6 +34,10 @@ import {
  *   4. TUS resumable upload, reporting real byte progress,
  *   5. upload the cover,
  *   6. only then write the row.
+ *
+ * The row lands last so a version can never exist without its video. If the row
+ * fails anyway, the uploaded objects are removed rather than left as orphans in
+ * a private bucket nobody will ever look at again.
  */
 
 export type VideoUploadPhase = "preparing" | "optimizing" | "uploading" | "paused" | "retrying" | "processing";
@@ -245,6 +249,10 @@ async function signedOrEmpty(supabase: SupabaseClient, path: string): Promise<st
 }
 
 async function removeQuietly(supabase: SupabaseClient, paths: string[]): Promise<void> {
+  // Storage cleanup is retryable: a transient 5xx at the exact moment metadata
+  // insertion fails must not turn a version into a permanent private-bucket
+  // orphan. `remove()` reports failures in its result rather than always
+  // throwing, so inspect both forms.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const { error } = await supabase.storage.from("room-assets").remove(paths);
