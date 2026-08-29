@@ -112,7 +112,28 @@ export type ColorToken = {
 export const ALTERNATIVE_STRATEGIES = ["conservative", "balanced", "bold"] as const;
 export type AlternativeStrategy = (typeof ALTERNATIVE_STRATEGIES)[number];
 
+/**
+ * 改動的維度。
+ *
+ * 存在的理由只有一個：任務書要求三個方案「必須真的不同，不能只是三組不同
+ * 顏色」。「真的不同」如果只靠人眼判斷就無法驗證，所以把它變成可檢查的
+ * 結構 —— 三個方案碰的維度集合不能完全一樣（見 `analysis.ts` 的
+ * `validateAlternativeDiversity`）。
+ */
+export const CHANGE_DIMENSIONS = [
+  "color",
+  "typography",
+  "layout",
+  "imagery",
+  "copy",
+  "motion",
+  "structure",
+  "interaction",
+] as const;
+export type ChangeDimension = (typeof CHANGE_DIMENSIONS)[number];
+
 export type DesignChange = {
+  dimension: ChangeDimension;
   /** 改哪裡。 */
   target: string;
   /** 改成什麼（具體值）。 */

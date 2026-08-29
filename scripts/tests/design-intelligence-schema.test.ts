@@ -116,7 +116,7 @@ test("信心值：百分比與超界值都夾回 0–1，不是丟掉", () => {
 // ---- 方案：三個方向必須真的不同 -------------------------------------------
 
 test("方案：strategy 重複要被擋（不能只是三組不同顏色）", () => {
-  const change = { target: "標題", change: "40px", reason: "建立層級" };
+  const change = { dimension: "typography", target: "標題", change: "40px", reason: "建立層級" };
   const result = parseAlternatives([
     { name: "微調", strategy: "conservative", changes: [change] },
     { name: "再微調", strategy: "conservative", changes: [change] },
@@ -124,6 +124,25 @@ test("方案：strategy 重複要被擋（不能只是三組不同顏色）", ()
   ]);
   assert.deepEqual(result.value.map((alt) => alt.strategy), ["conservative", "balanced"]);
   assert.ok(result.rejected.some((line) => line.includes("三個方向必須真的不同")));
+});
+
+test("方案：沒有標明維度的改動要被退掉", () => {
+  // dimension 是「三個方案真的不同」唯一可檢查的依據。讓它可選，
+  // 等於讓那條規則失效 —— 模型只要不填就繞過了。
+  const result = parseAlternatives([
+    {
+      name: "微調",
+      strategy: "conservative",
+      changes: [
+        { target: "標題", change: "40px", reason: "建立層級" },              // 缺 dimension
+        { dimension: "不存在的維度", target: "副標", change: "18px", reason: "拉開" },
+        { dimension: "typography", target: "內文", change: "16px", reason: "可讀性" },
+      ],
+    },
+  ]);
+  assert.equal(result.value.length, 1);
+  assert.equal(result.value[0].changes.length, 1, "只有標明合法維度的那一條該留下");
+  assert.equal(result.value[0].changes[0].target, "內文");
 });
 
 test("方案：沒有任何具體修改的方案要被擋", () => {
