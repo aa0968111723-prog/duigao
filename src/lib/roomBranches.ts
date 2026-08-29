@@ -144,6 +144,8 @@ export function mergeRoomBranch(room: Room, detail: Room, branchId: string): Roo
     discussionSupports: detail.discussionSupports ?? room.discussionSupports,
     whiteboards: detail.whiteboards ?? room.whiteboards,
     decisions: detail.decisions ?? room.decisions,
+    todos: detail.todos ?? room.todos,
+    members: detail.members ?? room.members,
     allowBoardEdit: detail.allowBoardEdit ?? room.allowBoardEdit,
     plans: [
       ...(room.plans ?? []).filter((plan) => plan.branchId !== branchId),

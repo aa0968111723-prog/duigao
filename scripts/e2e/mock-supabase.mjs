@@ -46,7 +46,7 @@ const tables = {
   // 同房多分支 1.0
   room_branches: [], plan_documents: [], content_relations: [], room_polls: [], room_poll_votes: [],
   whiteboards: [], whiteboard_nodes: [], whiteboard_edges: [],
-  room_discussion_messages: [], room_discussion_supports: [], room_discussion_reads: [], decision_records: [],
+  room_discussion_messages: [], room_discussion_supports: [], room_discussion_reads: [], room_discussion_mentions: [], room_todos: [], decision_records: [],
   voice_sessions: [], voice_session_participants: [], presentation_state: [],
   canva_connections: [], canva_oauth_states: [],
   whiteboard_frames: [], whiteboard_operations: [], whiteboard_versions: [],
@@ -71,6 +71,8 @@ const CONFLICT_KEYS = {
   whiteboard_frames: ["id"],
   room_discussion_supports: ["message_id", "user_id"],
   room_discussion_reads: ["room_id", "user_id"],
+  room_discussion_mentions: ["message_id", "mentioned_user_id"],
+  room_todos: ["id"],
   presentation_state: ["room_id"],
   version_review_briefs: ["version_id"],
   version_verdicts: ["version_id", "user_id"],

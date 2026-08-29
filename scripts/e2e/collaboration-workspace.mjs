@@ -287,6 +287,33 @@ try {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
+    await page.getByLabel("房間討論").fill("@");
+    await page.waitForSelector('[data-testid="mention-picker"]', { timeout: 8000 });
+    check("@ 從成員挑，不是第二條聊天", await page.getByTestId("mention-picker").count() === 1 && await page.getByTestId("mention-picker").locator("button").count() >= 1);
+    await page.getByTestId("mention-picker").locator("button").first().click();
+    await page.getByRole("button", { name: "送出" }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="discussion-mention"]'), null, { timeout: 8000 });
+    check("提及畫在同一則討論", await page.getByTestId("discussion-mention").count() >= 1);
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_mention_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_mention_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+
+    await page.getByTestId("todo-draft-open").click();
+    await page.getByTestId("todo-draft-input").fill("印海報");
+    await page.getByTestId("todo-draft-add").click();
+    check("待辦要人填標題", (await page.getByTestId("discussion-todo").innerText()).includes("印海報"));
+    await page.getByTestId("todo-complete").click();
+    check("人可以結案待辦", await page.locator('[data-testid="discussion-todo"] [data-status="done"]').count() >= 1);
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_todo_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_todo_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+
     await page.getByRole("button", { name: "白板", exact: true }).click();
     await page.getByLabel("白板名稱").fill("招生規劃");
     await page.getByRole("button", { name: "建立白板" }).click();

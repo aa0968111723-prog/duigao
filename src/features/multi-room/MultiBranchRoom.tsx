@@ -87,12 +87,16 @@ export type MultiBranchRoomApi = {
   chatInput: string;
   setChatInput: (value: string) => void;
   sendChat: () => void;
-  onSendDiscussion: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
+  onSendDiscussion: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string; mentionedUserIds?: string[] }) => void;
   onSupportDiscussion: (messageId: string, add: boolean) => void;
   onEditDiscussion?: (messageId: string, body: string) => void;
   onTombstoneDiscussion?: (messageId: string) => void;
   discussionRead?: { lastReadMessageId?: string; lastReadAt?: number } | null;
   onMarkDiscussionRead?: (messageId: string) => void;
+  onCreateTodo?: (title: string) => void;
+  onCompleteTodo?: (todoId: string) => void;
+  typingLabel?: string;
+  onDiscussionTyping?: (active: boolean) => void;
   onCreateWhiteboard: (title: string) => void;
   onArchiveWhiteboard: (id: string) => void;
   onOpenWhiteboard: (id: string | null) => void;
@@ -983,6 +987,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       onTombstoneMessage: api.onTombstoneDiscussion,
                       readWatermark: api.discussionRead,
                       onMarkRead: api.onMarkDiscussionRead,
+                      onCreateTodo: api.onCreateTodo,
+                      onCompleteTodo: api.onCompleteTodo,
+                      typingLabel: api.typingLabel,
+                      onTyping: api.onDiscussionTyping,
                       onCreatePoll: createPoll,
                       onAddToBoard: api.onAddMessageToBoard,
                       onOpenBoardNode: (whiteboardId, nodeId) => {

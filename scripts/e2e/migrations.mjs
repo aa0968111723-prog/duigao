@@ -2057,6 +2057,72 @@ try {
       && as(owner, `select count(*) from public.room_discussion_messages where id = '${tombOwn}'::uuid;`).out === "1",
   );
 
+  section("0032：討論提及 + 待辦草稿 RLS");
+  const mentionMsg = psql("select gen_random_uuid();").out;
+  const todoOwn = psql("select gen_random_uuid();").out;
+  const todoForge = psql("select gen_random_uuid();").out;
+  const todoMove = psql("select gen_random_uuid();").out;
+  as(owner, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${mentionMsg}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid, 'Owner', '先看 @Reviewer');`);
+  ok(
+    "作者可以提及本房成員",
+    !as(owner, `insert into public.room_discussion_mentions (message_id, room_id, mentioned_user_id) values ('${mentionMsg}'::uuid, '${capRoom}'::uuid, '${reviewer}'::uuid);`).failed
+      && as(owner, `select count(*) from public.room_discussion_mentions where message_id = '${mentionMsg}'::uuid;`).out === "1",
+  );
+  ok(
+    "不能提及非成員",
+    as(owner, `insert into public.room_discussion_mentions (message_id, room_id, mentioned_user_id) values ('${mentionMsg}'::uuid, '${capRoom}'::uuid, '${stranger}'::uuid);`).failed,
+  );
+  ok(
+    "別人不能替作者寫提及",
+    as(reviewer, `insert into public.room_discussion_mentions (message_id, room_id, mentioned_user_id) values ('${mentionMsg}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid);`).failed,
+  );
+  ok(
+    "非成員讀不到別房的提及",
+    as(stranger, `select count(*) from public.room_discussion_mentions where room_id = '${capRoom}'::uuid;`).out === "0",
+  );
+  ok(
+    "提及不能掛到別的房間（跨房）",
+    as(owner, `insert into public.room_discussion_mentions (message_id, room_id, mentioned_user_id) values ('${mentionMsg}'::uuid, '${otherRoom}'::uuid, '${reviewer}'::uuid);`).failed,
+  );
+  ok(
+    "成員可以建自己的待辦",
+    !as(reviewer, `insert into public.room_todos (id, room_id, title) values ('${todoOwn}'::uuid, '${capRoom}'::uuid, '印海報');`).failed
+      && as(reviewer, `select title from public.room_todos where id = '${todoOwn}'::uuid;`).out === "印海報",
+  );
+  ok(
+    "不能冒充別人建待辦",
+    as(reviewer, `insert into public.room_todos (id, room_id, title, created_by) values ('${todoForge}'::uuid, '${capRoom}'::uuid, '假的', '${owner}'::uuid);`).failed,
+  );
+  ok(
+    "非成員不能在別房建待辦",
+    as(stranger, `insert into public.room_todos (room_id, title) values ('${capRoom}'::uuid, '路人待辦');`).failed,
+  );
+  as(owner, `insert into public.room_todos (id, room_id, title) values ('${todoMove}'::uuid, '${capRoom}'::uuid, '不要搬房');`);
+  as(owner, `update public.room_todos set room_id = '${otherRoom}'::uuid where id = '${todoMove}'::uuid;`);
+  ok(
+    "待辦不能搬到別的房間（跨房）",
+    as(owner, `select room_id from public.room_todos where id = '${todoMove}'::uuid;`).out === capRoom,
+  );
+  ok(
+    "作者可以把待辦標完成",
+    !as(reviewer, `update public.room_todos set status = 'done' where id = '${todoOwn}'::uuid;`).failed
+      && as(reviewer, `select status from public.room_todos where id = '${todoOwn}'::uuid;`).out === "done",
+  );
+  ok(
+    "authenticated 對提及與待辦沒有 DELETE",
+    as(owner, `delete from public.room_discussion_mentions where message_id = '${mentionMsg}'::uuid;`).failed
+      && as(owner, `delete from public.room_todos where id = '${todoMove}'::uuid;`).failed
+      && as(owner, `select count(*) from public.room_discussion_mentions where message_id = '${mentionMsg}'::uuid;`).out === "1"
+      && as(owner, `select count(*) from public.room_todos where id = '${todoMove}'::uuid;`).out === "1",
+  );
+
+  const mentionShape = () => psql(`select
+    (select count(*) from pg_policies where tablename in ('room_discussion_mentions','room_todos')) || '/' ||
+    (select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('room_discussion_mentions','room_todos'));`).out;
+  const mentionBefore = mentionShape();
+  psqlFile(join(MIGRATIONS, "0032_discussion_mentions_todos.sql"));
+  ok("重跑 0032 後 policy 數與表不變", mentionBefore === mentionShape(), `${mentionBefore} → ${mentionShape()}`);
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

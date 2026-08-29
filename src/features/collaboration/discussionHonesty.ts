@@ -1,6 +1,6 @@
 /**
- * Discussion extras typed by 0014/0018/0022 plus 0031 tombstone / unread watermark.
- * Mentions, typing, todo, and receipts stay unmodeled.
+ * Discussion extras typed by 0014/0018/0022 plus 0031 tombstone / unread
+ * and 0032 mentions / todos. Receipts stay unmodeled. Typing is ephemeral presence.
  */
 import type { DiscussionKind, DiscussionMessage, DiscussionPayload } from "./types";
 import { replySnippet } from "./replies";
@@ -103,6 +103,78 @@ export function discussionEditPatch(body: string): { body: string } | null {
   const next = body.replace(/\s+/g, " ").trim();
   if (!next) return null;
   return { body: next.slice(0, 4000) };
+}
+
+export function todoDraftTitle(raw: string): string | null {
+  return decisionDraftTitle(raw);
+}
+
+export function canWriteTodo(actor: string | undefined | null): boolean {
+  return isMemberActor(actor);
+}
+
+export function canCompleteTodo(actor: string | undefined | null): boolean {
+  return isMemberActor(actor);
+}
+
+export type MentionableMember = { userId: string; name: string; color?: string };
+
+export function parseMentionQuery(draft: string): { prefix: string; query: string } | null {
+  const at = draft.lastIndexOf("@");
+  if (at < 0) return null;
+  const prefix = draft.slice(0, at);
+  if (prefix.length && !/\s$/.test(prefix)) return null;
+  const query = draft.slice(at + 1);
+  if (/[\s\n]/.test(query)) return null;
+  return { prefix, query };
+}
+
+export function filterMentionableMembers(
+  members: MentionableMember[],
+  query: string,
+): MentionableMember[] {
+  const q = query.replace(/\s+/g, "").toLowerCase();
+  return members.filter((member) => {
+    if (!isMemberActor(member.userId)) return false;
+    const name = member.name.replace(/\s+/g, "").toLowerCase();
+    if (name === "ai" || name === "system" || name === "agent") return false;
+    return !q || name.includes(q);
+  });
+}
+
+export function mentionedIdsFromDraft(draft: string, members: MentionableMember[]): string[] {
+  const ids: string[] = [];
+  for (const member of members) {
+    if (!isMemberActor(member.userId) || !member.name) continue;
+    if (draft.includes(`@${member.name}`) && !ids.includes(member.userId)) ids.push(member.userId);
+  }
+  return ids;
+}
+
+export function highlightMentions(body: string, names: string[]): string {
+  let out = body;
+  for (const name of [...names].sort((a, b) => b.length - a.length)) {
+    if (!name) continue;
+    out = out.split(name).join(`‹${name}›`);
+  }
+  return out;
+}
+
+export function mentionBodyParts(body: string, names: string[]): Array<{ text: string; mention: boolean }> {
+  const sorted = [...names].filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!sorted.length) return [{ text: body, mention: false }];
+  const escaped = sorted.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`(@?(?:${escaped.join("|")}))`, "g");
+  const parts: Array<{ text: string; mention: boolean }> = [];
+  let last = 0;
+  for (const match of body.matchAll(re)) {
+    const start = match.index ?? 0;
+    if (start > last) parts.push({ text: body.slice(last, start), mention: false });
+    parts.push({ text: match[0], mention: true });
+    last = start + match[0].length;
+  }
+  if (last < body.length) parts.push({ text: body.slice(last), mention: false });
+  return parts.length ? parts : [{ text: body, mention: false }];
 }
 
 export function isMemberActor(actor: string | undefined | null): boolean {

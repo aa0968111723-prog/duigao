@@ -92,6 +92,9 @@ import {
   insertDecision,
   insertAiApplyAudit,
   insertDiscussion,
+  insertDiscussionMentions,
+  insertTodo as repoInsertTodo,
+  updateTodo as repoUpdateTodo,
   updateDiscussion as repoUpdateDiscussion,
   tombstoneDiscussion as repoTombstoneDiscussion,
   upsertDiscussionRead as repoUpsertDiscussionRead,
@@ -143,6 +146,9 @@ export type CloudWrites = {
   createPoll: (poll: RoomPoll) => void;
   votePoll: (vote: PollVote) => void;
   insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
+  insertDiscussionMentions?: (input: { roomId: string; messageId: string; mentionedUserIds: string[] }) => Promise<boolean>;
+  insertTodo?: (todo: import("../features/collaboration/types").RoomTodo) => void;
+  updateTodo?: (todo: import("../features/collaboration/types").RoomTodo) => void;
   updateDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
   tombstoneDiscussion?: (message: Pick<import("../features/collaboration/types").DiscussionMessage, "id" | "roomId">) => Promise<boolean>;
   upsertDiscussionRead?: (watermark: { roomId: string; lastReadMessageId?: string; lastReadAt: number }) => Promise<boolean>;
@@ -493,6 +499,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   /** Run a cloud write with optimistic UI already done; queue + degrade on failure. */
   // ---- WB04 realtime ----
   const [presencePeople, setPresencePeople] = useState<import("./roomSync").PresencePerson[]>([]);
+  const typingRef = useRef(false);
+  const typingOffTimer = useRef<number | null>(null);
   const sessionUserIdRef = useRef<string | null>(null);
   /** frames 即時事件出口（App 掛上）。 */
   const onFrameEventRef = useRef<FrameEventHandler | null>(null);
@@ -710,7 +718,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
           onPresence: setOnline,
           onPresenceList: (people) => setPresencePeople(people),
           // 重訂閱時 track 的初值現查（F3）
-          getPresenceIdentity: () => ({ boardId: activeWhiteboardRef.current }),
+          getPresenceIdentity: () => ({ boardId: activeWhiteboardRef.current, typing: typingRef.current }),
           onStatus: (connected) => {
             if (connected) {
               void flushPending();
@@ -1142,11 +1150,24 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
         return false; // 稽核失敗不擋套用結果；App 端以 toast 誠實告知
       }
     },
+    insertTodo: (todo) => run(`todo:${todo.id}`, () => repoInsertTodo(supabase!, todo)),
+    updateTodo: (todo) => run(`todo-up:${todo.id}:${todo.status}`, () => repoUpdateTodo(supabase!, todo)),
     insertDiscussion: async (message) => {
       if (!supabase || !boundRef.current) return false;
       setStatus("syncing");
       try {
         await insertDiscussion(supabase, message);
+        if (message.mentionedUserIds?.length) {
+          try {
+            await insertDiscussionMentions(supabase, {
+              roomId: message.roomId,
+              messageId: message.id,
+              mentionedUserIds: message.mentionedUserIds,
+            });
+          } catch {
+            /* 提及是附加列；訊息已落地就不擋。 */
+          }
+        }
         setStatus(pending.current.length ? "offline-pending" : "synced");
         return true;
       } catch (err) {
@@ -1255,6 +1276,25 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   return {
     // ---- WB04 realtime ----
     presencePeople,
+    setTyping: (active: boolean) => {
+      if (typingOffTimer.current) {
+        window.clearTimeout(typingOffTimer.current);
+        typingOffTimer.current = null;
+      }
+      const flip = typingRef.current !== active;
+      typingRef.current = active;
+      if (active) {
+        typingOffTimer.current = window.setTimeout(() => {
+          typingRef.current = false;
+          const sub = unsubRef.current as unknown as { retrack?: () => void } | null;
+          sub?.retrack?.();
+        }, 2500);
+      }
+      if (flip) {
+        const sub = unsubRef.current as unknown as { retrack?: () => void } | null;
+        sub?.retrack?.();
+      }
+    },
     /** frames 即時事件出口：App 掛一個 handler 進來。 */
     setFrameEventHandler: (handler: FrameEventHandler | null) => {
       onFrameEventRef.current = handler;
