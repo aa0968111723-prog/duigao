@@ -29,7 +29,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isDuplicateKey, isInvalidInvite, isPermissionDenied, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -292,6 +292,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteInvalid, setInviteInvalid] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   /**
    * This visitor's capability in the bound room. Null until the first snapshot
    * lands (and in a local-only session); the UI treats "unknown" as "cannot
@@ -573,6 +574,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     unsubRef.current = null;
     setStatus("connecting");
     setInviteInvalid(false);
+    setPermissionDenied(false);
     (async () => {
       try {
         setUserId(await ensureSession(supabase));
@@ -652,6 +654,9 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
         if (isInvalidInvite(err)) {
           setInviteInvalid(true);
           showToast("這個分享連結已失效，請向主辦方取得新連結", { tone: "error" });
+        } else if (isPermissionDenied(err)) {
+          setPermissionDenied(true);
+          showToast("沒有權限進入這個房間", { tone: "error" });
         }
         setStatus("error");
       }
@@ -695,6 +700,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   /** 再試一次: reload when bound, otherwise redo auth + join + load from scratch. */
   const retry = useCallback(() => {
     setInviteInvalid(false);
+    setPermissionDenied(false);
     if (boundRef.current) {
       void (async () => {
         await flushPending();
@@ -1096,6 +1102,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     online,
     inviteUrl,
     inviteInvalid,
+    permissionDenied,
     boundRoomId: boundRef.current,
     role,
     // A local-only room has no membership row and no server to ask; it belongs
