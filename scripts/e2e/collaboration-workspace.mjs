@@ -290,13 +290,24 @@ try {
     check("流程邊線會一起建立", edgeCount >= 5, `edges=${edgeCount}`);
 
     await dismissSelection(page);
+    const compactToolbar = page.getByTestId("wb-compact-toolbar");
+    check("390 工具列走 compact（圖示、不佔整排字）", (await compactToolbar.getAttribute("data-compact")) === "true");
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤文宣/ }).click();
+    await page.waitForSelector('[data-testid="wb-poster-region"]', { timeout: 8000 });
+    check("文宣卡先問範圍，不假裝已有圈選", (await page.getByTestId("wb-poster-region").innerText()).includes("還沒有圈選範圍"));
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_poster_region_390.png"), fullPage: true });
+    await page.getByTestId("wb-poster-whole").click();
     await dismissSelection(page);
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤計畫/ }).click();
+    await page.waitForSelector('[data-testid="wb-plan-section"]', { timeout: 8000 });
+    check("企劃卡先問段落或整份", await page.getByTestId("wb-plan-whole").count() === 1);
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_plan_section_390.png"), fullPage: true });
+    await page.getByTestId("wb-plan-whole").click();
     await dismissSelection(page);
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
@@ -304,6 +315,13 @@ try {
     await page.getByTestId("wb-video-0040").click();
     check("可把文宣／企劃／影片時間卡放上白板", await page.locator("[data-node-type='room_content']").count() >= 3);
     check("影片卡帶 00:40 時間點", (await page.locator("[data-node-type='room_content']").allTextContents()).some((text) => text.includes("00:40")));
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_compact_toolbar_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForTimeout(200);
+    check("768 工具列不是 compact", (await compactToolbar.getAttribute("data-compact")) === "false");
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_toolbar_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(200);
 
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-create-poll").click();
@@ -1144,6 +1162,7 @@ try {
         return { vertical: box.height > box.width, right: Math.round(window.innerWidth - box.right) };
       });
       check("平板：工具列轉右側直欄", toolbar.vertical && toolbar.right < 40, JSON.stringify(toolbar));
+      check("平板 ≥768 不是 compact 橫列", (await page.getByTestId("wb-compact-toolbar").getAttribute("data-compact")) === "false");
 
       // 收合側欄 → 畫布佔滿
       await page.getByTestId("wb-rail-toggle").click();
