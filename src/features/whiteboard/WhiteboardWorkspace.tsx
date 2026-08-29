@@ -39,6 +39,7 @@ import { initialPenState, penDown, penUp, segmentWidths, shouldRejectPointer, ty
 import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
 import { describePreview, planApply, type BoardAiPreview } from "./aiPreview";
 import { rendererFor } from "./registry";
+import { boardPollWrite } from "../collaboration/boardPollWrite";
 import "./whiteboard.css";
 
 export type WhiteboardApi = {
@@ -121,7 +122,7 @@ export type WhiteboardApi = {
   onConsumeStagedAiPreview?: () => void;
 };
 
-type Sheet = "add" | "search" | "content" | "more" | "poll" | "video-range" | "versions" | "ai" | null;
+type Sheet = "add" | "search" | "content" | "more" | "poll" | "poll-create" | "video-range" | "versions" | "ai" | null;
 
 const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
@@ -370,6 +371,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [videoStart, setVideoStart] = useState("00:40");
   const [videoEnd, setVideoEnd] = useState("");
   const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan" | "asset">("all");
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState<string[]>(["", ""]);
   const [previewNodes, setPreviewNodes] = useState<WhiteboardNode[] | null>(null);
   // F4：拖曳 preview 的同步事實來源 — render 閉包的 previewNodes 在
   // 同批 pointermove 之間是舊值，增量會疊在過期基準上（節點抖動/丟步）
@@ -1329,7 +1332,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 </button>
               )}
               <button type="button" className="wb-card" onClick={() => setSheet("poll")}>放入既有投票</button>
-              {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-create-poll" onClick={() => { const id = api.onCreatePoll("主視覺要不要換？", ["要，換成 B 版", "先維持 A 版"]); if (id) addAtView("poll", { pollQuestion: "主視覺要不要換？", voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) }); setSheet(null); }}>＋投票</button>}
+              {api.canManageBoards && (
+                <button
+                  type="button"
+                  className="wb-card"
+                  data-testid="wb-create-poll"
+                  onClick={() => { setPollQuestion(""); setPollOptions(["", ""]); setSheet("poll-create"); }}
+                >＋投票</button>
+              )}
               {api.canManageBoards && <button type="button" className="wb-card" data-testid="wb-write-decision" onClick={() => { api.onCreateDecision("已決定：採用 B 版", undefined, "decided"); addAtView("decision", { text: "已決定：採用 B 版", sourceLabel: "決策區" }); setSheet(null); }}>寫下決策</button>}
             </div>
             <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
@@ -1463,6 +1473,68 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               )}
             </div>
             <button type="button" className="project-sheet-close" onClick={() => { setSheet(null); setVersionPreview(null); }}>關閉</button>
+          </section>
+        </div>
+      )}
+      {sheet === "poll-create" && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="新增投票">
+            <div className="wb-sheet" data-testid="wb-poll-draft">
+              <h3>新增投票</h3>
+              <p className="project-muted">題目與至少兩個選項要人填。空題目不是投票。AI 不能代建。</p>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const write = boardPollWrite(pollQuestion, pollOptions);
+                  if (!write) return;
+                  const id = api.onCreatePoll(write.question, write.options);
+                  if (id) addAtView("poll", { pollQuestion: write.question, voteCount: 0 }, { linkedEntityType: "poll", linkedEntityId: String(id) });
+                  setPollQuestion("");
+                  setPollOptions(["", ""]);
+                  setSheet(null);
+                }}
+              >
+                <input
+                  className="text-input wb-search"
+                  autoFocus
+                  value={pollQuestion}
+                  onChange={(event) => setPollQuestion(event.target.value)}
+                  aria-label="投票題目"
+                  placeholder="例如：主視覺要不要換？"
+                  data-testid="wb-poll-question"
+                />
+                {pollOptions.map((option, index) => (
+                  <input
+                    key={index}
+                    className="text-input wb-search"
+                    value={option}
+                    onChange={(event) => {
+                      const next = [...pollOptions];
+                      next[index] = event.target.value;
+                      setPollOptions(next);
+                    }}
+                    aria-label={`選項 ${index + 1}`}
+                    placeholder={`選項 ${index + 1}`}
+                    data-testid={`wb-poll-option-${index}`}
+                  />
+                ))}
+                {pollOptions.length < 6 && (
+                  <button
+                    type="button"
+                    className="project-text-button"
+                    data-testid="wb-poll-add-option"
+                    onClick={() => setPollOptions((current) => [...current, ""])}
+                  >加選項</button>
+                )}
+                <button
+                  type="submit"
+                  className="project-save-button project-submit"
+                  data-testid="wb-create-poll-save"
+                  disabled={!boardPollWrite(pollQuestion, pollOptions)}
+                >建立投票</button>
+              </form>
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => { setPollQuestion(""); setPollOptions(["", ""]); setSheet(null); }}>取消</button>
           </section>
         </div>
       )}

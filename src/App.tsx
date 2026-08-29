@@ -56,6 +56,7 @@ import {
 } from "./cloud/assetIntelligence";
 import { addRoomTarget, readRoomLink } from "./cloud/invite";
 import { type SyncStatus } from "./cloud/types";
+import { boardPollWrite } from "./features/collaboration/boardPollWrite";
 import { useCloudRoom } from "./cloud/useCloudRoom";
 import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
 import { ToastStack, useToasts } from "./toast";
@@ -1661,11 +1662,16 @@ export function App() {
 
   const createProjectPoll = useCallback(
     (poll: RoomPoll) => {
+      const write = boardPollWrite(poll.question, poll.options);
+      if (!write) {
+        showToast("投票要有題目和至少兩個選項。", { tone: "error" });
+        return;
+      }
       if (!cloud.canManageMedia && cloud.boundRoomId) {
         showToast("檢視者可以投票，但不能建立待決策。", { tone: "error" });
         return;
       }
-      const nextPoll = { ...poll, createdBy: cloud.userId ?? poll.createdBy };
+      const nextPoll = { ...poll, question: write.question, options: write.options, createdBy: cloud.userId ?? poll.createdBy };
       updateRoom((r) => ({ ...r, polls: [...(r.polls ?? []), nextPoll] }));
       cloudRef.current.writes.createPoll(nextPoll);
     },

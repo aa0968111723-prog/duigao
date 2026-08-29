@@ -3,6 +3,7 @@ import { UniversalIntake, type IntakeHandle } from "../../components/UniversalIn
 import { anchorFromDiscussion, openTarget } from "../../lib/contextAnchor";
 import { indexMessages, replySnippet, resolveReply, type ReplyReference } from "../collaboration/replies";
 import type { Guest, Room, RoomPoll } from "../../lib/types";
+import { boardPollWrite } from "../collaboration/boardPollWrite";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
 import { shouldFollowLatest } from "./feed";
@@ -172,6 +173,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const attachRef = useRef<IntakeHandle>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [boardPick, setBoardPick] = useState<DiscussionMessage | null>(null);
+  const [pollDraft, setPollDraft] = useState<{ question: string; options: string[] } | null>(null);
   const [reply, setReply] = useState<DiscussionMessage | null>(null);
 
   const showDecisions = api.showDecisions ?? true;
@@ -408,7 +410,13 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               <div className="rd-actions">
                 <button type="button" onClick={() => setReply(message)}>回覆</button>
                 <button type="button" onClick={() => api.onSupport(message.id, !supported)}>支持{supportCount ? ` ${supportCount}` : ""}</button>
-                {showRoomActions && api.canManage && <button type="button" onClick={() => api.onCreatePoll(message.body || "要不要這樣做？", ["贊成", "再想想"])}>建立投票</button>}
+                {showRoomActions && api.canManage && (
+                  <button
+                    type="button"
+                    data-testid="discussion-create-poll"
+                    onClick={() => setPollDraft({ question: message.body, options: ["", ""] })}
+                  >建立投票</button>
+                )}
                 {showRoomActions && <button type="button" onClick={() => setBoardPick(message)}>加入白板</button>}
               </div>
               )}
@@ -528,6 +536,65 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           />
           <button type="submit" className="btn btn-primary" disabled={!api.draft.trim()}>送出</button>
         </form>
+      )}
+
+      {pollDraft && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setPollDraft(null)}>
+          <section className="project-sheet" role="dialog" aria-label="建立投票">
+            <div className="wb-sheet" data-testid="discussion-poll-draft">
+              <h3>建立投票</h3>
+              <p className="project-muted">題目要人填。空正文不是投票。AI 不能代建。</p>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const write = boardPollWrite(pollDraft.question, pollDraft.options);
+                  if (!write) return;
+                  api.onCreatePoll(write.question, write.options);
+                  setPollDraft(null);
+                }}
+              >
+                <input
+                  className="text-input"
+                  autoFocus
+                  value={pollDraft.question}
+                  onChange={(event) => setPollDraft({ ...pollDraft, question: event.target.value })}
+                  aria-label="投票題目"
+                  placeholder="投票題目"
+                  data-testid="discussion-poll-question"
+                />
+                {pollDraft.options.map((option, index) => (
+                  <input
+                    key={index}
+                    className="text-input"
+                    value={option}
+                    onChange={(event) => {
+                      const options = [...pollDraft.options];
+                      options[index] = event.target.value;
+                      setPollDraft({ ...pollDraft, options });
+                    }}
+                    aria-label={`選項 ${index + 1}`}
+                    placeholder={`選項 ${index + 1}`}
+                    data-testid={`discussion-poll-option-${index}`}
+                  />
+                ))}
+                {pollDraft.options.length < 6 && (
+                  <button
+                    type="button"
+                    className="project-text-button"
+                    onClick={() => setPollDraft({ ...pollDraft, options: [...pollDraft.options, ""] })}
+                  >加選項</button>
+                )}
+                <button
+                  type="submit"
+                  className="project-save-button project-submit"
+                  data-testid="discussion-create-poll-save"
+                  disabled={!boardPollWrite(pollDraft.question, pollDraft.options)}
+                >建立投票</button>
+              </form>
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => setPollDraft(null)}>取消</button>
+          </section>
+        </div>
       )}
 
       {boardPick && (
