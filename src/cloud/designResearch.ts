@@ -3,8 +3,8 @@
  *
  * Success is `{ query, answer, sources, … }` — not `{ ok: true }`.
  * SPA HTML, a missing string `answer`, or no supabase transport must never
- * become a research answer. PERPLEXITY_API_KEY stays on the edge; this file
- * must not read `VITE_PERPLEXITY` or call Perplexity.
+ * become a research answer. The upstream key stays on the edge; this file
+ * must not read a frontend research key or call the vendor directly.
  */
 import { invokeErrorContentType, looksLikeSpaHtml, parseFunctionPayload } from "./apiResponse";
 import {

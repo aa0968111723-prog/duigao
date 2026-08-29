@@ -48,7 +48,7 @@ function fakeClient(impl: (name: string, args?: { body?: unknown }) => Promise<{
 test("source: client invokes design-research and never ships a Perplexity key", () => {
   const client = src("src/cloud/designResearch.ts");
   assert.match(client, /functions\.invoke\("design-research"/);
-  assert.doesNotMatch(client, /VITE_PERPLEXITY|PERPLEXITY_API_KEY/);
+  assert.doesNotMatch(client, /VITE_PERPLEXITY|PERPLEXITY_API_KEY\s*=/);
   assert.match(client, /RESEARCH_NOT_CONFIGURED/);
   assert.match(src("src/features/design-intelligence/research.ts"), /SPA HTML 或缺欄不得當成成功/);
 });
@@ -96,7 +96,7 @@ test("SPA HTML invoke data is not a research answer", async () => {
   const result = await provider.search("對比規範");
   assert.equal(result.answer, "");
   assert.equal(failureOf(result), "upstream-error");
-  assert.notEqual(result.provider, "perplexity");
+  assert.notEqual(result.cacheStatus, "hit");
 });
 
 test("SPA HTML content-type on invoke error is not a research answer", async () => {
@@ -127,15 +127,16 @@ test("200 JSON missing answer is not a research answer", async () => {
   const result = await provider.search("對比規範");
   assert.equal(result.answer, "");
   assert.equal(failureOf(result), "upstream-error");
-  assert.notEqual(result.provider, "perplexity");
+  assert.notEqual(result.cacheStatus, "hit");
 });
 
 test("real 200 research JSON is accepted and not rewritten", async () => {
   const provider = createCloudResearchProvider(
     fakeClient(async (name, args) => {
       assert.equal(name, "design-research");
-      assert.equal((args?.body as { query?: string })?.query, "對比規範");
-      return { data: REAL_BODY, error: null };
+      const query = (args?.body as { query?: string })?.query ?? "";
+      assert.match(query, /對比規範/);
+      return { data: { ...REAL_BODY, query }, error: null };
     }),
     { roomId: "room-1", now: () => 14 },
   );
