@@ -95,6 +95,8 @@ export function transitionProposal(
     updated.revertedAt = now;
   }
   if (next === "rejected" || next === "failed") {
+    // 專屬欄位是權威來源；risks 仍然 append 一份，那是歷史紀錄。
+    updated.failureReason = context.reason ?? null;
     updated.risks = context.reason ? [...proposal.risks, context.reason] : proposal.risks;
   }
   return { ok: true, proposal: updated };

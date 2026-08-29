@@ -233,6 +233,17 @@ export type DesignProposal = {
   approvedAt: number | null;
   appliedAt: number | null;
   revertedAt: number | null;
+  /**
+   * 這次失敗的原因。**唯一權威來源。**
+   *
+   * 不要用 `risks[0]` 代替：`risks` 是這份提案一路累積下來的歷史紀錄
+   *（沒有 AI provider、只有一個方案、知識有衝突…），失敗原因被 append
+   * 到尾巴，而讀取端取 `[0]` 拿到的是完全無關的舊訊息。
+   *
+   * 實測過的後果：套用失敗時面板顯示「只提供了一個保守方案…」，
+   * 而「Canva API 回 500」—— 使用者唯一能拿去處理的資訊 —— 完全不顯示。
+   */
+  failureReason: string | null;
   /** 套用前的版本（可回去的那一版）。 */
   baseRevision: string | null;
   /** 套用後產生的版本。 */

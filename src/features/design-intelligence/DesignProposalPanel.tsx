@@ -33,7 +33,16 @@ type Props = {
   /** 使用者按下「套用這個方案」。**元件自己不套用任何東西。** */
   onApply: (alternativeId: string) => void;
   onDismiss: () => void;
+  /** 重跑分析。 */
   onRetry?: () => void;
+  /**
+   * 重試套用。
+   *
+   * 與 `onRetry` 是**兩件不同的事**：套用失敗時作品可能已經被動過，
+   * 這時使用者要的是「再套一次」，不是「重跑分析」——
+   * 一個按鈕接錯對象會讓他丟掉剛剛核准的那個方案。
+   */
+  onRetryApply?: () => void;
 };
 
 const SEVERITY_LABEL: Record<Diagnostic["severity"], string> = {
@@ -43,7 +52,15 @@ const SEVERITY_LABEL: Record<Diagnostic["severity"], string> = {
   nit: "細節",
 };
 
-export function DesignProposalPanel({ proposal, viewport, canApply, onApply, onDismiss, onRetry }: Props) {
+export function DesignProposalPanel({
+  proposal,
+  viewport,
+  canApply,
+  onApply,
+  onDismiss,
+  onRetry,
+  onRetryApply,
+}: Props) {
   const layout = useMemo(() => layoutFor(viewport), [viewport]);
   const state = useMemo(() => panelStateFor(proposal), [proposal]);
   const [index, setIndex] = useState(0);
@@ -143,11 +160,18 @@ export function DesignProposalPanel({ proposal, viewport, canApply, onApply, onD
               {/* 失敗原因照實顯示。用「請稍後再試」蓋掉真正的錯誤，
                   使用者就沒辦法判斷是自己的問題還是服務的問題。 */}
               <p data-testid="di-failure-detail">{state.detail}</p>
-              {state.retryable && onRetry && (
-                <button type="button" onClick={onRetry}>
-                  再試一次
-                </button>
-              )}
+              {state.retryable &&
+                (state.retryOf === "apply"
+                  ? onRetryApply && (
+                      <button type="button" onClick={onRetryApply} data-testid="di-retry-apply">
+                        重試套用
+                      </button>
+                    )
+                  : onRetry && (
+                      <button type="button" onClick={onRetry} data-testid="di-retry">
+                        再試一次
+                      </button>
+                    ))}
             </div>
           )}
 

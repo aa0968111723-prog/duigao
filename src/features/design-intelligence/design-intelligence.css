@@ -38,8 +38,12 @@
   top: 0;
   right: 0;
   bottom: 0;
+  /* 寬度只有一個來源：元件算出來的 inline width（見 proposalView 的
+     layoutFor）。這裡的 clamp 只是沒有 inline 值時的後備。
+     原本還有一條 `max-width: 40vw`，它會把 inline 的 320px 夾成 307.19px ——
+     於是文件寫 40.0%、純函式算 41.7%、瀏覽器畫 307.19px，三方對不起來，
+     而且 e2e 只驗抽屜高度、沒驗分割寬度，所以沒人發現。已移除。 */
   width: clamp(320px, 38vw, 420px);
-  max-width: 40vw;
   border-radius: 0;
   border-left: 1px solid var(--border, #e3e5ea);
   box-shadow: -8px 0 32px rgb(0 0 0 / 12%);

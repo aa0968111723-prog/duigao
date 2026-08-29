@@ -407,6 +407,8 @@ export async function analyzeDesign(
     risks,
     confidence,
     status,
+    // 分析階段不會失敗成「套用失敗」；真的失敗時由 lifecycle 填。
+    failureReason: null,
     createdBy: input.createdBy,
     createdAt: now(),
     approvedBy: null,

@@ -48,6 +48,7 @@ function base(over: Partial<DesignProposal>): DesignProposal {
     approvedAt: null,
     appliedAt: null,
     revertedAt: null,
+    failureReason: null,
     baseRevision: null,
     resultRevision: null,
     ...over,
@@ -142,7 +143,13 @@ FIXTURES.full = base({
 FIXTURES.clean = base({});
 FIXTURES.failed = base({
   status: "failed",
-  risks: ["AI 分析沒有完成（mock：503 上游無回應），以下只有本地量測得出的結果"],
+  // `failureReason` 才是權威來源。`risks` 是歷史紀錄 —— 這裡刻意讓兩者不同，
+  // 而且讓 risks[0] 是一條完全無關的舊訊息，驗收才驗得出面板讀對了欄位。
+  failureReason: "AI 分析沒有完成（mock：503 上游無回應），以下只有本地量測得出的結果",
+  risks: [
+    "只提供了一個保守方案：平衡重設計與大膽創意需要創意判斷",
+    "AI 分析沒有完成（mock：503 上游無回應），以下只有本地量測得出的結果",
+  ],
 });
 FIXTURES["needs-context"] = base({
   status: "needs-context",
@@ -189,6 +196,7 @@ function Harness() {
           onApply={(id) => setApplied(id)}
           onDismiss={() => setDismissed(true)}
           onRetry={() => undefined}
+          onRetryApply={() => undefined}
         />
       )}
     </div>

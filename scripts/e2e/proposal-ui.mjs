@@ -194,6 +194,33 @@ try {
       // **共同**撐著 —— 只把其中一邊改壞，另一邊還擋著，測試照樣綠
       //（對抗審查實測到的）。所以直接斷言兩邊一致：
       // 真正畫出來的高度必須等於 JS 算出來的那個值。
+      // 分割版面的**寬度**也要驗同一件事。
+      //
+      // 原本只有抽屜高度有這道「畫出來 = JS 算的」檢查，分割寬度沒有 ——
+      // 於是 CSS 的 `max-width: 40vw` 把 inline 的 320px 夾成 307.19px，
+      // 文件寫 40.0%、純函式算 41.7%、瀏覽器畫 307.19，三方對不起來而沒人發現。
+      // 更糟的是把 max-width 改成 6vw（面板剩 46px、按鈕短邊掉到 13px）之後，
+      // split 的其餘斷言全是上界，仍然全綠。
+      if (size.expect === "split") {
+        const splitWidth = await page.evaluate(() => {
+          const panel = document.querySelector('[data-testid="di-panel"]');
+          return {
+            rendered: panel.getBoundingClientRect().width,
+            inline: parseFloat(panel.style.width) || null,
+          };
+        });
+        check(
+          `${size.label}：分割欄畫出來的寬度與 JS 算的一致（CSS 沒有偷偷夾住）`,
+          splitWidth.inline !== null && Math.abs(splitWidth.rendered - splitWidth.inline) < 1.5,
+          `畫出來 ${splitWidth.rendered.toFixed(2)}px，JS 算 ${splitWidth.inline}px`,
+        );
+        check(
+          `${size.label}：分割欄 ≥ 320px（再窄診斷讀不了）`,
+          splitWidth.rendered >= 320,
+          `${splitWidth.rendered.toFixed(2)}px`,
+        );
+      }
+
       if (size.expect === "sheet" && expandedMetrics.inlineHeight !== null) {
         check(
           `${size.label}：畫出來的高度與 JS 算的一致（CSS 沒有偷偷夾住）`,
@@ -429,7 +456,9 @@ try {
       ["needs-context", /還不能分析/, /色碼/],
       // 正則要同時要求「有具體原因」與「沒有用罐頭句蓋掉」——
       // 原本只查 /503/，而「請稍後再試（503）」也會過（對抗審查指出）。
-      ["failed", /這次分析沒有完成/, /503 上游無回應/, /請稍後再試/],
+      // 第四個是**不該出現**的樣式。這裡刻意用 risks[0] 的內容當禁字：
+      // 面板若讀錯欄位（取 risks[0]），顯示的就會是那條無關的舊訊息。
+      ["failed", /這次分析沒有完成/, /503 上游無回應/, /只提供了一個保守方案/],
     ];
     for (const [fixture, title, detail, forbidden] of cases) {
       const { context, page } = await open(SIZES[1], fixture);

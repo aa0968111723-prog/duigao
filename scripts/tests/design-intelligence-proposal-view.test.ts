@@ -19,6 +19,7 @@ import {
   sortDiagnostics,
   swipeIntent,
 } from "../../src/features/design-intelligence/proposalView";
+import { transitionProposal } from "../../src/features/design-intelligence/lifecycle";
 import type {
   DesignAlternative,
   DesignProposal,
@@ -84,6 +85,7 @@ function proposal(over: Partial<DesignProposal> = {}): DesignProposal {
     approvedAt: null,
     appliedAt: null,
     revertedAt: null,
+    failureReason: null,
     baseRevision: null,
     resultRevision: null,
     ...over,
@@ -210,12 +212,66 @@ test("「沒問題」「資料不足」「分析失敗」是三種不同的訊�
   }
 
   const failed = panelStateFor(
-    proposal({ status: "failed", risks: ["AI 分析沒有完成（503 上游無回應）"] }),
+    proposal({
+      status: "failed",
+      failureReason: "AI 分析沒有完成（503 上游無回應）",
+      risks: ["AI 分析沒有完成（503 上游無回應）"],
+    }),
   );
   assert.equal(failed.kind, "failed");
   if (failed.kind === "failed") {
     assert.match(failed.detail, /503/, "失敗原因要照實顯示，不能用「請稍後再試」蓋掉");
     assert.equal(failed.retryable, true);
+    assert.equal(failed.retryOf, "analysis", "還沒進 applying，重試的是分析");
+  }
+});
+
+test("套用失敗顯示的是這次的原因，不是歷史紀錄的第一條", () => {
+  // 實測到的：無金鑰的預設設定下，每個 ready 提案都已經帶著 risks
+  //（「沒有可用的 AI」「只提供了一個保守方案」），而 lifecycle 把失敗原因
+  // append 到**尾巴**。讀取端取 risks[0] 拿到的是完全無關的舊訊息，
+  // 而使用者唯一能拿去處理的資訊完全不顯示。
+  const REASON = "套用失敗：Canva API 回 500（board adapter 沒有寫入權限）";
+  const ready = proposal({
+    risks: [
+      "只提供了一個保守方案：平衡重設計與大膽創意需要創意判斷",
+      "目前沒有可用的 AI 分析服務，以下只有本地量測得出的結果",
+    ],
+    patch: { adapter: "board", payload: {}, reversible: true, revertHint: "回到上一版" },
+  });
+  const now = () => 2;
+  const approved = transitionProposal(ready, "approved", { now, actor: "user-2" });
+  assert.ok(approved.ok);
+  if (!approved.ok) return;
+  const applying = transitionProposal(approved.proposal, "applying", { now, baseRevision: "v3" });
+  assert.ok(applying.ok);
+  if (!applying.ok) return;
+  const failed = transitionProposal(applying.proposal, "failed", { now, reason: REASON });
+  assert.ok(failed.ok);
+  if (!failed.ok) return;
+
+  const state = panelStateFor(failed.proposal);
+  assert.equal(state.kind, "failed");
+  if (state.kind !== "failed") return;
+  assert.equal(state.detail, REASON, "顯示的必須是這次的原因，字串完全相等");
+  assert.match(state.title, /套用/, "作品可能已經被動過，訊息要說出來");
+  assert.equal(state.retryOf, "apply", "要重試的是套用，不是重跑分析");
+
+  // 不變式：risks 有幾條都不影響 —— 任何靠 index 取值的寫法都會在其中一種紅
+  for (const risks of [[], ["一條"], ["一", "二", "三"]]) {
+    const variant = transitionProposal(
+      { ...applying.proposal, risks },
+      "failed",
+      { now, reason: REASON },
+    );
+    assert.ok(variant.ok);
+    if (!variant.ok) continue;
+    const s = panelStateFor(variant.proposal);
+    assert.equal(
+      s.kind === "failed" ? s.detail : "",
+      REASON,
+      `risks 長度 ${risks.length} 時取到了別的東西`,
+    );
   }
 });
 

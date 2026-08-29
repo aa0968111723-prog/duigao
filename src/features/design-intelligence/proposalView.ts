@@ -146,7 +146,14 @@ export type PanelState =
   | { kind: "result"; diagnostics: Diagnostic[]; alternativeCount: number }
   /** 有結論但不是「找到問題」—— 例如作品沒問題，或資料不足。 */
   | { kind: "notice"; title: string; detail: string; actionable: boolean }
-  | { kind: "failed"; title: string; detail: string; retryable: boolean };
+  | {
+      kind: "failed";
+      title: string;
+      detail: string;
+      retryable: boolean;
+      /** 重試的對象：重跑分析，還是重試套用。兩者的按鈕接的不是同一個東西。 */
+      retryOf: "analysis" | "apply";
+    };
 
 const SEVERITY_RANK: Record<Severity, number> = {
   blocker: 0,
@@ -176,11 +183,16 @@ export function panelStateFor(proposal: DesignProposal): PanelState {
     return { kind: "analyzing", note: "正在分析這件作品…" };
   }
   if (proposal.status === "failed") {
+    // `baseRevision` 有值代表已經進過 applying —— 也就是**作品可能已經被動過**。
+    // 那和「分析沒跑完」是完全不同的處境，訊息與可用的動作都不一樣。
+    const duringApply = proposal.baseRevision !== null;
     return {
       kind: "failed",
-      title: "這次分析沒有完成",
-      detail: proposal.risks[0] ?? "沒有取得失敗原因",
+      title: duringApply ? "套用沒有完成，作品可能已經被更動" : "這次分析沒有完成",
+      // **不要用 risks[0]。** 那是歷史紀錄的第一條，不是這次的失敗原因。
+      detail: proposal.failureReason ?? "沒有取得失敗原因",
       retryable: true,
+      retryOf: duringApply ? "apply" : "analysis",
     };
   }
   if (proposal.status === "needs-context") {

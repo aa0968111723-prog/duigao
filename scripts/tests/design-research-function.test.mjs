@@ -35,8 +35,13 @@ const AUTH = "Bearer header.payload.signature";
  * `calls` 記下每一個出站請求，讓測試可以斷言「這個情況下一次都沒有送出去」
  * —— 那是配額與授權檢查真正該保證的事，光看回應碼看不出來。
  */
-async function handlerWith({ apiKey = FAKE_KEY, upstream, member = true, usage = 0 } = {}) {
+async function handlerWith({ apiKey = FAKE_KEY, upstream, member = true, usage = 0, usageInsertFails = false } = {}) {
   const calls = [];
+  // **真正決定配額的是這張表的 insert，不是回應裡的 usage 欄位。**
+  // 原本 stub 只是把 POST 路由掉，從來沒有留存內容 —— 於是把整段 insert
+  // 刪掉，14/14 仍然全綠。配額的唯一計數來源沒有任何斷言守著。
+  const usageInserts = [];
+  let usageCount = usage;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const href = typeof url === "string" ? url : url.url;
@@ -52,13 +57,24 @@ async function handlerWith({ apiKey = FAKE_KEY, upstream, member = true, usage =
     // supabase REST：使用量（配額查詢用 head + count）
     if (href.includes("/rest/v1/design_research_usage")) {
       if ((init?.method ?? "GET") === "POST") {
+        try {
+          usageInserts.push(JSON.parse(init.body));
+        } catch {
+          usageInserts.push({ __unparseable: String(init?.body) });
+        }
+        if (usageInsertFails) {
+          return new Response(JSON.stringify({ message: "insert failed" }), {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          });
+        }
         return new Response("[]", { status: 201, headers: { "content-type": "application/json" } });
       }
       return new Response("[]", {
         status: 200,
         headers: {
           "content-type": "application/json",
-          "content-range": `0-0/${usage}`,
+          "content-range": `0-0/${typeof usageCount === "function" ? usageCount() : usageCount}`,
         },
       });
     }
@@ -82,6 +98,10 @@ async function handlerWith({ apiKey = FAKE_KEY, upstream, member = true, usage =
 
   return {
     calls,
+    usageInserts,
+    setUsageCount: (fn) => {
+      usageCount = fn;
+    },
     restore: () => {
       globalThis.fetch = originalFetch;
     },
@@ -115,6 +135,52 @@ test("POST 路徑真的跑得起來（不是只有 OPTIONS 被測過）", async 
     assert.equal(body.sources.length, 1, "同一個網址出現兩次應該只留一筆");
     assert.equal(body.sources[0].publishedAt, null, "上游沒給發布日期就是 null，不用取得時間冒充");
     assert.equal(body.usage.requests, 1);
+
+    // **配額的唯一計數來源**：這一筆真的寫進去了嗎，內容對不對。
+    assert.equal(ctx.usageInserts.length, 1, "沒有寫入使用量，配額就永遠不會觸頂");
+    const row = Array.isArray(ctx.usageInserts[0]) ? ctx.usageInserts[0][0] : ctx.usageInserts[0];
+    assert.equal(row.room_id, ROOM);
+    assert.equal(row.source_count, body.sources.length);
+    assert.equal(row.suspicious_count, body.answerSuspicious.length);
+    assert.match(row.query_hash, /^[0-9a-f]{64}$/, "只存雜湊，不存查詢原文");
+    assert.equal(typeof row.latency_ms, "number");
+    assert.equal(body.usageLogged, true);
+  } finally {
+    ctx.restore();
+  }
+});
+
+test("寫不進使用量時仍然回 200，但**要說**（usageLogged: false）", async () => {
+  // 這支函式的邏輯原本是不對稱的：算不出用量時選擇 503 停機
+  //（註解明說「以免產生無上限的費用」），寫不進用量時卻靜默放行 ——
+  // 而只有停機的那一半有測試。一直寫不進去代表配額實際上是失效的，
+  // 那件事必須被看見。
+  const ctx = await handlerWith({ upstream: okUpstream, usageInsertFails: true });
+  try {
+    const response = await ctx.post({ roomId: ROOM, query: "海報的對比要多少" });
+    const body = await response.json();
+    assert.equal(response.status, 200, "使用者的請求已經完成了，不該因為記帳失敗而失敗");
+    assert.equal(body.usageLogged, false, "這個欄位是唯一會讓監控看見配額失效的訊號");
+    assert.equal(ctx.usageInserts.length, 1, "應該有嘗試過寫入");
+  } finally {
+    ctx.restore();
+  }
+});
+
+test("寫入端與讀取端接得起來：連續 40 次之後第 41 次被擋", async () => {
+  // 這條同時抓得到「不寫」與「寫進去但欄位改名導致數不到」。
+  const ctx = await handlerWith({ upstream: okUpstream });
+  try {
+    // 讓配額查詢回傳「目前為止真的寫進去的筆數」
+    ctx.setUsageCount(() => ctx.usageInserts.length);
+    for (let i = 0; i < 40; i += 1) {
+      const response = await ctx.post({ roomId: ROOM, query: `問題 ${i}` });
+      assert.equal(response.status, 200, `第 ${i + 1} 次應該通過`);
+    }
+    assert.equal(ctx.usageInserts.length, 40);
+    const blocked = await ctx.post({ roomId: ROOM, query: "第 41 個問題" });
+    assert.equal(blocked.status, 429, "第 41 次應該被配額擋下");
+    assert.equal((await blocked.json()).error, "QUOTA_EXCEEDED");
   } finally {
     ctx.restore();
   }
