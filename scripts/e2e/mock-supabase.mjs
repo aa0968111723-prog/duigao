@@ -49,6 +49,7 @@ const tables = {
   room_discussion_messages: [], room_discussion_supports: [], decision_records: [],
   voice_sessions: [], voice_session_participants: [], presentation_state: [],
   canva_connections: [], canva_oauth_states: [],
+  whiteboard_frames: [], whiteboard_operations: [], whiteboard_versions: [],
   collaboration_audit_events: [],
   // 影片對稿 2.0 (PR #32)
   version_review_briefs: [], video_reactions: [], version_verdicts: [],
@@ -65,6 +66,9 @@ const CONFLICT_KEYS = {
   plan_documents: ["branch_id"],
   room_poll_votes: ["poll_id", "user_id"],
   whiteboard_nodes: ["id"],
+  // frames 也要有自然鍵（S9）：少了它，frame 更新走 insert → 409
+  // duplicate 被 client 折成成功，mock 資料列根本沒變＝e2e 全程假綠。
+  whiteboard_frames: ["id"],
   room_discussion_supports: ["message_id", "user_id"],
   presentation_state: ["room_id"],
   version_review_briefs: ["version_id"],
@@ -331,7 +335,27 @@ function filterRows(rows, params) {
       const values = v.slice(4, -1).split(",").map((item) => item.replace(/^\"|\"$/g, ""));
       out = out.filter((r) => values.includes(String(r[k])));
     }
+    // tombstone 讀路（0021）：`deleted_at=is.null` 與 not.is.null
+    if (v === "is.null") out = out.filter((r) => r[k] === null || r[k] === undefined);
+    if (v === "not.is.null") out = out.filter((r) => r[k] !== null && r[k] !== undefined);
   }
+  // order/limit（WB04）：真的照做，不要靜默忽略 — 版本清單這種「最新在前」
+  // 的語意若只在 mock 裡自動成立，e2e 就測不出排序壞掉（假綠溫床）。
+  const order = params.get("order");
+  if (order) {
+    const [column, direction = "asc"] = order.split(".");
+    const sign = direction.startsWith("desc") ? -1 : 1;
+    out = [...out].sort((a, b) => {
+      const left = a[column];
+      const right = b[column];
+      if (left === right) return 0;
+      if (left === null || left === undefined) return 1;
+      if (right === null || right === undefined) return -1;
+      return (left < right ? -1 : 1) * sign;
+    });
+  }
+  const limit = Number(params.get("limit"));
+  if (Number.isFinite(limit) && limit > 0) out = out.slice(0, limit);
   return out;
 }
 
@@ -543,7 +567,7 @@ export const server = http.createServer(async (req, res) => {
       const uid = userOf(req);
       const board = tables.whiteboards.find((item) => item.id === body.p_whiteboard_id);
       if (!uid || !board || !isMember(board.room_id, uid)) return json(res, 200, null);
-      const nodes = tables.whiteboard_nodes.filter((node) => node.whiteboard_id === board.id);
+      const nodes = tables.whiteboard_nodes.filter((node) => node.whiteboard_id === board.id && !node.deleted_at);
       const selected = Array.isArray(body.p_node_ids) ? nodes.filter((node) => body.p_node_ids.includes(node.id)) : nodes;
       if (fn === "get_selected_board_context") {
         return json(res, 200, { whiteboardId: board.id, roomId: board.room_id, nodes: selected });
@@ -708,10 +732,18 @@ export const server = http.createServer(async (req, res) => {
           }
         }
 
+        if (table === "whiteboard_operations") {
+          // 0023：op_id unique — 重試冪等的 DB 半邊
+          if (tables[table].some((r) => r.op_id === filled.op_id)) {
+            return json(res, 409, { code: "23505", message: "duplicate key value violates unique constraint" });
+          }
+        }
         const keys = CONFLICT_KEYS[table];
         const existing = keys ? tables[table].find((r) => keys.every((k) => r[k] === filled[k])) : null;
         if (existing && upsert) {
-          if (table === "whiteboard_nodes") {
+          if (table === "whiteboard_nodes" || table === "whiteboard_frames") {
+            // frames 與 nodes 同樣走 OCC（S9）：0023 的 touch trigger 會
+            // bump version 並擋 stale-write，mock 不模擬就測不出版本簿記。
             const incoming = Number(filled.version ?? existing.version ?? 1);
             const current = Number(existing.version ?? 1);
             if (incoming !== current && incoming < current) {

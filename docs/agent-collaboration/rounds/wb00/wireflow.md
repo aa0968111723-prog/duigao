@@ -111,3 +111,27 @@ Split View（討論｜白板）、可收合側欄、Pencil；PR-02 僅保證 Foc
 工具列全鈕 aria-label＋≥44px；選取態非僅顏色（框＋handle）；
 reduced-motion 時關 camera 動畫；焦點環可見；橫向可用（工具列轉側欄
 屬 PR-05，PR-02 橫向維持底欄不破版）。
+
+## WB02 實作偏差（誠實記錄）
+
+1. **繪圖鈕缺席**：手繪筆畫需要 node_type 詞彙 migration（0014 CHECK 無
+   freehand）＋筆畫資料模型 — 屬 WB03。工具列以「選取（框選⇄套索循環）」
+   取代 繪圖 位；套索已實作（多邊形命中）。
+2. **素材 sheet = 房間內容**：相機/相簿/檔案/Canva/3D 直入白板屬
+   Universal Intake（WB03）；WB02 誠實只列現有來源，不擺假入口。
+3. **主題軸**：視覺回歸 4 尺寸×3 狀態=12 張 — app 為單主題深色設計，
+   光暗雙主題的 24 張矩陣在主題功能存在前是造假覆蓋。
+4. **鍵盤避讓的 e2e**：headless 無法縮 visualViewport — camera 平移
+   效果由真機清單第 5 項驗（rounds/wb02/real-device-checklist.md）。
+5. **frame 尚不可拖/縮**（pointer-events:none）：建立與渲染已通，
+   互動屬 WB03。
+6. **content overlay 的 history 第二層**（疊加規則 3）：overlay 開啟點
+   在 App 層，WB03 佈線。
+7. **keep-mounted 未實作**（Grok wb02 F9 誠實化）：本節上方寫的
+   「切對話 tab 時 display:none 不 unmount ＋ re-show 重量測」在 WB02
+   **沒有做到** — tab 切換走 App 的 `onOpenWhiteboard(null)`，workspace
+   直接 unmount，camera/選取狀態回到預設。原因：tab 語意在 App 層，
+   keep-mounted 需要 App 容器改構（超出 PR-02 最小侵入邊界）。行為上
+   「切對話＝關板」，回白板 tab 進板清單。keep-mounted＋re-measure
+   排 WB03；舊 `.wb-shell`/`.wb-toolbar`/`.wb-canvas-wrap`/`.wb-bottom`
+   死 CSS 已隨本輪移除。

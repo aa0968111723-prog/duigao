@@ -100,3 +100,11 @@
   font-size: 13px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, .18);
 }
+
+/* WB03 jump-to-source flash + video board-ref chip */
+.rd-msg.rd-msg-flash { animation: rd-flash 1.6s ease-out; }
+@keyframes rd-flash {
+  0% { background: rgba(232, 194, 122, 0.35); }
+  100% { background: transparent; }
+}
+.m-vchip-board { border-color: var(--accent, #c45c4a); }

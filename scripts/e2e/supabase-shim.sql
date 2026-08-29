@@ -83,3 +83,8 @@ $$;
 grant usage on schema storage to anon, authenticated;
 grant select, insert, update, delete on storage.objects to authenticated;
 grant select on storage.objects to anon;
+
+-- Realtime publication（WB01）：真專案由 Supabase 建立；shim 補上讓
+-- migrations 的 `alter publication supabase_realtime add table` 分支真的
+-- 執行（先前 guard 跳過 → publication 成員資格在 harness 測不到）。
+create publication supabase_realtime;

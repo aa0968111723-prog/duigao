@@ -1,0 +1,33 @@
+{
+ "verdict": "MUST_FIX",
+ "findings": [
+  {
+   "id": "F1",
+   "severity": "high",
+   "blocking": true,
+   "title": "房間 AI 仍可一鍵把白板提案落板，取消幽靈救不回來",
+   "claim": "白板問 AI（App.tsx:3209 askAi→821 setAiResponse）→取消幽靈（WhiteboardWorkspace.tsx:1645 只清 aiPreview）→開房間 AI 按套用（RoomAiSheet.tsx:289）→applyAiProposal 直接 upsertNode（App.tsx:2118-2134），無幽靈、無 createBoardVersion；asset-intelligence.mjs:184 仍把這條當生產路徑"
+  },
+  {
+   "id": "F2",
+   "severity": "high",
+   "blocking": true,
+   "title": "套用前快照失敗仍寫入，且不進復原疊",
+   "claim": "離線/snapshotTooLarge/createBoardVersion 失敗（App.tsx:3241-3261 catch false 後仍 upsertNodes）→已套用但沒有可回去的快照；套用未走 record()（WhiteboardWorkspace.tsx:1629-1638），↺ 無法撤"
+  },
+  {
+   "id": "F3",
+   "severity": "medium",
+   "blocking": false,
+   "title": "預覽原點 ref 從未寫入，幽靈可在視野外",
+   "claim": "拖離原點→問 AI→screenCenterWorldRef 只宣告與讀取（App.tsx:274,3217）從未賦值，幽靈固定 (120,120)→確認列仍可套用，使用者沒看到位置就寫入"
+  },
+  {
+   "id": "F4",
+   "severity": "medium",
+   "blocking": false,
+   "title": "連點套用與換板殘留會寫錯板/寫兩批",
+   "claim": "預覽後連點套用（WhiteboardWorkspace.tsx:1629 setAiBusy 無 in-flight ref）→兩次 planApply 兩批節點；或板A預覽→back（1165 BoardList 不卸載）→開板B再套用→快照用 activeWhiteboardRef（App.tsx:3236-3250）但節點 whiteboardId 仍是 A"
+  }
+ ]
+}

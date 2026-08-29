@@ -1,0 +1,175 @@
+{
+ "source": "Claude 自審 workflow（4 面向找缺陷＋懷疑者對抗驗證，34 agents）",
+ "confirmed": 21,
+ "refuted": 9,
+ "findings": [
+  {
+   "title": "frames 自我 echo 會蓋掉比它新的本地值（版本護欄用 `<`，且沒有 in-flight 護盾）",
+   "file": "src/App.tsx",
+   "line": 296,
+   "severity": "high",
+   "dimension": "realtime-convergence",
+   "claim": "操作序列：同一使用者在一個 round-trip 內做兩次手勢——拖區塊 A 放手（本地樂觀 {x:300, version:5}，POST#1 送出），約 150ms 後再拖一次放手（本地 {x:500}）。POST#1 回來後 adoptFrameVersion 把本地 version 改成 6（座標仍是 500）；接著 POST#1 的 WAL echo {x:300, version:6} 抵達，護欄 `(incoming.version ?? 1) < (existing.version ?? 1)` 判斷 6 < 6 為 false，於是整列覆蓋本地。錯誤行為：區塊在畫面上跳回第一次手勢的位置，第二次手勢的位移被自己的廣播抹掉。echo 若比 HTTP ack 先到（本地仍是 v5）結果一樣（6 < 5 為 false）。節點路徑有 offline.ts 的 shieldedIds（拖曳中/persist in-flight 一律讓路）＋acked 水位兩層防線（offline.ts:117-137），frames 這條路徑兩者都沒有——WB04 新開 frames 訂閱等於把節點當年踩過的 F1/F2 原樣重現一次。"
+  },
+  {
+   "title": "斷線重連／回前景只補 nodes/edges，frames 不自癒——之後每一次該區塊的寫入都會被 trigger 擋下",
+   "file": "src/cloud/useCloudRoom.ts",
+   "line": 685,
+   "severity": "high",
+   "dimension": "realtime-convergence",
+   "claim": "操作序列：使用者開著白板 B1，切到 LINE 30 秒（或進地鐵）；期間同事把區塊改名並搬走（server v5→v7）。回到前景後 onStatus(connected) 走 `if (activeWhiteboardRef.current) void loadWhiteboard(...)`（:685），visibilitychange 的 revive() 走 reload()+loadWhiteboard（:721/:742）——但 loadWhiteboard 只做 loadWhiteboardGraph 的 nodes/edges 整替（:432-447），完全不碰 frames；boardFrames 只有 App.tsx:303 的 loadFramesForBoard 會填，而它只在開板（App.tsx:2970）和反向鏈 chip（:3170）被呼叫。錯誤行為：(1) 使用者回來後仍看到舊標題、舊位置的區塊，且不會再自癒（該區塊往後沒有新事件就永遠停在斷線前）；(2) 更糟的是本地 version 停在 v5，他一動那個區塊就送 v5 → trigger stale-write → 進佇列 → 每次 flush 再撞一次，永久卡在 offline-pending。註解 :683-684 明說「重連時對開著的板刻意 loadWhiteboard 補齊斷線期間漏掉的增量」，WB04 把 frames 納入即時收斂時漏了同一條自癒路徑。"
+  },
+  {
+   "title": "loadFramesForBoard 沒有請求序號：載入視窗內抵達的即時事件會被較舊的回應整批蓋掉",
+   "file": "src/App.tsx",
+   "line": 303,
+   "severity": "medium",
+   "dimension": "realtime-convergence",
+   "claim": "操作序列一（更常見）：A 點開白板 B（loadFrames 請求送出，手機弱網 300ms）；在回應落地前，B 在同一塊板上新增了一個區塊，INSERT echo 先到 → boardFrames 加入該區塊。接著那份「讀取時間點早於這筆 insert」的回應 resolve，`.then((frames) => setBoardFrames(frames))`（:310）無條件整批覆蓋。錯誤行為：剛出現的區塊消失，且此後不會再有任何事件把它帶回來——要重開板才看得到；同一視窗內抵達的 DELETE 也會被復活成殭屍區塊。操作序列二：開板 B1 → 立刻返回 → 開板 B2，兩個請求併發，B1 的較慢回應後到 → setBoardFrames(B1 的 frames)，而 WhiteboardWorkspace.tsx:278 依 board.id 過濾，畫面上 B2 變成「一個區塊都沒有」。這個壞掉的狀態還會外溢到 WB04 的版本歷史：此時按「存快照」，onSnapshotBoard 取的是 boardFramesRef 過濾後的空陣列（App.tsx:3043），日後還原這個版本時 planRestore 的 deleteFrameIds 會等於當下全部區塊（versions.ts:105）——一次無聲的全板區塊刪除。"
+  },
+  {
+   "title": "edge UPDATE 訂閱與 offline.ts 的 upsert 護欄目前是死碼：客戶端沒有任何 edge UPDATE 寫入路徑",
+   "file": "src/cloud/collaborationRepository.ts",
+   "line": 355,
+   "severity": "medium",
+   "dimension": "realtime-convergence",
+   "claim": "WB04 宣稱修的是「0022 之後 edges 有 label/handle 可以改，但只訂 INSERT/DELETE，別人改的線標籤在對方重載前看不到」。實際查核：全庫對 whiteboard_edges 只有 select（:250）、insert（:355、:772）、delete（:586），沒有任何 update；useCloudRoom 的 writes 也只有 createEdge → insertEdge（:1110）；WhiteboardWorkspace 的三個 onCreateEdge 呼叫點（:512「連線」、:1433「+下一步」、:1444「+子項目」）都是新 id 的新線；history.ts 的 executors 也沒有 edge-update。錯誤行為：使用者根本無法改一條既有線的標籤或 handle，所以新增的 UPDATE 訂閱與 offline.ts:143-150 的版本護欄在真實操作下永遠不會被觸發——這一項不是修好，是無法被觸發。更值得注意的是若之後有人照現況的直覺補上「改線標籤」而複用 createEdge，App.tsx:1926 會把同 id 的線再 push 進 whiteboardEdges（本地長出重複線），而 insertEdge 是純 INSERT，撞 23505 後被 isDuplicateKey 折成「成功」並 ack——標籤改動會被無聲吞掉。"
+  },
+  {
+   "title": "WB04 新單元測試以錯誤型別呼叫 applyBoardPatches，且 scripts/ 不在 tsconfig include，型別錯誤永遠抓不到",
+   "file": "scripts/tests/whiteboard-realtime.test.ts",
+   "line": 27,
+   "severity": "low",
+   "dimension": "realtime-convergence",
+   "claim": "applyBoardPatches 的簽章是 (nodes, edges, acked: Map<string,number>, patches, shieldedIds: ReadonlySet|null)（offline.ts:98-104），但新測試呼叫 `applyBoardPatches(nodes, before, 0, [...])`——第三個參數傳數字 0 當 acked、第五個參數整個省略。它之所以綠燈，是因為 tsconfig.json 的 include 只有 [\"src\"]，而測試用 `tsx --test` 執行（不做型別檢查），加上 edge 分支剛好不碰 acked、`shieldedIds?.has` 對 undefined 也不炸。錯誤行為：這條「WB04 收斂規則」的護欄測試實際上完全沒有覆蓋 ack 水位與拖曳護盾語意——只要未來 edge 分支開始參考 acked 或 shieldedIds（正是上面 F1 建議的修法方向），測試會在 `0.get is not a function` 才爆，或更糟地繼續綠燈但驗證的是錯的狀態。同檔 offline.ts:90-96 的函式註解也仍寫著「edge 無版本欄位：insert 以 id 去重」，與新行為相反。"
+  },
+  {
+   "title": "本機房的 frames 只活在 React state：關板再開就全沒了，第一次分享上雲也不會被搬過去",
+   "file": "src/cloud/collaborationRepository.ts",
+   "line": 746,
+   "severity": "low",
+   "dimension": "realtime-convergence",
+   "claim": "操作序列：未上雲的本機房，開白板、畫三個區塊、返回房間、再開同一塊白板。App.tsx:304 的 loadFramesForBoard 先無條件 setBoardFrames([])，接著 `const bound = cloudRef.current.boundRoomId` 為 null 而直接 return（:307-308）——區塊全部消失，且 boardFrames 不在 Room 物件裡、saveRoom 也不會存它，重新整理同樣歸零。第二個序列：在本機房畫好區塊後按分享上雲，insertCollaborationSlice（:746-780）只搬 whiteboards / nodes / edges / discussion / decisions，完全沒有 frames；上雲後 reload 一開板，loadFrames 回空陣列，區塊整批遺失且無任何提示。此條屬 WB03 既有缺口（不在本 diff 內），但 WB04 把 frames 正式升格為即時協作物件，收斂路徑的每一端都假設 frames 有後端真相來源——這個假設在本機房與上雲遷移這兩段不成立。"
+  },
+  {
+   "title": "onRestoreVersion 是純本機 fire-and-forget：await 立刻 resolve，寫入全失敗也照樣說「已還原到這個版本」",
+   "file": "src/App.tsx",
+   "line": 3061,
+   "severity": "high",
+   "dimension": "versions-restore",
+   "claim": "操作序列：手機進地下停車場（瀏覽器 offline）或另一位夥伴正在改同一批節點 → 開版本歷史 → 點某個版本。App.tsx:3061-3086 的 onRestoreVersion 內部沒有任何 await：upsertNodes(3072) 只做 updateRoom＋void persistCloud、deleteNode(3073) 只做 updateRoom＋void persistDelete、upsertFrame/deleteFrame/createEdge 全是 void。所以 WhiteboardWorkspace.tsx:1204 的 `await api.onRestoreVersion?.(version)` 在任何 HTTP 往返之前就 resolve → 1205 立刻 showNotice(「已還原到這個版本」)＋關 sheet。錯誤行為：離線時所有節點寫入被丟進 IndexedDB outbox、edges 走 run() 進記憶體佇列（重整即失），畫面卻宣告成功；使用者退出白板再進來（loadWhiteboard）板就跳回還原前。有人同時在編輯時更慘：conflict 的節點會被 App.tsx:1789 的 refetch 逐一蓋回伺服器值，使用者看到板「還原後又自己變回去」，而 1207 的 catch（「還原沒有完成，畫面維持現狀」）是死碼 —— 只有 activeWhiteboardRef 取值丟例外才可能進去，實務上永遠不會。"
+  },
+  {
+   "title": "本機房（無 Supabase）照樣顯示「版本歷史／存一張快照」入口，按下去只會拿到「請再試一次」",
+   "file": "src/App.tsx",
+   "line": 3032,
+   "severity": "medium",
+   "dimension": "versions-restore",
+   "claim": "App.tsx:3032 的註解宣稱「只在雲端房提供 — 本機房沒有快照表」，但 onSnapshotBoard/onListVersions/onRestoreVersion 三個 handler 是無條件掛在 api 物件上的（projectApi 的建立條件只有 room?.projectMode，同一支檔案 3018 行的 onEmitOperation 就有做 `if (!actor || !bound) return` 的誠實 no-op，這裡沒有）。WhiteboardWorkspace.tsx:1150 的入口判斷是 `api.onListVersions &&`（函式恆存在＝恆為 true），快照鈕判斷是 `canEdit && api.onSnapshotBoard`。操作序列：以未設定 Supabase 的部署（getSupabase() 回 null，client.ts:8）或未綁房的本機房開白板 → ⋯ → 「版本歷史」→ 看到正常的 sheet 與「還沒有快照。先存一張，之後才有得回去。」→ 按「存一張快照」→ onSnapshotBoard 立刻 throw new Error(\"cloud-required\") → 被 1189 行的 catch 吞成 showNotice(「快照沒存成功，請再試一次」)。錯誤行為：功能在這個部署形態下永遠不可能成功，UI 卻邀請使用者無限重試，訊息也沒說出真正原因（沒有雲端）。"
+  },
+  {
+   "title": "超過 2000 節點的板：SNAPSHOT_NODE_LIMIT 是死常數，快照永遠存不起來且訊息叫使用者一直重試",
+   "file": "src/features/whiteboard/versions.ts",
+   "line": 28,
+   "severity": "medium",
+   "dimension": "versions-restore",
+   "claim": "0025_whiteboard_versions.sql 的 CHECK 有 `coalesce(jsonb_array_length(snapshot->'nodes') <= 2000, false)`，versions.ts:28 也導出了 SNAPSHOT_NODE_LIMIT = 2000 —— 但 grep 全 src/scripts，這個常數零個引用點：buildSnapshot(versions.ts:30-41) 不檢查、App.tsx:3038-3052 的 onSnapshotBoard 不檢查、createBoardVersion(collaborationRepository.ts:530) 也不檢查。操作序列：一塊累積到 2100 個活節點的板（招生規劃這種長期板很容易到）→ ⋯ → 版本歷史 → 存一張快照 → insert 被 Postgres CHECK 擋下 → CloudError 冒泡到 WhiteboardWorkspace.tsx:1188 的 catch → showNotice(「快照沒存成功，請再試一次」)。錯誤行為：使用者每次重試都必然失敗、永遠不知道是節點太多，也拿不到任何可行動的指引（例如「先封存一部分節點」）；而且愈是大板、愈需要快照，功能就愈是在那裡沉默地壞掉。"
+  },
+  {
+   "title": "開一次版本歷史就下載 20 份完整快照，並在每次 render 重跑 20 次 planRestore",
+   "file": "src/cloud/collaborationRepository.ts",
+   "line": 553,
+   "severity": "medium",
+   "dimension": "versions-restore",
+   "claim": "listBoardVersions 的註解寫「不取 snapshot 以外的東西，快照本身可能不小」，但 collaborationRepository.ts:560 實際是 `.select(\"*\")` ＋ limit 20 —— 拿的正好是 20 份完整 snapshot jsonb（每份最多 2000 個節點含 content）。而 WhiteboardWorkspace.tsx:1199 的 `const plan = planRestore(version.snapshot, { nodes: liveNodes, edges, frames })` 寫在 .map 的 render 路徑裡，沒有 useMemo。操作序列：1000 節點的板、已存 20 張快照，使用者在 4G 上點「版本歷史」→ 一口氣下載數十 MB 才看得到清單；清單打開期間任何一個 realtime 事件（夥伴打一個字＝一次 node UPDATE echo）都會重 render → 20 × 1000 次 sameNodeShape，每次都做一對 JSON.stringify(content)。錯誤行為：sheet 開啟時主執行緒被 2 萬次序列化反覆佔住，畫面卡死、返回鍵沒反應，愈多人同時在板上就愈卡 —— 正好違背這個專案的行動裝置紀律。"
+  },
+  {
+   "title": "還原不清 undo/redo 疊：還原後按「重做」會靜默把快照剛還原掉的編輯再套回去",
+   "file": "src/App.tsx",
+   "line": 3061,
+   "severity": "medium",
+   "dimension": "versions-restore",
+   "claim": "onRestoreVersion 沒有呼叫任何 history 重置（App.tsx:420 有 clearUndo，但只在 onGoHome 用；WhiteboardWorkspace 的 history 是 component state，還原不經過 record()）。操作序列：節點 A 在快照 V1 時位於 (0,0) → 使用者把 A 拖到 (500,500)（入 undo 疊）→ 按 ↺ 復原（A 回 (0,0)，該 draft 進 redo 疊）→ 開版本歷史還原 V1 → 還原完成後 ↻ 仍是可按的 → 使用者按 ↻。history.ts:110 的 drift 防護比對 `draft.before`＝(0,0)，而還原後 A 正好就是 (0,0)（快照值），檢查通過 → executors.upsert 把 A 搬回 (500,500)。錯誤行為：一個明明「已還原到 V1」的板，被 redo 靜默地部分退回還原後的狀態，沒有任何提示；反過來，使用者以為 ↺ 可以撤銷還原，實際上按下去只是逐格消耗還原前的舊紀錄，且多半跳出「這則內容剛被別人改過」這種在單人情境下純屬誤導的訊息。還原本身無法撤銷，UI 也完全沒說。"
+  },
+  {
+   "title": "sameNodeShape 用 JSON.stringify 比 content：jsonb 正規化過的鍵序與本機建構順序不同 → 無變化的還原被算成大量改寫",
+   "file": "src/features/whiteboard/versions.ts",
+   "line": 55,
+   "severity": "low",
+   "dimension": "versions-restore",
+   "claim": "versions.ts:55-61 以 `JSON.stringify(a.content) === JSON.stringify(b.content)` 判斷節點是否相同，但兩邊的鍵序來源不同：快照經過 Postgres jsonb（鍵依長度＋位元組排序）再由 listBoardVersions 讀回，而現況節點若是本機這一輪建立／編輯的（stampWriter 以展開式重建 content），鍵序是插入順序。操作序列：使用者新增一張標題便利貼（content 依序寫入 title、text）→ 立刻存快照 → 馬上打開版本歷史。錯誤行為：明明零變化，卡片摘要卻顯示「N 個內容還原」而不是「和現在一樣，沒有變化」；使用者照著點下去，這些其實沒變的節點全部被重新 upsert，version 全部 +1 —— 對正在編輯同一批節點的夥伴而言，這批無謂寫入會把他們的 in-flight 編輯推成 409，各自觸發整塊板 refetch。"
+  },
+  {
+   "title": "listBoardVersions 只做 Array.isArray、不驗每一筆元素形狀，畸形快照會變成 outbox 毒藥",
+   "file": "src/cloud/collaborationRepository.ts",
+   "line": 567,
+   "severity": "low",
+   "dimension": "versions-restore",
+   "claim": "collaborationRepository.ts:566-578 對 snapshot 的防禦只有三個 Array.isArray，元素直接 `as never[]` 硬轉成 WhiteboardNode[]，沒有檢查 id/nodeType/content 是否存在。操作序列：任何一份鍵不齊的快照列（跨版本 client 寫入、或未來新增必填欄位後的舊快照）→ 使用者按還原 → planRestore 把它當正常節點放進 upsertNodes → App.tsx:3072 → nodeRowPayload 產出 id: undefined / content: undefined 的 payload → PostgREST 400（非 stale-write，writeAck 回 false 而不是 \"conflict\"）→ App.tsx:1804 走 queuePendingEdit 把這筆畸形 payload 寫進 IndexedDB 持久佇列。錯誤行為：這筆永遠不可能成功的寫入從此每次重連都重放一次，成為佇列毒藥（與本專案既有的「佇列中毒」失效模式同類），而且使用者這一側完全無感 —— 還原當下的畫面照樣顯示成功。至少該在轉換點丟掉缺 id/nodeType 的元素，或讓整份快照誠實地判為不可還原。"
+  },
+  {
+   "title": "首次 track 永遠帶 boardId:null，開板早於訂閱時 retrack 被靜默丟棄 → 用 &board= 連結進板的人在所有人眼中都不在板上",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\cloud\\roomSync.ts",
+   "line": 61,
+   "severity": "high",
+   "dimension": "presence",
+   "claim": "roomSync.ts:61 把 identity 寫死成 `{ name: handlers.displayName ?? \"\", boardId: null }`，boardId 沒有像 displayName 一樣從 handlers 帶進來；:179 的 SUBSCRIBED 回呼因此第一次 track 一定送 boardId:null，而且 useCloudRoom.ts:1147 的 `sub?.retrack?.(next)` 在 unsubRef.current 還是 null 時是完全無聲的 no-op（只更新 displayNameRef，boardId 沒有任何地方保存），onStatus(connected) 也沒有補一次 retrack。操作序列：使用者點開 buildInviteUrl 產的 `#room=<uuid>&invite=<t>&board=<id>` 連結（invite.ts:44 的 `board` 參數是既有功能，WB03 反向鏈 chip 也走同一條）→ App 掛載時 activeWhiteboardId 還是 null，App.tsx:316 的 effect 先跑一次（此時 unsubRef.current === null，retrack 丟掉）→ useCloudRoom 的 bind effect 進到 async IIFE，`await reload()` 期間 App.tsx:533 `setActiveWhiteboardId(roomLink.whiteboardId)` 把使用者送進板 → React 在後面那個 `await supabase.auth.getUser()`（真的打網路）讓出的空檔 flush effects，App.tsx:316 再跑一次，unsubRef.current 仍是 null（subscribeRoom 還沒回來）→ 第二次 retrack 也丟掉 → 接著 subscribeRoom 以 boardId:null 首次 track。錯誤行為：這個人明明開著板 X，房裡其他人的板 X 頂列「N 在板上」永遠不含他，他的名字也不進 tooltip；要等他手動關板再開板（activeWhiteboardId 真的變動）才會被看見。同一條路徑也會打到「冷開 App 時網路慢，使用者在 bind 完成前就點開白板」的一般情況，以及 retry()/bindNonce 造成的重新 subscribeRoom（新 identity 又回到 boardId:null，而 activeWhiteboardId 沒變所以 App 的 effect 不會再跑）。修法：把 boardId 跟 displayName 一樣放進 SyncHandlers 由 useCloudRoom 用 ref 供給，或在 onStatus(connected) 時補一次 retrack。"
+  },
+  {
+   "title": "presence 走非 private channel：只要有房間 uuid（邀請連結裡就有）＋公開 anon key，任何人都能讀到全房成員姓名與各自開著哪塊板",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\cloud\\roomSync.ts",
+   "line": 58,
+   "severity": "high",
+   "dimension": "presence",
+   "claim": "roomSync.ts:58 的 channel 只設 `config: { presence: { key: userId } }`，沒有 `private: true`，migrations 也沒有任何 realtime.messages 授權策略（grep 全部 supabase/migrations 只有 publication 相關）。postgres_changes 的 payload 有 RLS 擋，presence 沒有：Realtime 的公開 topic 任何持 anon key 的客戶端都能 join。WB04 之前 track 的 payload 是 `{ at: Date.now() }`，外人最多推得出人數；現在 :62 的 trackPayload 帶 `{ name, boardId }`。操作序列：主辦方把 `#room=<uuid>&invite=<token>` 貼進 LINE 群 → 之後把該成員移出／換掉 invite token（或連結被轉傳給不相干的人）→ 對方雖然 join/RLS 都過不了、看不到任何一列資料，但仍握有房間 uuid，用 bundle 裡的 anon key 執行 `supabase.channel('room:<uuid>').on('presence',{event:'sync'},...).subscribe()` → 錯誤行為：即時拿到房內所有人的顯示名稱、以及每個人此刻開著哪塊白板的 id，並可長期輪詢當作出勤監看。這是 WB04 新增的外洩面（從「人數」變成「姓名＋所在板」），design.md 的「不做」清單沒有涵蓋。"
+  },
+  {
+   "title": "presenceState 的 metas 取最後一筆＝最後 join 的 socket，不是最新 track；同一人開兩個分頁時會從「在板上」名單整個消失",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\cloud\\roomSync.ts",
+   "line": 166,
+   "severity": "medium",
+   "dimension": "presence",
+   "claim": "roomSync.ts:166 `const meta = metas[metas.length - 1] ?? {}`。presence key 是 auth user id，同一台裝置的多個分頁共用同一個匿名 session，因此會 collapse 成同一個 key 底下多筆 metas，順序是 join 順序而非更新時間；:62 明明有送 `at`、:170 也把 at 讀進 PresencePerson 了，但沒有任何地方拿它挑最新的一筆（全 repo grep 不到 `.at` 的消費點）。操作序列：使用者在同一瀏覽器開分頁 A 進房並開白板 X（此時所有人都看得到他在板上）→ 為了對照另一個分支，再開分頁 B 進同一個房、停在房間首頁不開板 → 分頁 B 較晚 join，metas 最後一筆是它，boardId 為 null → 錯誤行為：所有人的板 X 頂列立刻少算一人、tooltip 少一個名字，而這個人其實正在板 X 上編輯；反過來若先關掉分頁 B，名單又會跳回來。應改成依 `at` 取最大的一筆（或把有 boardId 的一筆優先）。"
+  },
+  {
+   "title": "presence key 用 getUser()（可能回 \"anon\"），自我過濾用 ensureSession() 的 id：兩者分歧時使用者會在「也在這塊板」看到自己",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\cloud\\useCloudRoom.ts",
+   "line": 633,
+   "severity": "medium",
+   "dimension": "presence",
+   "claim": "useCloudRoom.ts:633 用 `(await supabase.auth.getUser()).data.user?.id ?? \"anon\"` 當 presence key（getUser 在 supabase-js v2 會實際打 /auth/v1/user，網路失敗時回 user:null），而 App.tsx:3110 的自我過濾比對的是 `cloud.userId` — 它來自 auth.ts:9 的 ensureSession（走本地 getSession，不打網路）。WB03 以前這個 fallback 只影響人數，WB04 之後它會直接顯示成一個陌生同伴。操作序列：手機在訊號不穩的場合（本產品的主場景）進房 → ensureSession 用本地 session 拿到 uuid、setUserId 成功 → 緊接著的 getUser() 逾時／失敗回 null → presence key 變成 \"anon\" → 使用者開白板 X 並 retrack → 錯誤行為：自己的 presence 進到 presencePeople 且 `person.userId(\"anon\") !== cloud.userId(uuid)` 成立，板頂列顯示「2 在板上」但板上只有他一個人，tooltip 寫「也在這塊板：<自己的名字>」；若同時有兩台裝置都 fallback 成 \"anon\"，它們還會共用同一個 presence key 互相覆蓋 metas，人數與名單一起錯。至少要讓 presence key 直接沿用 ensureSession 回傳值，別讓兩個身分來源分歧。"
+  },
+  {
+   "title": "presencePeople 從不清空：斷線／邀請失效／切房 unsubscribe 後，「N 在板上」與名字名單凍結在最後一次 sync",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\cloud\\useCloudRoom.ts",
+   "line": 468,
+   "severity": "medium",
+   "dimension": "presence",
+   "claim": "useCloudRoom.ts:468 的 presencePeople 只有 :671 的 onPresenceList 會寫；bind effect 的 cleanup（:696）、forgetCloudRoom（:881）、以及 catch 到 invalid invite 走 setStatus(\"error\") 的路徑都只清 unsubRef，沒有 setPresencePeople([])。presence 名單只在 sync 事件抵達時才更新，而 channel 一旦被 removeChannel 就再也不會有 sync。操作序列：使用者 A 在雲端房開著白板 X，B 與 C 也在同一塊板，頂列顯示「3 在板上」、tooltip 列出 B、C → A 這邊發生 rebind 失敗（邀請被撤銷後重試、或 retry() 走 bindNonce 重綁時 joinRoom 拋錯）→ unsubRef 被清掉、status 變成 error/local-only，A 已經完全離線 → 錯誤行為：activeWhiteboardId 沒變，App.tsx:3109 的過濾條件仍成立，頂列繼續顯示「3 在板上」並在 tooltip 列出 B、C 的名字，直到重整頁面為止；A 會以為協作還在進行，實際上他寫的東西全進了離線佇列。切到另一個房間或回本機房時同樣殘留（只是板 id 不同才碰巧沒顯示）。至少要在 unsubscribe 與 status 離開 synced 時清空名單。"
+  },
+  {
+   "title": "「具名在場」的名字只放在 title tooltip，手機優先的產品在主平台上只剩一個數字；而且 chip 含自己、tooltip 不含自己",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\features\\whiteboard\\WhiteboardWorkspace.tsx",
+   "line": 1285,
+   "severity": "low",
+   "dimension": "presence",
+   "claim": "WhiteboardWorkspace.tsx:1285 把名字塞進 `title={boardPeopleLabel}`，:1287 的可見元素只有 `{boardPeople.length + 1} 在板上`。AGENTS.md 第 3 行寫明「手機優先」，觸控裝置沒有 hover、也沒有把 title 顯示出來的機制。操作序列：使用者在手機上開白板，房裡另有兩個人也在同一塊板 → 錯誤行為：只看得到「3 在板上」，看不到任何名字，WB04 的「具名在場」在主要平台上退化成既有的人頭數（桌機使用者滑上去才有）。同一段還有數字語意不一致：boardPeople 有 4 人時 chip 顯示「5 在板上」（含自己），tooltip 卻是「也在這塊板：A、B、C 等 4 人」（不含自己），兩個數字並排出現時會讓人以為漏了一個人。建議把名字做成可點開的小名單（sheet），至少讓觸控裝置點得到。"
+  },
+  {
+   "title": "selfConsume 洩漏後吞掉真正的 back：兩層都關不掉、onBack 完全沒被呼叫",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\lib\\historyLayers.ts",
+   "line": 112,
+   "severity": "high",
+   "dimension": "history-seq",
+   "claim": "consume() 假設 history.back() 一定落在 layer.prevSeq 那格，handlePop 只認「序號完全相等」的自消耗；一旦落錯格，那個序號就永遠留在 selfConsume 裡，之後某一次真正的 back 落在同一格時被 delete() 命中 → 直接 return，dispatch 完全不跑，所有活層的 onBack 都不會被呼叫。\n\n實測序列（用 repo 的 harness 直接跑 createLayerStack，模擬瀏覽器條目陣列）：\n1. 開白板 Focus（board-focus seq=1，格 g1）\n2. 從白板節點跳到分支 → 對稿 overlay 疊上來（content-overlay seq=2，格 g2）\n3. 按返回 → overlay 關掉，currentSeq=1，g2 變成前進方向的死格\n4. 按瀏覽器「下一頁」 → handlePop 走 line 102 的 forward 分支，currentSeq 被推到 2，但棧頂只剩 focus(seq=1)，瀏覽器實際停在死格 g2\n5. 按 Escape 關白板 → handleEscape → consume(focus)：selfConsume.add(prevSeq=0)、currentSeq=0、history.back()。瀏覽器從 g2 退到 g1（不是基準格）→ popstate 落地 seq=1，selfConsume 裡沒有 1 → 不匹配；又因 1 > currentSeq(0) 走 forward 分支 → 【0 永久留在 selfConsume】\n6. 使用者重新開白板 + 再疊 overlay（depth=2）\n7. 長按返回、選最底那格（go(-3)）→ popstate 落地 seq=0 → selfConsume.delete(0) 命中 → return\n\n實測結果：hits 沒有新增任何一筆（兩層的 onBack 都沒被呼叫），depth 仍是 2，瀏覽器已經回到基準格。畫面上白板 Focus 與對稿 overlay 都還在，位址列已經退到底；再按一次 back 直接離開網站，兩層一路留到 unload。這不是「多退一層」的已知窄競態，而是反向的「一層都不退」，而且洩漏是永久的（Set 只在序號完全命中時才縮）。"
+  },
+  {
+   "title": "重新整理後 seqCounter 歸零，舊格 __seq 比新層大 → 連按兩次返回鍵白板紋風不動",
+   "file": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\D--\\925c04d3-aafe-4cee-ac57-9860bb4d9814\\scratchpad\\wt-wb\\src\\lib\\historyLayers.ts",
+   "line": 68,
+   "severity": "high",
+   "dimension": "history-seq",
+   "claim": "seqCounter 與 currentSeq 都硬編從 0 起算，但重新整理不會清掉 session history — 重整前那些帶 __seq:1、__seq:2 的格子還留在下方。新的層從 seq=1 重新發號，於是「比較舊的格」反而序號比「比較新的層」大，back 被 line 102 判成 forward，或落進 dispatch 卻因為 `top.seq > landedSeq` 不成立而空轉。根因是 HistoryLike（line 32-35）只暴露 pushState/back，拿不到 history.state，連 seed 的機會都沒有。\n\n實測序列（harness 起始條目 = [base, {__seq:1}, {__seq:2}]，index=2，模擬「白板 Focus + 對稿 overlay 開著時按 F5」）：\n1. 重整後模組全新：seqCounter=0、currentSeq=0、stack=[]\n2. 使用者再開一次白板 → push 拿到 seq=1，pushState 接在舊的 g2 之後 → 條目變成 [base, g1(__seq:1), g2(__seq:2), g_new(__seq:1)]\n3. 第一次按返回 → 落在 g2（__seq=2），2 > currentSeq(1) → 走 forward 分支，currentSeq=2，不派發 → 【畫面完全沒反應】\n4. 第二次按返回 → 落在 g1（__seq=1），1 < 2 → dispatch(1)，但棧頂 focus.seq=1，`1 > 1` 為 false，迴圈一次都沒跑 → 【畫面還是完全沒反應】\n5. 第三次按返回 → 落在基準格 seq=0 → dispatch(0) → 白板才關掉\n\n實測 log：back#1 hits=[] depth=1、back#2 hits=[] depth=1、back#3 hits=['focus'] depth=0。白板協作場景使用者本來就常按 F5（覺得同步卡住），重整後返回鍵死兩次、第三次才有反應，看起來就是「返回鍵壞了」。層數越多、重整前走越深，死按次數越多。"
+  }
+ ]
+}

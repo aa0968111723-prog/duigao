@@ -1,0 +1,47 @@
+{
+ "verdict": "MUST_FIX",
+ "findings": [
+  {
+   "id": "F1",
+   "severity": "high",
+   "blocking": true,
+   "title": "掌拒吞掉已追蹤 touch 的 up，手勢層永久卡死成 pinch",
+   "claim": "單指先按下平移（不抬手）→ 用筆寫 → 寫的期間或抬筆後 250ms 內抬手指 → 之後單指再按：畫面暴縮/暴放。根因：touch 已 feed down 進 gesture.pointers（WhiteboardWorkspace.tsx:771），筆 down 後 shouldRejectPointer 連 pointerup 也 return（:796），手勢永遠刪不掉該 pointerId；下一次任意單指 down 時 pointers.size===2 直接進 pinch（gestures.ts:91-110）。e2e 只測筆先落下的掌拒，沒測手掌/拇指先接觸。離開白板重掛載才恢復。"
+  },
+  {
+   "id": "F2",
+   "severity": "high",
+   "blocking": true,
+   "title": "平板側欄討論無法捲動，訊息一多連輸入框都被裁掉",
+   "claim": "平板開白板 Split View → 討論已有超過一屏訊息 → 側欄看不到舊訊、滑不動，輸入框也可能在欄外。主討論靠 .project-room 整頁捲 + .is-discussion-root 的 fixed composer（discussion.css:18）；側欄是 main 的兄弟（MultiBranchRoom.tsx:1153-1159），.wb-side-rail overflow:hidden（whiteboard.css:181-192）、.rd-feed 沒有 overflow-y（discussion.css:5）。e2e 只 assert feed 存在，新房是空討論所以假綠。"
+  },
+  {
+   "id": "F3",
+   "severity": "high",
+   "blocking": true,
+   "title": "手機橫向 ≥900px 誤進平板 Split View",
+   "claim": "iPhone 15/16 Plus·Pro Max 橫向（926–956 CSS px）開白板 → 左 340px 討論欄、工具列變右側直欄，畫布約 592×430。design 寫「手機完全不變」，CSS 註解寫「非粗指標手機」，實際 media query 只有 min-width:900px（whiteboard.css:144-148,194-196），沒 min-height、也沒 pointer:coarse 排除。390/412/768 視覺基準打不到這條。"
+  },
+  {
+   "id": "F4",
+   "severity": "medium",
+   "blocking": false,
+   "title": "筆優先沒套到 frame 標題帶，劃過會拖區塊",
+   "claim": "不開繪圖工具，用筆從 frame 標題帶上劃過 → 整塊 frame 被拖走、不出墨。beginFrameDrag 只在 drawMode 時放行冒泡（WhiteboardWorkspace.tsx:809），註解寫「筆要落在 frame 帶上」卻仍用舊的 drawMode 當繪圖判定；筆優先路徑不開 drawMode，handle 仍 stopPropagation 並起拖。"
+  },
+  {
+   "id": "F5",
+   "severity": "medium",
+   "blocking": false,
+   "title": "收合側欄不補償 camera，畫布視角跳 340px",
+   "claim": "對準畫布中央一個節點 → 按 ☰ 收合討論 → 該節點在畫面上左移。只改 .wb-focus left 340→0 與 is-rail-collapsed（whiteboard.css:147-148），沒依新 viewport 重算 camera。真機清單第 13 項寫「視角不因收合而跳掉」，e2e 只查 focusLeft===0。"
+  },
+  {
+   "id": "F6",
+   "severity": "low",
+   "blocking": false,
+   "title": "壓感預覽是固定粗細，抬筆後才跳成逐段線寬",
+   "claim": "用筆由輕到重畫一條線 → 畫的過程中預覽 polyline 固定 strokeWidth=3（WhiteboardWorkspace.tsx:1451-1453），抬筆後 registry 才渲染逐段 <line>（registry.tsx:101-115），線條粗細會跳一下。"
+  }
+ ]
+}
