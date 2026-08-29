@@ -5,13 +5,20 @@ import { indexMessages, replySnippet, resolveReply, type ReplyReference } from "
 import {
   attachmentCiteReply,
   boardPollWrite,
+  canCompleteRoomTodo,
   canEditDiscussion,
   canTombstoneDiscussion,
+  canWriteTodo,
   decisionDraftTitle,
   discussionEditPatch,
+  filterMentionableMembers,
   firstUnreadMessageId,
+  mentionBodyParts,
+  mentionedIdsFromDraft,
   messageIsEdited,
   messageIsTombstoned,
+  parseMentionQuery,
+  todoDraftTitle,
   unreadCount,
   workCiteFromBoard,
   workCiteFromBranch,
@@ -35,7 +42,11 @@ export type RoomDiscussionApi = {
   boards: Whiteboard[];
   draft: string;
   setDraft: (value: string) => void;
-  onSend: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
+  onSend: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string; mentionedUserIds?: string[] }) => void;
+  onCreateTodo?: (title: string) => void;
+  onCompleteTodo?: (todoId: string) => void;
+  typingLabel?: string;
+  onTyping?: (active: boolean) => void;
   onSupport: (messageId: string, add: boolean) => void;
   onCreatePoll: (question: string, options: string[]) => void;
   onAddToBoard: (message: DiscussionMessage, whiteboardId: string) => void;
@@ -58,6 +69,8 @@ export type RoomDiscussionApi = {
   onRetry?: (messageId: string) => void;
   /** 決定條預設顯示；single 房 drawer 對 reviewer 關閉。 */
   showDecisions?: boolean;
+  /** 平板 Split View 側欄不掛待辦，避免第一層板 chrome 被撐開。 */
+  showTodos?: boolean;
   /** 白板/投票等房間層動作；single 房 drawer 對 reviewer 關閉。 */
   showRoomActions?: boolean;
   /** 語音邊界說明；single 房 drawer 不顯示（語音是房間殼的事）。 */
@@ -184,6 +197,18 @@ function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("zh-Hant", { hour: "2-digit", minute: "2-digit" });
 }
 
+function MentionBody({ body, names }: { body: string; names: string[] }) {
+  return (
+    <p>
+      {mentionBodyParts(body, names).map((part, index) => (
+        part.mention
+          ? <mark key={`${part.text}-${index}`} className="rd-mention" data-testid="discussion-mention">{part.text}</mark>
+          : <span key={`${part.text}-${index}`}>{part.text}</span>
+      ))}
+    </p>
+  );
+}
+
 function PollMini({ poll, room }: { poll: RoomPoll; room: Room }) {
   const count = (room.pollVotes ?? []).filter((vote) => vote.pollId === poll.id).length;
   return <div className="rd-ref">{poll.question} · {count} 人已投</div>;
@@ -201,8 +226,11 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [decisionDraftOpen, setDecisionDraftOpen] = useState(false);
   const [citeSheet, setCiteSheet] = useState<"work" | "attachment" | null>(null);
   const [pollDraft, setPollDraft] = useState<{ question: string; options: string[] } | null>(null);
+  const [todoDraft, setTodoDraft] = useState("");
+  const [todoDraftOpen, setTodoDraftOpen] = useState(false);
 
   const showDecisions = api.showDecisions ?? true;
+  const showTodos = api.showTodos ?? true;
   const showRoomActions = api.showRoomActions ?? true;
   const decided = api.decisions.filter((item) => item.status === "decided");
   const pending = api.decisions.filter((item) => item.status === "pending");
@@ -250,6 +278,30 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   );
   const lastMessageRef = useRef(lastMessage);
   lastMessageRef.current = lastMessage;
+
+  const mentionMembers = useMemo(() => {
+    const seen = new Set<string>();
+    const list: { userId: string; name: string; color?: string }[] = [];
+    const add = (userId?: string, name?: string, color?: string) => {
+      if (!userId || !name || seen.has(userId)) return;
+      seen.add(userId);
+      list.push({ userId, name, color });
+    };
+    for (const member of api.room.members ?? []) add(member.userId, member.name, member.color);
+    add(api.userId, api.guest.name, api.guest.color);
+    for (const message of api.messages) add(message.authorId, message.authorName, message.authorColor);
+    return list;
+  }, [api.room.members, api.userId, api.guest.name, api.guest.color, api.messages]);
+  const mentionQuery = parseMentionQuery(api.draft);
+  const mentionHits = mentionQuery ? filterMentionableMembers(mentionMembers, mentionQuery.query) : [];
+  const nameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const member of mentionMembers) map.set(member.userId, member.name);
+    return map;
+  }, [mentionMembers]);
+  const todos = api.room.todos ?? [];
+  const openTodos = todos.filter((item) => item.status === "open");
+  const doneTodos = todos.filter((item) => item.status === "done");
 
   const scrollToLatest = (behavior: ScrollBehavior) => {
     const id = lastMessage?.id;
@@ -449,6 +501,62 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       </section>
       )}
 
+      {showTodos && (
+      <section className="rd-todos" data-testid="discussion-todo">
+        <div className="project-section-title-row">
+          <h3>待辦</h3>
+          {api.onCreateTodo && canWriteTodo(api.userId) && !todoDraftOpen && (
+            <button
+              type="button"
+              className="project-text-button"
+              data-testid="todo-draft-open"
+              onClick={() => setTodoDraftOpen(true)}
+            >新增</button>
+          )}
+        </div>
+        {api.onCreateTodo && canWriteTodo(api.userId) && todoDraftOpen && (
+          <form
+            className="rd-decision-draft"
+            data-testid="todo-draft"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const title = todoDraftTitle(todoDraft);
+              if (!title || !canWriteTodo(api.userId)) return;
+              api.onCreateTodo?.(title);
+              setTodoDraft("");
+              setTodoDraftOpen(false);
+            }}
+          >
+            <input
+              className="text-input"
+              value={todoDraft}
+              onChange={(event) => setTodoDraft(event.target.value)}
+              aria-label="待辦草稿"
+              placeholder="待辦標題"
+              data-testid="todo-draft-input"
+              autoFocus
+            />
+            <button type="submit" className="project-text-button" data-testid="todo-draft-add" disabled={!todoDraftTitle(todoDraft)}>新增</button>
+            <button type="button" className="project-text-button" onClick={() => { setTodoDraft(""); setTodoDraftOpen(false); }}>取消</button>
+          </form>
+        )}
+        {openTodos.map((item) => (
+          <article className="rd-todo" key={item.id} data-status="open">
+            <strong>{item.title}</strong>
+            {api.onCompleteTodo && canCompleteRoomTodo(item, api.userId, api.canManage) && (
+              <button type="button" className="project-text-button" data-testid="todo-complete" onClick={() => api.onCompleteTodo?.(item.id)}>完成</button>
+            )}
+          </article>
+        ))}
+        {doneTodos.map((item) => (
+          <article className="rd-todo is-done" key={item.id} data-status="done">
+            <strong>{item.title}</strong>
+          </article>
+        ))}
+        {!todos.length && <p className="project-muted">還沒有待辦</p>}
+      </section>
+      )}
+
       <div className="rd-feed" data-testid="discussion-feed">
         {messages.map((message) => {
           const supportCount = api.supports.filter((item) => item.messageId === message.id).length;
@@ -502,7 +610,10 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   </div>
                 </form>
               ) : (
-                <p>{message.body}</p>
+                <MentionBody
+                  body={message.body}
+                  names={(message.mentionedUserIds ?? []).map((id) => nameById.get(id)).filter((name): name is string => Boolean(name))}
+                />
               )}
               {!tombstoned && <ReplyRef reference={resolveReply(message, byId)} onJump={jumpToMessage} />}
               {!tombstoned && (message.kind === "whiteboard" || message.kind === "node") && (
@@ -631,11 +742,13 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
             api.onSend({
               body: text,
               replyToId: reply?.id,
+              mentionedUserIds: mentionedIdsFromDraft(text, mentionMembers),
               // quotedBody 只是「來源不在時還能看到什麼」的備援快照。
               // 現況一律由 resolveReply 從來源現值算出來。
               payload: reply ? { quotedBody: replySnippet(reply) } : {},
             });
             setReply(null);
+            api.onTyping?.(false);
           }}
         >
           {reply && (
@@ -702,12 +815,39 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               ) : null}
             </div>
           )}
+          {api.typingLabel ? (
+            <div className="rd-typing" data-testid="discussion-typing">{api.typingLabel}</div>
+          ) : null}
+          {mentionQuery && mentionHits.length > 0 && (
+            <div className="rd-mention-picker" data-testid="mention-picker" role="listbox" aria-label="提及成員">
+              {mentionHits.map((member) => (
+                <button
+                  type="button"
+                  key={member.userId}
+                  role="option"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    api.setDraft(`${mentionQuery.prefix}@${member.name} `);
+                    api.onTyping?.(true);
+                  }}
+                >
+                  @{member.name}
+                </button>
+              ))}
+            </div>
+          )}
           <input
             className="text-input"
             value={api.draft}
             onFocus={() => api.onComposerActive?.(true)}
-            onBlur={() => api.onComposerActive?.(false)}
-            onChange={(event) => api.setDraft(event.target.value)}
+            onBlur={() => {
+              api.onComposerActive?.(false);
+              api.onTyping?.(false);
+            }}
+            onChange={(event) => {
+              api.setDraft(event.target.value);
+              api.onTyping?.(Boolean(event.target.value.trim()));
+            }}
             onPaste={(event) => {
               // 只攔檔案貼上；文字貼上不動。
               const files = event.clipboardData?.files;

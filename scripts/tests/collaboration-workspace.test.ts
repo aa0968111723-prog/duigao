@@ -437,6 +437,8 @@ test("insertCollaborationSlice uploads boards, nodes, discussion and decisions b
       id: "d1", roomId: "room-1", title: "採用 B 版", body: "", status: "decided",
       createdBy: "me", createdAt: 1, updatedAt: 1, version: 1,
     }],
+    todos: [],
+    members: [],
   }, "cloud-room");
   await insertCollaborationSlice(supabase as never, slice);
   assert.deepEqual(calls.map((item) => item.table), [

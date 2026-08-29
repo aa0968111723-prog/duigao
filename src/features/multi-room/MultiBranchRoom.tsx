@@ -87,12 +87,16 @@ export type MultiBranchRoomApi = {
   chatInput: string;
   setChatInput: (value: string) => void;
   sendChat: () => void;
-  onSendDiscussion: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
+  onSendDiscussion: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string; mentionedUserIds?: string[] }) => void;
   onSupportDiscussion: (messageId: string, add: boolean) => void;
   onEditDiscussion?: (messageId: string, body: string) => void;
   onTombstoneDiscussion?: (messageId: string) => void;
   discussionRead?: { lastReadMessageId?: string; lastReadAt?: number } | null;
   onMarkDiscussionRead?: (messageId: string) => void;
+  onCreateTodo?: (title: string) => void;
+  onCompleteTodo?: (todoId: string) => void;
+  typingLabel?: string;
+  onDiscussionTyping?: (active: boolean) => void;
   onCreateWhiteboard: (title: string) => void;
   onArchiveWhiteboard: (id: string) => void;
   onOpenWhiteboard: (id: string | null) => void;
@@ -944,7 +948,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
    * null（手機是 tab、同時只有一個）。平板的側欄是**同時**顯示，所以要
    * 明確傳 "chat" — 否則側欄是空的（e2e 抓到）。
    */
-  function renderDiscussion(paneOverride?: "chat" | "board") {
+  function renderDiscussion(paneOverride?: "chat" | "board", opts?: { showTodos?: boolean }) {
     return (
                     <RoomDiscussion api={{
                       room: normalized,
@@ -983,6 +987,11 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       onTombstoneMessage: api.onTombstoneDiscussion,
                       readWatermark: api.discussionRead,
                       onMarkRead: api.onMarkDiscussionRead,
+                      onCreateTodo: api.onCreateTodo,
+                      onCompleteTodo: api.onCompleteTodo,
+                      showTodos: opts?.showTodos,
+                      typingLabel: api.typingLabel,
+                      onTyping: api.onDiscussionTyping,
                       onCreatePoll: createPoll,
                       onAddToBoard: api.onAddMessageToBoard,
                       onOpenBoardNode: (whiteboardId, nodeId) => {
@@ -1303,7 +1312,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
             <strong>討論</strong>
             <button type="button" onClick={() => setRailCollapsed(true)} aria-label="收起討論">✕</button>
           </div>
-          <div className="wb-side-rail-body">{renderDiscussion("chat")}</div>
+          <div className="wb-side-rail-body">{renderDiscussion("chat", { showTodos: false })}</div>
         </aside>
       )}
       {api.workspace && (

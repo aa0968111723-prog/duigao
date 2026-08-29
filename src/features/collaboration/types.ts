@@ -259,6 +259,24 @@ export type DiscussionMessage = {
   /** 0031 tombstone：非空＝已刪。列還在，UI 畫墓碑，不默默消失。 */
   deletedAt?: number;
   deletedBy?: string;
+  /** 0032 @提及。不是第二條聊天。 */
+  mentionedUserIds?: string[];
+};
+
+export type RoomMember = {
+  userId: string;
+  name: string;
+  color?: string;
+};
+
+export type RoomTodo = {
+  id: string;
+  roomId: string;
+  title: string;
+  createdBy: string;
+  status: "open" | "done";
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type DiscussionSupport = {
