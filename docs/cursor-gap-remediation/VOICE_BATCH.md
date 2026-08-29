@@ -57,7 +57,7 @@ There is no `npm test` script.
 
 | Script | Result |
 |---|---|
-| `test:voice-state` | **13/13** |
+| `test:voice-state` | **15/15** (after V-07: refresh mute/disconnect before `reconnecting`) |
 | `test:collaboration` | **118/118** (includes voice-state) |
 | `test:agent` | **16/16** |
 | `test:edge-cors` | **5/5** |
@@ -96,6 +96,7 @@ Head: see `git rev-parse HEAD` on this branch.
 | V-04 | RoomDiscussion still only shows `live` roster chrome | **deferred-with-owner** — `#95` owns the file; dock `state` mapping kept |
 | V-05 | health `{ok:true}` does not prove TURN / LiveKit is up | **accepted-as-designed** — join still parses token; missing provider cannot become `connected` |
 | V-06 | production Zeabur `/functions/v1/voice-token` is SPA HTML 200 | **deferred-with-owner** — platform routing; client now refuses that body |
+| V-07 | Token refresh set `reconnecting` (dock `connecting`) before disconnect; RoomDiscussion hides Leave on non-`live`, so mic could stay open with no leave | **accepted** — mute+disconnect the previous LiveKit session, then enter `reconnecting`; `refreshHidesLeaveWhileSessionLive` + source-order test |
 
 Rejected-with-evidence: none. No secrets, invite fragments, or `room-assets` ACL changes.
 

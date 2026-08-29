@@ -58,6 +58,22 @@ export function canShowVoiceParticipants(phase: VoiceTruthfulPhase): boolean {
   return phase === "connected";
 }
 
+/**
+ * RoomDiscussion (#95) only renders Leave when `state === "live"`.
+ * Any phase that maps away from `live` hides leave. Combined with an
+ * still-open LiveKit/mic session that is the Bugbot refresh hole.
+ */
+export function dockShowsLeaveControl(phase: VoiceTruthfulPhase): boolean {
+  return voicePhaseToDockState(phase) === "live";
+}
+
+export function refreshHidesLeaveWhileSessionLive(input: {
+  phase: VoiceTruthfulPhase;
+  liveKitSessionOpen: boolean;
+}): boolean {
+  return !dockShowsLeaveControl(input.phase) && input.liveKitSessionOpen;
+}
+
 export function voicePhaseToDockState(phase: VoiceTruthfulPhase): VoiceDockState {
   switch (phase) {
     case "connected":

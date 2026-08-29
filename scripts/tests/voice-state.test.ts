@@ -11,6 +11,8 @@ import {
   assertConnectableToken,
   canShowVoiceParticipants,
   classifyConnectFailure,
+  dockShowsLeaveControl,
+  refreshHidesLeaveWhileSessionLive,
   isVoiceConnected,
   looksLikeSpaHtml,
   parseVoiceHealthPayload,
@@ -152,6 +154,51 @@ test("mutation: dropping the HTML check accepts a typed-html {ok:true} — real 
   assert.equal(real.ok, false);
   if (real.ok) return;
   assert.equal(real.code, "SPA_HTML");
+});
+
+test("negative: reconnecting hides leave while a live session stays open (Bugbot refresh)", () => {
+  assert.equal(dockShowsLeaveControl("connected"), true);
+  assert.equal(dockShowsLeaveControl("reconnecting"), false);
+  assert.equal(voicePhaseToDockState("reconnecting"), "connecting");
+  assert.equal(
+    refreshHidesLeaveWhileSessionLive({ phase: "reconnecting", liveKitSessionOpen: true }),
+    true,
+    "RoomDiscussion hides leave on connecting; mic still open is the hole",
+  );
+  assert.equal(
+    refreshHidesLeaveWhileSessionLive({ phase: "reconnecting", liveKitSessionOpen: false }),
+    false,
+  );
+  assert.equal(
+    refreshHidesLeaveWhileSessionLive({ phase: "connected", liveKitSessionOpen: true }),
+    false,
+  );
+});
+
+test("mutation: refresh that flips to reconnecting before disconnect keeps the hole", () => {
+  const sawLeaveHiddenWhileLive = (steps: string[]) => {
+    let phase: "connected" | "reconnecting" = "connected";
+    let liveKitSessionOpen = true;
+    let hole = false;
+    for (const step of steps) {
+      if (step === "reconnecting") phase = "reconnecting";
+      if (step === "disconnect" || step === "mute") liveKitSessionOpen = false;
+      if (refreshHidesLeaveWhileSessionLive({ phase, liveKitSessionOpen })) hole = true;
+    }
+    return hole;
+  };
+  assert.equal(sawLeaveHiddenWhileLive(["reconnecting", "fetch-token", "disconnect"]), true);
+  assert.equal(sawLeaveHiddenWhileLive(["disconnect", "reconnecting", "fetch-token"]), false);
+  const hook = readFileSync(resolve(ROOT, "src/hooks/useVoiceRoom.ts"), "utf8");
+  const refresh = hook.slice(hook.indexOf("const scheduleTokenRefresh"));
+  const reconnectAt = refresh.search(/setPhase\(\s*["']reconnecting["']\s*\)/);
+  const releaseAt = refresh.search(/setMuted\(true\)|previous\?\.disconnect|previous\.disconnect/);
+  assert.ok(reconnectAt >= 0, "refresh must mention reconnecting");
+  assert.ok(releaseAt >= 0, "refresh must mute or disconnect the live session");
+  assert.ok(
+    releaseAt < reconnectAt,
+    "mic/session must be released before dock leaves live (leave control)",
+  );
 });
 
 test("reconnecting / joining / left never publish a fake roster", () => {

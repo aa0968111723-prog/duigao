@@ -263,6 +263,14 @@ export function useVoiceRoom({ supabase, boundRoomId, userId, displayName, canMa
     refreshTimerRef.current = window.setTimeout(() => {
       void (async () => {
         if (!supabase || seq !== joinSeqRef.current) return;
+        // RoomDiscussion only shows Leave when dock state is live.
+        // Release mic/session first so reconnecting (connecting) never
+        // hides leave while the previous LiveKit session is still open.
+        const previous = connectionRef.current;
+        connectionRef.current = null;
+        await previous?.setMuted(true).catch(() => undefined);
+        await previous?.disconnect().catch(() => undefined);
+        if (seq !== joinSeqRef.current) return;
         phaseRef.current = "reconnecting";
         setPhase("reconnecting");
         setParticipants([]);
@@ -279,9 +287,6 @@ export function useVoiceRoom({ supabase, boundRoomId, userId, displayName, canMa
           await teardown(true);
           return;
         }
-        const previous = connectionRef.current;
-        connectionRef.current = null;
-        await previous?.disconnect().catch(() => undefined);
         if (seq !== joinSeqRef.current) return;
         const reconnected = await connectVoice({
           url: parsed.url,
