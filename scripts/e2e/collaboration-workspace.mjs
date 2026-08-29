@@ -17,7 +17,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { faults, requestLog, rows, start as startMock } from "./mock-supabase.mjs";
-import { ensureRoomMore, openRoomCreate } from "./room-more.mjs";
+import { ensureRoomMore, openRoomCreate, openRoomPane } from "./room-more.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54418;
@@ -677,7 +677,8 @@ try {
       check("打開來源訊息：跳回討論並高亮原文", (await page.locator(".rd-msg-flash").innerText()).includes("擺攤動線要重排"));
 
       // 內容側反向 chip：開 擺攤文宣 對稿 → 白板引用 chip → 跳回引用節點
-      await page.getByTestId("open-content-pane").click();
+      // 第一層沒有常駐內容入口（#110 更多 sheet）；不可直接點 open-content-pane。
+      await openRoomPane(page, "open-content-pane");
       await page.getByRole("button", { name: /擺攤文宣/ }).first().click();
       await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
       await page.waitForSelector('[data-testid="board-refs-chip"]', { timeout: 10000 });
