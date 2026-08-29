@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isPlanNotSaved } from "./cloud/planUpsertAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -1578,14 +1579,27 @@ export function App() {
         showToast("建立內容失敗，請確認連線後再試一次。", { tone: "error" });
         return;
       }
-      if (plan) cloudRef.current.writes.savePlan(plan);
+      if (plan) {
+        try {
+          await cloudRef.current.writes.savePlan(plan);
+        } catch (err) {
+          if (isPlanNotSaved(err)) {
+            updateRoom((r) => ({
+              ...r,
+              plans: (r.plans ?? []).filter((item) => item.branchId !== plan.branchId),
+            }));
+            showToast("企劃沒有存成，請再試一次。", { tone: "error" });
+            return;
+          }
+        }
+      }
       if (files?.length) {
         if (type === "poster") void addImageFiles(files, branch.id, next);
         if (type === "video") void addVideoFile(files, branch.id, next);
       }
       showToast(`已建立${type === "copy" ? "文案" : type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片"}`, { tone: "success" });
     },
-    [addImageFiles, addVideoFile, cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, persist, showToast],
+    [addImageFiles, addVideoFile, cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, persist, showToast, updateRoom],
   );
 
   const addFilesToBranch = useCallback(
@@ -1621,6 +1635,7 @@ export function App() {
         showToast("檢視者不能編輯企劃正文。", { tone: "error" });
         return;
       }
+      const previous = (roomRef.current?.plans ?? []).find((item) => item.branchId === plan.branchId);
       const nextPlan = { ...plan, updatedBy: cloud.userId ?? guest?.id, updatedAt: Date.now() };
       updateRoom((r) => ({
         ...r,
@@ -1629,7 +1644,20 @@ export function App() {
           branch.id === plan.branchId ? { ...branch, updatedAt: Date.now() } : branch,
         ),
       }));
-      cloudRef.current.writes.savePlan(nextPlan);
+      void cloudRef.current.writes.savePlan(nextPlan).catch((err) => {
+        if (!isPlanNotSaved(err)) return;
+        updateRoom((r) => {
+          const current = (r.plans ?? []).find((item) => item.branchId === plan.branchId);
+          if (!current || current.updatedAt !== nextPlan.updatedAt) return r;
+          return {
+            ...r,
+            plans: previous
+              ? (r.plans ?? []).map((item) => (item.branchId === plan.branchId ? previous : item))
+              : (r.plans ?? []).filter((item) => item.branchId !== plan.branchId),
+          };
+        });
+        showToast("企劃沒有存成，請再試一次。", { tone: "error" });
+      });
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
   );

@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptPlanUpsertAck } from "./planUpsertAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -1018,19 +1019,24 @@ export async function updateBranch(
 }
 
 export async function upsertPlan(supabase: SupabaseClient, plan: PlanDocument, roomId: string): Promise<void> {
-  const { error } = await supabase.from("plan_documents").upsert(
-    {
-      room_id: roomId,
-      branch_id: plan.branchId,
-      title: plan.title,
-      description: plan.description,
-      blocks: plan.blocks,
-      updated_by: isUuid(plan.updatedBy ?? "") ? plan.updatedBy : null,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "branch_id" },
-  );
+  const { data, error } = await supabase
+    .from("plan_documents")
+    .upsert(
+      {
+        room_id: roomId,
+        branch_id: plan.branchId,
+        title: plan.title,
+        description: plan.description,
+        blocks: plan.blocks,
+        updated_by: isUuid(plan.updatedBy ?? "") ? plan.updatedBy : null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "branch_id" },
+    )
+    .select("branch_id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "plan");
+  acceptPlanUpsertAck(data);
 }
 
 export async function insertRelation(supabase: SupabaseClient, relation: ContentRelation): Promise<void> {

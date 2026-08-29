@@ -43,7 +43,8 @@ test("flush replays only the latest same-key task and keeps unrelated keys", asy
 
 test("useCloudRoom keys replaceable writes and flushes before snapshot reload", () => {
   const source = readFileSync(resolve(ROOT, "src/cloud/useCloudRoom.ts"), "utf8");
-  assert.match(source, /run\(`plan:\$\{plan\.branchId\}`/);
+  assert.match(source, /const key = `plan:\$\{plan\.branchId\}`/);
+  assert.match(source, /isPlanNotSaved\(err\)/);
   assert.match(source, /run\("room-title"/);
   assert.match(source, /run\(`proposal:\$\{doc\.id\}`/);
   assert.match(source, /acknowledgePendingWrite/);
