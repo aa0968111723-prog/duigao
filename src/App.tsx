@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isVersionNotSaved } from "./cloud/versionInsertAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -202,6 +203,7 @@ function userFacingMessage(err: unknown): string {
   if (err instanceof CloudError && err.code === "setup") {
     return "房間已建立，但初始化沒完成。再試一次會沿用同一個房間，不會多開新房。";
   }
+  if (isVersionNotSaved(err)) return "影片版本沒有建立，請再試一次。";
   const raw = err instanceof Error ? err.message : "";
   if (!raw || raw === "cloud-room-failed") return fallback;
   if (!/[一-鿿]/.test(raw)) {
@@ -1126,12 +1128,25 @@ export function App() {
           return v;
         });
         persist(next);
-        newVersions.forEach((v, i) =>
-          cloudRef.current.writes.addVersion(v.label, branchCount + i, v.imageDataUrl, targetBranchId),
-        );
-        const added = newVersions[newVersions.length - 1];
-        if (!created) {
-          showToast(newVersions.length > 1 ? `已新增 ${newVersions.length} 版` : `已新增${added.label}`, {
+        const rejected: string[] = [];
+        for (const [i, v] of newVersions.entries()) {
+          try {
+            await cloudRef.current.writes.addVersion(v.label, branchCount + i, v.imageDataUrl, targetBranchId);
+          } catch (err) {
+            if (isVersionNotSaved(err)) rejected.push(v.id);
+          }
+        }
+        if (rejected.length) {
+          const kept = next.versions.filter((item) => !rejected.includes(item.id));
+          const reverted: Room = normalizeRoomBranches({ ...next, versions: kept, updatedAt: Date.now() });
+          setRoom(reverted);
+          persist(reverted);
+          showToast("文宣版本沒有建立，請再試一次。", { tone: "error" });
+          if (rejected.length === newVersions.length) return;
+        }
+        const added = newVersions.filter((item) => !rejected.includes(item.id)).at(-1);
+        if (!created && added) {
+          showToast(newVersions.length - rejected.length > 1 ? `已新增 ${newVersions.length - rejected.length} 版` : `已新增${added.label}`, {
             tone: "success",
             action: { label: "復原", onClick: undoLast },
           });

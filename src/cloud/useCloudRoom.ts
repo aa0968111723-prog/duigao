@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isVersionNotSaved } from "./versionInsertAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -129,7 +130,7 @@ export type CloudWrites = {
   insertStroke: (stroke: import("../lib/types").Stroke) => void;
   deleteStroke: (id: string) => void;
   insertMessage: (msg: import("../lib/types").ChatMessage) => void;
-  addVersion: (label: string, sortOrder: number, imageDataUrl: string, branchId?: string) => void;
+  addVersion: (label: string, sortOrder: number, imageDataUrl: string, branchId?: string) => Promise<void>;
   /** Resolves after the branch FK exists, so a first version/plan can follow it. */
   createBranch: (branch: RoomBranch) => Promise<void>;
   updateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => void;
@@ -1068,15 +1069,38 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     insertStroke: (stroke) => run(`stroke:${stroke.id}`, () => insertStroke(supabase!, boundRef.current!, stroke)),
     deleteStroke: (id) => run(`stroke-del:${id}`, () => repoDeleteStroke(supabase!, id)),
     insertMessage: (msg) => run(`message:${msg.id}`, () => insertMessage(supabase!, boundRef.current!, msg)),
-    addVersion: (label, sortOrder, imageDataUrl, branchId) => {
-      // 穩定 id 在排隊當下鑄一次：run() 的 duplicate-key=acknowledge 因此
+    addVersion: async (label, sortOrder, imageDataUrl, branchId) => {
+      // 穩定 id 在排隊當下鑄一次：duplicate-key=acknowledge 因此
       // 對 replay 真正冪等（回應丟失的重送不會複製版本）。
+      const rid = boundRef.current;
+      const key = `version:${branchId ?? "room"}:${sortOrder}:${label}`;
+      if (!supabase || !rid) return;
       const stableId = uuid();
-      run(`version:${branchId ?? "room"}:${sortOrder}:${label}`, async () => {
-        const v: Version = await repoAddVersion(supabase!, boundRef.current!, label, sortOrder, imageDataUrl, branchId, stableId);
-        void v;
+      setStatus("syncing");
+      try {
+        await repoAddVersion(supabase, rid, label, sortOrder, imageDataUrl, branchId, stableId);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
         scheduleReload();
-      });
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          scheduleReload();
+          return;
+        }
+        if (isVersionNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: async () => {
+            await repoAddVersion(supabase, rid, label, sortOrder, imageDataUrl, branchId, stableId);
+          },
+        });
+        setStatus("offline-pending");
+      }
     },
     createBranch: (branch) => runAndWait(`branch-insert:${branch.id}`, () => insertBranch(supabase!, branch)),
     updateBranch: (branchId, patch) => run(`branch:${branchId}`, () => updateBranch(supabase!, boundRef.current!, branchId, patch)),

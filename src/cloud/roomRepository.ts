@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptVersionInsertAck } from "./versionInsertAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -914,17 +915,20 @@ export async function addVersion(
     ...(contentHash ? { content_hash: contentHash } : {}),
     ...(branchId ? { branch_id: branchId } : {}),
   };
-  let { error } = await supabase
+  let { data, error } = await supabase
     .from("versions")
-    .insert(versionRow);
+    .insert(versionRow)
+    .select("id")
+    .maybeSingle();
   // A mixed-version deployment may not have 0014 yet. The upload is already
   // in the existing private bucket, so retry the legacy row shape rather than
   // breaking the established review flow while the migration rolls out.
   if (error && /content_hash|column/i.test(error.message)) {
     const { content_hash: _ignored, ...legacyRow } = versionRow;
-    ({ error } = await supabase.from("versions").insert(legacyRow));
+    ({ data, error } = await supabase.from("versions").insert(legacyRow).select("id").maybeSingle());
   }
   if (error) throw new CloudError(error.message, "version");
+  acceptVersionInsertAck(data);
   return { id, label, imageDataUrl: await signedUrl(supabase, path), ...(branchId ? { branchId } : {}) };
 }
 
@@ -978,12 +982,13 @@ export async function addVideoVersion(
     // assign_version_branch trigger 會在 INSERT 時補真分支。
     ...(input.branchId && isUuid(input.branchId) ? { branch_id: input.branchId } : {}),
   };
-  let { error } = await supabase.from("versions").insert(versionRow);
+  let { data, error } = await supabase.from("versions").insert(versionRow).select("id").maybeSingle();
   if (error && /content_hash|optimized_video_path|source_file_size|optimized|column/i.test(error.message)) {
     const { content_hash: _hash, optimized_video_path: _proxy, optimized: _flag, source_file_size: _src, ...legacyRow } = versionRow;
-    ({ error } = await supabase.from("versions").insert(legacyRow));
+    ({ data, error } = await supabase.from("versions").insert(legacyRow).select("id").maybeSingle());
   }
   if (error) throw new CloudError(error.message, "version");
+  acceptVersionInsertAck(data);
 }
 
 // ---- project-room branches / plans / relations / decisions ---------------
