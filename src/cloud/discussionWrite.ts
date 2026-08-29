@@ -13,7 +13,7 @@ export { looksLikeSpaHtml };
 
 export type DiscussionInsertAccept =
   | { ok: true; reason: "inserted" | "duplicate" }
-  | { ok: false; code: "SPA_HTML" | "FAILED" };
+  | { ok: false; code: "SPA_HTML" | "FAILED" | "ZERO_ROW" };
 
 export type StorageUploadAccept =
   | { ok: true }
@@ -36,7 +36,14 @@ function errorText(error: unknown): string {
   return "";
 }
 
-/** Insert result: HTML / missing API is failure. Duplicate key of the same id is success. */
+function returnedDiscussionId(data: unknown): string {
+  if (Array.isArray(data)) return data.length ? returnedDiscussionId(data[0]) : "";
+  if (!data || typeof data !== "object") return "";
+  const raw = (data as { id?: unknown }).id;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+/** Insert result: HTML / missing API / zero rows is failure. Duplicate key of the same id is success. */
 export function acceptDiscussionInsert(input: {
   error: unknown;
   data?: unknown;
@@ -49,6 +56,8 @@ export function acceptDiscussionInsert(input: {
     if (isDuplicateKey(input.error)) return { ok: true, reason: "duplicate" };
     return { ok: false, code: "FAILED" };
   }
+  // RLS can "succeed" with zero rows. No returned id is not a sent message.
+  if (!returnedDiscussionId(input.data)) return { ok: false, code: "ZERO_ROW" };
   return { ok: true, reason: "inserted" };
 }
 
