@@ -34,8 +34,14 @@ export function applyDiscussionRealtime(
   if (event.op === "delete") {
     const id = event.id?.trim();
     if (!id) return { messages, applied: false };
-    if (!messages.some((item) => item.id === id)) return { messages, applied: false };
-    return { messages: messages.filter((item) => item.id !== id), applied: true };
+    const existing = messages.find((item) => item.id === id);
+    if (!existing) return { messages, applied: false };
+    if (existing.deletedAt) return { messages, applied: false };
+    // 0031：硬刪已收回。DELETE echo 只能變成墓碑，不能默默抽走。
+    return {
+      messages: messages.map((item) => (item.id === id ? { ...item, deletedAt: item.deletedAt ?? Date.now() } : item)),
+      applied: true,
+    };
   }
   const incoming = event.message;
   if (!incoming?.id) return { messages, applied: false };
@@ -44,7 +50,12 @@ export function applyDiscussionRealtime(
     return { messages: [...messages, incoming].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)), applied: true };
   }
   if (incoming.updatedAt < existing.updatedAt) return { messages, applied: false };
-  if (incoming.updatedAt === existing.updatedAt && incoming.body === existing.body && incoming.kind === existing.kind) {
+  if (
+    incoming.updatedAt === existing.updatedAt
+    && incoming.body === existing.body
+    && incoming.kind === existing.kind
+    && incoming.deletedAt === existing.deletedAt
+  ) {
     return { messages, applied: false };
   }
   return {

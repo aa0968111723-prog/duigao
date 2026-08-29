@@ -14,3 +14,19 @@ export function shouldFollowLatest(args: {
   if (args.nextLastId === args.previousLastId) return false;
   return args.pinnedToLatest;
 }
+
+/**
+ * Feed-end on screen is not "I've read everything" if the first unread is
+ * still in view, or the person just jumped to it. Marking latest in those
+ * cases wipes `data-first-unread` on a short feed.
+ */
+export function shouldMarkLatestFromFeedEnd(args: {
+  endIntersecting: boolean;
+  firstUnreadInView: boolean;
+  holdingFirstUnread: boolean;
+}): boolean {
+  if (!args.endIntersecting) return false;
+  if (args.holdingFirstUnread) return false;
+  if (args.firstUnreadInView) return false;
+  return true;
+}

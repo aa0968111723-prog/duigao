@@ -6,16 +6,20 @@ import {
   attachmentCiteReply,
   boardPollWrite,
   canEditDiscussion,
+  canTombstoneDiscussion,
   decisionDraftTitle,
   discussionEditPatch,
+  firstUnreadMessageId,
   messageIsEdited,
+  messageIsTombstoned,
+  unreadCount,
   workCiteFromBoard,
   workCiteFromBranch,
 } from "../collaboration/discussionHonesty";
 import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
-import { shouldFollowLatest } from "./feed";
+import { shouldFollowLatest, shouldMarkLatestFromFeedEnd } from "./feed";
 import { voiceDockShowsLeave } from "./voiceDockLeave";
 import "./discussion.css";
 
@@ -40,6 +44,11 @@ export type RoomDiscussionApi = {
   onFinalizeDecision: (id: string) => void;
   /** 作者改自己的文字。0022 允許改 body，不改作者。 */
   onEditMessage?: (messageId: string, body: string) => void;
+  /** 0031：作者或 can_manage 標 tombstone。列留下，畫面畫墓碑。 */
+  onTombstoneMessage?: (messageId: string) => void;
+  /** 0031：自己的未讀水位。只給自己用，不給別人看。 */
+  readWatermark?: { lastReadMessageId?: string; lastReadAt?: number } | null;
+  onMarkRead?: (messageId: string) => void;
   onOpenContent?: (branchId: string) => void;
   hideTabs?: boolean;
   pane?: "chat" | "board";
@@ -209,7 +218,12 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   // 跳到來源之後短暫標記，讓使用者看得出「就是這一則」。
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimer = useRef<number | null>(null);
+  const holdingFirstUnreadRef = useRef(false);
   const jumpToMessage = (sourceId: string) => {
+    if (sourceId === firstUnreadIdRef.current) {
+      pinnedToLatest.current = false;
+      holdingFirstUnreadRef.current = true;
+    }
     const el = typeof document !== "undefined" ? document.getElementById(`rd-msg-${sourceId}`) : null;
     el?.scrollIntoView({ block: "center", behavior: "smooth" });
     setHighlightId(sourceId);
@@ -224,17 +238,32 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const feedCountRef = useRef(0);
   const lastMessageIdRef = useRef<string | undefined>(undefined);
   const lastMessage = messages[messages.length - 1];
+  const firstUnreadId = useMemo(
+    () => firstUnreadMessageId(messages, api.readWatermark),
+    [messages, api.readWatermark],
+  );
+  const firstUnreadIdRef = useRef(firstUnreadId);
+  firstUnreadIdRef.current = firstUnreadId;
+  const unread = useMemo(
+    () => unreadCount(messages, api.readWatermark),
+    [messages, api.readWatermark],
+  );
+  const lastMessageRef = useRef(lastMessage);
+  lastMessageRef.current = lastMessage;
 
   const scrollToLatest = (behavior: ScrollBehavior) => {
     const id = lastMessage?.id;
     if (!id || typeof document === "undefined") return;
     document.getElementById(`rd-msg-${id}`)?.scrollIntoView({ block: "end", behavior });
     pinnedToLatest.current = true;
+    holdingFirstUnreadRef.current = false;
     setShowJumpLatest(false);
+    if (lastMessage) api.onMarkRead?.(lastMessage.id);
   };
 
   useEffect(() => {
     pinnedToLatest.current = true;
+    holdingFirstUnreadRef.current = false;
     feedCountRef.current = 0;
     lastMessageIdRef.current = undefined;
     setShowJumpLatest(false);
@@ -246,8 +275,32 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     const el = feedEndRef.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(([entry]) => {
-      pinnedToLatest.current = Boolean(entry?.isIntersecting);
-      if (entry?.isIntersecting) setShowJumpLatest(false);
+      const intersecting = Boolean(entry?.isIntersecting);
+      if (!intersecting) {
+        pinnedToLatest.current = false;
+        holdingFirstUnreadRef.current = false;
+        return;
+      }
+      const latest = lastMessageRef.current;
+      const unreadId = firstUnreadIdRef.current;
+      let firstUnreadInView = false;
+      if (unreadId && typeof document !== "undefined") {
+        const unreadEl = document.getElementById(`rd-msg-${unreadId}`);
+        if (unreadEl) {
+          const box = unreadEl.getBoundingClientRect();
+          firstUnreadInView = box.bottom > 0 && box.top < window.innerHeight;
+        }
+      }
+      if (!shouldMarkLatestFromFeedEnd({
+        endIntersecting: true,
+        firstUnreadInView,
+        holdingFirstUnread: holdingFirstUnreadRef.current,
+      })) {
+        return;
+      }
+      pinnedToLatest.current = true;
+      setShowJumpLatest(false);
+      if (latest) api.onMarkRead?.(latest.id);
     }, { threshold: 0.01 });
     observer.observe(el);
     return () => observer.disconnect();
@@ -255,6 +308,13 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
 
   useEffect(() => {
     const nextLastId = lastMessage?.id;
+    if (feedCountRef.current === 0 && firstUnreadId && firstUnreadId !== nextLastId) {
+      jumpToMessage(firstUnreadId);
+      feedCountRef.current = messages.length;
+      lastMessageIdRef.current = nextLastId;
+      setShowJumpLatest(true);
+      return;
+    }
     const follow = shouldFollowLatest({
       previousCount: feedCountRef.current,
       nextCount: messages.length,
@@ -269,7 +329,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     }
     feedCountRef.current = messages.length;
     lastMessageIdRef.current = nextLastId;
-  }, [messages, lastMessage?.id]);
+  }, [messages, lastMessage?.id, firstUnreadId]);
 
   if ((api.pane ?? pane) === "board") {
     return null;
@@ -396,22 +456,27 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           const sendState = api.sendStates?.[message.id];
           // legacy（0001 messages）唯讀：沒有討論表的列可以支持/回覆。
           const readOnly = Boolean((message.payload as { legacy?: boolean }).legacy);
+          const tombstoned = messageIsTombstoned(message);
           return (
             <article
-              className={`rd-msg${sendState === "sending" ? " is-sending" : ""}${sendState === "failed" ? " is-failed" : ""}${highlightId === message.id ? " is-highlight" : ""}`}
+              className={`rd-msg${sendState === "sending" ? " is-sending" : ""}${sendState === "failed" ? " is-failed" : ""}${highlightId === message.id ? " is-highlight" : ""}${tombstoned ? " is-tombstone" : ""}`}
               key={message.id}
               id={`rd-msg-${message.id}`}
               data-testid={`discussion-${message.id}`}
               data-latest={message.id === lastMessage?.id ? "true" : undefined}
-              onContextMenu={(event) => { event.preventDefault(); setMenuId(message.id); }}
+              data-first-unread={message.id === firstUnreadId ? "true" : undefined}
+              data-tombstone={tombstoned ? "true" : undefined}
+              onContextMenu={(event) => { event.preventDefault(); if (!tombstoned) setMenuId(message.id); }}
             >
               <header>
                 <span className="rd-dot" style={{ background: message.authorColor }} />
                 <b>{message.authorName}</b>
-                {messageIsEdited(message) ? <span className="rd-edited" data-testid="discussion-edited">已編輯</span> : null}
+                {messageIsEdited(message) && !tombstoned ? <span className="rd-edited" data-testid="discussion-edited">已編輯</span> : null}
                 <time>{timeLabel(message.createdAt)}</time>
               </header>
-              {editingId === message.id ? (
+              {tombstoned ? (
+                <p className="rd-tombstone" data-testid="discussion-tombstone">這則討論已刪除</p>
+              ) : editingId === message.id ? (
                 <form
                   className="rd-edit-form"
                   data-testid="discussion-edit-form"
@@ -439,8 +504,8 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               ) : (
                 <p>{message.body}</p>
               )}
-              <ReplyRef reference={resolveReply(message, byId)} onJump={jumpToMessage} />
-              {(message.kind === "whiteboard" || message.kind === "node") && (
+              {!tombstoned && <ReplyRef reference={resolveReply(message, byId)} onJump={jumpToMessage} />}
+              {!tombstoned && (message.kind === "whiteboard" || message.kind === "node") && (
                 <button
                   type="button"
                   className="rd-ref"
@@ -455,7 +520,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   {message.payload.title ?? "打開白板"}
                 </button>
               )}
-              {(message.kind === "poster" || message.kind === "video" || message.kind === "plan") && message.payload.branchId && (
+              {!tombstoned && (message.kind === "poster" || message.kind === "video" || message.kind === "plan") && message.payload.branchId && (
                 <button
                   type="button"
                   className="rd-ref"
@@ -467,10 +532,10 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   {message.payload.title ?? "房間內容"}
                 </button>
               )}
-              {message.kind === "attachment" && (
+              {!tombstoned && message.kind === "attachment" && (
                 <AttachmentCard message={message} resolve={api.resolveAssetUrl} />
               )}
-              {message.kind === "link" && (() => {
+              {!tombstoned && message.kind === "link" && (() => {
                 const href = safeHref(message.payload.href);
                 return href ? (
                   <a className="rd-ref rd-link" href={href} target="_blank" rel="noopener noreferrer" data-testid="link-card">
@@ -485,7 +550,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   未送出 · 重試
                 </button>
               )}
-              {!readOnly && (
+              {!readOnly && !tombstoned && (
               <div className="rd-actions">
                 <button type="button" onClick={() => setReply(message)}>回覆</button>
                 <button type="button" onClick={() => api.onSupport(message.id, !supported)}>支持{supportCount ? ` ${supportCount}` : ""}</button>
@@ -495,6 +560,13 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                     data-testid="discussion-edit"
                     onClick={() => { setEditingId(message.id); setEditDraft(message.body); }}
                   >編輯</button>
+                )}
+                {api.onTombstoneMessage && canTombstoneDiscussion(message, api.userId, api.canManage, sendState) && (
+                  <button
+                    type="button"
+                    data-testid="discussion-tombstone-btn"
+                    onClick={() => api.onTombstoneMessage?.(message.id)}
+                  >刪除</button>
                 )}
                 {showRoomActions && api.canManage && (
                   <button
@@ -518,6 +590,16 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         <div ref={feedEndRef} className="rd-feed-end" data-testid="discussion-feed-end" aria-hidden />
       </div>
 
+      {firstUnreadId && unread > 0 && (
+        <button
+          type="button"
+          className="rd-jump-unread"
+          data-testid="jump-first-unread"
+          onClick={() => jumpToMessage(firstUnreadId)}
+        >
+          第一則未讀{unread > 1 ? ` ${unread}` : ""}
+        </button>
+      )}
       {showJumpLatest && lastMessage && (
         <button
           type="button"

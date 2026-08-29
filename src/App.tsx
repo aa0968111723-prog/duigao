@@ -29,14 +29,14 @@ import {
 } from "./lib/types";
 import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
-import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, loadBoardVersion, createBoardVersion } from "./cloud/collaborationRepository";
+import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, loadBoardVersion, createBoardVersion, loadDiscussionRead as loadCloudDiscussionRead } from "./cloud/collaborationRepository";
 import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type BoardVersionSummary } from "./features/whiteboard/versions";
 import { boardProposals, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
 import { roomCode, uid, uuid } from "./lib/id";
-import { deleteRoom, listRooms, listUploadSessions, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
+import { deleteRoom, listRooms, listUploadSessions, loadDiscussionReadLocal, loadFlag, loadGuest, loadRoom, saveDiscussionRead, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
 import { useDiscussionDraft } from "./hooks/useDiscussionDraft";
 import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
@@ -141,7 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { boardPollWrite, canEditDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor } from "./features/collaboration/discussionHonesty";
+import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -770,6 +770,45 @@ export function App() {
   const draftRoomKey = cloud.boundRoomId ?? room?.id ?? null;
   const draftMigrateFrom = room?.id && cloud.boundRoomId && room.id !== cloud.boundRoomId ? room.id : null;
   const [chatInput, setChatInput] = useDiscussionDraft(draftRoomKey, draftMigrateFrom);
+  const [discussionRead, setDiscussionRead] = useState<DiscussionReadWatermark | null>(null);
+  const discussionReadRef = useRef(discussionRead);
+  discussionReadRef.current = discussionRead;
+
+  const isAuthUserId = (value?: string | null) =>
+    Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
+
+  useEffect(() => {
+    const roomId = cloud.boundRoomId ?? room?.id ?? null;
+    const userId = cloud.userId ?? guest?.id ?? null;
+    if (!roomId || !userId) {
+      setDiscussionRead(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const local = await loadDiscussionReadLocal(roomId, userId).catch(() => null);
+      if (cancelled) return;
+      if (local) {
+        setDiscussionRead({
+          roomId,
+          lastReadMessageId: local.lastReadMessageId,
+          lastReadAt: local.lastReadAt,
+        });
+      }
+      const supabase = getSupabase();
+      if (!supabase || !cloud.boundRoomId || !isAuthUserId(cloud.userId)) return;
+      try {
+        const remote = await loadCloudDiscussionRead(supabase, cloud.boundRoomId);
+        if (cancelled || !remote) return;
+        setDiscussionRead({ roomId: cloud.boundRoomId, ...remote });
+      } catch {
+        /* IndexedDB watermark stays; cloud is source of truth when it answers */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cloud.boundRoomId, cloud.userId, guest?.id, room?.id]);
 
   // Intelligence is a separate, bounded slice. It never gates the existing
   // room/review load, and a branch workspace only asks for that branch's
@@ -1910,6 +1949,44 @@ export function App() {
       void cloudRef.current.writes.updateDiscussion?.(next);
     },
     [cloud.userId, guest, updateRoom],
+  );
+
+  const tombstoneDiscussion = useCallback(
+    (messageId: string) => {
+      const userId = cloud.userId ?? guest?.id;
+      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
+      const canManage = cloud.boundRoomId ? cloud.canManageMedia : true;
+      if (!userId || !current || !canTombstoneDiscussion(current, userId, canManage)) return;
+      const next = { ...current, deletedAt: Date.now() };
+      updateRoom((r) => ({
+        ...r,
+        discussion: (r.discussion ?? []).map((item) => (item.id === messageId ? next : item)),
+      }));
+      void cloudRef.current.writes.tombstoneDiscussion?.(next);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, updateRoom],
+  );
+
+  const markDiscussionRead = useCallback(
+    (messageId: string) => {
+      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
+      const userId = cloud.userId ?? guest?.id;
+      if (!current || !userId) return;
+      const prev = discussionReadRef.current?.roomId === current.roomId ? discussionReadRef.current : null;
+      const next = nextReadWatermark(prev, current);
+      if (prev && prev.lastReadMessageId === next.lastReadMessageId && prev.lastReadAt === next.lastReadAt) return;
+      setDiscussionRead(next);
+      void saveDiscussionRead({
+        roomId: next.roomId,
+        userId,
+        lastReadMessageId: next.lastReadMessageId,
+        lastReadAt: next.lastReadAt,
+      }).catch(() => undefined);
+      if (cloud.boundRoomId && isAuthUserId(userId)) {
+        void cloudRef.current.writes.upsertDiscussionRead?.(next);
+      }
+    },
+    [cloud.boundRoomId, cloud.userId, guest],
   );
 
   const createWhiteboard = useCallback(
@@ -3070,6 +3147,10 @@ export function App() {
           onRetry={discussionOutbox.retry}
           onSend={sendDiscussion}
           onSupport={supportDiscussion}
+          onEditMessage={editDiscussion}
+          onTombstoneMessage={tombstoneDiscussion}
+          readWatermark={discussionRead}
+          onMarkRead={markDiscussionRead}
           onAttach={(files) => void sendAttachment(files)}
           attachBusy={attachmentUploading}
           attachUpload={attachUpload}
@@ -3265,6 +3346,9 @@ export function App() {
         onSendDiscussion: sendDiscussion,
         onSupportDiscussion: supportDiscussion,
         onEditDiscussion: editDiscussion,
+        onTombstoneDiscussion: tombstoneDiscussion,
+        discussionRead,
+        onMarkDiscussionRead: markDiscussionRead,
         onCreateWhiteboard: createWhiteboard,
         onArchiveWhiteboard: archiveWhiteboard,
         onOpenWhiteboard: (id) => {
