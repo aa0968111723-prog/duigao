@@ -7,6 +7,8 @@ export interface OutboxEntry {
   state: OutboxEntryState;
   /** 這輪失敗後已自動補送過一次（上限一次；之後只聽手動重試/online）。 */
   autoRetried?: boolean;
+  /** 送出時的帳號；換帳號不得看到或重試別人的 outbox。 */
+  ownerId?: string;
 }
 
 export interface OutboxRoomContext {
@@ -32,6 +34,24 @@ export interface OutboxRoomContext {
  *    不畫進別房。換房或回首頁不得把 in-flight／failed 丟掉，否則重整或
  *    切房會讓尚未送出的訊息永久消失。
  */
+export function outboxRowVisibleToOwner(entry: OutboxEntry, ownerId: string | null): boolean {
+  if (!ownerId) return false;
+  if (entry.ownerId) return entry.ownerId === ownerId;
+  return entry.message.authorId === ownerId;
+}
+
+export function isolateOutboxForOwner(
+  entries: Record<string, OutboxEntry>,
+  ownerId: string | null,
+): Record<string, OutboxEntry> {
+  if (!ownerId) return {};
+  const next: Record<string, OutboxEntry> = {};
+  for (const [id, entry] of Object.entries(entries)) {
+    if (outboxRowVisibleToOwner(entry, ownerId)) next[id] = entry;
+  }
+  return next;
+}
+
 export function belongsToCurrentRoom(
   message: DiscussionMessage,
   ctx: Pick<OutboxRoomContext, "localRoomId" | "boundRoomId">,
