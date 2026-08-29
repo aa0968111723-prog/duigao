@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isPrefNotRemoved, isPrefNotSaved } from "./proposalPrefAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -162,7 +163,7 @@ export type CloudWrites = {
   setAllowBoardEdit?: (allow: boolean) => void;
   toggleSupport: (commentId: string, add: boolean) => void;
   insertReply: (reply: import("../lib/types").CommentReply) => void;
-  setProposalPref: (versionId: string, choice: string) => void;
+  setProposalPref: (versionId: string, choice: string) => Promise<void>;
   archiveVersion?: (versionId: string) => Promise<void>;
   restoreVersion?: (versionId: string) => Promise<void>;
 };
@@ -1168,7 +1169,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     setAllowBoardEdit: (allow) => run("allow-board-edit", () => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),
     toggleSupport: (commentId, add) => run(`comment-support:${commentId}`, () => setSupport(supabase!, boundRef.current!, commentId, add)),
     insertReply: (reply) => run(`reply:${reply.id}`, () => repoInsertReply(supabase!, boundRef.current!, reply)),
-    setProposalPref: (versionId, choice) => run(`pref:${versionId}`, () => setPreference(supabase!, boundRef.current!, versionId, choice)),
+    setProposalPref: async (versionId, choice) => {
+      const rid = boundRef.current;
+      const key = `pref:${versionId}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await setPreference(supabase, rid, versionId, choice);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isPrefNotSaved(err) || isPrefNotRemoved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => setPreference(supabase, rid, versionId, choice),
+        });
+        setStatus("offline-pending");
+      }
+    },
     archiveVersion: async (versionId) => {
       if (!supabase) return;
       await repoArchiveVersion(supabase, versionId);

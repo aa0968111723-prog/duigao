@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isPrefNotRemoved, isPrefNotSaved } from "./cloud/proposalPrefAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -2535,9 +2536,24 @@ export function App() {
         const list = (r.proposalPrefs ?? []).filter((p) => !(p.versionId === versionId && p.userId === uidNow));
         return { ...r, proposalPrefs: clearing ? list : [...list, { versionId, userId: uidNow, choice }] };
       });
-      cloudRef.current.writes.setProposalPref(versionId, clearing ? "" : choice);
+      void cloudRef.current.writes.setProposalPref(versionId, clearing ? "" : choice).catch((err) => {
+        if (isPrefNotSaved(err)) {
+          updateRoom((r) => {
+            const list = (r.proposalPrefs ?? []).filter((p) => !(p.versionId === versionId && p.userId === uidNow));
+            return { ...r, proposalPrefs: existing ? [...list, existing] : list };
+          });
+          showToast("這個選擇沒有存成，請再試一次。", { tone: "error" });
+          return;
+        }
+        if (!isPrefNotRemoved(err) || !existing) return;
+        updateRoom((r) => {
+          if ((r.proposalPrefs ?? []).some((p) => p.versionId === versionId && p.userId === uidNow)) return r;
+          return { ...r, proposalPrefs: [...(r.proposalPrefs ?? []), existing] };
+        });
+        showToast("這個選擇沒有取消，請再試一次。", { tone: "error" });
+      });
     },
-    [guest, updateRoom],
+    [guest, showToast, updateRoom],
   );
 
   const startHosting = useCallback(() => {

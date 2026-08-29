@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptPrefDeleteAck, acceptPrefUpsertAck } from "./proposalPrefAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -1124,12 +1125,21 @@ export async function insertReply(supabase: SupabaseClient, roomId: string, repl
 export async function setPreference(supabase: SupabaseClient, roomId: string, versionId: string, choice: string) {
   if (!choice) {
     // RLS delete policy limits this to the caller's own preference row.
-    const { error } = await supabase.from("proposal_preferences").delete().eq("version_id", versionId);
+    const { data, error } = await supabase
+      .from("proposal_preferences")
+      .delete()
+      .eq("version_id", versionId)
+      .select("version_id")
+      .maybeSingle();
     if (error) throw new CloudError(error.message, "preference");
+    acceptPrefDeleteAck(data);
     return;
   }
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("proposal_preferences")
-    .upsert({ room_id: roomId, version_id: versionId, choice }, { onConflict: "version_id,user_id" });
+    .upsert({ room_id: roomId, version_id: versionId, choice }, { onConflict: "version_id,user_id" })
+    .select("version_id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "preference");
+  acceptPrefUpsertAck(data);
 }
