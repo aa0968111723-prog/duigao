@@ -10,7 +10,7 @@ base：`origin/main` @ `2a9d7a0`
 
 | 階段 | 範圍 | 狀態 |
 |---|---|---|
-| **PR-COMM-00** | 真實稽核與安全基線 | **實作完成，待開 PR** |
+| **PR-COMM-00** | 真實稽核與安全基線 | **已開 [#94](https://github.com/aa0968111723-prog/duigao/pull/94)，待人類 review** |
 | PR-COMM-01 | 手機輸入列與可靠傳送 | 未開始 |
 | PR-COMM-02 | 回覆、提及與表情 | 未開始（**需新 migration，被凍結擋住**） |
 | PR-COMM-03 | 未讀、Presence 與 Typing | 未開始（需新 migration） |
@@ -25,8 +25,8 @@ base：`origin/main` @ `2a9d7a0`
 
 **分支**：`agent/team-communication-mobile-tablet`
 **base commit**：`2a9d7a018836e7ec913f009f2f7a5d5b8b25fbff`
-**commit**：`f2adcb8`
-**PR**：尚未建立
+**commit**：`8363c8a`（5 個 commit）
+**PR**：[#94](https://github.com/aa0968111723-prog/duigao/pull/94) — **OPEN，不自動合併**
 **Preview URL**：無（**不自動部署正式環境**）
 
 ### 完成內容
@@ -105,9 +105,19 @@ workflow 子代理做多角度稽核：
 - **BLOCKED_TWO_ACCOUNT_E2E**：沒有第二個測試帳號與可連線的 Supabase 環境變數。
 - **BLOCKED_REAL_DEVICE**：沒有真機／真瀏覽器可驗收。
 
+### commit
+
+```
+8363c8a PR-COMM-00: 修掉我自己寫的假綠探針，並補上表情回應的 RLS
+5ac8fe8 PR-COMM-00: 對抗審查裁決與交接更新
+b2a9490 PR-COMM-00: 回覆自己剛送出的訊息不再撞外鍵
+d112733 PR-COMM-00: 一次讀取失敗不再清空整條討論串
+f2adcb8 PR-COMM-00: 訊息作者可被偽造，回覆是失去來源的複製品
+```
+
 ### 下一步
 
-1. 人類 review PR-COMM-00，決定 `0029` 的合併與套用順序。
+1. 人類 review [#94](https://github.com/aa0968111723-prog/duigao/pull/94)，決定 `0029` 的合併與套用順序。
 2. `0022–0028` 定案後解除 migration 凍結。
 3. 開始 PR-COMM-01（捲動管理、輸入列、草稿持久化、outbox 持久化）——
    這一階段**不需要新表**，可以在凍結期間進行。
