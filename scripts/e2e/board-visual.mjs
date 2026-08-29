@@ -174,6 +174,7 @@ try {
 }
 
 async function shot(page, name) {
+  await page.evaluate(() => document.fonts.ready);
   const file = join(OUT_DIR, `${name}.png`);
   await page.screenshot({ path: file, fullPage: false });
   const baselinePath = join(BASELINE_DIR, `${name}.png`);
