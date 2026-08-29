@@ -52,7 +52,7 @@ test("shell first layer is gated by more, not permanently painted", () => {
   assert.match(shell, /moreOpen/);
   assert.match(shell, /open-\$\{item\.id\}-pane|open-overview-pane/);
   // Secondary chrome must not render on the first layer.
-  assert.match(shell, /moreOpen && \(/);
+  assert.match(shell, /moreOpen &&(?: !hideRoomChrome &&)? \(/);
   assert.doesNotMatch(shell, /project-entry-chips[\s\S]{0,80}hidden=\{hideRoomChrome\}/);
   assert.match(shell, /popstate|duigaoMore/);
 });
