@@ -653,9 +653,10 @@ export async function deleteEdge(supabase: SupabaseClient, roomId: string, edgeI
   if (error) throw new CloudError(error.message, "whiteboard-edge");
 }
 
-export async function updateDiscussion(supabase: SupabaseClient, message: Pick<DiscussionMessage, "id" | "roomId" | "body">): Promise<void> {
+export async function updateDiscussion(supabase: SupabaseClient, message: Pick<DiscussionMessage, "id" | "roomId" | "body" | "payload">): Promise<void> {
   const { data, error } = await supabase.from("room_discussion_messages").update({
     body: message.body,
+    payload: message.payload ?? {},
   }).eq("id", message.id).eq("room_id", message.roomId).abortSignal(AbortSignal.timeout(12000));
   const accepted = acceptDiscussionInsert({ error, data });
   if (!accepted.ok) {

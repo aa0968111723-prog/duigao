@@ -43,6 +43,7 @@ test("D-01: updated_at 明顯晚於 created_at 才標已編輯", () => {
   assert.equal(messageIsEdited(message()), false);
   assert.equal(messageIsEdited(message({ updatedAt: 1_200 })), false);
   assert.equal(messageIsEdited(message({ updatedAt: 4_000 })), true);
+  assert.equal(messageIsEdited(message({ payload: { edited: true } })), true);
 });
 
 test("D-02: 只有作者能改自己的文字；legacy／附件／failed 不行", () => {

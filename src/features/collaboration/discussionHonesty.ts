@@ -8,7 +8,8 @@ import { replySnippet } from "./replies";
 /** Insert + touch trigger can bump updated_at by a few hundred ms. */
 export const EDIT_MARK_MS = 1500;
 
-export function messageIsEdited(message: Pick<DiscussionMessage, "createdAt" | "updatedAt">): boolean {
+export function messageIsEdited(message: Pick<DiscussionMessage, "createdAt" | "updatedAt" | "payload">): boolean {
+  if (message.payload?.edited === true) return true;
   return message.updatedAt - message.createdAt > EDIT_MARK_MS;
 }
 

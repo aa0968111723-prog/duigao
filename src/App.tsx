@@ -1876,7 +1876,7 @@ export function App() {
       const patch = discussionEditPatch(body);
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
       if (!userId || !patch || !current || !canEditDiscussion(current, userId)) return;
-      const next = { ...current, body: patch.body, updatedAt: Date.now() };
+      const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
       updateRoom((r) => ({
         ...r,
         discussion: (r.discussion ?? []).map((item) => item.id === messageId ? next : item),

@@ -338,7 +338,11 @@ try {
     await dismissSelection(page);
     await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_compact_toolbar_390.png"), fullPage: true });
     await page.setViewportSize({ width: 768, height: 1024 });
-    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="wb-compact-toolbar"]')?.getAttribute("data-compact") === "false",
+      null,
+      { timeout: 8000 },
+    );
     check("768 工具列不是 compact", (await page.getByTestId("wb-compact-toolbar").getAttribute("data-compact")) === "false");
     await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_toolbar_768.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -718,7 +722,7 @@ try {
       // 內容側反向 chip：開 擺攤文宣 對稿 → 白板引用 chip → 跳回引用節點
       // 第一層沒有常駐內容入口（#110 更多 sheet）；不可直接點 open-content-pane。
       await openRoomPane(page, "open-content-pane");
-      await page.getByRole("button", { name: /擺攤文宣/ }).first().click();
+      await page.getByTestId("content-pane").getByRole("button", { name: /擺攤文宣/ }).click();
       await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
       await page.waitForSelector('[data-testid="board-refs-chip"]', { timeout: 10000 });
       check("對稿頂列出現「白板 N」引用 chip", (await page.getByTestId("board-refs-chip").first().innerText()).includes("白板"));
