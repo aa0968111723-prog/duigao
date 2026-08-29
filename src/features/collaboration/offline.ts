@@ -366,3 +366,24 @@ export function mergeDiscussionSnapshot<T>(
   if (current && current.id === incoming.id) return current.discussion;
   return undefined;
 }
+
+/**
+ * A collaboration snapshot can land after the message row and before the
+ * mention extras. Replacing the optimistic row then drops `mentionedUserIds`
+ * and the @ highlight vanishes (CI: 提及畫在同一則討論). Keep the ids we
+ * already showed until extras catch up.
+ */
+export function retainMentionedUserIds<T extends { id: string; mentionedUserIds?: string[] }>(
+  current: T[] | undefined,
+  incoming: T[] | undefined,
+): T[] | undefined {
+  if (!incoming) return incoming;
+  if (!current?.length) return incoming;
+  const previous = new Map(current.map((row) => [row.id, row.mentionedUserIds]));
+  return incoming.map((row) => {
+    if (row.mentionedUserIds?.length) return row;
+    const kept = previous.get(row.id);
+    if (kept?.length) return { ...row, mentionedUserIds: kept };
+    return row;
+  });
+}

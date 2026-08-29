@@ -802,6 +802,19 @@ export async function insertDiscussion(supabase: SupabaseClient, message: Discus
   if (!accepted.ok) {
     throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : (error?.message ?? "discussion insert failed"), "discussion");
   }
+  // Mentions must land before this function returns. A snapshot that races
+  // the follow-up insert would otherwise paint the row without @ highlights.
+  if (message.mentionedUserIds?.length) {
+    try {
+      await insertDiscussionMentions(supabase, {
+        roomId: message.roomId,
+        messageId: message.id,
+        mentionedUserIds: message.mentionedUserIds,
+      });
+    } catch {
+      // 訊息已落地。提及列晚到時 retainMentionedUserIds 保住畫面高亮。
+    }
+  }
 }
 
 export async function insertDiscussionMentions(

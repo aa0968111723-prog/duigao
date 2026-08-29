@@ -172,6 +172,7 @@ import {
   loadBoardSnapshot,
   queuePendingEdit,
   mergeDiscussionSnapshot,
+  retainMentionedUserIds,
   reconcileNodes,
   saveBoardSnapshot,
 } from "./features/collaboration/offline";
@@ -629,7 +630,7 @@ export function App() {
         // 讀取失敗造成的空討論不覆蓋畫面上已有的對話（見上方註解）。
         // 只在「同一間房」時保留 —— 換房時 current 是上一間房，
         // 沿用它會把別間房的訊息畫進這間房。
-        discussion: mergeDiscussionSnapshot(current, normalized),
+        discussion: retainMentionedUserIds(current?.discussion, mergeDiscussionSnapshot(current, normalized)),
         // 專案房不可被快照「降級」：loadRoomFull 的 projectMode 推斷在
         // room_mode PATCH 還沒落地、又只有一個分支時會誤判 single，
         // 那會讓房間殼整個掉出去換成單房對稿樹。

@@ -92,7 +92,6 @@ import {
   insertDecision,
   insertAiApplyAudit,
   insertDiscussion,
-  insertDiscussionMentions,
   insertTodo as repoInsertTodo,
   updateTodo as repoUpdateTodo,
   updateDiscussion as repoUpdateDiscussion,
@@ -1157,17 +1156,6 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       setStatus("syncing");
       try {
         await insertDiscussion(supabase, message);
-        if (message.mentionedUserIds?.length) {
-          try {
-            await insertDiscussionMentions(supabase, {
-              roomId: message.roomId,
-              messageId: message.id,
-              mentionedUserIds: message.mentionedUserIds,
-            });
-          } catch {
-            /* 提及是附加列；訊息已落地就不擋。 */
-          }
-        }
         setStatus(pending.current.length ? "offline-pending" : "synced");
         return true;
       } catch (err) {

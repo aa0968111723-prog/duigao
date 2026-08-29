@@ -104,6 +104,11 @@ test("M-05 cross-room: 寫入路徑帶本房 room_id，提及必須是成員", (
     : repo.slice(repo.indexOf("insertDiscussionMentions"));
   assert.match(mentionFn.slice(0, 800), /room_id/);
   assert.match(mentionFn.slice(0, 800), /mentioned_user_id|mentionedUserId/);
+  const insertFn = repo.slice(
+    repo.indexOf("export async function insertDiscussion("),
+    repo.indexOf("export async function insertDiscussionMentions"),
+  );
+  assert.match(insertFn, /insertDiscussionMentions/);
 });
 
 test("M-06: typing 走既有 presence，不建表；不准已讀回條", () => {

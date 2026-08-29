@@ -297,13 +297,32 @@ try {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
-    await page.getByLabel("房間討論").fill("@");
+    const mentionComposer = page.getByTestId("discussion-composer");
+    await mentionComposer.getByLabel("房間討論").fill("@");
     await page.waitForSelector('[data-testid="mention-picker"]', { timeout: 8000 });
     check("@ 從成員挑，不是第二條聊天", await page.getByTestId("mention-picker").count() === 1 && await page.getByTestId("mention-picker").locator("button").count() >= 1);
     await page.getByTestId("mention-picker").locator("button").first().click();
-    await page.getByRole("button", { name: "送出" }).click();
-    await page.waitForFunction(() => document.querySelector('[data-testid="discussion-mention"]'), null, { timeout: 8000 });
-    check("提及畫在同一則討論", await page.getByTestId("discussion-mention").count() >= 1);
+    // Picker writes via setDraft; a too-early 送出 sends bare "@" with no ids.
+    await page.waitForFunction(() => {
+      const input = document.querySelector('[data-testid="discussion-composer"] input[aria-label="房間討論"]');
+      return Boolean(input instanceof HTMLInputElement && /@\S+/.test(input.value) && input.value.trim() !== "@");
+    }, null, { timeout: 5000 });
+    const mentionSend = mentionComposer.getByRole("button", { name: "送出" });
+    await mentionSend.waitFor({ state: "visible", timeout: 5000 });
+    if (!(await mentionSend.isEnabled())) {
+      await mentionComposer.getByLabel("房間討論").fill(await mentionComposer.getByLabel("房間討論").inputValue());
+    }
+    await mentionSend.click();
+    // Optimistic mark can appear then vanish when a snapshot lacks extras.
+    // Wait until the mark is present *and still present* after a settle.
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="discussion-mention"]').length >= 1, null, { timeout: 8000 });
+    await page.waitForTimeout(120);
+    const mentionStill = await page.waitForFunction(
+      () => document.querySelectorAll('[data-testid="discussion-mention"]').length >= 1,
+      null,
+      { timeout: 4000 },
+    ).then(() => true).catch(() => false);
+    check("提及畫在同一則討論", mentionStill && await page.getByTestId("discussion-mention").count() >= 1);
     await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_mention_390.png"), fullPage: true });
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });

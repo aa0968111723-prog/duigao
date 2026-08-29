@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { indexMessages, replySnippet, resolveReply, REPLY_SNIPPET_MAX } from "../../src/features/collaboration/replies.ts";
-import { mergeDiscussionSnapshot } from "../../src/features/collaboration/offline.ts";
+import { mergeDiscussionSnapshot, retainMentionedUserIds } from "../../src/features/collaboration/offline.ts";
 import type { DiscussionMessage } from "../../src/features/collaboration/types.ts";
 
 function message(over: Partial<DiscussionMessage> & { id: string }): DiscussionMessage {
@@ -159,4 +159,23 @@ test("伺服器回答時一律採用，不會被同房的舊資料蓋回去", ()
     { id: "room-1", discussion: [{ id: "new" }] },
   );
   assert.deepEqual(kept, [{ id: "new" }]);
+});
+
+test("快照缺提及 extras 時保住畫面上已有的 mentionedUserIds", () => {
+  const incoming = retainMentionedUserIds(
+    [{ id: "m1", mentionedUserIds: ["u-b"] }, { id: "m2" }],
+    [{ id: "m1" }, { id: "m2", mentionedUserIds: ["u-c"] }],
+  );
+  assert.deepEqual(incoming, [
+    { id: "m1", mentionedUserIds: ["u-b"] },
+    { id: "m2", mentionedUserIds: ["u-c"] },
+  ]);
+});
+
+test("快照帶了提及列就採用伺服器的，不留樂觀殘值", () => {
+  const incoming = retainMentionedUserIds(
+    [{ id: "m1", mentionedUserIds: ["stale"] }],
+    [{ id: "m1", mentionedUserIds: ["u-b"] }],
+  );
+  assert.deepEqual(incoming, [{ id: "m1", mentionedUserIds: ["u-b"] }]);
 });
