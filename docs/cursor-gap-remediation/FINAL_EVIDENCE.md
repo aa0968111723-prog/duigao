@@ -12,7 +12,7 @@
 ## This branch
 
 - Branch: `cursor/p0-main-remainders-70d9`
-- Code head: `61e969c` board 「＋投票」human question (on `dbe8882` decision title)
+- Code head: `19d7c60` discussion 「建立投票」human question (on `afbdd3a` board poll)
 - Evidence commit follows this file; do not treat docs as IMPLEMENTED without the source above
 - No `0031+` this turn. Mentions / unread / receipts / todo / typing / message tombstone stay unmodeled.
 - Base **must stay `main`**
@@ -43,13 +43,20 @@ Inspected current tree after #107/#108/#113/#114. Do **not** invent tables. Do *
 | work cite | **wired** | existing kinds `poster`/`video`/`plan`/`whiteboard` + payload ids; composer `引` → `cite-work` |
 | decision draft | **wired** | `decision_records` pending/decided; discussion 新增 + board 「寫下決策」both require a human title; AI/`agent`/`system` cannot finalize |
 | board 寫下決策 | **wired** | `boardDecisionWrite`; sheet `wb-decision-draft` / `wb-decision-title`; no canned 「已決定：採用 B 版」 |
-| board ＋投票 | **wired this turn** | `boardPollWrite`; sheet `wb-poll-draft` / `wb-poll-question`; 0013 options 2–6; no canned 「主視覺要不要換？」; AI cannot create |
+| board ＋投票 | **wired** | `boardPollWrite`; sheet `wb-poll-draft` / `wb-poll-question`; 0013 options 2–6; no canned 「主視覺要不要換？」; AI cannot create |
+| discussion 建立投票 | **wired this turn** | sheet `discussion-poll-draft`; `boardPollWrite`; no `message.body || "要不要這樣做？"` |
 | todo draft | **unmodeled** | no todo/task table |
 | read receipts | **unmodeled** | no receipt table; UI must not show 已讀／雙藍勾 |
 | `kind: quote` | **unmodeled as producer** | CHECK allows it; zero honest producers — do not fake a cite type |
-| polls | **present** | `room_polls` 0013; board create is honest; discussion 「建立投票」still falls back to 「要不要這樣做？」 if body empty |
+| polls | **present** | `room_polls` 0013; board and discussion create both require a human question + ≥2 options |
 
-## This turn — board ＋投票 + `dbe8882` CI
+## This turn — discussion 建立投票 + `afbdd3a` CI
+
+Main still `cd7eb5f`; no merge needed. No `0031+`. `afbdd3a` agent-read-layer **success** `33264454473`; browser `33264454105` still in progress at evidence write (build + migrations already green).
+
+Discussion 「建立投票」no longer uses `message.body || "要不要這樣做？"`. D-10 failed first against that fallback. Sheet requires `boardPollWrite` (human question + ≥2 options). Empty body is not a poll. `createProjectPoll` still rejects AI/`agent`/`system`.
+
+## Prior turn — board ＋投票 + `dbe8882` CI
 
 `dbe8882` CI **green**: agent-read-layer success; browser `33264257587` success. Main still `cd7eb5f`; no merge needed. No `0031+`.
 
@@ -83,7 +90,8 @@ Board 「寫下決策」no longer inserts canned 「已決定：採用 B 版」.
 | `8f91286` edit mark | **success** | **failed** `33263703226` | visual 11/15; fixed on `1416120` |
 | `f61cd54` compact + #123 | **success** `33263983135` | **success** `33263983133` | 15/15 visual |
 | `dbe8882` board decision title | **success** | **success** `33264257587` | 15/15 visual |
-| `61e969c` board poll question | (this push) | (pending) | do not claim green until terminal |
+| `afbdd3a` board poll question | **success** `33264454473` | in progress `33264454105` | build + migrations green at evidence write |
+| `19d7c60` discussion poll | (this push) | (pending) | do not claim green until terminal |
 
 ## Review classifications
 
@@ -101,14 +109,14 @@ Board 「寫下決策」no longer inserts canned 「已決定：採用 B 版」.
 | Poster/video fake vision + research SPA 200 | Fixed on this branch | `honesty.ts` + analysis/research wiring |
 | Discussion edit / work cite / decision title | Wired | `discussionHonesty.ts` + RoomDiscussion |
 | Board canned 「已決定：採用 B 版」 | Fixed | `boardDecisionWrite` + `wb-decision-title` |
-| Board canned 「主視覺要不要換？」 | Fixed this turn | `boardPollWrite` + `wb-poll-question` |
+| Board canned 「主視覺要不要換？」 | Fixed | `boardPollWrite` + `wb-poll-question` |
+| Discussion canned 「要不要這樣做？」 | Fixed this turn | `discussion-poll-draft` + `boardPollWrite` |
 
 ### Won’t fix / leftover (not this PR)
 
 - Mentions / unread / first-unread / read receipts / discussion tombstone / todo — **unmodeled**. No `0031+`.
 - Typing / per-member presence **table** unmodeled (channel count + lastWriter stamps only)
 - `kind: quote` has no producer
-- Discussion 「建立投票」still uses `message.body || "要不要這樣做？"` when the message body is empty
 - Canva / CUTOS / Perplexity production secrets unverified
 - Stale room stack `#95→#115` vs main
 - #88 / #104 / #119 drafts still CONFLICTING / human rebase
@@ -122,15 +130,15 @@ Board 「寫下決策」no longer inserts canned 「已決定：採用 B 版」.
 | Suite | Result |
 |---|---|
 | `test:visual` | **15/15** after baseline refresh (was 11/15 on `8f91286` CI) |
-| `discussion-honesty` | **9/9** D-01…D-09 |
-| `test:collaboration-e2e` | **128/128** (poll question sheet + human options) |
-| `test:collaboration` | **254/254** |
+| `discussion-honesty` | **10/10** D-01…D-10 |
+| `test:collaboration-e2e` | **129/129** (discussion poll sheet + human question) |
+| `test:collaboration` | **255/255** |
 
-390/768 board poll shots: `wb_poll_question_390.png`, `wb_poll_question_768.png`.
+390/768 discussion poll shots: `discussion_poll_390.png`, `discussion_poll_768.png`.
 
 ## Production (re-curl this turn)
 
-Re-curled 2026-08-29 16:58 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1700.txt`):
+Re-curled 2026-08-29 17:02 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1705.txt`):
 
 | Path | HTTP | Type | Body |
 |---|---|---|---|
