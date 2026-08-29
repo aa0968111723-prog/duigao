@@ -4,6 +4,8 @@ import type {
   DecisionRecord,
   DiscussionMessage,
   DiscussionSupport,
+  RoomMember,
+  RoomTodo,
   Whiteboard,
   WhiteboardEdge,
   WhiteboardFrame,
@@ -96,6 +98,20 @@ export type DiscussionReadRow = {
 };
 
 type SupportRow = { message_id: string; room_id: string; user_id: string };
+
+type MentionRow = { message_id: string; room_id: string; mentioned_user_id: string };
+
+type TodoRow = {
+  id: string;
+  room_id: string;
+  title: string;
+  created_by: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type MemberRow = { user_id: string; display_name: string; color: string | null };
 
 type DecisionRow = {
   id: string;
@@ -231,7 +247,22 @@ export type CollaborationSlice = {
   discussionSupports: DiscussionSupport[];
   decisions: DecisionRecord[];
   allowBoardEdit: boolean;
+  todos: RoomTodo[];
+  members: RoomMember[];
 };
+
+function todoFromRow(row: TodoRow): RoomTodo | null {
+  if (row.status !== "open" && row.status !== "done") return null;
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    title: row.title,
+    createdBy: row.created_by ?? "system",
+    status: row.status,
+    createdAt: ms(row.created_at),
+    updatedAt: ms(row.updated_at),
+  };
+}
 
 export async function loadCollaborationSummary(supabase: SupabaseClient, roomId: string): Promise<Omit<CollaborationSlice, "nodes" | "edges"> & { nodes: WhiteboardNode[]; edges: WhiteboardEdge[] }> {
   const [boardsRes, discussionRes, supportsRes, decisionsRes, roomRes] = await Promise.all([
@@ -251,11 +282,21 @@ export async function loadCollaborationSummary(supabase: SupabaseClient, roomId:
   // 使用者看到的是上一份好的快照，不是被抹掉的對話。
   const failed = [boardsRes, discussionRes, supportsRes, decisionsRes, roomRes].find((res) => res.error);
   if (failed?.error) throw new CloudError(failed.error.message, "collaboration-summary");
+  const extras = await loadDiscussionExtras(supabase, roomId);
+  const mentionsByMessage = new Map<string, string[]>();
+  for (const row of extras.mentions) {
+    const list = mentionsByMessage.get(row.message_id) ?? [];
+    list.push(row.mentioned_user_id);
+    mentionsByMessage.set(row.message_id, list);
+  }
   return {
     whiteboards: ((boardsRes.data as WhiteboardRow[] | null) ?? []).map(whiteboardFromRow),
     nodes: [],
     edges: [],
-    discussion: ((discussionRes.data as DiscussionRow[] | null) ?? []).map(discussionFromRow).filter((item): item is DiscussionMessage => Boolean(item)),
+    discussion: ((discussionRes.data as DiscussionRow[] | null) ?? []).map(discussionFromRow).filter((item): item is DiscussionMessage => Boolean(item)).map((message) => ({
+      ...message,
+      mentionedUserIds: mentionsByMessage.get(message.id),
+    })),
     discussionSupports: ((supportsRes.data as SupportRow[] | null) ?? []).map((row) => ({
       messageId: row.message_id,
       roomId: row.room_id,
@@ -263,6 +304,33 @@ export async function loadCollaborationSummary(supabase: SupabaseClient, roomId:
     })),
     decisions: ((decisionsRes.data as DecisionRow[] | null) ?? []).map(decisionFromRow).filter((item): item is DecisionRecord => Boolean(item)),
     allowBoardEdit: Boolean((roomRes.data as { allow_board_edit?: boolean } | null)?.allow_board_edit),
+    todos: extras.todos,
+    members: extras.members,
+  };
+}
+
+/** 0032 extras. Table missing / RLS miss must not wipe 0014 discussion. */
+async function loadDiscussionExtras(
+  supabase: SupabaseClient,
+  roomId: string,
+): Promise<{ mentions: MentionRow[]; todos: RoomTodo[]; members: RoomMember[] }> {
+  const [mentionsRes, todosRes, membersRes] = await Promise.all([
+    supabase.from("room_discussion_mentions").select("message_id, room_id, mentioned_user_id").eq("room_id", roomId),
+    supabase.from("room_todos").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
+    supabase.from("room_members").select("user_id, display_name, color").eq("room_id", roomId),
+  ]);
+  return {
+    mentions: mentionsRes.error ? [] : ((mentionsRes.data as MentionRow[] | null) ?? []),
+    todos: todosRes.error
+      ? []
+      : ((todosRes.data as TodoRow[] | null) ?? []).map(todoFromRow).filter((item): item is RoomTodo => Boolean(item)),
+    members: membersRes.error
+      ? []
+      : ((membersRes.data as MemberRow[] | null) ?? []).map((row) => ({
+        userId: row.user_id,
+        name: row.display_name,
+        color: row.color ?? undefined,
+      })),
   };
 }
 
@@ -734,6 +802,55 @@ export async function insertDiscussion(supabase: SupabaseClient, message: Discus
   if (!accepted.ok) {
     throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : (error?.message ?? "discussion insert failed"), "discussion");
   }
+  // Mentions must land before this function returns. A snapshot that races
+  // the follow-up insert would otherwise paint the row without @ highlights.
+  if (message.mentionedUserIds?.length) {
+    try {
+      await insertDiscussionMentions(supabase, {
+        roomId: message.roomId,
+        messageId: message.id,
+        mentionedUserIds: message.mentionedUserIds,
+      });
+    } catch {
+      // 訊息已落地。提及列晚到時 retainMentionedUserIds 保住畫面高亮。
+    }
+  }
+}
+
+export async function insertDiscussionMentions(
+  supabase: SupabaseClient,
+  input: { roomId: string; messageId: string; mentionedUserIds: string[] },
+): Promise<void> {
+  const ids = [...new Set(input.mentionedUserIds.filter(isUuid))];
+  if (!ids.length) return;
+  const { error } = await supabase.from("room_discussion_mentions").insert(
+    ids.map((mentionedUserId) => ({
+      message_id: input.messageId,
+      room_id: input.roomId,
+      mentioned_user_id: mentionedUserId,
+    })),
+  );
+  if (error) throw new CloudError(error.message, "discussion-mention");
+}
+
+export async function insertTodo(supabase: SupabaseClient, todo: RoomTodo): Promise<void> {
+  const { error } = await supabase.from("room_todos").insert({
+    id: todo.id,
+    room_id: todo.roomId,
+    title: todo.title,
+    created_by: isUuid(todo.createdBy) ? todo.createdBy : undefined,
+    status: todo.status,
+  });
+  if (error) throw new CloudError(error.message, "room-todo");
+}
+
+export async function updateTodo(supabase: SupabaseClient, todo: Pick<RoomTodo, "id" | "roomId" | "title" | "status">): Promise<void> {
+  const { error } = await supabase.from("room_todos").update({
+    title: todo.title,
+    status: todo.status,
+    updated_at: new Date().toISOString(),
+  }).eq("id", todo.id).eq("room_id", todo.roomId);
+  if (error) throw new CloudError(error.message, "room-todo");
 }
 
 /**
@@ -801,7 +918,7 @@ export type CollaborationIdMaps = {
   pollIdMap?: Map<string, string>;
 };
 
-export function collaborationSliceFromRoom(room: Pick<Room, "whiteboards" | "whiteboardNodes" | "whiteboardEdges" | "discussion" | "discussionSupports" | "decisions" | "allowBoardEdit">): CollaborationSlice {
+export function collaborationSliceFromRoom(room: Pick<Room, "whiteboards" | "whiteboardNodes" | "whiteboardEdges" | "discussion" | "discussionSupports" | "decisions" | "allowBoardEdit" | "todos" | "members">): CollaborationSlice {
   return {
     whiteboards: room.whiteboards ?? [],
     nodes: room.whiteboardNodes ?? [],
@@ -810,6 +927,8 @@ export function collaborationSliceFromRoom(room: Pick<Room, "whiteboards" | "whi
     discussionSupports: room.discussionSupports ?? [],
     decisions: room.decisions ?? [],
     allowBoardEdit: Boolean(room.allowBoardEdit),
+    todos: room.todos ?? [],
+    members: room.members ?? [],
   };
 }
 
@@ -853,6 +972,8 @@ export function remapCollaborationSlice(slice: CollaborationSlice, roomId: strin
       roomId,
       sourceId: decision.sourceType === "poll" ? remapId(decision.sourceId, maps.pollIdMap) : decision.sourceId,
     })),
+    todos: slice.todos.map((todo) => ({ ...todo, roomId })),
+    members: slice.members,
   };
 }
 
@@ -864,6 +985,7 @@ export function collaborationSliceHasRows(slice: CollaborationSlice): boolean {
     || slice.discussion.length
     || slice.discussionSupports.length
     || slice.decisions.length
+    || slice.todos.length
     || slice.allowBoardEdit,
   );
 }
@@ -923,6 +1045,27 @@ export async function insertCollaborationSlice(supabase: SupabaseClient, slice: 
       reply_to_id: message.replyToId ?? null,
     })));
     if (error) throw new CloudError(error.message, "discussion");
+    const mentionRows = slice.discussion.flatMap((message) =>
+      (message.mentionedUserIds ?? []).filter(isUuid).map((mentionedUserId) => ({
+        message_id: message.id,
+        room_id: message.roomId,
+        mentioned_user_id: mentionedUserId,
+      })),
+    );
+    if (mentionRows.length) {
+      const mentionError = (await supabase.from("room_discussion_mentions").insert(mentionRows)).error;
+      if (mentionError) throw new CloudError(mentionError.message, "discussion-mention");
+    }
+  }
+  if (slice.todos.length) {
+    const { error } = await supabase.from("room_todos").insert(slice.todos.map((todo) => ({
+      id: todo.id,
+      room_id: todo.roomId,
+      title: todo.title,
+      created_by: isUuid(todo.createdBy) ? todo.createdBy : undefined,
+      status: todo.status,
+    })));
+    if (error) throw new CloudError(error.message, "room-todo");
   }
   const supportRows = slice.discussionSupports.filter((support) => isUuid(support.userId));
   if (supportRows.length) {

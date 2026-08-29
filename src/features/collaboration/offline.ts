@@ -366,3 +366,55 @@ export function mergeDiscussionSnapshot<T>(
   if (current && current.id === incoming.id) return current.discussion;
   return undefined;
 }
+
+/**
+ * A collaboration snapshot can land after the message row and before the
+ * mention extras. Replacing the optimistic row then drops `mentionedUserIds`
+ * and the @ highlight vanishes (CI: 提及畫在同一則討論). Keep the ids we
+ * already showed until extras catch up.
+ */
+export function retainMentionedUserIds<T extends { id: string; mentionedUserIds?: string[] }>(
+  current: T[] | undefined,
+  incoming: T[] | undefined,
+): T[] | undefined {
+  return mergeDiscussionRowState(current, incoming);
+}
+
+type DiscussionRowState = {
+  id: string;
+  mentionedUserIds?: string[];
+  body?: string;
+  updatedAt?: number;
+  payload?: { edited?: boolean } & Record<string, unknown>;
+};
+
+/**
+ * Snapshot rows can lag the optimistic UI:
+ *   - mention extras not written yet → keep `mentionedUserIds`
+ *   - insert snapshot after a local edit → keep edited body / 已編輯
+ * A newer server edit (`payload.edited` + higher updatedAt) still wins.
+ */
+export function mergeDiscussionRowState<T extends DiscussionRowState>(
+  current: T[] | undefined,
+  incoming: T[] | undefined,
+): T[] | undefined {
+  if (!incoming) return incoming;
+  if (!current?.length) return incoming;
+  const previous = new Map(current.map((row) => [row.id, row]));
+  return incoming.map((row) => {
+    const mine = previous.get(row.id);
+    const mentionedUserIds = row.mentionedUserIds?.length ? row.mentionedUserIds : mine?.mentionedUserIds;
+    const withMentions = mentionedUserIds?.length ? { ...row, mentionedUserIds } : row;
+    if (!mine) return withMentions;
+    const incomingEdited = row.payload?.edited === true;
+    const localEdited = mine.payload?.edited === true;
+    const localNewer = (mine.updatedAt ?? 0) > (row.updatedAt ?? 0);
+    if (localEdited && !incomingEdited) {
+      return { ...withMentions, body: mine.body, payload: mine.payload, updatedAt: mine.updatedAt };
+    }
+    if (localEdited && incomingEdited && localNewer && mine.body !== row.body) {
+      return { ...withMentions, body: mine.body, payload: mine.payload, updatedAt: mine.updatedAt };
+    }
+    return withMentions;
+  });
+}

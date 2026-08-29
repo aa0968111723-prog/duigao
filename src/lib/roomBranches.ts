@@ -105,10 +105,26 @@ export function branchSummary(room: Room, branchId: string): BranchSummary {
   };
 }
 
+/**
+ * A collaboration / branch snapshot can land before a just-uploaded cut is
+ * in the response (or a summary snapshot arrives with `versions: []`).
+ * Replacing the array then unmounts the player and can leak the other
+ * branch's chips into the overlay (CI: 影片分支沿用既有播放器 / 沒有把文宣版本串進來).
+ * Union by id: the snapshot wins on a shared id; local-only rows stay.
+ */
+export function retainLocalVersions(current: Version[] | undefined, incoming: Version[] | undefined): Version[] {
+  const remote = incoming ?? [];
+  const local = current ?? [];
+  if (!remote.length) return local;
+  if (!local.length) return remote;
+  const remoteIds = new Set(remote.map((version) => version.id));
+  const extras = local.filter((version) => !remoteIds.has(version.id));
+  return extras.length ? [...remote, ...extras] : remote;
+}
+
 /** Replace one branch's detail slice without disturbing room-level summary data. */
 export function mergeRoomBranch(room: Room, detail: Room, branchId: string): Room {
   const detailVersionIds = new Set(detail.versions.map((version) => version.id));
-  const keepVersion = (version: Version) => version.branchId !== branchId && !detailVersionIds.has(version.id);
   const keepVersionChild = <T extends { versionId: string }>(row: T) => !detailVersionIds.has(row.versionId);
   const branches = (room.branches ?? []).map((branch) =>
     branch.id === branchId ? detail.branches?.find((item) => item.id === branchId) ?? branch : branch,
@@ -119,7 +135,7 @@ export function mergeRoomBranch(room: Room, detail: Room, branchId: string): Roo
     projectMode: true,
     branches,
     branchSummaries: room.branchSummaries ?? detail.branchSummaries,
-    versions: [...room.versions.filter(keepVersion), ...detail.versions],
+    versions: retainLocalVersions(room.versions, detail.versions),
     comments: [...room.comments.filter(keepVersionChild), ...detail.comments],
     strokes: [...room.strokes.filter(keepVersionChild), ...detail.strokes],
     messages: room.messages,
@@ -144,6 +160,8 @@ export function mergeRoomBranch(room: Room, detail: Room, branchId: string): Roo
     discussionSupports: detail.discussionSupports ?? room.discussionSupports,
     whiteboards: detail.whiteboards ?? room.whiteboards,
     decisions: detail.decisions ?? room.decisions,
+    todos: detail.todos ?? room.todos,
+    members: detail.members ?? room.members,
     allowBoardEdit: detail.allowBoardEdit ?? room.allowBoardEdit,
     plans: [
       ...(room.plans ?? []).filter((plan) => plan.branchId !== branchId),

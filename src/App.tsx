@@ -34,7 +34,7 @@ import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type 
 import { boardProposals, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
-import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
+import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, retainLocalVersions, roomForBranch } from "./lib/roomBranches";
 import { roomCode, uid, uuid } from "./lib/id";
 import { deleteRoom, listRooms, listUploadSessions, loadDiscussionReadLocal, loadFlag, loadGuest, loadRoom, saveDiscussionRead, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
 import { useDiscussionDraft } from "./hooks/useDiscussionDraft";
@@ -141,7 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
+import { boardPollWrite, canCompleteRoomTodo, canEditDiscussion, canTombstoneDiscussion, canWriteTodo, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, todoDraftTitle, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -172,6 +172,7 @@ import {
   loadBoardSnapshot,
   queuePendingEdit,
   mergeDiscussionSnapshot,
+  mergeDiscussionRowState,
   reconcileNodes,
   saveBoardSnapshot,
 } from "./features/collaboration/offline";
@@ -353,13 +354,16 @@ export function App() {
     for (const message of room?.discussion ?? []) {
       if (message.authorId && message.authorName) map.set(message.authorId, message.authorName);
     }
+    for (const member of room?.members ?? []) {
+      if (member.userId && member.name) map.set(member.userId, member.name);
+    }
     for (const node of room?.whiteboardNodes ?? []) {
       const id = node.content.lastWriterId;
       const name = node.content.lastWriterName;
       if (id && name) map.set(id, name);
     }
     return map;
-  }, [room?.discussion, room?.whiteboardNodes]);
+  }, [room?.discussion, room?.whiteboardNodes, room?.members]);
 
   // frame stale-write：這次寫入已被丟棄（不重試），重讀該板 frames 並誠實
   // 告知 — 與節點衝突路徑同一紀律（F2）。
@@ -479,6 +483,7 @@ export function App() {
   isMobileRef.current = isMobile;
   const collabRef = useRef<Collab | null>(null);
   const roomRef = useRef<Room | null>(null);
+  const activeBranchIdRef = useRef<string | null>(null);
   const lastAckedNodeVersion = useRef(new Map<string, number>());
   const nodePersistChain = useRef(new Map<string, Promise<void>>());
   const appliedAiProposalIds = useRef(new Set<string>());
@@ -489,6 +494,7 @@ export function App() {
   const undoStack = useRef<Room[]>([]);
   roomRef.current = room;
   viewRef.current = view;
+  activeBranchIdRef.current = activeBranchId;
 
   /**
    * How this tab was opened. Read once: `main.tsx` has already upgraded a
@@ -623,10 +629,16 @@ export function App() {
         plans,
         whiteboardNodes,
         whiteboardEdges,
+        // Summary / stale branch snapshots can arrive with `versions: []` or
+        // without the cut we just adopted locally. Same rule as discussion:
+        // a snapshot must not wipe media the person already sees.
+        versions: current && current.id === normalized.id
+          ? retainLocalVersions(current.versions, normalized.versions)
+          : normalized.versions,
         // 讀取失敗造成的空討論不覆蓋畫面上已有的對話（見上方註解）。
         // 只在「同一間房」時保留 —— 換房時 current 是上一間房，
         // 沿用它會把別間房的訊息畫進這間房。
-        discussion: mergeDiscussionSnapshot(current, normalized),
+        discussion: mergeDiscussionRowState(current?.discussion, mergeDiscussionSnapshot(current, normalized)),
         // 專案房不可被快照「降級」：loadRoomFull 的 projectMode 推斷在
         // room_mode PATCH 還沒落地、又只有一個分支時會誤判 single，
         // 那會讓房間殼整個掉出去換成單房對稿樹。
@@ -649,7 +661,18 @@ export function App() {
       if (!wantsBranch || branchReady) roomLinkAppliedRef.current = true;
     }
     setView((v) => {
-      const ids = normalized.versions.map((x) => x.id);
+      // Scope to the open branch. A room-wide snapshot still lists the poster
+      // cut; keeping that id selected on a video overlay makes the player
+      // resolve the image version (or remount) and the chip strip mix branches.
+      const currentRoom = roomRef.current;
+      const versions = currentRoom && currentRoom.id === normalized.id
+        ? retainLocalVersions(currentRoom.versions, normalized.versions)
+        : normalized.versions;
+      const openBranchId = activeBranchIdRef.current;
+      const scoped = openBranchId
+        ? versions.filter((item) => item.branchId === openBranchId)
+        : versions;
+      const ids = (scoped.length ? scoped : versions).map((x) => x.id);
       const requestedVersionId = applyLink && roomLink.kind === "cloud" ? roomLink.versionId : undefined;
       const versionId = requestedVersionId && ids.includes(requestedVersionId)
         ? requestedVersionId
@@ -1171,6 +1194,11 @@ export function App() {
         setView((v) => {
           const viewRoom = targetBranchId ? roomForBranch(next, targetBranchId) : next;
           if (created || !v.versionId) return initialView(viewRoom);
+          const added = newVersions[newVersions.length - 1];
+          const onThisBranch = viewRoom.versions.some((item) => item.id === v.versionId);
+          if (!onThisBranch && added) {
+            return { ...v, versionId: added.id, compareId: added.id, compareMode: "single" };
+          }
           if (v.compareId === v.versionId && viewRoom.versions.length >= 2) {
             const other = viewRoom.versions.find((x) => x.id !== v.versionId);
             if (other) return { ...v, compareId: other.id };
@@ -1358,7 +1386,17 @@ export function App() {
           updatedAt: Date.now(),
         };
         setRoom(next);
-        setView((v) => (isNewRoom || !v.versionId ? initialView(next) : v));
+        setView((v) => {
+          const viewRoom = targetBranchId ? roomForBranch(next, targetBranchId) : next;
+          if (isNewRoom || !v.versionId) return initialView(viewRoom);
+          // Stay on this branch's new cut. Keeping the previous poster's
+          // versionId lets a later snapshot resolve the image row inside the
+          // video overlay (0 players / mixed chips).
+          if (viewRoom.versions.some((item) => item.id === version.id)) {
+            return { ...v, versionId: version.id, compareId: version.id, compareMode: "single" };
+          }
+          return initialView(viewRoom);
+        });
         trackSave(next);
         showToast(isNewRoom ? "影片好了，開始留意見吧" : `已新增${label}`, { tone: "success" });
       } catch (err) {
@@ -1749,7 +1787,7 @@ export function App() {
   );
 
   const sendDiscussion = useCallback(
-    (input?: { id?: string; body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => {
+    (input?: { id?: string; body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string; mentionedUserIds?: string[] }) => {
       if (!guest) return;
       const body = (input?.body ?? chatInput).trim();
       if (!body && !input?.kind) return;
@@ -1764,6 +1802,7 @@ export function App() {
         body: body || (input?.payload?.title ?? ""),
         payload: input?.payload ?? {},
         replyToId: input?.replyToId,
+        mentionedUserIds: input?.mentionedUserIds,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -1924,7 +1963,10 @@ export function App() {
       const userId = cloud.userId ?? guest?.id;
       const patch = discussionEditPatch(body);
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
-      if (!userId || !patch || !current || !canEditDiscussion(current, userId)) return;
+      if (!userId || !patch || !current) return;
+      // Bind can swap guest.id → cloud.userId after send; the author row
+      // still has the id used at insert. Either id may edit.
+      if (!canEditDiscussion(current, userId) && !(guest && canEditDiscussion(current, guest.id))) return;
       const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
       updateRoom((r) => ({
         ...r,
@@ -1971,6 +2013,43 @@ export function App() {
       }
     },
     [cloud.boundRoomId, cloud.userId, guest],
+  );
+
+  const createTodo = useCallback(
+    (raw: string) => {
+      const title = todoDraftTitle(raw);
+      const userId = cloud.userId ?? guest?.id;
+      const roomId = roomRef.current?.id;
+      if (!title || !userId || !roomId || !canWriteTodo(userId)) return;
+      const todo = {
+        id: uuid(),
+        roomId,
+        title,
+        createdBy: userId,
+        status: "open" as const,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      updateRoom((r) => ({ ...r, todos: [...(r.todos ?? []), todo] }));
+      cloudRef.current.writes.insertTodo?.(todo);
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
+  const completeTodo = useCallback(
+    (todoId: string) => {
+      const userId = cloud.userId ?? guest?.id;
+      const current = (roomRef.current?.todos ?? []).find((item) => item.id === todoId);
+      const canManage = cloud.boundRoomId ? cloud.canManageMedia : true;
+      if (!userId || !current || !canCompleteRoomTodo(current, userId, canManage)) return;
+      const next = { ...current, status: "done" as const, updatedAt: Date.now() };
+      updateRoom((r) => ({
+        ...r,
+        todos: (r.todos ?? []).map((item) => (item.id === todoId ? next : item)),
+      }));
+      cloudRef.current.writes.updateTodo?.(next);
+    },
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, updateRoom],
   );
 
   const createWhiteboard = useCallback(
@@ -3135,6 +3214,16 @@ export function App() {
           onTombstoneMessage={tombstoneDiscussion}
           readWatermark={discussionRead}
           onMarkRead={markDiscussionRead}
+          onCreateTodo={createTodo}
+          onCompleteTodo={completeTodo}
+          typingLabel={(cloud.presencePeople ?? [])
+            .filter((person) => person.typing && person.userId !== cloud.userId)
+            .map((person) => nameByUserId.get(person.userId))
+            .filter((name): name is string => Boolean(name))
+            .slice(0, 2)
+            .map((name) => `${name}正在輸入`)
+            .join("、") || ((cloud.presencePeople ?? []).some((person) => person.typing && person.userId !== cloud.userId) ? "有人正在輸入" : undefined)}
+          onTyping={cloud.setTyping}
           onAttach={(files) => void sendAttachment(files)}
           attachBusy={attachmentUploading}
           attachUpload={attachUpload}
@@ -3333,6 +3422,16 @@ export function App() {
         onTombstoneDiscussion: tombstoneDiscussion,
         discussionRead,
         onMarkDiscussionRead: markDiscussionRead,
+        onCreateTodo: createTodo,
+        onCompleteTodo: completeTodo,
+        typingLabel: (cloud.presencePeople ?? [])
+          .filter((person) => person.typing && person.userId !== cloud.userId)
+          .map((person) => nameByUserId.get(person.userId))
+          .filter((name): name is string => Boolean(name))
+          .slice(0, 2)
+          .map((name) => `${name}正在輸入`)
+          .join("、") || ((cloud.presencePeople ?? []).some((person) => person.typing && person.userId !== cloud.userId) ? "有人正在輸入" : undefined),
+        onDiscussionTyping: cloud.setTyping,
         onCreateWhiteboard: createWhiteboard,
         onArchiveWhiteboard: archiveWhiteboard,
         onOpenWhiteboard: (id) => {

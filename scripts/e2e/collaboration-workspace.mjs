@@ -176,6 +176,8 @@ try {
     userAgent: ANDROID_UA,
   });
   const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
   try {
     await page.goto(APP, { waitUntil: "domcontentloaded" });
     await page.fill("input.text-input", "招生企劃");
@@ -209,15 +211,23 @@ try {
     await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
 
     await page.getByRole("button", { name: "對話", exact: true }).click();
+    await page.waitForSelector('[data-testid="discussion-feed"]', { state: "visible", timeout: 10000 });
     await page.getByLabel("房間討論").fill("先把招生流程攤在白板上");
-    await page.getByRole("button", { name: "送出" }).click();
+    await page.getByTestId("discussion-composer").getByRole("button", { name: "送出" }).click();
     check("房間討論可送出文字", (await page.getByTestId("discussion-feed").innerText()).includes("先把招生流程攤在白板上"));
     check("送出後看得到最新一則", await page.locator('[data-testid="discussion-feed"] [data-latest="true"]').innerText().then((text) => text.includes("先把招生流程攤在白板上")));
+    await page.getByTestId("discussion-edit").waitFor({ state: "visible", timeout: 8000 });
     await page.getByTestId("discussion-edit").click();
     await page.getByTestId("discussion-edit-input").fill("先把招生流程攤在白板上（改過）");
     await page.getByTestId("discussion-edit-save").click();
-    check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
-    check("改過的訊息標已編輯", await page.getByTestId("discussion-edited").count() === 1);
+    const editLanded = await page.waitForFunction(
+      () => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("改過") === true,
+      null,
+      { timeout: 8000 },
+    ).then(() => true).catch(() => false);
+    check("作者可改自己的文字", editLanded && (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
+    const editedMark = await page.waitForSelector('[data-testid="discussion-edited"]', { timeout: 8000 }).then(() => true).catch(() => false);
+    check("改過的訊息標已編輯", editedMark && await page.getByTestId("discussion-edited").count() >= 1);
     mkdirSync("/opt/cursor/artifacts", { recursive: true });
     await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_edit_390.png"), fullPage: true });
     await page.getByTestId("decision-draft-open").click();
@@ -277,13 +287,66 @@ try {
     const unreadJump = page.getByTestId("jump-first-unread");
     check("第一則未讀可跳", await unreadJump.count() === 1);
     if (await unreadJump.count()) {
-      await unreadJump.click({ force: true });
-      check("未讀跳到水位之後", await page.locator('[data-first-unread="true"]').count() === 1);
+      const unreadId = await page.locator('[data-testid="discussion-feed"] [data-first-unread="true"]').first().getAttribute("id");
+      // Do not Playwright-scroll the chip: that can expose feed-end and
+      // mark latest before onClick sets suppressReadFromJump.
+      await unreadJump.evaluate((btn) => { if (btn instanceof HTMLElement) btn.click(); });
+      const stayed = await page.waitForFunction((id) => {
+        const el = id ? document.getElementById(id) : null;
+        return Boolean(el && el.getAttribute("data-first-unread") === "true");
+      }, unreadId, { timeout: 4000 }).then(() => true).catch(() => false);
+      check("未讀跳到水位之後", stayed && await page.locator('[data-testid="discussion-feed"] [data-first-unread="true"]').count() >= 1);
     }
     await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_unread_390.png"), fullPage: true });
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
     await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_unread_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+
+    const mentionComposer = page.getByTestId("discussion-composer");
+    await mentionComposer.getByLabel("房間討論").fill("@");
+    await page.waitForSelector('[data-testid="mention-picker"]', { timeout: 8000 });
+    check("@ 從成員挑，不是第二條聊天", await page.getByTestId("mention-picker").count() === 1 && await page.getByTestId("mention-picker").locator("button").count() >= 1);
+    await page.getByTestId("mention-picker").locator("button").first().click();
+    // Picker writes via setDraft; a too-early 送出 sends bare "@" with no ids.
+    await page.waitForFunction(() => {
+      const input = document.querySelector('[data-testid="discussion-composer"] input[aria-label="房間討論"]');
+      return Boolean(input instanceof HTMLInputElement && /@\S+/.test(input.value) && input.value.trim() !== "@");
+    }, null, { timeout: 5000 });
+    const mentionSend = mentionComposer.getByRole("button", { name: "送出" });
+    await mentionSend.waitFor({ state: "visible", timeout: 5000 });
+    if (!(await mentionSend.isEnabled())) {
+      await mentionComposer.getByLabel("房間討論").fill(await mentionComposer.getByLabel("房間討論").inputValue());
+    }
+    await mentionSend.click();
+    // Optimistic mark can appear then vanish when a snapshot lacks extras.
+    // Wait until the mark is present *and still present* after a settle.
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="discussion-mention"]').length >= 1, null, { timeout: 8000 });
+    await page.waitForTimeout(120);
+    const mentionStill = await page.waitForFunction(
+      () => document.querySelectorAll('[data-testid="discussion-mention"]').length >= 1,
+      null,
+      { timeout: 4000 },
+    ).then(() => true).catch(() => false);
+    check("提及畫在同一則討論", mentionStill && await page.getByTestId("discussion-mention").count() >= 1);
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_mention_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_mention_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+
+    await page.getByTestId("todo-draft-open").click();
+    await page.getByTestId("todo-draft-input").fill("印海報");
+    await page.getByTestId("todo-draft-add").click();
+    check("待辦要人填標題", (await page.getByTestId("discussion-todo").innerText()).includes("印海報"));
+    await page.getByTestId("todo-complete").click();
+    check("人可以結案待辦", await page.locator('[data-testid="discussion-todo"] [data-status="done"]').count() >= 1);
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_todo_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_todo_768.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
@@ -1222,7 +1285,7 @@ try {
   } catch (error) {
     mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
     await page.screenshot({ path: join(ROOT, "output", "playwright", "collaboration-mobile-fail.png"), fullPage: true }).catch(() => undefined);
-    check("協作工作台手機 acceptance journey", false, error instanceof Error ? error.message : String(error));
+    check("協作工作台手機 acceptance journey", false, `${error instanceof Error ? error.message : String(error)}${pageErrors.length ? ` | pageerror: ${pageErrors.join(" | ")}` : ""}`);
   } finally {
     await context.close();
   }

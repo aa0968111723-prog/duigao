@@ -98,7 +98,8 @@ begin
   end if;
 
   if old.deleted_at is null and new.deleted_at is not null then
-    new.deleted_by := coalesce(new.deleted_by, caller);
+    -- 操作者就是 caller。不能把 deleted_by 偽造成別人。
+    new.deleted_by := caller;
   end if;
 
   return new;

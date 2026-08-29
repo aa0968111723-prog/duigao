@@ -1,8 +1,8 @@
-.rd-shell { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.rd-shell { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .rd-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 4px; margin: 8px 0 12px; border-radius: 14px; background: var(--panel); }
 .rd-tabs button { min-height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-faint); }
 .rd-tabs button.is-active { background: var(--raise); color: var(--ink); font-weight: 600; }
-.rd-feed { display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(88px + var(--kb, 0px)); }
+.rd-feed { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 120px; overflow: auto; padding-bottom: calc(88px + var(--kb, 0px)); }
 .rd-msg { border: 1px solid var(--line-soft); background: var(--panel); border-radius: 16px; padding: 12px 14px; -webkit-touch-callout: none; }
 .rd-msg header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .rd-dot { width: 8px; height: 8px; border-radius: 99px; }
@@ -94,10 +94,11 @@
 .rd-msg.is-tombstone { opacity: .78; }
 .rd-tombstone { margin: 0; font-size: 14px; color: var(--ink-faint); font-style: italic; }
 .rd-jump-unread {
-  position: sticky;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: calc(104px + var(--kb, 0px));
   z-index: 35;
-  align-self: center;
   min-height: 36px;
   padding: 0 14px;
   border: 0;
@@ -108,10 +109,11 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
 }
 .rd-jump-latest {
-  position: sticky;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: calc(64px + var(--kb, 0px));
   z-index: 35;
-  align-self: center;
   min-height: 36px;
   padding: 0 14px;
   border: 0;
@@ -129,3 +131,11 @@
   100% { background: transparent; }
 }
 .m-vchip-board { border-color: var(--accent, #c45c4a); }
+
+.rd-mention { background: rgba(196, 92, 74, .14); color: var(--accent, #c45c4a); font-weight: 600; padding: 0 2px; border-radius: 4px; }
+.rd-mention-picker { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; padding: 4px 0; }
+.rd-mention-picker button { min-height: 36px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--raise); color: var(--ink); font-size: 13px; }
+.rd-typing { width: 100%; font-size: 12px; color: var(--ink-faint); }
+.rd-todos { display: grid; gap: 8px; margin: 0 0 12px; }
+.rd-todo { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line-soft); border-radius: 14px; padding: 10px 12px; background: var(--panel); }
+.rd-todo.is-done { opacity: .7; }

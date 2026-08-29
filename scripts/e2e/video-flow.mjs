@@ -254,15 +254,73 @@ async function uploadVideo(page, buffer, fileName = "cut.webm") {
   });
 }
 
-const playerReady = (page) =>
-  page.waitForFunction(
-    () => {
+async function dumpPlayerWait(page) {
+  return page.evaluate(() => ({
+    href: location.href,
+    hasVideo: Boolean(document.querySelector("video.v-video")),
+    onboard: document.querySelector(".onboard-card")?.textContent?.replace(/\s+/g, " ").slice(0, 240) ?? null,
+    body: (document.body?.innerText || "").replace(/\s+/g, " ").slice(0, 280),
+  }));
+}
+
+/**
+ * The player mounts only after create-room + TUS + a version row
+ * (`VideoWorkspace` returns null when `!version`). `waitForSelector` default
+ * `visible` plus 45s timed out on CI run 33268176148 after this job had already
+ * run collaboration / visual e2e — the same locator with 90s passed in
+ * `test:collaboration-e2e` on that SHA. Wait for the element (not box-size)
+ * or an honest fail card; never treat a hung home screen as ready.
+ */
+async function playerReady(page, opts = {}) {
+  // Check 24 retries from a fail card that still says「初始化沒完成」.
+  // Treating that leftover copy as a new failure returns before the player
+  // can mount (CI 33268904599, 170/171).
+  const ignoreFailCard = opts.ignoreFailCard === true;
+  const timeout = opts.timeout ?? 90000;
+  let phase = "missing";
+  try {
+    const handle = await page.waitForFunction(
+      (skipFail) => {
+        if (document.querySelector("video.v-video")) return "player";
+        if (skipFail) return false;
+        const text = document.querySelector(".onboard-card")?.textContent ?? "";
+        if (/初始化沒完成|檢查網路|無法上傳|上傳失敗/.test(text)) return "fail";
+        return false;
+      },
+      ignoreFailCard,
+      { timeout },
+    );
+    phase = await handle.jsonValue();
+  } catch {
+    throw new Error(`playerReady: video.v-video never mounted: ${JSON.stringify(await dumpPlayerWait(page))}`);
+  }
+  if (phase !== "player") {
+    throw new Error(`playerReady: upload failed honestly: ${JSON.stringify(await dumpPlayerWait(page))}`);
+  }
+  try {
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector("video.v-video");
+        return Boolean(v && v.readyState >= 1);
+      },
+      null,
+      { timeout: 15000 },
+    );
+  } catch {
+    await page.evaluate(() => {
       const v = document.querySelector("video.v-video");
-      return Boolean(v && v.readyState >= 1);
-    },
-    null,
-    { timeout: 60000 },
-  );
+      if (v && v.readyState < 1) v.load();
+    });
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector("video.v-video");
+        return Boolean(v && v.readyState >= 1);
+      },
+      null,
+      { timeout: 30000 },
+    );
+  }
+}
 
 const currentTime = (page) => page.evaluate(() => document.querySelector("video.v-video")?.currentTime ?? -1);
 const videoDuration = (page) =>
@@ -1628,8 +1686,14 @@ try {
     // 重試：從失敗卡重新選同一支檔
     const retryZone = Q.locator(".onboard-card input[type=file]").first();
     await retryZone.setInputFiles({ name: "setup-dies.webm", mimeType: "video/webm", buffer: SHORT });
-    const playerCame = await playerReady(Q).then(() => true).catch(() => false);
-    check("24. 重試成功進到播放器", playerCame);
+    let playerDetail = "";
+    const playerCame = await playerReady(Q, { ignoreFailCard: true, timeout: 120000 })
+      .then(() => true)
+      .catch((err) => {
+        playerDetail = String(err?.message ?? err).slice(0, 280);
+        return false;
+      });
+    check("24. 重試成功進到播放器", playerCame, playerDetail);
     check(
       "24. 重試沿用死亡當下那間房，沒有另開新房",
       [...cloudRooms.keys()].filter((id) => !roomIdsBefore.has(id)).length === 1,

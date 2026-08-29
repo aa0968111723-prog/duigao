@@ -1,7 +1,16 @@
 /**
  * 討論串要不要跟著最新一則走。打開房間、自己送出、或人本來就停在底部
  * 時跟著捲；人往上讀舊訊息時不要硬拉回去。
+ *
+ * Jump-to-unread must not treat a visible feed-end as "caught up".
  */
+export function feedEndShouldMarkRead(args: {
+  intersecting: boolean;
+  suppressReadFromJump: boolean;
+}): boolean {
+  return args.intersecting && !args.suppressReadFromJump;
+}
+
 export function shouldFollowLatest(args: {
   previousCount: number;
   nextCount: number;

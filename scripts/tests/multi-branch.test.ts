@@ -8,6 +8,7 @@ import {
   latestBranchVersion,
   mergeRoomBranch,
   normalizeRoomBranches,
+  retainLocalVersions,
   roomForBranch,
   sortBranchesByRecent,
 } from "../../src/lib/roomBranches.ts";
@@ -110,6 +111,35 @@ test("summary-first project room preserves lightweight card data", () => {
   assert.equal(branchSummary(summaryRoom, poster.id).latestLabel, "改二");
   assert.equal(branchSummary(summaryRoom, poster.id).openCommentCount, 3);
   assert.equal(branchVersions(summaryRoom, video.id).length, 0);
+});
+
+test("stale empty branch snapshot cannot drop a just-uploaded video cut", () => {
+  const poster = branch("poster", "poster", 1);
+  const video = branch("video", "video", 2);
+  const local = room({
+    projectMode: true,
+    branches: [poster, video],
+    versions: [version("p1", "image", poster.id), version("v1", "video", video.id)],
+    updatedAt: 50,
+  });
+  const stale = room({
+    projectMode: true,
+    branches: [video],
+    versions: [],
+    updatedAt: 10,
+  });
+  const merged = mergeRoomBranch(local, stale, video.id);
+  assert.deepEqual(merged.versions.map((item) => item.id), ["p1", "v1"]);
+  assert.deepEqual(roomForBranch(merged, video.id).versions.map((item) => item.id), ["v1"]);
+  assert.deepEqual(roomForBranch(merged, poster.id).versions.map((item) => item.id), ["p1"]);
+});
+
+test("retainLocalVersions keeps local-only rows and lets the snapshot win on the same id", () => {
+  const poster = version("p1", "image", "poster");
+  const localCut = version("v1", "video", "video");
+  const remoteCut = { ...version("v1", "video", "video"), label: "初剪（雲端）" };
+  assert.deepEqual(retainLocalVersions([poster, localCut], []).map((item) => item.id), ["p1", "v1"]);
+  assert.deepEqual(retainLocalVersions([poster, localCut], [remoteCut]).map((item) => item.label), ["初剪（雲端）", "p1"]);
 });
 
 test("hydrating one branch does not mix another branch's review data", () => {
