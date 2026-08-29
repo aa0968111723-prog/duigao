@@ -5,6 +5,7 @@ import { indexMessages, replySnippet, resolveReply, type ReplyReference } from "
 import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
+import { shouldFollowLatest } from "./feed";
 import "./discussion.css";
 
 export type RoomDiscussionApi = {
@@ -195,6 +196,59 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   };
   useEffect(() => () => { if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current); }, []);
 
+  const feedEndRef = useRef<HTMLDivElement>(null);
+  const pinnedToLatest = useRef(true);
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
+  const feedCountRef = useRef(0);
+  const lastMessageIdRef = useRef<string | undefined>(undefined);
+  const lastMessage = messages[messages.length - 1];
+
+  const scrollToLatest = (behavior: ScrollBehavior) => {
+    const id = lastMessage?.id;
+    if (!id || typeof document === "undefined") return;
+    document.getElementById(`rd-msg-${id}`)?.scrollIntoView({ block: "end", behavior });
+    pinnedToLatest.current = true;
+    setShowJumpLatest(false);
+  };
+
+  useEffect(() => {
+    pinnedToLatest.current = true;
+    feedCountRef.current = 0;
+    lastMessageIdRef.current = undefined;
+    setShowJumpLatest(false);
+  }, [api.room.id]);
+
+  const activePane = api.pane ?? pane;
+  useEffect(() => {
+    if (activePane === "board") return;
+    const el = feedEndRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => {
+      pinnedToLatest.current = Boolean(entry?.isIntersecting);
+      if (entry?.isIntersecting) setShowJumpLatest(false);
+    }, { threshold: 0.01 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [api.room.id, activePane]);
+
+  useEffect(() => {
+    const nextLastId = lastMessage?.id;
+    const follow = shouldFollowLatest({
+      previousCount: feedCountRef.current,
+      nextCount: messages.length,
+      pinnedToLatest: pinnedToLatest.current,
+      previousLastId: lastMessageIdRef.current,
+      nextLastId,
+    });
+    if (follow) {
+      scrollToLatest(feedCountRef.current === 0 ? "auto" : "smooth");
+    } else if (nextLastId && nextLastId !== lastMessageIdRef.current) {
+      setShowJumpLatest(true);
+    }
+    feedCountRef.current = messages.length;
+    lastMessageIdRef.current = nextLastId;
+  }, [messages, lastMessage?.id]);
+
   if ((api.pane ?? pane) === "board") {
     return null;
   }
@@ -292,6 +346,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               key={message.id}
               id={`rd-msg-${message.id}`}
               data-testid={`discussion-${message.id}`}
+              data-latest={message.id === lastMessage?.id ? "true" : undefined}
               onContextMenu={(event) => { event.preventDefault(); setMenuId(message.id); }}
             >
               <header>
@@ -363,11 +418,24 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           );
         })}
         {!messages.length && <p className="project-muted">先留一句房間層級的討論。文宣圈選和影片時間點回饋會留在各自內容裡。</p>}
+        <div ref={feedEndRef} className="rd-feed-end" data-testid="discussion-feed-end" aria-hidden />
       </div>
+
+      {showJumpLatest && lastMessage && (
+        <button
+          type="button"
+          className="rd-jump-latest"
+          data-testid="jump-latest"
+          onClick={() => scrollToLatest("smooth")}
+        >
+          最新訊息
+        </button>
+      )}
 
       {api.canTalk && (
         <form
           className="rd-composer"
+          data-testid="discussion-composer"
           onSubmit={(event) => {
             event.preventDefault();
             const text = api.draft.trim();

@@ -34,6 +34,7 @@ import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
 import { roomCode, uid, uuid } from "./lib/id";
 import { deleteRoom, listRooms, listUploadSessions, loadFlag, loadGuest, loadRoom, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
+import { useDiscussionDraft } from "./hooks/useDiscussionDraft";
 import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
@@ -270,7 +271,6 @@ export function App() {
   const [form, setFormState] = useState<PinForm>(EMPTY_FORM);
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [previewStrokeId, setPreviewStrokeId] = useState<string | null>(null);
-  const [chatInput, setChatInput] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [collabStatus, setCollabStatus] = useState<CollabStatus | null>(null);
   const [peerCount, setPeerCount] = useState(0);
@@ -566,6 +566,9 @@ export function App() {
   });
   const discussionOutboxRef = useRef(discussionOutbox);
   discussionOutboxRef.current = discussionOutbox;
+  const draftRoomKey = cloud.boundRoomId ?? room?.id ?? null;
+  const draftMigrateFrom = room?.id && cloud.boundRoomId && room.id !== cloud.boundRoomId ? room.id : null;
+  const [chatInput, setChatInput] = useDiscussionDraft(draftRoomKey, draftMigrateFrom);
 
   // Intelligence is a separate, bounded slice. It never gates the existing
   // room/review load, and a branch workspace only asks for that branch's

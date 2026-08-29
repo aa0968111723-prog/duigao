@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiscussionMessage } from "../features/collaboration/types";
+import { loadOutboxEntries, saveOutboxEntries } from "../lib/store";
 import { blockedRepliesTo, failedBlockingParentId, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "./discussionOutboxCore";
 
 export type OutboxState = "sending" | "failed";
@@ -33,6 +34,7 @@ export function useDiscussionOutbox(args: {
 } {
   const { insert, bound, boundRoomId, localRoomId, serverIds } = args;
   const [entries, setEntries] = useState<Record<string, OutboxEntry>>({});
+  const persistReadyRef = useRef(false);
   // dispatch 需要讀「現在」的 entries／serverIds 才能判斷回覆的來源落地沒有，
   // 而它是 useCallback([]) 的閉包 —— 用 ref 讀，不把它們放進相依。
   const entriesRef = useRef(entries);
@@ -158,6 +160,28 @@ export function useDiscussionOutbox(args: {
       return next;
     });
   }, [serverIds]);
+
+  // 重整／被系統回收後還能重試：先讀 cache，之後每次變更寫回。
+  useEffect(() => {
+    let cancelled = false;
+    void loadOutboxEntries()
+      .then((saved) => {
+        if (cancelled) return;
+        setEntries((current) => (Object.keys(current).length ? { ...saved, ...current } : saved));
+        persistReadyRef.current = true;
+      })
+      .catch(() => {
+        if (!cancelled) persistReadyRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!persistReadyRef.current) return;
+    void saveOutboxEntries(entries).catch(() => undefined);
+  }, [entries]);
 
   const belongsNow = (message: DiscussionMessage) =>
     Boolean(
