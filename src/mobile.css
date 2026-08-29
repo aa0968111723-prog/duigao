@@ -447,9 +447,10 @@
   .m-btn-danger { color: #d98157; border-color: rgba(217, 129, 87, 0.4); }
 
   /* ---------- project room shell ---------- */
-  .project-room { min-height: 100dvh; overflow-y: auto; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .project-room { min-height: 100dvh; overflow-x: hidden; overflow-y: auto; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
   .project-room-header { position: sticky; top: 0; z-index: 10; padding: 8px 10px; background: rgba(255, 255, 255, .92); backdrop-filter: blur(16px); box-shadow: 0 1px 0 var(--line-soft); }
-  .project-home-button, .project-back-button { width: 40px; height: 40px; }
+  .project-home-button, .project-back-button, .project-room-more-btn, .project-voice-chip { min-width: 44px; min-height: 44px; width: auto; height: auto; padding: 0 10px; }
+  .project-more-sheet { top: calc(56px + env(safe-area-inset-top)); }
   .project-room-heading h1, .project-room-title-input { font-size: 18px; }
   .project-search-wrap, .project-tabs, .project-room-main, .project-branch-detail { width: calc(100% - 24px); }
   .project-search-wrap { margin-top: 10px; }

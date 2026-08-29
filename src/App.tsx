@@ -52,6 +52,8 @@ import {
   type AssetIntelligenceSnapshot,
 } from "./cloud/assetIntelligence";
 import { addRoomTarget, readRoomLink } from "./cloud/invite";
+import { sessionEntryStatus } from "./cloud/sessionEntryStatus";
+import { applyDiscussionRealtime } from "./cloud/realtimeApply";
 import { type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
 import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
@@ -543,7 +545,16 @@ export function App() {
     });
   }, []);
 
-  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onBoardReplace, showToast });
+  const onDiscussionPatch = useCallback((patch: { op: "upsert"; message: DiscussionMessage } | { op: "delete"; id: string }) => {
+    setRoom((current) => {
+      if (!current) return current;
+      const result = applyDiscussionRealtime(current.discussion ?? [], patch);
+      if (!result.applied) return current;
+      return { ...current, discussion: result.messages };
+    });
+  }, []);
+
+  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
 
@@ -3182,17 +3193,17 @@ export function App() {
   if (!hasVersions) {
     if (isGuestSession) {
       // Cloud serves invite links; legacy #room=<6碼> links ride the peer channel.
-      const cloudGuest = cloudSession && roomLink.kind === "cloud";
-      const stalled = cloudGuest
-        ? cloud.status === "error"
-        : collabStatus === "waiting" || collabStatus === "error";
-      const badLink = cloudGuest && cloud.inviteInvalid;
-      /**
-       * A legacy link with the host offline can never load: there is no cloud
-       * room behind it and no local mapping to upgrade it with. Say that once
-       * instead of looping a generic retry the partner cannot win.
-       */
-      const legacyStalled = isLegacyLink && stalled;
+      const cloudGuest = Boolean(cloudSession && roomLink.kind === "cloud");
+      const entry = sessionEntryStatus({
+        isCloudGuest: cloudGuest,
+        isLegacyLink,
+        cloudStatus: cloud.status,
+        collabStatus,
+        inviteInvalid: cloud.inviteInvalid,
+        permissionDenied: cloud.permissionDenied,
+        hasVersions,
+        projectMode: Boolean(room?.projectMode),
+      });
       return (
         <div className="onboard">
           <div className="onboard-card">
@@ -3200,42 +3211,36 @@ export function App() {
             {/* The link does not say what is behind it, so the title stays the
                 neutral one rather than promising a poster. */}
             <h1 className="onboard-title">對稿討論區</h1>
-            <p className="onboard-hint">
-              {!stalled
-                ? "正在載入…"
-                : legacyStalled
-                  ? "這是舊版分享連結"
-                  : badLink
-                    ? "分享連結無效或已失效"
-                    : "目前暫時無法載入這個討論，請稍後再試。"}
+            <p className="onboard-hint" data-testid="session-entry-status" data-kind={entry.kind}>
+              {entry.headline}
             </p>
-            {stalled && (
-              <>
-                <p className="onboard-note">
-                  {legacyStalled
-                    ? "舊版連結需要主辦方保持頁面開著才打得開。請向主辦方取得新版分享連結，新版連結在主辦方關掉頁面後也能打開。"
-                    : badLink
-                      ? "請向分享的人要一個新的連結。"
-                      : "可能是網路不太穩，會自動重試；稍後再打開這個連結也可以。"}
-                </p>
-                {legacyStalled ? (
-                  <button className="btn btn-block" onClick={() => collabRef.current?.retryNow()}>
-                    主辦方在線的話，再試一次
-                  </button>
-                ) : (
-                  !badLink && (
-                    <button
-                      className="btn btn-primary btn-block"
-                      onClick={() => {
-                        if (cloudGuest) cloudRef.current.retry();
-                        else collabRef.current?.retryNow();
-                      }}
-                    >
-                      再試一次
-                    </button>
-                  )
-                )}
-              </>
+            {entry.note && <p className="onboard-note">{entry.note}</p>}
+            {entry.kind === "empty-room" && (
+              <button
+                className="btn btn-block"
+                onClick={() => {
+                  setRoom(null);
+                  location.hash = "";
+                }}
+              >
+                回首頁
+              </button>
+            )}
+            {entry.retry === "legacy" && (
+              <button className="btn btn-block" onClick={() => collabRef.current?.retryNow()}>
+                主辦方在線的話，再試一次
+              </button>
+            )}
+            {entry.retry === "cloud" && (
+              <button
+                className="btn btn-primary btn-block"
+                onClick={() => {
+                  if (cloudGuest) cloudRef.current.retry();
+                  else collabRef.current?.retryNow();
+                }}
+              >
+                再試一次
+              </button>
             )}
           </div>
           <ToastStack toasts={toasts} onDismiss={dismiss} />

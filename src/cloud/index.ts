@@ -8,7 +8,7 @@ export {
 } from "./config";
 export { getSupabase } from "./client";
 export { ensureSession } from "./auth";
-export { CloudError, isInvalidInvite, isRevisionConflict } from "./errors";
+export { CloudError, isInvalidInvite, isPermissionDenied, isRevisionConflict } from "./errors";
 export {
   addRoomTarget,
   buildInviteUrl,

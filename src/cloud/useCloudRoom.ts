@@ -29,7 +29,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isDuplicateKey, isInvalidInvite, isPermissionDenied, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -92,6 +92,7 @@ import {
   insertAiApplyAudit,
   insertDiscussion,
   insertEdge,
+  discussionFromRow,
   nodeFromRow,
   insertWhiteboard,
   loadWhiteboardGraph,
@@ -220,6 +221,7 @@ type Params = {
   onSnapshot: (room: Room) => void;
   /** 白板增量（PR-02c）：走專屬回呼，不經 applyRemoteRoom（deep-link 消耗不得重跑）。 */
   onBoardPatch?: (patch: BoardPatch) => void;
+  onDiscussionPatch?: (patch: { op: "upsert"; message: import("../features/collaboration/types").DiscussionMessage } | { op: "delete"; id: string }) => void;
   /**
    * 板級自癒（Grok pr02c F3）：整板以雲端 graph 替換 — 走 applyRemoteRoom
    * 會被空陣列守門與 reconcile 的「本地補回」擋住，斷線期間的 DELETE
@@ -287,11 +289,12 @@ function rememberCloudRoom(localRoomId: string, roomId: string, token: string, p
  * Binds the active room to the cloud when configured. Inert (returns
  * local-only) otherwise, so the local IndexedDB + PeerJS path is untouched.
  */
-export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, onBoardReplace, showToast }: Params) {
+export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast }: Params) {
   const [status, setStatus] = useState<SyncStatus>(isCloudConfigured ? "connecting" : "local-only");
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteInvalid, setInviteInvalid] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   /**
    * This visitor's capability in the bound room. Null until the first snapshot
    * lands (and in a local-only session); the UI treats "unknown" as "cannot
@@ -323,6 +326,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   activeWhiteboardRef.current = activeWhiteboardId ?? null;
   const onBoardPatchRef = useRef(onBoardPatch);
   onBoardPatchRef.current = onBoardPatch;
+  const onDiscussionPatchRef = useRef(onDiscussionPatch);
+  onDiscussionPatchRef.current = onDiscussionPatch;
   const onBoardReplaceRef = useRef(onBoardReplace);
   onBoardReplaceRef.current = onBoardReplace;
   roomRef.current = room;
@@ -573,6 +578,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     unsubRef.current = null;
     setStatus("connecting");
     setInviteInvalid(false);
+    setPermissionDenied(false);
     (async () => {
       try {
         setUserId(await ensureSession(supabase));
@@ -636,6 +642,11 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
             if (edge) onBoardPatchRef.current?.({ type: "edge-insert", edge });
           },
           onBoardEdgeDelete: (id) => onBoardPatchRef.current?.({ type: "edge-delete", id }),
+          onDiscussionUpsert: (row) => {
+            const message = discussionFromRow(row as import("./collaborationRepository").DiscussionRow);
+            if (message) onDiscussionPatchRef.current?.({ op: "upsert", message });
+          },
+          onDiscussionDelete: (id) => onDiscussionPatchRef.current?.({ op: "delete", id }),
           onPresence: setOnline,
           onStatus: (connected) => {
             if (connected) {
@@ -652,6 +663,9 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
         if (isInvalidInvite(err)) {
           setInviteInvalid(true);
           showToast("這個分享連結已失效，請向主辦方取得新連結", { tone: "error" });
+        } else if (isPermissionDenied(err)) {
+          setPermissionDenied(true);
+          showToast("沒有權限進入這個房間", { tone: "error" });
         }
         setStatus("error");
       }
@@ -695,6 +709,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   /** 再試一次: reload when bound, otherwise redo auth + join + load from scratch. */
   const retry = useCallback(() => {
     setInviteInvalid(false);
+    setPermissionDenied(false);
     if (boundRef.current) {
       void (async () => {
         await flushPending();
@@ -1096,6 +1111,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     online,
     inviteUrl,
     inviteInvalid,
+    permissionDenied,
     boundRoomId: boundRef.current,
     role,
     // A local-only room has no membership row and no server to ask; it belongs

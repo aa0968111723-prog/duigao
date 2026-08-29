@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiscussionMessage } from "../features/collaboration/types";
 import { loadOutboxEntries, saveOutboxEntries } from "../lib/store";
-import { blockedRepliesTo, failedBlockingParentId, isolateOutboxForOwner, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "./discussionOutboxCore";
+import { blockedRepliesTo, failedBlockingParentId, flushOutboxOnOnline, isolateOutboxForOwner, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "./discussionOutboxCore";
 
 export type OutboxState = "sending" | "failed";
 
@@ -122,15 +122,9 @@ export function useDiscussionOutbox(args: {
   useEffect(() => {
     const onOnline = () => {
       setEntries((current) => {
-        let changed = false;
-        const next: typeof current = { ...current };
-        for (const [id, entry] of Object.entries(current)) {
-          if (entry.state !== "failed") continue;
-          changed = true;
-          void dispatch(entry.message);
-          next[id] = { ...entry, state: "sending", autoRetried: true };
-        }
-        return changed ? next : current;
+        const { entries: next, toFlush } = flushOutboxOnOnline(current, ownerRef.current);
+        for (const message of toFlush) void dispatch(message);
+        return next;
       });
     };
     window.addEventListener("online", onOnline);
