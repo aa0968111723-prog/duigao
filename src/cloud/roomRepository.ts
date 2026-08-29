@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptSupportDeleteAck, acceptSupportUpsertAck } from "./commentSupportAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -1098,14 +1099,23 @@ export async function upsertProposal(
 
 export async function setSupport(supabase: SupabaseClient, roomId: string, commentId: string, add: boolean) {
   if (add) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("comment_supports")
-      .upsert({ room_id: roomId, comment_id: commentId }, { onConflict: "comment_id,user_id" });
+      .upsert({ room_id: roomId, comment_id: commentId }, { onConflict: "comment_id,user_id" })
+      .select("comment_id")
+      .maybeSingle();
     if (error) throw new CloudError(error.message, "support");
+    acceptSupportUpsertAck(data);
   } else {
     // RLS delete policy limits this to the caller's own support row.
-    const { error } = await supabase.from("comment_supports").delete().eq("comment_id", commentId);
+    const { data, error } = await supabase
+      .from("comment_supports")
+      .delete()
+      .eq("comment_id", commentId)
+      .select("comment_id")
+      .maybeSingle();
     if (error) throw new CloudError(error.message, "support");
+    acceptSupportDeleteAck(data);
   }
 }
 

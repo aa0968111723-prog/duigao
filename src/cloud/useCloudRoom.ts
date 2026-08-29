@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isSupportNotRemoved, isSupportNotSaved } from "./commentSupportAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -160,7 +161,7 @@ export type CloudWrites = {
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   setAllowBoardEdit?: (allow: boolean) => void;
-  toggleSupport: (commentId: string, add: boolean) => void;
+  toggleSupport: (commentId: string, add: boolean) => Promise<void>;
   insertReply: (reply: import("../lib/types").CommentReply) => void;
   setProposalPref: (versionId: string, choice: string) => void;
   archiveVersion?: (versionId: string) => Promise<void>;
@@ -1166,7 +1167,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     createDecision: (decision) => run(`decision-insert:${decision.id}`, () => insertDecision(supabase!, decision)),
     updateDecision: (decision) => run(`decision:${decision.id}`, () => repoUpdateDecision(supabase!, decision)),
     setAllowBoardEdit: (allow) => run("allow-board-edit", () => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),
-    toggleSupport: (commentId, add) => run(`comment-support:${commentId}`, () => setSupport(supabase!, boundRef.current!, commentId, add)),
+    toggleSupport: async (commentId, add) => {
+      const rid = boundRef.current;
+      const key = `comment-support:${commentId}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await setSupport(supabase, rid, commentId, add);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isSupportNotSaved(err) || isSupportNotRemoved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => setSupport(supabase, rid, commentId, add),
+        });
+        setStatus("offline-pending");
+      }
+    },
     insertReply: (reply) => run(`reply:${reply.id}`, () => repoInsertReply(supabase!, boundRef.current!, reply)),
     setProposalPref: (versionId, choice) => run(`pref:${versionId}`, () => setPreference(supabase!, boundRef.current!, versionId, choice)),
     archiveVersion: async (versionId) => {

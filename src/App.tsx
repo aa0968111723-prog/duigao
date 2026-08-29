@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isSupportNotRemoved, isSupportNotSaved } from "./cloud/commentSupportAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -2498,9 +2499,24 @@ export function App() {
             : [...list, { commentId, userId: uidNow }],
         };
       });
-      cloudRef.current.writes.toggleSupport(commentId, !existing);
+      void cloudRef.current.writes.toggleSupport(commentId, !existing).catch((err) => {
+        if (isSupportNotSaved(err)) {
+          updateRoom((r) => ({
+            ...r,
+            supports: (r.supports ?? []).filter((s) => !(s.commentId === commentId && s.userId === uidNow)),
+          }));
+          showToast("「我也覺得」沒有存成，請再試一次。", { tone: "error" });
+          return;
+        }
+        if (!isSupportNotRemoved(err)) return;
+        updateRoom((r) => {
+          if ((r.supports ?? []).some((s) => s.commentId === commentId && s.userId === uidNow)) return r;
+          return { ...r, supports: [...(r.supports ?? []), { commentId, userId: uidNow }] };
+        });
+        showToast("「我也覺得」沒有取消，請再試一次。", { tone: "error" });
+      });
     },
-    [guest, updateRoom],
+    [guest, showToast, updateRoom],
   );
 
   const addReply = useCallback(
