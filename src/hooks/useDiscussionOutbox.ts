@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiscussionMessage } from "../features/collaboration/types";
 import { loadOutboxEntries, saveOutboxEntries } from "../lib/store";
-import { blockedRepliesTo, failedBlockingParentId, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "./discussionOutboxCore";
+import { blockedRepliesTo, failedBlockingParentId, isolateOutboxForOwner, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "./discussionOutboxCore";
 
 export type OutboxState = "sending" | "failed";
 
@@ -26,13 +26,17 @@ export function useDiscussionOutbox(args: {
   /** 目前本機房 id（綁定前的訊息會帶這個 id）。 */
   localRoomId: string | null;
   serverIds: ReadonlySet<string>;
+  /** 目前帳號；換人不得重試或看見上一個人的 outbox。 */
+  ownerId: string | null;
 }): {
   sendStates: Record<string, OutboxState>;
   ghosts: DiscussionMessage[];
   send: (message: DiscussionMessage) => void;
   retry: (messageId: string) => void;
 } {
-  const { insert, bound, boundRoomId, localRoomId, serverIds } = args;
+  const { insert, bound, boundRoomId, localRoomId, serverIds, ownerId } = args;
+  const ownerRef = useRef(ownerId);
+  ownerRef.current = ownerId;
   const [entries, setEntries] = useState<Record<string, OutboxEntry>>({});
   const persistReadyRef = useRef(false);
   // dispatch 需要讀「現在」的 entries／serverIds 才能判斷回覆的來源落地沒有，
@@ -64,7 +68,7 @@ export function useDiscussionOutbox(args: {
       if (entry.state === "acked") return current;
       if (ok) {
         // 成功 ≠ 快照已包含：轉 acked 留著當 ghost，等 serverIds 對帳。
-        const next = { ...current, [message.id]: { message: stamped, state: "acked" as const } };
+        const next = { ...current, [message.id]: { message: stamped, state: "acked" as const, ownerId: ownerRef.current ?? entry.ownerId } };
         // 來源落地了 → 被它擋住的回覆現在送得出去。
         for (const waiting of blockedRepliesTo(message.id, next)) void dispatch(waiting);
         return next;
@@ -74,16 +78,16 @@ export function useDiscussionOutbox(args: {
       // 成功）。上限一次 — 之後誠實 failed，等手動重試或 online 事件。
       if (typeof navigator !== "undefined" && navigator.onLine && !entry.autoRetried) {
         void dispatch(stamped);
-        return { ...current, [message.id]: { message: stamped, state: "sending", autoRetried: true } };
+        return { ...current, [message.id]: { message: stamped, state: "sending", autoRetried: true, ownerId: ownerRef.current ?? entry.ownerId } };
       }
-      return { ...current, [message.id]: { message: stamped, state: "failed", autoRetried: entry.autoRetried } };
+      return { ...current, [message.id]: { message: stamped, state: "failed", autoRetried: entry.autoRetried, ownerId: ownerRef.current ?? entry.ownerId } };
     });
   }, []);
 
   const send = useCallback(
     (message: DiscussionMessage) => {
       if (!insertRef.current) return; // 本機模式：IndexedDB 是真相來源
-      setEntries((current) => ({ ...current, [message.id]: { message, state: "sending" } }));
+      setEntries((current) => ({ ...current, [message.id]: { message, state: "sending", ownerId: ownerRef.current ?? undefined } }));
       if (boundRef.current.bound) void dispatch(message);
       // 未綁定：留在 sending，reconcile 的綁定補送會處理。
     },
@@ -162,12 +166,17 @@ export function useDiscussionOutbox(args: {
   }, [serverIds]);
 
   // 重整／被系統回收後還能重試：先讀 cache，之後每次變更寫回。
+  // 換帳號重讀：不得把上一個人的 sending/failed 畫進這一個人的房。
   useEffect(() => {
+    persistReadyRef.current = false;
     let cancelled = false;
-    void loadOutboxEntries()
+    void loadOutboxEntries(ownerId)
       .then((saved) => {
         if (cancelled) return;
-        setEntries((current) => (Object.keys(current).length ? { ...saved, ...current } : saved));
+        setEntries((current) => {
+          const mine = isolateOutboxForOwner(current, ownerId);
+          return Object.keys(mine).length ? { ...saved, ...mine } : saved;
+        });
         persistReadyRef.current = true;
       })
       .catch(() => {
@@ -176,12 +185,12 @@ export function useDiscussionOutbox(args: {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ownerId]);
 
   useEffect(() => {
-    if (!persistReadyRef.current) return;
-    void saveOutboxEntries(entries).catch(() => undefined);
-  }, [entries]);
+    if (!persistReadyRef.current || !ownerId) return;
+    void saveOutboxEntries(ownerId, isolateOutboxForOwner(entries, ownerId)).catch(() => undefined);
+  }, [entries, ownerId]);
 
   const belongsNow = (message: DiscussionMessage) =>
     Boolean(
@@ -191,7 +200,7 @@ export function useDiscussionOutbox(args: {
 
   const sendStates: Record<string, OutboxState> = {};
   const ghosts: DiscussionMessage[] = [];
-  for (const [id, entry] of Object.entries(entries)) {
+  for (const [id, entry] of Object.entries(isolateOutboxForOwner(entries, ownerId))) {
     if (!belongsNow(entry.message)) continue; // 換房瞬間的殘影也不畫
     // 卡在失敗來源後面的回覆一起顯示失敗：永遠的「送出中」是假的送出中。
     if (entry.state !== "acked") {
