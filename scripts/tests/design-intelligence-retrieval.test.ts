@@ -285,3 +285,48 @@ test("沒有標脈絡的規則與有標脈絡的規則之間的矛盾要被回�
   assert.equal(result.conflicts.length, 1, `矛盾要被回報且只回報一次，實得 ${result.conflicts.length}`);
   assert.deepEqual(result.conflicts[0].entryIds.sort(), ["general", "web"]);
 });
+
+test("跨類別的同一個量測對象也算衝突（品牌規範 vs 通用規範）", () => {
+  // 驗收案例 E 實測到的缺口：品牌規範在 brand-rules 類別、無障礙知識在
+  // typography 類別，只在同類別內比對就永遠不會發現它們直接矛盾。
+  // 這是最容易真實發生的一種衝突。
+  const brand = entry({
+    id: "brand",
+    category: "brand-rules",
+    title: "品牌行高",
+    summary: "本專案內文行高固定 1.2",
+    rules: ["內文行高 = 1.2"],
+    trustLevel: "project",
+    status: "approved",
+    projectSpecific: "room-1",
+    contentHash: "h-brand",
+  });
+  const wcag = entry({
+    id: "wcag",
+    category: "typography",
+    title: "內文行高至少 1.5",
+    summary: "WCAG 建議",
+    rules: ["內文行高 ≥ 1.5"],
+    trustLevel: "approved",
+    status: "approved",
+    contentHash: "h-wcag",
+  });
+
+  const result = retrieveKnowledge([brand, wcag], { goal: "內文行高", projectId: "room-1" });
+  assert.equal(result.conflicts.length, 1, `跨類別的矛盾要被回報，實得 ${result.conflicts.length}`);
+  assert.deepEqual(result.conflicts[0].entryIds.sort(), ["brand", "wcag"]);
+
+  // 同一個對象、同一個值不算衝突
+  const agreeing = retrieveKnowledge(
+    [{ ...brand, id: "a", rules: ["內文行高 ≥ 1.5"], contentHash: "h-a" }, wcag],
+    { goal: "內文行高", projectId: "room-1" },
+  );
+  assert.equal(agreeing.conflicts.length, 0, "兩條規則說同一件事不是矛盾");
+
+  // 不同對象不算衝突
+  const unrelated = retrieveKnowledge(
+    [{ ...brand, id: "b", rules: ["觸控目標 ≥ 24"], contentHash: "h-b" }, wcag],
+    { goal: "內文行高 觸控目標", projectId: "room-1" },
+  );
+  assert.equal(unrelated.conflicts.length, 0, "行高與觸控目標無關，不該被當成矛盾");
+});

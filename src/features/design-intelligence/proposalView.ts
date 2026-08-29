@@ -45,7 +45,17 @@ export function layoutFor(viewport: ViewportInfo): PanelLayout {
   const phoneLandscape =
     viewport.coarsePointer && viewport.height <= 520 && viewport.width <= 920;
   if (phoneByWidth || phoneLandscape) {
-    return { kind: "sheet", maxHeightRatio: 0.76, peekPx: 56 };
+    // peek 要有上限：極矮的視窗（軟鍵盤彈出、分割視窗、桌機瀏覽器被拉扁）下，
+    // 固定的 56px 會蓋掉大半個畫面 —— 對抗審查用 360×56 打出來的。
+    //
+    // **這裡有一個真實的取捨**：12% 的上限與「把手至少要 32px 才按得到」
+    // 在很矮的視窗上會衝突（56px 高的視窗，12% 只有 7px）。
+    // 選擇讓 32px 的下限勝出 —— 一個按不到的把手比一個稍微佔位的把手更糟，
+    // 而且視窗矮到那種程度時，任何 UI 都已經不能用了。
+    //
+    // 也就是說：視窗高於約 270px 時遵守 12%；低於就退回 32px 並接受它佔比高。
+    const peekPx = Math.max(32, Math.min(56, Math.round(viewport.height * 0.12)));
+    return { kind: "sheet", maxHeightRatio: 0.76, peekPx };
   }
   // 平板：分割欄佔 38%，但夾在 320–420px 之間 —— 太窄讀不了診斷，
   // 太寬就變成 AI 佔據主畫面。
@@ -97,7 +107,11 @@ export function swipeIntent(sample: SwipeSample): "prev" | "next" | null {
   const absX = Math.abs(sample.dx);
   const absY = Math.abs(sample.dy);
   if (absX < 12) return null;                    // 誤觸
-  if (absX < absY * 1.4) return null;            // 主要是垂直，讓它捲動
+  // 垂直位移的**絕對上限**：40px 已經足夠捲動一整條診斷，
+  // 只看比例的話「dx -70 / dy 49」也算換頁，而那一下使用者是想捲清單的
+  //（對抗審查實測到的）。比例與絕對值兩條都要過。
+  if (absY > 40) return null;
+  if (absX < absY * 2) return null;              // 主要是垂直，讓它捲動
   const fast = sample.elapsedMs > 0 && absX / sample.elapsedMs > 0.5; // px/ms
   if (absX < 56 && !fast) return null;           // 慢速的短滑動不算
   return sample.dx < 0 ? "next" : "prev";
@@ -174,6 +188,26 @@ export function panelStateFor(proposal: DesignProposal): PanelState {
       actionable: true,
     };
   }
+  // 已經被處理過的提案不該再顯示「沒有找到問題」—— 那是分析剛結束時的訊息。
+  // 對抗審查實測：`status: "approved"` 但內容為空時，舊版會說「沒有找到可以
+  // 量測的問題」，而使用者剛剛才核准過它。
+  const PROCESSED: Record<string, string> = {
+    approved: "這個提案已經核准，等待套用",
+    applying: "正在套用…",
+    applied: "這個提案已經套用完成",
+    rejected: "這個提案已經被否決",
+    reverted: "這個提案已經復原",
+  };
+  const processed = PROCESSED[proposal.status];
+  if (processed) {
+    return {
+      kind: "notice",
+      title: processed,
+      detail: proposal.rationale || "沒有其他說明",
+      actionable: false,
+    };
+  }
+
   if (!proposal.diagnostics.length && !proposal.alternatives.length) {
     return {
       kind: "notice",
@@ -207,7 +241,16 @@ export type ApplyGate =
 export function applyGate(
   proposal: DesignProposal,
   selectedAlternativeId: string | null,
+  /**
+   * 這個人有沒有權限改這件作品。
+   *
+   * 預設 `true` 只是為了不強迫每個呼叫端都傳；**UI 一定要傳**。
+   * 房間裡的 reviewer 看得到提案，但不該能把它套到別人的作品上 ——
+   * 那是 `can_manage_media` 的範圍（對抗審查指出這裡原本完全沒有角色檢查）。
+   */
+  canApply = true,
 ): ApplyGate {
+  if (!canApply) return { enabled: false, reason: "你在這個房間沒有修改作品的權限" };
   if (proposal.status === "applied") return { enabled: false, reason: "這個提案已經套用過了" };
   if (proposal.status === "applying") return { enabled: false, reason: "正在套用…" };
   if (proposal.status === "rejected") return { enabled: false, reason: "這個提案已經被否決" };

@@ -1651,11 +1651,15 @@ try {
   section("0028：外部研究使用量（append-only、後端才能寫）");
   psqlFile(join(MIGRATIONS, "0028_design_research_usage.sql"));
 
-  // 先用 service 身分寫一筆（edge function 走的就是這條路）
+  // 用**真的 service_role**寫一筆（edge function 走的就是這條路）。
+  //
+  // 對抗審查指出這裡原本用的是無角色的 psql（也就是超級使用者），
+  // 那證明不了 service_role 有沒有權限 —— 超級使用者本來就什麼都能做。
   const usageHash = "a".repeat(64);
+  const asService = (sql) => psql(`set role service_role; ${sql}`, { expectError: true });
   ok(
-    "service 路徑寫得進使用量",
-    !psql(`insert into public.design_research_usage (room_id, query_hash, source_count) values ('${capRoom}'::uuid, '${usageHash}', 3);`, { expectError: true }).failed,
+    "service_role 寫得進使用量",
+    !asService(`insert into public.design_research_usage (room_id, query_hash, source_count) values ('${capRoom}'::uuid, '${usageHash}', 3);`).failed,
   );
 
   ok("房內成員讀得到自己房間的用量", as(owner, `select count(*) from public.design_research_usage where room_id = '${capRoom}'::uuid;`).out === "1");
@@ -1679,6 +1683,27 @@ try {
   ok(
     "查詢原文塞不進去（欄位只收 64 字元雜湊）",
     psql(`insert into public.design_research_usage (room_id, query_hash) values ('${capRoom}'::uuid, '海報的對比要多少才夠');`, { expectError: true }).failed,
+  );
+
+  // 補一條：**只有 select 被 grant 給 authenticated**。
+  // 這是 0028 與 0019 的稽核表最大的差別，而檔頭原本抄錯了 0019 的說法。
+  // **RLS 不管 TRUNCATE。** 任何登入者能 truncate，等於所有 policy 都白寫。
+  ok(
+    "登入者 truncate 不掉使用量表",
+    as(owner, `truncate public.design_research_usage;`).failed,
+  );
+  ok(
+    "登入者 truncate 不掉知識庫",
+    as(owner, `truncate public.design_knowledge;`).failed,
+  );
+  ok(
+    "authenticated 對使用量表只有 select 權限",
+    psql(`select string_agg(privilege_type, ',' order by privilege_type)
+          from information_schema.role_table_grants
+          where table_name = 'design_research_usage' and grantee = 'authenticated';`).out === "SELECT",
+    psql(`select coalesce(string_agg(privilege_type, ',' order by privilege_type), '(無)')
+          from information_schema.role_table_grants
+          where table_name = 'design_research_usage' and grantee = 'authenticated';`).out,
   );
 
   const usageShape = () => psql(`select

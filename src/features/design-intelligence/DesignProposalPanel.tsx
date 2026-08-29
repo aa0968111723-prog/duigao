@@ -25,6 +25,11 @@ import type { DesignProposal, Diagnostic } from "./types";
 type Props = {
   proposal: DesignProposal;
   viewport: ViewportInfo;
+  /**
+   * 這個人有沒有修改作品的權限（對應 `can_manage_media`）。
+   * 房間裡的 reviewer 看得到提案，但不該能把它套到別人的作品上。
+   */
+  canApply: boolean;
   /** 使用者按下「套用這個方案」。**元件自己不套用任何東西。** */
   onApply: (alternativeId: string) => void;
   onDismiss: () => void;
@@ -38,7 +43,7 @@ const SEVERITY_LABEL: Record<Diagnostic["severity"], string> = {
   nit: "細節",
 };
 
-export function DesignProposalPanel({ proposal, viewport, onApply, onDismiss, onRetry }: Props) {
+export function DesignProposalPanel({ proposal, viewport, canApply, onApply, onDismiss, onRetry }: Props) {
   const layout = useMemo(() => layoutFor(viewport), [viewport]);
   const state = useMemo(() => panelStateFor(proposal), [proposal]);
   const [index, setIndex] = useState(0);
@@ -52,7 +57,7 @@ export function DesignProposalPanel({ proposal, viewport, onApply, onDismiss, on
 
   const alternatives = proposal.alternatives;
   const active = alternatives[Math.min(index, Math.max(0, alternatives.length - 1))] ?? null;
-  const gate = applyGate(proposal, active?.id ?? null);
+  const gate = applyGate(proposal, active?.id ?? null, canApply);
   const preview = applyPreviewText(proposal, active?.id ?? null);
 
   const drag = useRef<{ x: number; y: number; at: number } | null>(null);
@@ -260,7 +265,17 @@ export function DesignProposalPanel({ proposal, viewport, onApply, onDismiss, on
                   type="button"
                   className="di-apply__button"
                   disabled={!gate.enabled}
-                  onClick={() => active && onApply(active.id)}
+                  onClick={() => {
+                    // **再查一次閘門**，不只靠 `disabled`。
+                    //
+                    // `disabled` 是畫面上的提示，不是安全機制：它可以被
+                    // devtools 拿掉、被自動化工具 force click、或在 React
+                    // 重繪的空檔被繞過。真正的判斷必須跟按鈕的外觀分開
+                    //（對抗審查實測到的）。
+                    const now = applyGate(proposal, active?.id ?? null, canApply);
+                    if (!now.enabled || !active) return;
+                    onApply(active.id);
+                  }}
                   data-testid="di-apply"
                 >
                   套用這個方案

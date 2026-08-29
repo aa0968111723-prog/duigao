@@ -24,50 +24,29 @@ agent 16、edge-cors 5）；`tsc --noEmit` 乾淨；`npm run build` 綠。
 
 ## 進行中
 
-（無）
+（無 —— 六個階段都已完成並開出 PR）
 
+## PR 鏈
 
-### PR-DI-01 設計知識系統
+| PR | 階段 | base |
+|---|---|---|
+| [#88](https://github.com/aa0968111723-prog/duigao/pull/88) | PR-DI-01 設計知識系統 | `main` |
+| [#89](https://github.com/aa0968111723-prog/duigao/pull/89) | PR-DI-02 分析引擎 ＋ DI-01/02 審查修正 | #88 |
+| [#90](https://github.com/aa0968111723-prog/duigao/pull/90) | PR-DI-03 研究層 | #89 |
+| [#91](https://github.com/aa0968111723-prog/duigao/pull/91) | PR-DI-04 手機／平板介面 | #90 |
+| [#92](https://github.com/aa0968111723-prog/duigao/pull/92) | PR-DI-05 外部工具契約 | #91 |
+| （本分支）| PR-DI-06 完整評估 ＋ DI-03/04 審查修正 | #92 |
 
-| 產出 | 檔案 |
-|---|---|
-| 知識庫 schema、兩段式 RLS、seed | `supabase/migrations/0027_design_knowledge.sql` |
-| RLS 與 CHECK probe（19 條） | `scripts/e2e/migrations.mjs` |
-| 對抗審查修正 | `src/features/design-intelligence/schema.ts` |
-| 反例測試（+8 條） | `scripts/tests/design-intelligence-schema.test.ts` |
-| 測試型別閘門 | `tsconfig.scripts.json` |
+PR-DI-00 是 [#86](https://github.com/aa0968111723-prog/duigao/pull/86)，已合併。
 
-**兩段式授權**：`project_specific IS NULL` 的通用知識所有 authenticated 可讀、
-**沒有 client 寫入政策**（只有 migration seed 與 service_role 寫得進去）；
-`project_specific = <room_id>` 的專案規範沿用 `is_room_member` 讀、
-`can_manage_media` 寫。
+**堆疊的原因**：任務書要求小而獨立可回退的 PR，但同時禁止 force push。
+每個階段完成後才開新分支，所以修正只能落在後續的 PR 裡 ——
+每個 PR 的描述都寫明它帶了哪些屬於前一個 PR 的修正。
 
-**seed**：7 條**可驗證**的通用知識（WCAG 對比下限、非文字對比、觸控目標尺寸、
-prefers-reduced-motion、行長與行高、視覺層級、社群縮圖可讀性）。挑選原則是
-「程式量得出來」—— 「標題要有吸引力」這種品味不進知識庫。
+## 評估報告
 
-**檢索**：沿用既有 lexical 打分。**誠實記錄**：repo 沒有 pgvector
-（`asset_embeddings` 是 jsonb 死碼），本階段不假裝有語意檢索，
-中文召回率未驗證。
-
-處理 grok 對 PR-DI-00 契約層的對抗審查，5 條全部成立、全部修正：
-SSRF 列舉法被 IPv4-mapped IPv6／DNS 尾點／數值正規化繞過（改預設拒絕）、
-搜尋結果可自稱 approved（改由 provenance 決定信任上限）、
-色彩對比只對 background 算導致不及格被標成 AAA（改取最差底色）、
-多條紅線是假綠（補逐欄反例）、contentHash 可被輸入覆寫（改一律重算）。
-
-migration probe 另外實測到一個自己的 bug：`array_length('{}', 1)` 回傳 NULL，
-CHECK 遇到 NULL 一律放行 —— 零規則的知識條目寫得進去。改用 `cardinality`。
-
-測試：`test:migrations` 262/262；`test:design-intelligence` 28/28
-（型別檢查已納入同一個指令）。**變異測試 14 個變異體全數被殺死** ——
-包含「換回舊的列舉式 SSRF 檢查」「讓 analyzing 直接進 applying」
-「接受輸入的 contentHash」。
-
-## 下一步
-
-**PR-DI-02 設計分析引擎** —— 分析流程、結構化輸出驗證、provider adapter、
-mock provider、診斷產生、三個方案、取消、錯誤狀態。
+`docs/design-intelligence/EVALUATION.md` —— 七個驗收案例、測試總覽、
+安全、行動裝置實測數字、被抓到的 29 個問題、誠實的限制清單。
 
 ## 阻塞
 

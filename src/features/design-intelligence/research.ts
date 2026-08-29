@@ -115,6 +115,30 @@ function emptyResult(query: string, now: number, meta: ResearchResultMeta): Rese
   );
 }
 
+/**
+ * 讓等待可以被自己的 signal 打斷，而**不影響底層那個共用的請求**。
+ *
+ * 這是去重的關鍵：共用一個 promise 時，取消必須是每個呼叫端各自的事。
+ */
+function raceSignal<T>(promise: Promise<T>, signal: AbortSignal | undefined, onAbort: () => T): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.resolve(onAbort());
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => resolve(onAbort());
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export function createResearchProvider(options: ResearchProviderOptions): ResearchProvider & {
   diagnostics(): ResearchDiagnostics;
   clearCache(): void;
@@ -179,12 +203,17 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
     }
     const query = built.query;
 
-    // 快取
-    const cached = cache.get(query);
+    // 快取鍵含 roomId。
+    //
+    // 目前每個房間各有自己的 provider 實例，所以快取本來就不會跨房共用；
+    // 但那是**呼叫端的用法**，不是這個模組保證的事。哪天有人共用一個實例，
+    // 甲房就會吃到乙房的答案。把 roomId 放進鍵裡，讓它不依賴用法。
+    const cacheKey = `${options.roomId}|${query}`;
+    const cached = cache.get(cacheKey);
     if (cached && now - cached.storedAt < config.cacheTtlMs) {
       return { ...cached.result, cacheStatus: "hit" };
     }
-    if (cached) cache.delete(query);
+    if (cached) cache.delete(cacheKey);
 
     if (circuitIsOpen(now)) {
       return withMeta(emptyResult(query, now, {}), {
@@ -203,18 +232,30 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
       });
     }
 
-    // 去重：同一個問題正在查就共用那一次
-    const pending = inFlight.get(query);
-    if (pending) return pending.then((result) => ({ ...result, cacheStatus: "dedup" as const }));
+    // 去重：同一個問題正在查就共用那一次。
+    //
+    // **共用的那個請求不吃任何一方的 signal。** 舊版把第一個呼叫端的 signal
+    // 傳進去，於是甲取消時乙也拿到「已取消」，而且那次取消還被算成一次
+    // 上游失敗、推進斷路器 —— 乙什麼都沒做錯卻被連坐（對抗審查實測到的）。
+    //
+    // 現在每個呼叫端各自 race 自己的 signal：甲取消只影響甲，
+    // 共用的請求繼續跑完給乙。
+    const pending = inFlight.get(cacheKey);
+    if (pending) {
+      return raceSignal(
+        pending.then((result) => ({ ...result, cacheStatus: "dedup" as const })),
+        filters?.signal,
+        () => withMeta(emptyResult(query, now, {}), { failure: "timeout", retryable: true }),
+      );
+    }
 
     const task = (async (): Promise<ResearchResult> => {
       requestTimes.push(now);
       let response: { status: number; body: Record<string, unknown> };
       try {
-        response = await options.transport(
-          { roomId: options.roomId, query, timeoutMs: filters?.timeoutMs },
-          filters?.signal,
-        );
+        // 刻意不把呼叫端的 signal 傳下去 —— 見上面的說明。逾時由後端負責
+        // （edge function 有 45 秒上限），呼叫端的取消只影響它自己的等待。
+        response = await options.transport({ roomId: options.roomId, query, timeoutMs: filters?.timeoutMs });
       } catch (error) {
         recordFailure(now);
         const aborted = error instanceof Error && error.name === "AbortError";
@@ -244,10 +285,22 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
         });
       }
       if (response.status === 429) {
+        // 兩種 429 意義完全相反：
+        //   QUOTA_EXCEEDED       = 這個房間今天用完了，等明天，重試沒有用
+        //   UPSTREAM_RATE_LIMITED = 上游在限流，等一下再試就好
+        // 舊版一律當成前者，使用者會以為自己用完 40 次而放棄
+        //（對抗審查實測到的）。
+        const upstream = response.body.error === "UPSTREAM_RATE_LIMITED";
+        if (upstream) recordFailure(now);
         return withMeta(emptyResult(query, now, {}), {
-          failure: "quota-exceeded",
-          failureDetail: typeof response.body.detail === "string" ? response.body.detail : undefined,
-          retryable: false,
+          failure: upstream ? "upstream-error" : "quota-exceeded",
+          failureDetail:
+            typeof response.body.detail === "string"
+              ? response.body.detail
+              : upstream
+                ? "外部研究服務目前限流中，稍後會自動再試"
+                : undefined,
+          retryable: upstream,
         });
       }
       if (response.status !== 200) {
@@ -288,16 +341,15 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
         { suspicious: answer.suspicious },
       );
 
-      cache.set(query, { result, storedAt: now });
+      cache.set(cacheKey, { result, storedAt: now });
       return result;
     })();
 
-    inFlight.set(query, task);
-    try {
-      return await task;
-    } finally {
-      inFlight.delete(query);
-    }
+    inFlight.set(cacheKey, task);
+    task.finally(() => inFlight.delete(cacheKey));
+    return raceSignal(task, filters?.signal, () =>
+      withMeta(emptyResult(query, now, {}), { failure: "timeout", retryable: true }),
+    );
   }
 
   return {

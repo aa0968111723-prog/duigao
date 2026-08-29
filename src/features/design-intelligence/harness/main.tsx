@@ -185,6 +185,7 @@ function Harness() {
         <DesignProposalPanel
           proposal={fixture}
           viewport={viewport}
+          canApply={params.get("canApply") !== "false"}
           onApply={(id) => setApplied(id)}
           onDismiss={() => setDismissed(true)}
           onRetry={() => undefined}

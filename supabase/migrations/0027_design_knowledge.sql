@@ -248,8 +248,19 @@ create policy design_knowledge_delete_project on public.design_knowledge
   for delete to authenticated
   using (project_specific is not null and public.can_manage_media(project_specific));
 
-revoke all on public.design_knowledge from anon;
+-- 權限：**先全部收回再逐項給**。
+--
+-- Supabase 的 default privileges 對 public schema 的新表是 `grant all to
+-- anon, authenticated`，所以不先 revoke all，這張表一建立就帶著
+-- TRUNCATE / REFERENCES / TRIGGER。**RLS 不管 TRUNCATE** ——
+-- 也就是任何登入者都可以 `truncate public.design_knowledge` 把整個知識庫清空，
+-- 而所有的 policy 一條都攔不住（migration probe 誠實化之後實測到的）。
+revoke all on public.design_knowledge from anon, authenticated;
 grant select, insert, update, delete on public.design_knowledge to authenticated;
+
+-- service_role（edge function 與 migration seed）需要完整權限。
+-- 正式 Supabase 有預設授權，但依賴預設值就是依賴一個沒有寫下來的假設。
+grant all on public.design_knowledge to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Seed：通用設計知識（只放**可驗證**的規則）
