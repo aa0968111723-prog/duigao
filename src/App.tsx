@@ -141,7 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { boardPollWrite, canCompleteTodo, canEditDiscussion, canTombstoneDiscussion, canWriteTodo, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, todoDraftTitle, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
+import { boardPollWrite, canCompleteRoomTodo, canEditDiscussion, canTombstoneDiscussion, canWriteTodo, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, todoDraftTitle, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -2002,7 +2002,8 @@ export function App() {
     (todoId: string) => {
       const userId = cloud.userId ?? guest?.id;
       const current = (roomRef.current?.todos ?? []).find((item) => item.id === todoId);
-      if (!userId || !current || !canCompleteTodo(userId)) return;
+      const canManage = cloud.boundRoomId ? cloud.canManageMedia : true;
+      if (!userId || !current || !canCompleteRoomTodo(current, userId, canManage)) return;
       const next = { ...current, status: "done" as const, updatedAt: Date.now() };
       updateRoom((r) => ({
         ...r,
@@ -2010,7 +2011,7 @@ export function App() {
       }));
       cloudRef.current.writes.updateTodo?.(next);
     },
-    [cloud.userId, guest, updateRoom],
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, updateRoom],
   );
 
   const createWhiteboard = useCallback(

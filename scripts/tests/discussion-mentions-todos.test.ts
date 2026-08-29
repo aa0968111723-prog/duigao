@@ -9,6 +9,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  canCompleteRoomTodo,
   canCompleteTodo,
   canWriteTodo,
   filterMentionableMembers,
@@ -83,6 +84,10 @@ test("M-04 negative / permission: 不能提及房外的人；AI 不能當成員�
   assert.equal(canWriteTodo("system"), false);
   assert.equal(canCompleteTodo("u-b"), true);
   assert.equal(canCompleteTodo("ai-bot"), false);
+  assert.equal(canCompleteRoomTodo({ createdBy: "u-a" }, "u-a", false), true);
+  assert.equal(canCompleteRoomTodo({ createdBy: "u-a" }, "u-b", false), false);
+  assert.equal(canCompleteRoomTodo({ createdBy: "u-a" }, "u-b", true), true);
+  assert.equal(canCompleteRoomTodo({ createdBy: "u-a" }, "ai", true), false);
   assert.equal(isMemberActor("model-x"), false);
   assert.equal(todoDraftTitle("  印海報  "), "印海報");
   assert.equal(todoDraftTitle("   "), null);
@@ -123,4 +128,20 @@ test("M-07 mutation: 拿掉 mentions / isMemberActor 結案會讓契約失敗", 
   const stripped = honesty.replace(/export function canCompleteTodo[\s\S]*?\n\}/, "export function canCompleteTodo() { return true; }");
   assert.notEqual(stripped, honesty);
   assert.equal(canCompleteTodo("ai"), false);
+});
+
+test("M-08 adversarial: 跨房提及、提及不可改、todo 非作者／非成員不能結案、無 0033", () => {
+  const sql = src(MIGRATION);
+  const e2e = src("scripts/e2e/migrations.mjs");
+  assert.match(sql, /discussion-mention-update-forbidden|提及只能新增，不能改/);
+  assert.match(sql, /new\.deleted_by := caller/);
+  assert.doesNotMatch(sql, /new\.deleted_by := coalesce\(new\.deleted_by, caller\)/);
+  assert.match(e2e, /不能在這房提及只屬於另一房的人/);
+  assert.match(e2e, /檢視者不能完成別人的待辦/);
+  assert.match(e2e, /非成員不能把別房待辦標完成/);
+  assert.match(e2e, /不能改別人的未讀水位/);
+  assert.match(src("src/features/room-discussion/RoomDiscussion.tsx"), /canCompleteRoomTodo/);
+  assert.doesNotMatch(src("src/features/room-discussion/RoomDiscussion.tsx"), /canCompleteTodo\(api\.userId\)/);
+  assert.equal(existsSync(resolve(ROOT, "supabase/migrations/0033_discussion_receipts.sql")), false);
+  assert.doesNotMatch(src("src/features/room-discussion/RoomDiscussion.tsx"), /雙藍勾|(?<!未)已讀|read receipt/i);
 });

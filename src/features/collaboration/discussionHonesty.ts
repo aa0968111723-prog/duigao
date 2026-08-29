@@ -117,6 +117,16 @@ export function canCompleteTodo(actor: string | undefined | null): boolean {
   return isMemberActor(actor);
 }
 
+/** RLS: 作者或 can_manage。路人成員不能完成別人的待辦。 */
+export function canCompleteRoomTodo(
+  todo: { createdBy?: string },
+  actor: string | undefined | null,
+  canManage: boolean,
+): boolean {
+  if (!canCompleteTodo(actor) || !todo.createdBy) return false;
+  return todo.createdBy === actor || canManage;
+}
+
 export type MentionableMember = { userId: string; name: string; color?: string };
 
 export function parseMentionQuery(draft: string): { prefix: string; query: string } | null {

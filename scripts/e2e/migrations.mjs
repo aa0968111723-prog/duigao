@@ -2011,6 +2011,11 @@ try {
     "已刪的訊息不能再改 body",
     as(reviewer, `update public.room_discussion_messages set body = '洗白' where id = '${tombOwn}'::uuid;`).failed,
   );
+  as(owner, `update public.room_discussion_messages set deleted_at = now(), deleted_by = '${reviewer}'::uuid where id = '${tombOther}'::uuid;`);
+  ok(
+    "tombstone 不能把 deleted_by 偽造成別人",
+    as(owner, `select deleted_by from public.room_discussion_messages where id = '${tombOther}'::uuid;`).out === owner,
+  );
 
   const readMsg = tombOther;
   ok(
@@ -2039,6 +2044,17 @@ try {
     "authenticated 對未讀表沒有 DELETE",
     as(owner, `delete from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).failed
       && as(owner, `select count(*) from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).out === "1",
+  );
+  as(reviewer, `update public.room_discussion_reads set last_read_at = now() where room_id = '${capRoom}'::uuid and user_id = '${owner}'::uuid;`);
+  ok(
+    "不能改別人的未讀水位（BOLA）",
+    as(reviewer, `select count(*) from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).out === "0"
+      && as(owner, `select user_id from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).out === owner,
+  );
+  as(owner, `update public.room_discussion_reads set user_id = '${reviewer}'::uuid where room_id = '${capRoom}'::uuid;`);
+  ok(
+    "不能把未讀水位改掛到別人",
+    as(owner, `select user_id from public.room_discussion_reads where room_id = '${capRoom}'::uuid;`).out === owner,
   );
 
   // 0014 在本檔稍早被重跑過，會把 room_discussion_delete 放回來。
@@ -2084,6 +2100,18 @@ try {
     "提及不能掛到別的房間（跨房）",
     as(owner, `insert into public.room_discussion_mentions (message_id, room_id, mentioned_user_id) values ('${mentionMsg}'::uuid, '${otherRoom}'::uuid, '${reviewer}'::uuid);`).failed,
   );
+  const otherMentionMsg = psql("select gen_random_uuid();").out;
+  as(owner, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${otherMentionMsg}'::uuid, '${otherRoom}'::uuid, '${owner}'::uuid, 'Owner', '另一間房');`);
+  ok(
+    "不能在這房提及只屬於另一房的人（跨房 BOLA）",
+    as(owner, `insert into public.room_discussion_mentions (message_id, room_id, mentioned_user_id) values ('${otherMentionMsg}'::uuid, '${otherRoom}'::uuid, '${reviewer}'::uuid);`).failed
+      && as(owner, `select count(*) from public.room_discussion_mentions where message_id = '${otherMentionMsg}'::uuid;`).out === "0",
+  );
+  as(owner, `update public.room_discussion_mentions set mentioned_user_id = '${owner}'::uuid where message_id = '${mentionMsg}'::uuid;`);
+  ok(
+    "提及不能改掛被提及的人",
+    as(owner, `select mentioned_user_id from public.room_discussion_mentions where message_id = '${mentionMsg}'::uuid;`).out === reviewer,
+  );
   ok(
     "成員可以建自己的待辦",
     !as(reviewer, `insert into public.room_todos (id, room_id, title) values ('${todoOwn}'::uuid, '${capRoom}'::uuid, '印海報');`).failed
@@ -2107,6 +2135,16 @@ try {
     "作者可以把待辦標完成",
     !as(reviewer, `update public.room_todos set status = 'done' where id = '${todoOwn}'::uuid;`).failed
       && as(reviewer, `select status from public.room_todos where id = '${todoOwn}'::uuid;`).out === "done",
+  );
+  as(reviewer, `update public.room_todos set status = 'done' where id = '${todoMove}'::uuid;`);
+  ok(
+    "檢視者不能完成別人的待辦（peer BOLA）",
+    as(owner, `select status from public.room_todos where id = '${todoMove}'::uuid;`).out === "open",
+  );
+  as(stranger, `update public.room_todos set status = 'done' where id = '${todoMove}'::uuid;`);
+  ok(
+    "非成員不能把別房待辦標完成",
+    as(owner, `select status from public.room_todos where id = '${todoMove}'::uuid;`).out === "open",
   );
   ok(
     "authenticated 對提及與待辦沒有 DELETE",

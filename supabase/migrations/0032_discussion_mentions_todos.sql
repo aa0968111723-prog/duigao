@@ -86,13 +86,13 @@ declare
   caller uuid := (select auth.uid());
   author uuid;
 begin
+  if tg_op = 'UPDATE' then
+    raise exception 'discussion-mention-update-forbidden'
+      using hint = '提及只能新增，不能改。';
+  end if;
   if new.created_by is distinct from caller then
     raise exception 'discussion-mention-not-own'
       using hint = '提及只能用自己的身分寫。';
-  end if;
-  if tg_op = 'UPDATE' and new.room_id is distinct from old.room_id then
-    raise exception 'discussion-mention-room-immutable'
-      using hint = '不能把提及搬到別的房間。';
   end if;
   select author_user_id into author
   from public.room_discussion_messages
@@ -113,7 +113,42 @@ end;
 $$;
 
 comment on function public.guard_discussion_mention_write() is
-  '提及：作者自己寫、被提及者必須是本房成員、不能跨房（0032）。';
+  '提及：作者自己寫、被提及者必須是本房成員、INSERT-only、不能跨房（0032）。';
+
+-- 0031 replay 會把 tombstone 函式放回 coalesce(deleted_by)。這裡蓋回「只能是 caller」。
+create or replace function public.guard_discussion_tombstone()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  caller uuid := (select auth.uid());
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'discussion-hard-delete-forbidden'
+      using hint = '討論訊息只能標 tombstone，不能硬刪。';
+  end if;
+
+  if old.deleted_at is not null then
+    if new.deleted_at is distinct from old.deleted_at
+      or new.deleted_by is distinct from old.deleted_by
+      or new.body is distinct from old.body
+      or new.kind is distinct from old.kind
+      or new.payload is distinct from old.payload
+    then
+      raise exception 'discussion-tombstone-immutable'
+        using hint = '已刪除的討論不能再改。';
+    end if;
+  end if;
+
+  if old.deleted_at is null and new.deleted_at is not null then
+    new.deleted_by := caller;
+  end if;
+
+  return new;
+end;
+$$;
 
 revoke execute on function public.guard_discussion_mention_write() from public, anon, authenticated;
 

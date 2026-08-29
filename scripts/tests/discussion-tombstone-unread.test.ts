@@ -152,7 +152,14 @@ test("T-07 unread: 水位之後的第一則；沒有已讀回條", () => {
   const ui = src("src/features/room-discussion/RoomDiscussion.tsx");
   assert.match(ui, /jump-first-unread/);
   assert.match(ui, /firstUnreadMessageId/);
+  assert.match(ui, /suppressReadFromJump/);
   assert.doesNotMatch(ui, /雙藍勾|(?<!未)已讀/);
+});
+
+test("T-10: 墓碑 attribution 只能寫成呼叫者，不能把 deleted_by 偽造成別人", () => {
+  const sql = src(MIGRATION);
+  assert.match(sql, /new\.deleted_by := caller;/);
+  assert.doesNotMatch(sql, /new\.deleted_by := coalesce\(new\.deleted_by,\s*caller\)/);
 });
 
 test("T-08 mutation: 拿掉 deleted_at 對應會讓契約失敗", () => {

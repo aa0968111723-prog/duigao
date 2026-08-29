@@ -5,7 +5,7 @@ import { indexMessages, replySnippet, resolveReply, type ReplyReference } from "
 import {
   attachmentCiteReply,
   boardPollWrite,
-  canCompleteTodo,
+  canCompleteRoomTodo,
   canEditDiscussion,
   canTombstoneDiscussion,
   canWriteTodo,
@@ -243,17 +243,22 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   // 跳到來源之後短暫標記，讓使用者看得出「就是這一則」。
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimer = useRef<number | null>(null);
+  const suppressReadFromJump = useRef(false);
+  const feedEndRef = useRef<HTMLDivElement>(null);
+  const pinnedToLatest = useRef(true);
   const jumpToMessage = (sourceId: string) => {
     const el = typeof document !== "undefined" ? document.getElementById(`rd-msg-${sourceId}`) : null;
+    pinnedToLatest.current = false;
+    suppressReadFromJump.current = true;
     el?.scrollIntoView({ block: "center", behavior: "smooth" });
     setHighlightId(sourceId);
     if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
-    highlightTimer.current = window.setTimeout(() => setHighlightId(null), 1600);
+    highlightTimer.current = window.setTimeout(() => {
+      setHighlightId(null);
+      suppressReadFromJump.current = false;
+    }, 1600);
   };
   useEffect(() => () => { if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current); }, []);
-
-  const feedEndRef = useRef<HTMLDivElement>(null);
-  const pinnedToLatest = useRef(true);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const feedCountRef = useRef(0);
   const lastMessageIdRef = useRef<string | undefined>(undefined);
@@ -296,6 +301,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const scrollToLatest = (behavior: ScrollBehavior) => {
     const id = lastMessage?.id;
     if (!id || typeof document === "undefined") return;
+    suppressReadFromJump.current = false;
     document.getElementById(`rd-msg-${id}`)?.scrollIntoView({ block: "end", behavior });
     pinnedToLatest.current = true;
     setShowJumpLatest(false);
@@ -318,6 +324,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       pinnedToLatest.current = Boolean(entry?.isIntersecting);
       if (entry?.isIntersecting) {
         setShowJumpLatest(false);
+        if (suppressReadFromJump.current) return;
         const latest = lastMessageRef.current;
         if (latest) api.onMarkRead?.(latest.id);
       }
@@ -510,7 +517,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         {openTodos.map((item) => (
           <article className="rd-todo" key={item.id} data-status="open">
             <strong>{item.title}</strong>
-            {api.onCompleteTodo && canCompleteTodo(api.userId) && (
+            {api.onCompleteTodo && canCompleteRoomTodo(item, api.userId, api.canManage) && (
               <button type="button" className="project-text-button" data-testid="todo-complete" onClick={() => api.onCompleteTodo?.(item.id)}>完成</button>
             )}
           </article>
