@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldFollowLatest } from "../../src/features/room-discussion/feed.ts";
+import { shouldFollowLatest, shouldMarkLatestFromFeedEnd } from "../../src/features/room-discussion/feed.ts";
 import { belongsToCurrentRoom, blockedRepliesTo, failedBlockingParentId, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "../../src/hooks/discussionOutboxCore.ts";
 import type { DiscussionMessage } from "../../src/features/collaboration/types.ts";
 
@@ -171,6 +171,13 @@ test("打開討論串或停在底部時跟著最新一則；往上讀舊訊息�
   assert.equal(shouldFollowLatest({ previousCount: 3, nextCount: 4, pinnedToLatest: true, previousLastId: "c", nextLastId: "d" }), true);
   assert.equal(shouldFollowLatest({ previousCount: 3, nextCount: 4, pinnedToLatest: false, previousLastId: "c", nextLastId: "d" }), false);
   assert.equal(shouldFollowLatest({ previousCount: 3, nextCount: 3, pinnedToLatest: true, previousLastId: "c", nextLastId: "c" }), false);
+});
+
+test("短 feed 滑到底且第一則未讀仍在畫面上時，不可把水位刷到最新", () => {
+  assert.equal(shouldMarkLatestFromFeedEnd({ endIntersecting: true, firstUnreadInView: true, holdingFirstUnread: false }), false);
+  assert.equal(shouldMarkLatestFromFeedEnd({ endIntersecting: true, firstUnreadInView: false, holdingFirstUnread: true }), false);
+  assert.equal(shouldMarkLatestFromFeedEnd({ endIntersecting: true, firstUnreadInView: false, holdingFirstUnread: false }), true);
+  assert.equal(shouldMarkLatestFromFeedEnd({ endIntersecting: false, firstUnreadInView: false, holdingFirstUnread: false }), false);
 });
 
 test("來源失敗但其實已經在伺服器快照裡：不算擋路", () => {

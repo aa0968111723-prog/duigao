@@ -19,7 +19,7 @@ import {
 import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
-import { shouldFollowLatest } from "./feed";
+import { shouldFollowLatest, shouldMarkLatestFromFeedEnd } from "./feed";
 import { voiceDockShowsLeave } from "./voiceDockLeave";
 import "./discussion.css";
 
@@ -218,8 +218,12 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   // 跳到來源之後短暫標記，讓使用者看得出「就是這一則」。
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimer = useRef<number | null>(null);
+  const holdingFirstUnreadRef = useRef(false);
   const jumpToMessage = (sourceId: string) => {
-    if (sourceId === firstUnreadIdRef.current) pinnedToLatest.current = false;
+    if (sourceId === firstUnreadIdRef.current) {
+      pinnedToLatest.current = false;
+      holdingFirstUnreadRef.current = true;
+    }
     const el = typeof document !== "undefined" ? document.getElementById(`rd-msg-${sourceId}`) : null;
     el?.scrollIntoView({ block: "center", behavior: "smooth" });
     setHighlightId(sourceId);
@@ -252,12 +256,14 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     if (!id || typeof document === "undefined") return;
     document.getElementById(`rd-msg-${id}`)?.scrollIntoView({ block: "end", behavior });
     pinnedToLatest.current = true;
+    holdingFirstUnreadRef.current = false;
     setShowJumpLatest(false);
     if (lastMessage) api.onMarkRead?.(lastMessage.id);
   };
 
   useEffect(() => {
     pinnedToLatest.current = true;
+    holdingFirstUnreadRef.current = false;
     feedCountRef.current = 0;
     lastMessageIdRef.current = undefined;
     setShowJumpLatest(false);
@@ -269,17 +275,32 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     const el = feedEndRef.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(([entry]) => {
-      pinnedToLatest.current = Boolean(entry?.isIntersecting);
-      if (entry?.isIntersecting) {
-        setShowJumpLatest(false);
-        const latest = lastMessageRef.current;
-        const unreadId = firstUnreadIdRef.current;
-        // Short feed: jumping to first-unread still leaves the end on screen.
-        // Marking latest read here would wipe data-first-unread on the row
-        // the person just asked to see.
-        if (latest && unreadId && unreadId !== latest.id) return;
-        if (latest) api.onMarkRead?.(latest.id);
+      const intersecting = Boolean(entry?.isIntersecting);
+      if (!intersecting) {
+        pinnedToLatest.current = false;
+        holdingFirstUnreadRef.current = false;
+        return;
       }
+      const latest = lastMessageRef.current;
+      const unreadId = firstUnreadIdRef.current;
+      let firstUnreadInView = false;
+      if (unreadId && typeof document !== "undefined") {
+        const unreadEl = document.getElementById(`rd-msg-${unreadId}`);
+        if (unreadEl) {
+          const box = unreadEl.getBoundingClientRect();
+          firstUnreadInView = box.bottom > 0 && box.top < window.innerHeight;
+        }
+      }
+      if (!shouldMarkLatestFromFeedEnd({
+        endIntersecting: true,
+        firstUnreadInView,
+        holdingFirstUnread: holdingFirstUnreadRef.current,
+      })) {
+        return;
+      }
+      pinnedToLatest.current = true;
+      setShowJumpLatest(false);
+      if (latest) api.onMarkRead?.(latest.id);
     }, { threshold: 0.01 });
     observer.observe(el);
     return () => observer.disconnect();
