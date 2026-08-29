@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptRelationDeleteAck, acceptRelationInsertAck } from "./relationWriteAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -1034,20 +1035,32 @@ export async function upsertPlan(supabase: SupabaseClient, plan: PlanDocument, r
 }
 
 export async function insertRelation(supabase: SupabaseClient, relation: ContentRelation): Promise<void> {
-  const { error } = await supabase.from("content_relations").insert({
-    id: relation.id,
-    room_id: relation.roomId,
-    from_branch_id: relation.fromBranchId,
-    to_branch_id: relation.toBranchId,
-    relation_type: "related",
-    created_by: isUuid(relation.createdBy) ? relation.createdBy : null,
-  });
+  const { data, error } = await supabase
+    .from("content_relations")
+    .insert({
+      id: relation.id,
+      room_id: relation.roomId,
+      from_branch_id: relation.fromBranchId,
+      to_branch_id: relation.toBranchId,
+      relation_type: "related",
+      created_by: isUuid(relation.createdBy) ? relation.createdBy : null,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "relation");
+  acceptRelationInsertAck(data);
 }
 
 export async function deleteRelation(supabase: SupabaseClient, roomId: string, relationId: string): Promise<void> {
-  const { error } = await supabase.from("content_relations").delete().eq("id", relationId).eq("room_id", roomId);
+  const { data, error } = await supabase
+    .from("content_relations")
+    .delete()
+    .eq("id", relationId)
+    .eq("room_id", roomId)
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "relation");
+  acceptRelationDeleteAck(data);
 }
 
 export async function insertPoll(supabase: SupabaseClient, poll: RoomPoll): Promise<void> {

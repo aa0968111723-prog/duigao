@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isRelationNotRemoved, isRelationNotSaved } from "./relationWriteAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -134,8 +135,8 @@ export type CloudWrites = {
   createBranch: (branch: RoomBranch) => Promise<void>;
   updateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => void;
   savePlan: (plan: PlanDocument) => void;
-  createRelation: (relation: ContentRelation) => void;
-  deleteRelation: (relationId: string) => void;
+  createRelation: (relation: ContentRelation) => Promise<void>;
+  deleteRelation: (relationId: string) => Promise<void>;
   createPoll: (poll: RoomPoll) => void;
   votePoll: (vote: PollVote) => void;
   insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
@@ -1081,8 +1082,58 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     createBranch: (branch) => runAndWait(`branch-insert:${branch.id}`, () => insertBranch(supabase!, branch)),
     updateBranch: (branchId, patch) => run(`branch:${branchId}`, () => updateBranch(supabase!, boundRef.current!, branchId, patch)),
     savePlan: (plan) => run(`plan:${plan.branchId}`, () => upsertPlan(supabase!, plan, boundRef.current!)),
-    createRelation: (relation) => run(`relation:${relation.id}`, () => insertRelation(supabase!, relation)),
-    deleteRelation: (relationId) => run(`relation-del:${relationId}`, () => deleteRelation(supabase!, boundRef.current!, relationId)),
+    createRelation: async (relation) => {
+      const rid = boundRef.current;
+      const key = `relation:${relation.id}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await insertRelation(supabase, relation);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isRelationNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => insertRelation(supabase, relation),
+        });
+        setStatus("offline-pending");
+      }
+    },
+    deleteRelation: async (relationId) => {
+      const rid = boundRef.current;
+      const key = `relation-del:${relationId}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await deleteRelation(supabase, rid, relationId);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isRelationNotRemoved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => deleteRelation(supabase, rid, relationId),
+        });
+        setStatus("offline-pending");
+      }
+    },
     createPoll: (poll) => run(`poll:${poll.id}`, () => insertPoll(supabase!, poll)),
     votePoll: (vote) => run(`vote:${vote.pollId}:${vote.userId}`, () => votePoll(supabase!, vote)),
     // 討論訊息要能在 UI 上呈現「未送出／重試」，所以回傳可等待的成敗，

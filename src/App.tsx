@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isRelationNotRemoved, isRelationNotSaved } from "./cloud/relationWriteAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -1642,7 +1643,14 @@ export function App() {
       }
       const nextRelation = { ...relation, createdBy: cloud.userId ?? relation.createdBy };
       updateRoom((r) => ({ ...r, relations: [...(r.relations ?? []), nextRelation] }));
-      cloudRef.current.writes.createRelation(nextRelation);
+      void cloudRef.current.writes.createRelation(nextRelation).catch((err) => {
+        if (!isRelationNotSaved(err)) return;
+        updateRoom((r) => ({
+          ...r,
+          relations: (r.relations ?? []).filter((item) => item.id !== nextRelation.id),
+        }));
+        showToast("相關內容沒有加上，請再試一次。", { tone: "error" });
+      });
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, showToast, updateRoom],
   );
@@ -1653,8 +1661,16 @@ export function App() {
         showToast("檢視者不能管理相關內容。", { tone: "error" });
         return;
       }
+      const previous = (roomRef.current?.relations ?? []).find((item) => item.id === relationId);
       updateRoom((r) => ({ ...r, relations: (r.relations ?? []).filter((relation) => relation.id !== relationId) }));
-      cloudRef.current.writes.deleteRelation(relationId);
+      void cloudRef.current.writes.deleteRelation(relationId).catch((err) => {
+        if (!isRelationNotRemoved(err) || !previous) return;
+        updateRoom((r) => {
+          if ((r.relations ?? []).some((item) => item.id === relationId)) return r;
+          return { ...r, relations: [...(r.relations ?? []), previous] };
+        });
+        showToast("相關內容沒有移除，請再試一次。", { tone: "error" });
+      });
     },
     [cloud.boundRoomId, cloud.canManageMedia, showToast, updateRoom],
   );
