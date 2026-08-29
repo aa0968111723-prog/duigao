@@ -209,6 +209,8 @@ export type DiscussionPayload = {
   messageId?: string;
   /** plan-section 錨（WB01）：企劃分支內的段落 id。 */
   planSectionId?: string;
+  /** 作者改過 body（0022 允許改內容）。插入觸發器造成的小幅 updated_at 不算。 */
+  edited?: boolean;
   /** 唯讀併入的 legacy（0001 messages）列：討論表沒有這個 id，互動一律關閉。 */
   legacy?: boolean;
   /** attachment：room-assets 物件 key（永遠不是 signed URL）。 */

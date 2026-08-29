@@ -11,7 +11,11 @@
  *   - 手機一次看一個方案，用滑動切換 → `swipeIntent` + `nextAlternativeIndex`
  *   - 套用前必須人類確認 → `applyGate`
  */
+import { INTEGRATION_NOT_CONFIGURED } from "./honesty";
+import type { AdapterStatus } from "./adapters";
 import type { DesignProposal, Diagnostic, Severity } from "./types";
+
+const EXTERNAL_APPLY_ADAPTERS = new Set(["canva", "cutos", "planform-iso"]);
 
 // ---------------------------------------------------------------------------
 // 版面
@@ -266,6 +270,7 @@ export function applyGate(
    * 對抗審查兩次指出這裡：第一次是完全沒有角色檢查，第二次是預設值太寬鬆。
    */
   canApply: boolean,
+  adapterStatus?: AdapterStatus,
 ): ApplyGate {
   if (!canApply) return { enabled: false, reason: "你在這個房間沒有修改作品的權限" };
   if (proposal.status === "applied") return { enabled: false, reason: "這個提案已經套用過了" };
@@ -282,6 +287,12 @@ export function applyGate(
   }
   if (!proposal.alternatives.some((alternative) => alternative.id === selectedAlternativeId)) {
     return { enabled: false, reason: "選到的方案已經不在這份提案裡，請重新整理" };
+  }
+  const adapter = proposal.patch?.adapter;
+  if (adapter && EXTERNAL_APPLY_ADAPTERS.has(adapter)) {
+    if (adapterStatus?.state !== "ready") {
+      return { enabled: false, reason: INTEGRATION_NOT_CONFIGURED };
+    }
   }
   return { enabled: true };
 }

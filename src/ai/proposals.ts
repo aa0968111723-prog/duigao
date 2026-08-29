@@ -169,16 +169,16 @@ export function pollFromAction(payload: Record<string, unknown>, roomId: string,
   createdAt: number;
   updatedAt: number;
 } {
-  const question = text(payload.question) || text(payload.text) || "要不要這樣做？";
+  const question = text(payload.question) || text(payload.text);
   const options = Array.isArray(payload.options)
     ? payload.options.map((item) => text(item)).filter(Boolean).slice(0, 6)
-    : ["贊成", "再想想"];
+    : [];
   const now = Date.now();
   return {
     id: crypto.randomUUID(),
     roomId,
     question,
-    options: options.length >= 2 ? options : ["贊成", "再想想"],
+    options,
     createdBy,
     createdAt: now,
     updatedAt: now,

@@ -8,6 +8,11 @@
 .rd-dot { width: 8px; height: 8px; border-radius: 99px; }
 .rd-msg b { font-size: 13px; }
 .rd-msg time { margin-left: auto; color: var(--ink-faint); font-size: 11px; }
+.rd-edited { font-size: 11px; color: var(--ink-faint); font-weight: 400; }
+.rd-edit-form { display: grid; gap: 8px; margin-top: 4px; }
+.rd-edit-form textarea { min-height: 72px; resize: vertical; }
+.rd-decision-draft { display: flex; gap: 6px; align-items: center; }
+.rd-decision-draft .text-input { min-width: 0; flex: 1; }
 .rd-msg p { margin: 0; font-size: 15px; line-height: 1.45; }
 .rd-quote, .rd-ref { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--raise); font-size: 13px; color: var(--ink-dim); }
 .rd-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
