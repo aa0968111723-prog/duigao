@@ -143,10 +143,11 @@ test("wiring: insert and upload paths call the honesty helpers", () => {
   assert.match(store, /ownerId/);
 });
 
-test("mobile composer hides search/overview/AI chrome only while the input is focused", () => {
+test("mobile first layer keeps composer; secondary chrome lives behind 更多", () => {
   const shell = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
   const discussion = readFileSync(resolve(ROOT, "src/features/room-discussion/RoomDiscussion.tsx"), "utf8");
   assert.match(discussion, /onComposerActive/);
   assert.match(shell, /composerActive/);
-  assert.match(shell, /hideRoomChrome/);
+  assert.match(shell, /data-testid="room-more"/);
+  assert.doesNotMatch(shell, /hideRoomChrome/);
 });
