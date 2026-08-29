@@ -22,6 +22,7 @@
     "test:multi-branch-e2e": "node scripts/e2e/multi-branch-room.mjs",
     "test:collaboration-e2e": "node scripts/e2e/collaboration-workspace.mjs",
     "test:migrations": "node scripts/e2e/migrations.mjs",
+    "test:ai-external-handoff": "tsx --test scripts/tests/ai-external-handoff.test.ts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
     "test:design-intelligence": "tsc -p tsconfig.scripts.json --noEmit && tsx --test scripts/tests/design-intelligence-schema.test.ts scripts/tests/design-intelligence-retrieval.test.ts scripts/tests/design-intelligence-analyzers.test.ts scripts/tests/design-intelligence-analysis.test.ts scripts/tests/design-intelligence-sanitize.test.ts scripts/tests/design-intelligence-adversarial.test.ts scripts/tests/design-intelligence-research.test.ts scripts/tests/design-intelligence-proposal-view.test.ts scripts/tests/design-intelligence-adapters.test.ts scripts/tests/design-intelligence-eval.test.ts",
     "test:agent": "node --test scripts/tests/agent-layer.test.mjs",
