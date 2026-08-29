@@ -1,0 +1,103 @@
+{
+ "source": "Claude 自審 workflow（3 面向＋懷疑者對抗驗證，34 agents）",
+ "confirmed": 12,
+ "refuted": 19,
+ "findings": [
+  {
+   "title": "預覽永遠畫在世界座標 (120,120)：使用者常常「沒看到就套用」",
+   "file": "src/App.tsx",
+   "line": 3217,
+   "severity": "high",
+   "dimension": "red-line",
+   "claim": "`const origin = screenCenterWorldRef.current ?? { x: 120, y: 120 }` — 這個 ref 在 src/App.tsx:274 宣告後全 repo 再也沒有任何一處寫入（grep 只有宣告與這一行讀取），註解說「Workspace 在問 AI 時回報目前視野中心」但 WhiteboardWorkspace 呼叫 onAskBoardAi 時只傳 `{ nodes, selectedIds }`（WhiteboardWorkspace.tsx:1308），沒有帶視野。於是 origin 恆為固定世界座標 (120,120)。幽靈節點被畫在 camera 變換過的 .wb-layer 裡（WhiteboardWorkspace.tsx:1561，style 用 node.x/node.y 世界座標）。操作序列：開一塊已經有東西的板 → 平移／縮放畫布到板的另一區工作（或切走再切回來，CAMERA_MEMORY 會還原到非原點的視角）→ 更多 → 問 AI → 按「看看建議」→ sheet 關掉、底部確認列出現寫著「會加上 2 個便利貼」，但畫面上一個虛線幽靈都看不到（它們在畫面外的 (120,120)）→ 使用者只能照著文字按「套用」。錯誤行為：紅線「AI 是可選擇的協助、先給你看再決定」被繞過 —— 使用者在完全沒看到預覽的情況下完成套用；而且節點落在板左上角、極可能直接疊在既有節點上。同檔案既有的正確做法就在旁邊：WhiteboardWorkspace.tsx:1010 的 addAtView 用 `screenToWorld(camera, viewport.width / 2, viewport.height / 2)`。"
+  },
+  {
+   "title": "稽核失敗被完全吞掉（房間層有回報，白板層沒有）",
+   "file": "src/App.tsx",
+   "line": 3265,
+   "severity": "medium",
+   "dimension": "red-line",
+   "claim": "WB06 的稽核寫成 `void cloudRef.current.writes.recordAiApplyAudit?.({...});`（App.tsx:3265），沒有 `.then` 也沒有 toast；而 `recordAiApplyAudit` 內部本來就 `catch { return false }`（useCloudRoom.ts:1088-1101，註解寫「App 端以 toast 誠實告知」）。同一份 App.tsx 的房間層路徑（第 2140-2147 行）確實有做：`.then((recorded) => { if (!recorded) showToast(\"稽核紀錄暫時沒寫成（套用本身已完成）\") })`。白板層把這層告知拿掉了。操作序列：離線、或 collaboration_audit_events 的 RLS 拒絕這個身分 → 在白板套用 AI 建議 → toast「已套用 2 項（套用前已存快照）」、討論串出現「已把 AI 的 2 個建議放上白板」。錯誤行為：0019 稽核表一列都沒寫進去，沒有任何重試也沒進 pending 佇列，而且沒有任何人被告知 —— 設計文件的「人看得到、機器也查得到」只剩人看得到的那半，事後查「這批節點是誰／哪個提案放上去的」查無此事。"
+  },
+  {
+   "title": "「已套用 N 項」在離線時是謊：實際只是進了 pending 佇列（WB04 還原路徑有 queued，WB06 沒有）",
+   "file": "src/App.tsx",
+   "line": 3278,
+   "severity": "medium",
+   "dimension": "red-line",
+   "claim": "`return { applied: plan.nodes.length + plan.edges.length, snapshotTaken }`（App.tsx:3278）是在呼叫 `upsertNodes` 之前就算好的常數；upsertNodes 是樂觀寫入，離線時走 `queuePendingEdit`（App.tsx:1894-1904），根本還沒送出去。同檔案 WB04 的 onRestoreVersion 就有做對：`return { applied, queued: !navigator.onLine || cloudRef.current.status === \"offline-pending\" }`（App.tsx:3189，註解寫「離線時這些寫入是進佇列、不是已完成 — UI 要說得出差別（P2）」）；WB06 的回傳型別 `{ applied, snapshotTaken }` 連 queued 欄位都沒有。操作序列：離線（或 cloud status 為 offline-pending）→ 問 AI（5 分鐘內問過同題會命中快取，離線也有預覽）→ 套用。錯誤行為：toast 說「已套用 2 項」，但實際上節點只在本地與 pending 佇列裡、快照沒存到（createBoardVersion 直接失敗 → snapshotTaken=false，訊息只是少一句話）、稽核沒寫、連討論串那句「已把 AI 的 2 個建議放上白板」也會失敗進 outbox —— 使用者以為協作對象已經看得到，其實沒有。"
+  },
+  {
+   "title": "在 AI 面板按「取消」不會取消進行中的提問，預覽仍會自己冒出來",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 1304,
+   "severity": "low",
+   "dimension": "red-line",
+   "claim": "「看看建議」的 onClick（WhiteboardWorkspace.tsx:1304-1323）await onAskBoardAi 之後無條件 `setSheet(null)` 並 `setAiPreview(preview)`，沒有 AbortController、也沒有「使用者已經放棄」的旗標；而面板底部的「取消」（第 1327 行 `project-sheet-close`）與點 scrim（第 1284 行）在 aiBusy 期間都仍可按，它們只做 `setSheet(null)`。操作序列：輸入問題 → 按「看看建議」（按鈕變成「想一下…」）→ 反悔，按「取消」關掉面板，回到白板繼續做別的事 → 數秒後請求回來。錯誤行為：虛線幽靈節點與底部「AI 建議」確認列自己出現在板上，把使用者原本的節點情境列／主工具列擠掉（第 1626 行 aiPreview 優先於所有其他 bar），使用者已經明確表示放棄的流程又回到畫面上等著被按「套用」。"
+  },
+  {
+   "title": "screenCenterWorldRef 從來沒有被寫入：預覽永遠畫在世界座標 (120,120)，鏡頭一移就「確認一批看不見的東西」",
+   "file": "src/App.tsx",
+   "line": 3217,
+   "severity": "high",
+   "dimension": "ai-correctness",
+   "claim": "`screenCenterWorldRef` 在 App.tsx:274 宣告，全 repo 只有兩處出現（宣告 + 3217 的讀取），**沒有任何一處指派**；註解寫的「Workspace 在問 AI 時回報目前視野中心」的回報管線根本不存在（WhiteboardApi 沒有任何 viewport 回報 callback）。所以 `origin` 恆為 fallback `{x:120,y:120}`，而幽靈節點是畫在 `.wb-layer`（camera transform 內）的 `left: node.x / top: node.y`，即世界座標。操作序列：開一塊已經有內容的板 → 平移到離原點遠的那一區（camera.x 變成例如 -1500，WB03 的 CAMERA_MEMORY 還會把這個鏡頭記住，下次進來就直接在遠處）→ 更多 → 問 AI → 送出。錯誤行為：底部確認列出現並宣告「會加上 3 個便利貼」，但畫布上一個虛線節點都看不到（它們在螢幕外的 (120,120) 附近）；使用者只能對著一句文字按「套用」，套用後節點落在他沒在看的地方。這正面違反紅線「套用前要看得到」。次生後果：因為 origin 是常數，每一次套用都疊在同一組座標上——第二次套用的三個節點完全蓋在第一次的三個節點上（layoutPreview 沒有任何 per-invocation 位移），而 (120,120) 恰好就是 app 預設新增節點的落點區（addMessageToBoard 用 80+…、createNode 預設 80,80），所以 AI 節點預設會壓在既有節點上。e2e 測不出來是因為它在全新的板、預設鏡頭 (24,24) 下跑，(120,120) 剛好在畫面內。"
+  },
+  {
+   "title": "套用結果是憑計畫算出來的，不是憑寫入結果：離線／寫入失敗一律回報「已套用 N 項」",
+   "file": "src/App.tsx",
+   "line": 3278,
+   "severity": "medium",
+   "dimension": "ai-correctness",
+   "claim": "onApplyBoardAi 回傳 `applied: plan.nodes.length + plan.edges.length`，而 `upsertNodes`（App.tsx:1818）與 `createEdge`（App.tsx:2002）都是同步樂觀寫入＋fire-and-forget 的持久化鏈，**不 await、不拋錯**。操作序列：飛航模式（或雲端 offline-pending）→ 問 AI（若 askAi 有快取命中則預覽仍會出現）→ 按套用。錯誤行為：createBoardVersion 失敗 → snapshotTaken=false，`upsertNodes` 走 `queuePendingEdit` 全部進離線佇列，但通知照樣說「已套用 2 項」；同一支 codebase 的還原路徑（onRestoreVersion）為了誠實特地回傳 `queued` 並顯示「已排入離線佇列」，WB06 的 API 型別（WhiteboardWorkspace.tsx:109）連 queued 欄位都沒有。連帶地，WhiteboardWorkspace.tsx:1639 的 catch 分支「套用沒有完成，白板維持原狀」實際上不可達——沒有任何寫入失敗會讓這個 promise reject，那句話永遠不會出現，失敗一律偽裝成成功。"
+  },
+  {
+   "title": "AI payload 的 linkedEntityType/linkedEntityId 未經驗證就寫進 uuid 欄位，失敗後永久毒化離線佇列",
+   "file": "src/ai/proposals.ts",
+   "line": 157,
+   "severity": "medium",
+   "dimension": "ai-correctness",
+   "claim": "`nodeFromAddWhiteboardAction` 直接把 `payload.linkedEntityType`／`payload.linkedEntityId` 交給 `entityAnchor`，後者只檢查 type 是否在 LINKED_ENTITY_TYPES 內、對 id 只檢查非空字串（contextAnchor.ts:221-225）。但 DB 欄位是 `linked_entity_id uuid`（supabase/migrations/0014_collaboration_workspace.sql:81）。操作序列：AI（或被注入的 agent 回應）回一個 `{\"type\":\"add_whiteboard_node\",\"label\":\"方向一\",\"payload\":{\"text\":\"…\",\"linkedEntityType\":\"branch\",\"linkedEntityId\":\"poster-1\"}}` → 預覽看起來就是一張正常的便利貼（幽靈只渲染 content.text，完全不顯示 link）→ 使用者按套用。錯誤行為：本地樂觀狀態接受該節點（畫面上「成功」），PostgREST 端 22P02 invalid input syntax for uuid → `isCloudWriteAcknowledged` 為 false 且不是 conflict → 走 `decideNodeWriteRetry(\"failed\")` → `queuePendingEdit`（App.tsx:1875-1884），這筆永遠寫不進去的列就此常駐 durable 佇列，之後每一次 flush 都重放、每一次都失敗。這與 P13 註解（migrations 那段「畸形列 → PostgREST 400 之後進重試佇列反覆重放」）要防的是同一種毒化，只是這次的畸形來源是 AI 提案而不是舊快照。WB06 新增的是「AI 內容可以被批次套用且預覽不揭露 link」這條放大路徑：預覽層應該把 link 也顯示出來，或在 planApply／nodeFromAddWhiteboardAction 就把非 uuid 的 linkedEntityId 丟掉。"
+  },
+  {
+   "title": "只是「預覽」就把整塊板的文字寫進 IndexedDB 快取，且沒有淘汰機制",
+   "file": "src/cloud/assetIntelligence.ts",
+   "line": 425,
+   "severity": "low",
+   "dimension": "ai-correctness",
+   "claim": "`askRoomContext` 的快取鍵是 `contextCacheKey`（assetIntelligence.ts:431），內容是包含 **完整 query 字串** 的 JSON——而 WB06 的 query 就是「問題＋整塊板的文字」。回應成功後 `saveAiContext(key, response)` 把它 put 進 IndexedDB 的 `ai-contexts` store（src/lib/store.ts:30）。`loadAiContext` 有 5 分鐘新鮮度，但那只影響**讀**；沒有任何刪除或淘汰，記錄永久留存。操作序列：在共用電腦／教室機上開雲端房 → 在白板問一次 AI → 就算立刻按「取消」讓預覽整批消失、甚至關掉分頁。錯誤行為：板上的文字內容連同 AI 的提案清單留在該裝置的 IndexedDB 裡，重整不會清、離開房間不會清、之後換人使用同一台機器也還在。「預覽不持久（重整就沒了）」這句話只對畫面上的幽靈成立；提案這一步本身是有持久化副作用的，這值得在紅線「預覽不得寫入任何持久化狀態」的字面下被明確承認或清掉（例如在 discard 時 deleteAiContext）。"
+  },
+  {
+   "title": "板上 AI 把素材節點標題直接塞進 query，繞過 external_ai_allowed 阻擋",
+   "file": "src/App.tsx",
+   "line": 3204,
+   "severity": "medium",
+   "dimension": "integration",
+   "claim": "操作序列：房主在素材頁把「贊助商報價_機密.pdf」的「素材 AI 理解」關掉（aiReadable=false / externalAiAllowed=false）→ 任一成員把該素材拖到白板（placeAsset，WhiteboardWorkspace.tsx:1125-1134，存成 room_content 節點，content.title = 檔名，linkedEntityType=\"version\"）→ 在該板按「問 AI」。錯誤行為：onAskBoardAi 用 `node.content.text || node.content.title` 收集最多 40 個節點的文字，**把檔名內嵌進 query 字串**送出（3204-3212 行）；而 edge function 的外部 AI 阻擋只檢查 `selected` 這批資產（supabase/functions/room-ai-context/index.ts:432-437），資產查詢本身又已經 `.eq(\"ai_readable\", true)` 先濾掉（263 行），所以這個素材根本不在 selected 裡，`EXTERNAL_AI_BLOCKED` 永遠不會觸發。同時 onAskBoardAi 只把 `linkedEntityType===\"branch\"` 的節點放進 selectedBranchIds（3212 行），素材節點（\"version\"）不進 selectedVersionIds —— 等於伺服器的政策閘看不見它。被關掉 AI 的素材，名稱照樣進了外部模型的 prompt。"
+  },
+  {
+   "title": "e2e 的 WB06 章節有假綠：重複斷言當成新檢查、稽核與房態完全沒驗",
+   "file": "scripts/e2e/collaboration-workspace.mjs",
+   "line": 448,
+   "severity": "medium",
+   "dimension": "integration",
+   "claim": "操作序列：把實作改成「預覽時順手把節點也 insert 進 whiteboard_nodes」或「把 create_comment 提案也送進討論串」，再跑 npm run test:collaboration-e2e。錯誤行為：全綠。具體：(1) 448 行 `check(\"非白板提案（留言）不會混進板上預覽\", previewCount === 2)` 重複斷言 441 行已經算過的同一個變數，沒有任何新觀察 —— 它從不看 `rows.room_discussion_messages`，留言提案洩漏到討論串照樣過；(2) 441 與 453 行的「真節點數沒有變」「板上沒有殘留」都只數 DOM 的 `.wb-node:not(.wb-node-ai-preview)`，同檔 739/936/943 行明明就在用 `rows.whiteboard_nodes` 直查 mock DB，WB06 這段卻一次都沒查 —— 紅線「預覽不得寫入持久化狀態」在 e2e 裡沒有任何 DB 層證據；(3) 章節標題寫「提案 → 預覽 → 套用 → 稽核」，但套用後只驗了 `rows.whiteboard_versions`（474-476 行），`collaboration_audit_events` 一列都沒驗 —— 稽核這一腳完全沒被端到端覆蓋；(4) design.md 主張「重整預覽就沒了」，e2e 從頭到尾沒有 reload 過。"
+  },
+  {
+   "title": "稽核寫失敗被靜靜吞掉，與房間層 AI 的誠實回報不一致",
+   "file": "src/App.tsx",
+   "line": 3265,
+   "severity": "low",
+   "dimension": "integration",
+   "claim": "操作序列：套用 AI 建議，但 collaboration_audit_events 的 insert 失敗（RLS、離線、或欄位錯）。錯誤行為：使用者看到「已套用 2 項（套用前已存快照）」，完全不知道稽核沒記到。3264-3270 行是 `void cloudRef.current.writes.recordAiApplyAudit?.({...})` —— 丟掉回傳值；`recordAiApplyAudit` 明明會回 boolean 且註解寫著「App 端以 toast 誠實告知」（src/cloud/useCloudRoom.ts:1099-1101），房間層的同一段（src/App.tsx:2137-2147）也確實 `.then((recorded) => { if (!recorded) showToast(\"稽核紀錄暫時沒寫成…\") })`。同一個機制在板上這條路徑退化成靜默，「人看得到、機器也查得到」少了一半而沒人被告知。"
+  },
+  {
+   "title": "describePreview 對非四種型別直接吐英文型別名，說不了人話",
+   "file": "src/features/whiteboard/aiPreview.ts",
+   "line": 74,
+   "severity": "low",
+   "dimension": "integration",
+   "claim": "操作序列：AI 回一個 `{nodeType:\"poll\"}`／`\"image\"`／`\"link\"`／`\"group\"`／`\"ai_result\"` 的提案（nodeTypeFromPayload 會原樣放行，因為 NODE_TYPES 包含這些值，src/ai/proposals.ts:113-121）→ 看確認列。錯誤行為：確認列顯示「會加上 1 個poll」「會加上 1 個image」——label() 只涵蓋 text/mindmap/flow/room_content/decision，其餘 fall through 成 `type` 原字串（aiPreview.ts:72-75），中文句子裡插一段英文識別碼。這條列是使用者按下不可逆套用前唯一的說明文字。"
+  }
+ ]
+}

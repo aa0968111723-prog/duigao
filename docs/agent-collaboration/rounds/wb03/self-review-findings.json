@@ -1,0 +1,146 @@
+{
+ "source": "Claude 自審 workflow（5 面向找缺陷＋對抗驗證）",
+ "note": "gesture-pointer 面向 5 條完成對抗驗證且 0 條被反駁；其餘面向的驗證者因帳戶月度支出上限中斷，由 Claude 自行逐條查證原始碼（見 claude-adjudication.md）。",
+ "findings": [
+  {
+   "title": "第二指轉 pinch 回放的是第一指「原始 down 座標」而非當前位置，起手即產生大幅 zoom/pan 跳動",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 709,
+   "claim": "繪圖模式：單指從 A 點下筆，畫到 300px 外的 B 點，第二指落下轉 pinch。回放給 reducer 的第一個 down 用的是 strokeDownRef 存的原始座標 A（first.point），但手指實際在 B。reducer 以 A–第二指距離初始化 pinch.distance 與中點；第一指下一個 pointermove 把 pointer 1 更新為 B 附近的真實位置，distance 瞬間從 d(A,p2) 跳為 d(B,p2)，scale=兩者比值 → camera 瞬間縮放一大段，midDelta 同時造成整版大幅平移跳動。筆畫越長跳越大 — 這正是本輪新增的核心手勢路徑。應以第一指當前螢幕位置（strokeRef 最後一點換算回螢幕座標）回放。",
+   "severity": "high"
+  },
+  {
+   "title": "pinch 回放洩漏 hit-test 副作用：繪圖模式雙指縮放會意外選取／清除選取節點並彈出節點動作列",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 709,
+   "claim": "繪圖模式：筆畫起點壓在某節點上，第二指落下轉 pinch。回放第一個 down 時 reducer 發出 hit-test 效果，runEffects 完整執行單指命中邏輯：setSelected([hit.id])、setSelectedFrameId(null)、endEdit()、canEdit 時還 begin-drag（隨即被第二 down 的 cancel-drag 回滾，但選取狀態留下）。放開雙指後，該節點呈選取態且底部彈出 wb-node-actions 情境列 — 使用者只是縮放，卻在繪圖模式中改變了選取；若起點在空白處則反向失效：既有的節點/frame 選取被清空。若 multiSelect 已開啟，還會 toggle 該節點進出多選集合。回放時應繞過 hit-test（直接 begin-pan 或以旗標抑制）。",
+   "severity": "medium"
+  },
+  {
+   "title": "frameDragRef 單一 session 無 pointerId 記帳：兩指同時按兩個 frame 把手互相污染，frame 被以錯誤基準亂跳並以錯誤幾何入帳",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 752,
+   "claim": "觸控：手指 A 按住 frame1 的 wb-frame-handle 開始拖（session=frame1），手指 B 再按 frame2 的把手（或同一 frame 的 resize 把手）— beginFrameDrag 直接覆寫 frameDragRef.current。此後手指 A 的 pointermove（capture 在 frame1 把手上、handler 共用）以 A 的 clientX 減 B 的 startClient 計算 dx → frame2 以數百 px 的假位移瞬移；A/B 交替 move 使 frame2 在兩個位置間跳動。手指 A 先放開即以這個錯誤幾何 commit frame2（onUpdateFrame + frameUpdateDraft 入 undo），並清掉 session，手指 B 之後的 move/up 全部落空。onFramePointerMove/Up 應驗證 event.pointerId 等於起拖的 pointerId，忽略其他 pointer。",
+   "severity": "medium"
+  },
+  {
+   "title": "繪圖模式未停用 frame 把手：筆畫起點落在 frame 頂部 30px 帶會拖動 frame 而非畫線",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 1192,
+   "claim": "開啟繪圖模式後，wb-frame-handle（每個 frame 全寬、頂部 min-height 30px、pointer-events:auto）仍攔截 pointerdown 並 stopPropagation：pointerdown 落在任一 frame 的標題帶上時走 beginFrameDrag，畫布的 onCanvasPointerDown 收不到事件，筆畫不會開始，使用者的運筆軌跡變成把 frame 拖走並 commit 一筆 frame move（含 undo 記錄）；輕點則把 frame 選取、彈出 frame 情境列。繪圖工具啟用時把手應讓路（drawMode 下不掛 handler 或 pointer-events:none），否則板上 frame 越多，可畫區域破洞越多。",
+   "severity": "medium"
+  },
+  {
+   "title": "唯讀者（!canEdit）在 frame 標題帶上拖動完全死區：不能平移畫布，放手還誤觸 frame 選取態",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 766,
+   "claim": "reviewer/唯讀使用者從 frame 頂部 30px 帶起手拖動想平移畫布：beginFrameDrag 無條件執行（stopPropagation + setPointerCapture），onFramePointerMove 先 stopPropagation 再因 !canEdit return — down/move 都進不了手勢 reducer，畫布不平移、frame 也不動（WB02 時 .wb-frame 整體 pointer-events:none，此處原本可平移）。且因 moved 恆為 false，onFramePointerUp 把這次拖動當 tap：setSelectedFrameId(session.frame.id) → frame 出現 is-selected 外框，但唯讀者沒有任何 frame 動作列可用也無明顯取消入口（需點畫布空白處）。beginFrameDrag 應在 !canEdit 時不攔截（或至少 up 不進選取）。",
+   "severity": "low"
+  },
+  {
+   "title": "frame 更新無版本簿記：同一板開啟期間第二次寫入被 touch trigger 永久拒絕、重試佇列中毒",
+   "file": "src/App.tsx",
+   "line": 2931,
+   "severity": "high",
+   "claim": "開白板 → 拖動/改名 frame（client 送 version=1，0023 touch_whiteboard_frame 把 server 列 bump 到 2，但 useCloudRoom.ts:1085 upsertFrame 以 .then(() => undefined) 丟棄回傳、App.onUpdateFrame 也不 adopt 新版本）→ 再拖/resize/改名同一個 frame → payload 仍是 version 1 < server 2 → trigger raise 'stale-write' → run() 非 duplicate-key 走 enqueuePendingWrite，把捕獲了過期版本的同一 task closure 無限重放（每次都 stale）→ 本地畫面看似成功，雲端永遠停在第一次寫入的狀態，其他協作者/重載後 frame 位置回跳，sync 狀態永久卡在 offline-pending。frame-update 的 undo（送回舊 frame，version 同樣過期）也走同一條死路。frames 只在開板時 loadBoardFrames（App.tsx:2891），期間無任何版本 resync。"
+  },
+  {
+   "title": "normalizeStroke 的 2000 夾限有 1-ulp 浮點外溢：寬筆畫仍被 whiteboard_nodes CHECK 打回、IndexedDB 重試中毒",
+   "file": "src/features/whiteboard/freehand.ts",
+   "line": 55,
+   "severity": "high",
+   "claim": "桌機/平板在 MIN_ZOOM 0.35 下橫貫畫面畫一條筆畫（bbox 世界寬 > 2000，如 1024px 視窗 ≈ 2926）→ scale = 2000/rawW 後 rawW*scale 因浮點回程約有 15% 機率得到 2000.0000000000002 > 2000（實測 200 萬次抽樣 29 萬次違規）→ 0014 CHECK (width <= 2000) 拒絕 insert → writeAck 走 decideNodeWriteRetry('failed') queueDurable → 永久失敗的寫入進 IndexedDB、每次重連重放再失敗 → 筆畫本地看得到、雲端沒有、重載即消失、狀態卡 offline-pending；同時 node-create op 已入帳 whiteboard_operations，op 帳與實際列不一致。單元測試用 6000×3000 恰好落在整除點得到剛好 2000 → 假綠；修法應在乘回後再 Math.min(MAX_SIZE, …)。註：wb03.diff 內的版本連 clamp 都沒有，worktree 未提交的修補只修了一半。"
+  },
+  {
+   "title": "freehand 的 undo/redo 重建掉 nodeType/width/height：筆畫復活成 180×96 的空白 text 便利貼並持久化",
+   "file": "src/features/collaboration/operations.ts",
+   "line": 107,
+   "severity": "high",
+   "claim": "畫一條 freehand 筆畫 → undo（軟刪）→ redo：nodeCreateDraft/nodeDeleteDraft 的 mask 來自 diffMask({...node, content:{}, x:NaN, y:NaN}, node)，nodeType/width/height 與 before 展開值相同而不進 mask → redo/undo-of-delete 走 WhiteboardWorkspace.tsx:905 recreate 執行端，以 base（nodeType:'text', 180×96）+ applyMasked 重建 → 筆畫節點變成 nodeType 'text'、180×96、content.text 空（points 還在但 text renderer 不畫）→ 該損毀節點又被 onUpsertNode 寫進雲端＝持久化資料損毀。刪除筆畫再 undo 同樣中招。對照：本輪 frame 側刻意用 FRAME_CREATE_FIELDS 全集（含 kind/zIndex）避開了同一坑，node 側沒有回頭補，而新增的 freehand 是受害最重的型別（幾何全靠 width/height/nodeType）。"
+  },
+  {
+   "title": "e2e mock 的 whiteboard_frames 不在 CONFLICT_KEYS：frame 更新被 409-duplicate 折成成功、實際沒寫進 mock，掩蓋真 DB 的 stale-write bug",
+   "file": "scripts/e2e/mock-supabase.mjs",
+   "line": 64,
+   "severity": "medium",
+   "claim": "e2e 中拖動/改名既有 frame → repoUpsertFrame 對 mock 上 upsert → CONFLICT_KEYS 沒有 whiteboard_frames → existing 判 null 落入 insert 路徑 → id 重複回 409 duplicate-key → useCloudRoom run() 把 duplicate 視為 ack → client 顯示成功但 mock 資料列完全沒變。mock 也沒有 frames 的版本 OCC（只有 whiteboard_nodes 有，685/739 行）。結果：frame 持久化在 e2e 全程假綠 — 既測不出「mock 裡根本沒更新」，也永遠測不出真 DB 上第二次寫入被 touch trigger 拒絕的 high 級 bug。"
+  },
+  {
+   "title": "雲端房 summary 不載 nodes：重新整理後「白板引用 N」反向鏈 chip 永遠不出現，直到使用者自己開過該白板",
+   "file": "src/App.tsx",
+   "line": 3008,
+   "severity": "medium",
+   "claim": "雲端房間，某白板有節點引用 poster/video branch（或其 version）→ 重新整理頁面 → 不開白板、直接開該 branch 對稿 overlay → overlayBoardRefs 只掃 normalizedRoom.whiteboardNodes，而 loadCollaborationSummary（collaborationRepository.ts:234）刻意回 nodes: []、節點只在 loadWhiteboard(該板) 時才補進 room state → refs.length=0 → chip 不渲染，本輪的反向鏈結功能在雲端房的冷啟動路徑上整個消失。本地房與 e2e mock 房（nodes 全在記憶體）看得到 chip → 假綠。"
+  },
+  {
+   "title": "boardRefs 計數含已封存白板的節點：點 chip 跳進 board=null 的死路",
+   "file": "src/App.tsx",
+   "line": 3010,
+   "severity": "low",
+   "claim": "白板 A 有節點引用 branch → 封存白板 A（節點列仍在、無 deletedAt）→ 開該 branch 對稿 → overlayBoardRefs 只濾 node.deletedAt、不驗 whiteboard 是否封存 → chip 顯示「白板 1」→ 點擊 → setActiveWhiteboardId(A) → WhiteboardWorkspace 以 boards.find(!archivedAt) 找板得 null → 開到空白板面，focusNodeId 永遠找不到節點，使用者被帶到死路。"
+  },
+  {
+   "title": "Escape 在「對稿 overlay 疊在白板 Focus 上」時雙重處理：一次 Escape 同時關掉 overlay 和白板",
+   "file": "src/features/multi-room/MultiBranchRoom.tsx",
+   "line": 810,
+   "claim": "操作序列：開白板 Focus → 從板上節點「打開內容」疊出對稿 overlay → 按一次 Escape。此時兩個 listener 都在：MultiBranchRoom 的 document keydown（setTimeout(0) 後直接呼叫 api.onBackToRoom()，繞過 historyLayers）與 WhiteboardWorkspace 的 window keydown（呼叫 window.history.back()，走 historyLayers）。兩者都沒 preventDefault，所以互不知情、各做一次「關最上層」。常見排程順序（setTimeout(0) 先於 history traversal 的 popstate task）下：timeout 先執行 onBackToRoom → overlay 關閉 → overlay 層 effect cleanup 走 remove(false) → pop 出層並 pendingConsume++ 再補一個 history.back()；接著使用者那次 back 的 popstate 抵達卻被 pendingConsume 吃掉；cleanup 補的第二個 popstate 抵達時棧頂已是 board-focus 層 → onBack 觸發 onOpenBoard(null)。錯誤行為：一次 Escape 把 overlay 和白板 Focus 一起關掉，使用者被踢回白板列表（wireflow 規定 Escape/back 一次只關一層）。反向排程下則是 onBackToRoom 被呼叫兩次（第二次湊巧無害），行為取決於 task 競速。WhiteboardWorkspace.tsx:366-373 的 Escape handler 與這裡的 deferred defaultPrevented 判定之間沒有任何仲裁。",
+   "severity": "high"
+  },
+  {
+   "title": "WB03 反向鏈 boardRefs.open() 直接 setActiveWhiteboardId，繞過 onOpenWhiteboard 的 frames 載入：反向鏈開板後該板的 frames 全部不見",
+   "file": "src/App.tsx",
+   "line": 3021,
+   "claim": "操作序列（雲端房）：白板上有 frames 且有節點引用某 poster/video → 開該分支的對稿 overlay → 點 WB03 新增的「N 個白板引用」入口。open() 只做 setActiveBranchId(null)、setActiveWhiteboardId(first.whiteboardId)、setFocusNodeId(first.id)，不像 onOpenWhiteboard（App.tsx:2881-2894）那樣 setBoardFrames([]) 後從雲端載入該板 frames。錯誤行為：板打開了，節點都在，但所有 frame（區塊）不渲染——boardFrames 仍是上一塊板的（或空的），經 whiteboardId 過濾後為空；使用者以為區塊被刪了。之後用正常路徑重開同一塊板 frames 又回來，顯得資料忽有忽無。",
+   "severity": "high"
+  },
+  {
+   "title": "focusNodeId 效果 deps 含 nodes/viewport：經反向鏈或討論連結開板後，任何一次節點變動（含自己打字、拖曳落定）都把相機拉回焦點節點並搶走選取",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 411,
+   "claim": "操作序列：經 WB03 反向鏈（boardRefs.open 設 focusNodeId=N）或討論的「在白板打開」進入白板 → 相機聚焦 N（正確）→ 使用者平移到別處、新增一張便利貼開始編輯。addAt 已 setSelected([新節點]) 並 beginEdit，但 onUpsertNode 讓 api.nodes 換了 identity → useEffect([api.focusNodeId, nodes, viewport]) 重跑 → setSelected([N])、setCamera(focusCamera(N))。錯誤行為：相機瞬間跳離剛建立的節點回到 N，選取被改回 N（情境列顯示 N 的動作），而 editingId 仍是新節點——選取與編輯狀態脫鉤；且編輯任何節點時每一次 keystroke 都觸發 onUpsertNode(\"now\") → 每打一個字相機就被拉回 N 一次，鍵盤避讓也被蓋掉。focusNodeId 只在 onOpenWhiteboard(null)（關板）時清空，開板期間永遠殘留。效果本體是 WB02 舊碼，但 WB03 的反向鏈是本輪主打的新觸發入口，且與新做的 camera memory 直接衝突（還原的視角立刻被焦點覆蓋）。修法：效果只應在 focusNodeId 變化時跑一次（或跑完即通知上層清掉）。",
+   "severity": "high"
+  },
+  {
+   "title": "繪圖模式第二指轉 pinch 的「回放 down」用第一指的起筆點：hit-test 副作用改選取／pinch 基準線錯誤造成縮放跳變",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 706,
+   "claim": "操作序列：開繪圖模式 → 第一指開始畫（筆畫繞過 reducer，reducer 完全沒看到第一指的移動）→ 畫了一段後放第二指想縮放。程式回放兩個 down 給 reducer：(1) 第一個 down 走完整 hit-test 效果——若起筆點壓在某節點上就 setSelected([該節點])＋begin-drag（雖被 cancel-drag 回滾，選取仍留下），若在空白處則 endEdit()＋setSelected([]) 清空既有選取。錯誤行為 A：兩指縮放結束後，起筆點下的節點莫名被選取、節點情境列彈出（或原本的選取/編輯 session 被清掉），使用者從未點選它。(2) 回放用的是 first.point（原始落點），但第一指實際已隨筆畫移走——pinch 基準距離用「原始落點↔第二指」計算，第一指的下一個 move 用實際位置重算距離。錯誤行為 B：第一次 pinch move 的 scale 是 實際距離/過期距離，畫得越遠跳得越大——每次在繪圖模式下兩指縮放，畫面先猛然縮放＋中點平移一大步才恢復正常。",
+   "severity": "medium"
+  },
+  {
+   "title": "StrictMode 雙掛載讓 camera memory 在還原的同一瞬間被預設視角覆寫（dev 限定）",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 396,
+   "claim": "操作序列（dev build，main.tsx 有 StrictMode）：在板上平移/縮放後切到「對話」pane（WhiteboardWorkspace 整個 unmount，cleanup 正確存下視角）→ 由討論訊息卡或深連結回到白板（元件帶著 activeBoardId 重新 mount）。StrictMode 對 mount 的 effect 做 create→destroy→create：第一次 create 讀到已存視角並 setCamera(saved)，但排定的 re-render 尚未發生，cameraRef.current 仍是 useState 初始值 {x:24,y:24,zoom:1}；緊接的 destroy 執行 CAMERA_MEMORY.set(id, cameraRef.current)——把剛存好的視角覆寫成預設值；第二次 create 還原到的就是預設視角。錯誤行為：WB03 主打的「切走再回來視角不歸零」在開發環境永遠失效，且已存的視角被實際銷毀而非只是沒還原，開發時無法驗收此功能。production 無雙掛載不受影響。",
+   "severity": "low"
+  },
+  {
+   "title": "棧序與視覺 z 序相反：Focus 中「打開內容」開出看不見的 overlay，back/‹ 派給隱形層",
+   "file": "src/features/multi-room/MultiBranchRoom.tsx",
+   "line": 788,
+   "severity": "high",
+   "claim": "聚焦白板（.wb-focus 由 createPortal 掛到 document.body，position:fixed 不透明、z-index 45）→ 選取 room_content 節點按「打開內容」→ App 設 activeBranchId，MBR push \"content-overlay\" 層，但 .project-workspace-overlay 是 z-index 40（styles.css:1165，且 whiteboard.css:39 的 z 階梯註解明寫 workspace-overlay 40 < board-focus 45）→ overlay 被不透明的板整個蓋住，畫面零變化。此時協調器棧是 [board-focus, content-overlay]，棧頂是 overlay：使用者按瀏覽器 back、或按 focus 頂列的「‹ 回到白板列表」鈕（該鈕直接呼叫 window.history.back()）→ handlePop 派給棧頂 content-overlay.onBack → 關掉的是看不見的 overlay，板不動 → 使用者連按兩個「返回」才有一次可見效果。WB03 e2e 只斷言 branch-workspace-overlay 與 wb-canvas 同時存在於 DOM，不驗可見性，所以綠燈掩蓋了整條旗艦流程（板上開內容）實際不可用。"
+  },
+  {
+   "title": "Escape 雙重處理：overlay 與 focus 同開時，一次 Escape 併發觸發兩個關閉動作，常見交錯下板與 overlay 一起被關",
+   "file": "src/features/whiteboard/WhiteboardWorkspace.tsx",
+   "line": 372,
+   "severity": "medium",
+   "claim": "棧 [board-focus, content-overlay]（Focus 中打開內容）→ 桌機按一次 Escape：MBR 的 document keydown handler 排入 setTimeout（只看 defaultPrevented），WW 的 window keydown handler 無 sheet 時無條件呼叫 window.history.back()（既不檢查自己是否棧頂、也不 preventDefault）。常見交錯：timer 先跑（timer 在 back() 之前就已入佇列）→ onBackToRoom() 關 overlay → passive cleanup remove(false) 把 overlay pop 掉並 pendingConsume=1 再補一次 history.back() → WW 那次 back 的 popstate 抵達時被 pendingConsume 吞掉、cleanup 補的第二次 back 的 popstate 落到棧頂 board-focus → onOpenBoard(null)。結果：一次 Escape 同時關掉 overlay 和白板（history 連退兩格）；另一種交錯（popstate 先於 timer）才會只關一層。兩個 Escape handler 完全沒經過協調器排隊，修 popstate 互踩的同一個 bug 在 Escape 路徑原樣存在。"
+  },
+  {
+   "title": "同一 commit「remove 棧頂＋push 新層」留下 forward 幽靈格：按「下一頁」會關掉白板，之後兩下 back 無效",
+   "file": "src/lib/historyLayers.ts",
+   "line": 88,
+   "severity": "low",
+   "claim": "對稿 overlay 開著（棧 [content-overlay]，entries [base, O]）→ 點「⊞ 白板 N」引用 chip：overlayBoardRefs.open() 同一批次 setActiveBranchId(null)＋setActiveWhiteboardId(id) → React passive flush 先跑 destroy：overlay remove(false) → pop＋pendingConsume=1＋history.back()（traversal 非同步排隊）→ 再跑 create：board-focus push → pushState 同步先執行 → entries 變 [base, O, F]，接著 traversal 把 current 退回 O 的格、popstate 被 pendingConsume 吞掉。終態：棧 [board-focus]、current 停在 content-overlay 的舊格、F 的格變成 forward 記錄 → 瀏覽器「下一頁」鈕亮起。使用者按 forward → popstate 進 handlePop → pendingConsume=0、棧頂 board-focus 不是 zombie → onBack 被呼叫 → 前進一格反而把板關掉；此後棧空但上方殘留兩個帶 {layer} state 的孤兒格，連按兩次 back 都是無效死按。協調器把所有非 pendingConsume 的 popstate 一律當 back 派發，無法分辨 forward。"
+  },
+  {
+   "title": "使用者 back 在途時程式性 remove 頂層：pendingConsume 錯誤歸因，一次 back 多退一格（可多關下層或跳出房間）",
+   "file": "src/lib/historyLayers.ts",
+   "line": 50,
+   "severity": "low",
+   "claim": "棧 [A, B]（例：focus＋overlay）→ 使用者按一次瀏覽器 back（popstate T1 在途尚未抵達）→ 同瞬間 B 被程式性關閉（例：遠端把板/分支收走、或 UI 鈕觸發 onBackToRoom）→ cleanup remove(false)：此刻 B 仍是棧頂 → stack.pop＋pendingConsume=1＋history.back()（T2）→ T1 抵達被 pendingConsume 吞掉（但 T1 其實是使用者要關 B 的那一下）、T2 再多消一格並派給 A.onBack → A 也被關。單層情境（棧 [F]）同理：使用者的 back 與程式性關板互撞 → 兩格被消耗，多退到房間 hash 之下或離開頁面。pendingConsume 只做計數、無法辨識在途 pop 的來源，remove(false) 在「已有使用者 pop 在途」時仍補 back 造成過度消耗；競態窗僅約一個 traversal 的時間，屬窄但真實的序列。"
+  }
+ ]
+}

@@ -1,4 +1,4 @@
-import { anchorToDiscussionPayload } from "../../lib/contextAnchor";
+import { anchorToDiscussionPayload, anchorToNodeLink } from "../../lib/contextAnchor";
 import { createSticky } from "./nodes";
 import type { DiscussionMessage, DiscussionPayload, WhiteboardNode } from "./types";
 
@@ -19,7 +19,7 @@ export function stickyFromDiscussion(
   createdBy: string,
   position?: { x?: number; y?: number },
 ): WhiteboardNode {
-  return createSticky({
+  const sticky = createSticky({
     whiteboardId,
     roomId: message.roomId,
     createdBy,
@@ -27,4 +27,12 @@ export function stickyFromDiscussion(
     x: position?.x,
     y: position?.y,
   });
+  // provenance（WB03）：訊息→白板必須留錨 — anchorToNodeLink 的
+  // message 臂產 {linkedEntityType:"discussion", linkedEntityId}，
+  // 「打開來源訊息」靠它跳回。sourceLabel 給卡片顯示出處。
+  return {
+    ...sticky,
+    ...anchorToNodeLink({ type: "message", messageId: message.id }),
+    content: { ...sticky.content, sourceLabel: `討論 · ${message.authorName || "成員"}` },
+  };
 }

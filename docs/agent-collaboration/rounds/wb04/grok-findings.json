@@ -1,0 +1,26 @@
+{
+ "verdict": "MUST_FIX",
+ "findings": [
+  {
+   "id": "F1",
+   "severity": "high",
+   "blocking": true,
+   "title": "還原無法復活已刪節點",
+   "claim": "存快照→刪節點→還原該快照：節點樂觀出現後消失，toast 說被別人改過。planRestore 當新列重建且不帶現況 version（versions.ts:76-81）；deleteNode 只從本地陣列拿掉（App.tsx:1859-1862）；upsert  payload 刻意不含 deleted_at、全庫無 undelete（collaborationRepository.ts:306-307,317-320）；tombstone 的 UPDATE echo 被轉成 node-delete（useCloudRoom.ts:649-655）；onRestoreVersion 不等 persist 就回成功（App.tsx:3061-3073）。"
+  },
+  {
+   "id": "F2",
+   "severity": "high",
+   "blocking": true,
+   "title": "frame 即時整筆覆蓋且 409 佇列中毒",
+   "claim": "A 開始拖 frame→B 移動同一 frame 的 UPDATE 進 A→A 鬆手用起手 version persist：本地跳回／停在樂觀位置，雲端是 B 的，之後 frame 寫入一直 409。handler 用 incoming.version < existing 才丟、否則整物件替換（App.tsx:293-297），與 adoptFrameVersion 只改 version（App.tsx:272-275）以及節點 in-flight 護盾（offline.ts:117-125）相反；upsertFrame 走 run() 不處理 stale-write，過期 payload 重放（useCloudRoom.ts:474-490,1116-1123）。"
+  },
+  {
+   "id": "F3",
+   "severity": "medium",
+   "blocking": false,
+   "title": "重訂閱後 presence 的 boardId 停在 null",
+   "claim": "已開著白板時 channel 重建（bindNonce／room.id 重跑 subscribe）→ 自己仍在板上，別人的「N 在板上」少自己。identity.boardId 每次訂閱都從 null 開始（roomSync.ts:61,176-180）；retrack 只在 activeWhiteboardId／名字變時呼叫（App.tsx:316-321），subscribe 依賴不含目前開著的板（useCloudRoom.ts:700-701）。"
+  }
+ ]
+}

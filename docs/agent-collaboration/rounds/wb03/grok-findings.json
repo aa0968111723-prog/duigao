@@ -1,0 +1,33 @@
+{
+ "verdict": "MUST_FIX",
+ "findings": [
+  {
+   "id": "F1",
+   "severity": "high",
+   "blocking": true,
+   "title": "內容側 chip 只看本機已載入節點，雲端 summary 永遠 nodes:[]",
+   "claim": "雲端進房→loadCollaborationSummary 固定回 nodes:[]（collaborationRepository.ts:234）→overlayBoardRefs 只掃 normalizedRoom.whiteboardNodes（App.tsx:3011-3015）→使用者沒在本機開過該板就打開被引用的對稿→頂列沒有「⊞ 白板 N」，反向跳轉入口不存在。e2e 先「加入白板」再開對稿所以看不到。"
+  },
+  {
+   "id": "F2",
+   "severity": "high",
+   "blocking": true,
+   "title": "chip.open 繞過 onOpenWhiteboard，目標板 frames/graph 不載入",
+   "claim": "點 chip→open() 只 setActiveBranchId(null)+setActiveWhiteboardId+setFocusNodeId（App.tsx:3019-3023），不走 onOpenWhiteboard（2881-2922，才會 setBoardFrames([])、loadBoardFrames、loadWhiteboard）。對照討論列 onOpenBoardNode 會呼叫 onOpenWhiteboard（MultiBranchRoom.tsx:1023-1026）。序列：開板 B（frames=B）→關板（boardFrames=[]）或改開板 A→開對稿點 chip 跳到另一塊板→目標板區塊被 filter 成空（WhiteboardWorkspace.tsx:271），畫面上 frame 消失。"
+  },
+  {
+   "id": "F3",
+   "severity": "medium",
+   "blocking": false,
+   "title": "overlay 疊 Focus 時 Escape 雙重 back，板會被一起退",
+   "claim": "板上開「打開內容」→按 Escape：WhiteboardWorkspace window keydown 立刻 history.back()（WhiteboardWorkspace.tsx:369-375）；MBR document keydown 再 setTimeout→onBackToRoom（MultiBranchRoom.tsx:802-814）走 remove(false) 又 history.back()（historyLayers.ts:85-88）。popstate 與 timeout(0) 競態下第二次 back 打到 board-focus→overlay 關、白板也退回清單。系統返回（單一 popstate）e2e 過得到，這條桌機 Escape 沒測。"
+  },
+  {
+   "id": "F4",
+   "severity": "medium",
+   "blocking": false,
+   "title": "chip 寫入的 focusNodeId 不釋放，viewport/nodes 一變就搶回相機",
+   "claim": "點 chip 後 focusNodeId 一直掛著（App.tsx:3023；只在 onOpenWhiteboard(null) 才清，2883）。WhiteboardWorkspace effect deps 含 nodes 與 viewport（414-420）：使用者已平移看別處→手機網址列伸縮/旋轉/鍵盤改變 viewport→setSelected+setCamera(focusCamera) 把視角與選取拉回該節點。"
+  }
+ ]
+}
