@@ -133,3 +133,53 @@ f2adcb8 PR-COMM-00: 訊息作者可被偽造，回覆是失去來源的複製品
 `accepted` / `partially-accepted` / `rejected-with-reason` / `deferred-with-owner`。
 
 見本檔 `FINDINGS_RULING.md`（同目錄）。
+
+---
+
+## §三十二 完成標準對照（PR-COMM-00）
+
+```
+分支：            agent/team-communication-mobile-tablet
+PR：              #94  https://github.com/aa0968111723-prog/duigao/pull/94（OPEN，未合併）
+Commit：          41b6ee6（7 個 commit）
+Base commit：     2a9d7a018836e7ec913f009f2f7a5d5b8b25fbff
+Preview URL：     無 —— 不自動部署正式環境
+CI：              build / migrations / agent-read-layer / browser 全綠
+```
+
+**修改檔案**：`supabase/migrations/0022_discussion_author_integrity.sql`（新增）、
+`src/features/collaboration/replies.ts`（新增）、`src/hooks/discussionOutboxCore.ts`、
+`src/hooks/useDiscussionOutbox.ts`、`src/cloud/collaborationRepository.ts`、
+`src/features/collaboration/offline.ts`、`src/features/room-discussion/*`、
+`src/App.tsx`、`src/features/multi-room/MultiBranchRoom.tsx`、
+`scripts/e2e/migrations.mjs`、`scripts/tests/discussion-*.test.ts`、
+`scripts/tests/collaboration-workspace.test.ts`、`package.json`、`docs/**`。
+
+| 項目 | 狀態 |
+|---|---|
+| 真實完成 | 作者完整性（policy＋trigger＋replay 存活）、引用解析與跳轉、回覆取消、回覆順序、快照不清空、表情回應 RLS 探針、假綠測試修正 |
+| 尚未完成 | 提及、未讀、typing、per-member presence、多表情、待辦、置頂、統一搜尋、通知、平板 split view、訊息編輯／刪除、outbox 持久化、自動捲動 |
+| 測試指令 | `PG_BIN=… npm run test:migrations`／`npm run test:collaboration`／`test:multi-branch`／`test:asset-intelligence`／`test:edge-cors`／`tsc --noEmit`／`build:local` |
+| 測試結果 | migrations **257/257**（base 242）、collaboration **106 pass**（base 79）、其餘全綠、build ✓ |
+| 雙人同步 | **未執行** —— 無第二測試帳號與可連線 Supabase |
+| 離線測試 | 純函式層有（outbox 狀態機、回覆順序、快照合併）；**真瀏覽器離線未執行** |
+| 回覆測試 | ✅ 12 條（含已編輯來源、來源消失、先於來源到達、ghost、自我回覆） |
+| 提及測試 | **無此功能** |
+| 表情測試 | ✅ RLS 層 6 條（身分綁定、不重複計數、取消只刪自己那列、跨房） |
+| 未讀測試 | **無此功能** |
+| Presence 測試 | **無此功能**（目前只有人數） |
+| Typing 測試 | **無此功能** |
+| 附件測試 | 既有 10 條（本 PR 未動） |
+| 決策測試 | 既有（本 PR 未動） |
+| 待辦測試 | **無此功能** |
+| 語音失敗測試 | 程式碼層確認不阻塞文字；**真機未驗** |
+| 手機驗證 | **未執行** |
+| 平板驗證 | **未執行** |
+| RLS 驗證 | ✅ 真 PostgreSQL、真角色（非超級使用者），257 條 |
+| Migration 衝突檢查 | ✅ 已檢查並**確認會與 #78 撞號** —— 見 `MIGRATION_RESERVATION.md` |
+| irm／Grok 審查 | irm 不存在、未冒充；用 workflow 子代理兩層審查，含失敗如實記錄；裁決見 `FINDINGS_RULING.md` |
+| 已知限制 | `KNOWN_LIMITATIONS.md` |
+| 需要人工操作 | 決定合併順序並重新編號；設 Supabase secrets；真機／雙人驗收 |
+| 建議合併順序 | `#78 → #88 → DI(0028) → 本 PR（rebase 後重新編號）` |
+| 自動合併 | ❌ 沒有 |
+| 自動部署正式環境 | ❌ 沒有 |
