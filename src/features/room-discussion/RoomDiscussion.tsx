@@ -6,6 +6,7 @@ import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
 import { shouldFollowLatest } from "./feed";
+import { voiceDockShowsLeave } from "./voiceDockLeave";
 import "./discussion.css";
 
 export type RoomDiscussionApi = {
@@ -269,7 +270,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       {(api.showVoiceNote ?? true) && (
         api.voice?.available ? (
           <div className="rd-voice-dock" data-testid="voice-dock">
-            {api.voice.state === "live" ? (
+            {voiceDockShowsLeave(api.voice.state) ? (
               <>
                 <span className="rd-voice-live" aria-hidden>●</span>
                 <span className="rd-voice-roster" data-testid="voice-roster">
