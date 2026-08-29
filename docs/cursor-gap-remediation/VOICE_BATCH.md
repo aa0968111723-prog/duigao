@@ -42,7 +42,7 @@ There is no `npm test` script.
 | Script | Result |
 |---|---|
 | `test:voice-state` | **12/12** |
-| `test:collaboration` | pass (includes voice-state) |
+| `test:collaboration` | **118/118** (includes voice-state) |
 | `test:agent` | **16/16** |
 | `test:edge-cors` | **5/5** |
 | `test:asset-intelligence` | **15/15** |
