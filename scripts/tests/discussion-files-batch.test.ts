@@ -149,4 +149,5 @@ test("mobile composer hides search/overview/AI chrome only while the input is fo
   assert.match(discussion, /onComposerActive/);
   assert.match(shell, /composerActive/);
   assert.match(shell, /hideRoomChrome/);
+  assert.match(shell, /data-testid="room-more"/);
 });

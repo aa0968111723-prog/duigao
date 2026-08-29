@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   BranchStatus,
   BranchType,
@@ -38,6 +38,7 @@ import type { RoomRole } from "../../cloud/roomRepository";
 import type { VideoUploadState } from "../../components/api";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { BrandMark } from "../../components/BrandMark";
+import { firstLayerChrome } from "./roomChrome";
 
 export type MultiBranchRoomApi = {
   room: Room;
@@ -725,7 +726,26 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
   const [search, setSearch] = useState("");
   const [composerActive, setComposerActive] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreOpenRef = useRef(false);
+  moreOpenRef.current = moreOpen;
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 390 : window.innerWidth));
+  useEffect(() => {
+    const sync = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", sync);
+    window.addEventListener("orientationchange", sync);
+    return () => {
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("orientationchange", sync);
+    };
+  }, []);
   const hideRoomChrome = isMobile && composerActive && !search.trim();
+  const chrome = firstLayerChrome({
+    moreOpen: moreOpen && !hideRoomChrome,
+    width: viewportWidth,
+    composerActive: hideRoomChrome,
+  });
+  const tabletSplit = chrome.tabletSplit;
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
   const [sortRecent, setSortRecent] = useState(true);
@@ -754,8 +774,50 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   // 桌機 Escape：對稿 overlay 是最外層的「可返回」，讓工作區自己的
   // ladder（modal/sheet）先吃；事件冒泡到 document 而沒被吃掉才關 overlay。
   // 推進面板同理。
+  const moreHistoryOpen = () =>
+    typeof history !== "undefined" && Boolean((history.state as { duigaoMore?: boolean } | null)?.duigaoMore);
+
+  const clearMoreHistory = () => {
+    if (moreHistoryOpen()) history.replaceState({}, "");
+  };
+
+  const closeMoreFromAction = () => {
+    clearMoreHistory();
+    setMoreOpen(false);
+  };
+
   useEffect(() => {
-    if (!api.workspace && !pushedPane) return;
+    if (hideRoomChrome && moreOpen) closeMoreFromAction();
+  }, [hideRoomChrome, moreOpen]);
+
+  const toggleMore = () => {
+    if (hideRoomChrome) return;
+    if (moreOpenRef.current) {
+      if (moreHistoryOpen()) {
+        history.back();
+        return;
+      }
+      setMoreOpen(false);
+      return;
+    }
+    history.pushState({ duigaoMore: true }, "");
+    setMoreOpen(true);
+  };
+
+  useEffect(() => {
+    const onPop = () => {
+      if (moreOpenRef.current) {
+        setMoreOpen(false);
+        return;
+      }
+      setPushedPane(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    if (!api.workspace && !pushedPane && !moreOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       // 內層 ladder（pin/draft/modal…）消費時會 preventDefault，但監聽器
@@ -764,13 +826,18 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       // 只關一件事（Grok pr01a r2 N2）。
       setTimeout(() => {
         if (event.defaultPrevented) return;
+        if (moreOpen) {
+          if (moreHistoryOpen()) history.back();
+          else setMoreOpen(false);
+          return;
+        }
         if (api.workspace) api.onBackToRoom();
         else setPushedPane(null);
       }, 0);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [api.workspace, pushedPane, api.onBackToRoom]);
+  }, [api.workspace, pushedPane, moreOpen, api.onBackToRoom]);
 
   const openBranch = (branchId: string, opts?: { startTime?: number }) => {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合
@@ -807,28 +874,49 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   };
 
   return (
-    <div className="project-room" data-testid="multi-branch-room">
-      <header className="project-room-header">
-        <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="回到對稿首頁"><BrandMark compact /></button>
-        {inShellBranch ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
+    <div
+      className={`project-room${tabletSplit ? " is-tablet-split" : ""}`}
+      data-testid="multi-branch-room"
+      data-more-open={moreOpen && !hideRoomChrome ? "true" : "false"}
+      data-tablet-split={tabletSplit ? "true" : "false"}
+      data-first-layer={!inShellBranch && !pushedPane ? "true" : "false"}
+      data-composer-active={hideRoomChrome ? "true" : "false"}
+    >
+      <header className="project-room-header" data-testid="room-first-layer-top">
+        {inShellBranch ? (
+          <button type="button" className="project-back-button" onClick={api.onBackToRoom} aria-label="返回">‹</button>
+        ) : (
+          <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="返回"><BrandMark compact /></button>
+        )}
         <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
-        <div className="project-head-actions">
-          {!hideRoomChrome && <button type="button" className="project-ai-button" data-testid="room-ai-launcher" onClick={() => api.onOpenAi()}>✦ AI</button>}
-          <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>
-        </div>
+        {!hideRoomChrome && (
+          <>
+            <span className="project-presence" data-testid="room-presence">{api.online > 0 ? `${api.online} 人在線` : "在線"}</span>
+            <button
+              type="button"
+              className="project-voice-chip"
+              data-testid="room-voice-chip"
+              onClick={() => { setDiscussPane("chat"); closeMoreFromAction(); }}
+            >
+              語音
+            </button>
+            <button
+              type="button"
+              className="project-room-more-btn"
+              data-testid="room-more"
+              aria-label="更多"
+              aria-expanded={moreOpen}
+              onClick={toggleMore}
+            >
+              更多
+            </button>
+          </>
+        )}
       </header>
 
       {/* 掛在殼上而不是分支詳情裡：上傳期間人常常按「‹」回房間看別的東西，
           進度不能因此消失。 */}
       <UploadStatus upload={api.upload} />
-
-      {!inShellBranch && !hideRoomChrome && (
-        <div className="project-search-wrap">
-          <span aria-hidden>⌕</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜尋茶會、擺攤、招生…" aria-label="搜尋房間內容" />
-          {search && <button type="button" onClick={() => setSearch("")} aria-label="清除搜尋">×</button>}
-        </div>
-      )}
 
       {inShellBranch ? (
           <main className="project-branch-detail">
@@ -861,15 +949,6 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         </main>
       ) : (
         <>
-          <nav className="project-entry-chips" aria-label="房間內容" hidden={hideRoomChrome}>
-            {PANE_META.map((item) => (
-              <button type="button" key={item.id} data-testid={`open-${item.id}-pane`} onClick={() => setPushedPane(item.id)}>
-                <span aria-hidden>{item.icon}</span>{item.label}
-                {item.id === "content" && tabBranches("poster").length + tabBranches("video").length > 0 ? <small>{tabBranches("poster").length + tabBranches("video").length}</small> : null}
-                {item.id === "plan" && tabBranches("plan").length > 0 ? <small>{tabBranches("plan").length}</small> : null}
-              </button>
-            ))}
-          </nav>
           <main className="project-room-main is-discussion-root">
             {search.trim() ? (
               <section className="project-section" data-testid="search-results">
@@ -976,8 +1055,38 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
               </section>
             )}
           </main>
-          {api.canManage && !api.activeWhiteboardId && !hideRoomChrome && (
-            <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>
+          {moreOpen && !hideRoomChrome && (
+            <aside className="project-more-sheet" data-testid="room-more-sheet" aria-label="更多">
+              <div className="project-search-wrap">
+                <span aria-hidden>⌕</span>
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜尋茶會、擺攤、招生…" aria-label="搜尋房間內容" />
+                {search && <button type="button" onClick={() => setSearch("")} aria-label="清除搜尋">×</button>}
+              </div>
+              <nav className="project-entry-chips" aria-label="房間內容">
+                {PANE_META.map((item) => (
+                  <button
+                    type="button"
+                    key={item.id}
+                    data-testid={`open-${item.id}-pane`}
+                    onClick={() => {
+                      closeMoreFromAction();
+                      setPushedPane(item.id);
+                    }}
+                  >
+                    <span aria-hidden>{item.icon}</span>{item.label}
+                    {item.id === "content" && tabBranches("poster").length + tabBranches("video").length > 0 ? <small>{tabBranches("poster").length + tabBranches("video").length}</small> : null}
+                    {item.id === "plan" && tabBranches("plan").length > 0 ? <small>{tabBranches("plan").length}</small> : null}
+                  </button>
+                ))}
+              </nav>
+              <div className="project-more-actions">
+                <button type="button" className="project-ai-button" data-testid="room-ai-launcher" onClick={() => { closeMoreFromAction(); api.onOpenAi(); }}>✦ AI</button>
+                <button type="button" className="project-share-button" onClick={() => { closeMoreFromAction(); api.onShare(); }}>分享</button>
+                {api.canManage && !api.activeWhiteboardId && (
+                  <button type="button" className="project-fab" data-testid="room-add-content" onClick={() => { closeMoreFromAction(); setCreateOpen(true); }} aria-label="新增內容">＋</button>
+                )}
+              </div>
+            </aside>
           )}
           {pushedPane && (
             <div className="project-push-pane" data-testid={`${pushedPane}-pane`}>
