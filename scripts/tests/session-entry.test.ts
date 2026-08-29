@@ -128,3 +128,8 @@ test("App onboard mounts sessionEntryStatus and permissionDenied", () => {
   assert.match(hook, /permissionDenied/);
   assert.match(hook, /isPermissionDenied/);
 });
+
+test("post-join rooms RLS is permission-denied, not a swallowed generic retry", () => {
+  const hook = src("src/cloud/useCloudRoom.ts");
+  assert.match(hook, /if \(isPermissionDenied\(err\)\) \{\s*setPermissionDenied\(true\);/s);
+});

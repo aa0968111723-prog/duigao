@@ -391,7 +391,14 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       // is exactly the "at least reload after reconnect" the spec asks for.
       const selectedMediaType = selectedBranch?.branchType === "video" ? "video" : roomMediaType(nextRoom);
       void reloadReview(rid, selectedMediaType);
-    } catch {
+    } catch (err) {
+      // Join already succeeded; a later rooms/versions RLS denial is not a
+      // flaky retry and must not look like an empty room.
+      if (isPermissionDenied(err)) {
+        setPermissionDenied(true);
+        setStatus("error");
+        throw err;
+      }
       setStatus("error");
     }
   }, [supabase, onSnapshot, reloadReview]);
