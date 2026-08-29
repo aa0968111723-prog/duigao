@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   attachmentCiteReply,
+  boardDecisionWrite,
   canEditDiscussion,
   decisionDraftTitle,
   discussionEditPatch,
@@ -116,4 +117,16 @@ test("D-07: 未建模的提及／未讀／回條／tombstone 不得假裝存在"
   assert.doesNotMatch(sql, /create table if not exists public\.room_discussion_reads/i);
   assert.doesNotMatch(sql, /alter table public\.room_discussion_messages[\s\S]{0,200}deleted_at/i);
   assert.doesNotMatch(sql, /create table if not exists public\.room_todos/i);
+});
+
+test("D-08: 白板寫下決策要人填標題，不能用罐頭採用 B 版", () => {
+  assert.equal(boardDecisionWrite(""), null);
+  assert.equal(boardDecisionWrite("   "), null);
+  assert.deepEqual(boardDecisionWrite("  採用 B 版  "), { title: "採用 B 版", status: "decided" });
+  assert.equal(isMemberActor("ai"), false);
+  const wb = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  assert.doesNotMatch(wb, /onCreateDecision\("已決定：採用 B 版"/);
+  assert.match(wb, /wb-decision-title/);
+  assert.match(wb, /wb-write-decision-save/);
+  assert.match(wb, /boardDecisionWrite|decisionDraftTitle/);
 });

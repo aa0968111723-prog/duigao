@@ -45,6 +45,13 @@ export function decisionDraftTitle(raw: string): string | null {
   return title.length ? title : null;
 }
 
+/** Board 「寫下決策」uses the same title rule. Empty / canned UI is not a decision. */
+export function boardDecisionWrite(raw: string): { title: string; status: "decided" } | null {
+  const title = decisionDraftTitle(raw);
+  if (!title) return null;
+  return { title, status: "decided" };
+}
+
 export type WorkCite = {
   kind: Extract<DiscussionKind, "poster" | "video" | "plan" | "whiteboard">;
   body: string;

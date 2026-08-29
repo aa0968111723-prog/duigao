@@ -354,9 +354,23 @@ try {
     check("可引用投票節點", await page.locator("[data-node-type='poll']").count() >= 1);
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-write-decision").click();
-    check("可寫決策節點", await page.locator("[data-node-type='decision']").count() >= 1);
+    await page.waitForSelector('[data-testid="wb-decision-draft"]', { timeout: 8000 });
     mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_decision_title_390.png"), fullPage: true });
+    await page.getByTestId("wb-decision-title").fill("採用 B 版");
+    await page.getByTestId("wb-write-decision-save").click();
+    check("可寫決策節點", await page.locator("[data-node-type='decision']").count() >= 1);
+    check("決策標題是人填的，不是罐頭", (await page.locator("[data-node-type='decision']").first().innerText()).includes("採用 B 版"));
     await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_board.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.getByTestId("whiteboard-more").click();
+    await page.getByTestId("wb-write-decision").click();
+    await page.waitForSelector('[data-testid="wb-decision-draft"]', { timeout: 8000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_decision_title_768.png"), fullPage: true });
+    await page.getByRole("button", { name: "取消" }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
     const canvas = page.getByTestId("wb-canvas");
     const box = await canvas.boundingBox();

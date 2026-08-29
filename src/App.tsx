@@ -141,7 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { canEditDiscussion, discussionEditPatch, isMemberActor } from "./features/collaboration/discussionHonesty";
+import { canEditDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -2148,6 +2148,11 @@ export function App() {
   const createDecision = useCallback(
     (title: string, source?: { type: "poll"; id: string }, status: "pending" | "decided" = "pending") => {
       const actor = cloud.userId ?? guest?.id ?? "local";
+      const clean = decisionDraftTitle(title);
+      if (!clean) {
+        showToast("決策要有標題。", { tone: "error" });
+        return;
+      }
       if (!isMemberActor(actor)) {
         showToast("AI 不能代替成員建立決策。", { tone: "error" });
         return;
@@ -2159,7 +2164,7 @@ export function App() {
       const decision = {
         id: uuid(),
         roomId: roomRef.current?.id ?? "",
-        title,
+        title: clean,
         body: "",
         status,
         sourceType: source ? "poll" as const : "manual" as const,
