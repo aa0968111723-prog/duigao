@@ -440,8 +440,13 @@ try {
   await page.locator(".m-sheet-tabs button").filter({ hasText: "聊天" }).click();
   await page.waitForSelector('[data-testid="discussion-drawer"]', { timeout: 15000 });
   check("聊天位掛的是房級討論 drawer", await page.getByTestId("discussion-drawer").count() === 1);
-  await page.getByLabel("房間討論").fill("drawer 打個招呼");
-  await page.getByRole("button", { name: "送出" }).click();
+  const drawer = page.locator('[data-testid="discussion-drawer"][data-draft-ready="true"]');
+  await drawer.waitFor({ timeout: 15000 });
+  await drawer.getByLabel("房間討論").fill("drawer 打個招呼");
+  const send = drawer.getByRole("button", { name: "送出" });
+  await send.waitFor({ state: "visible", timeout: 5000 });
+  check("送出在草稿 hydrate 後可按", await send.isEnabled());
+  await send.click();
   await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("drawer 打個招呼"), null, { timeout: 15000 });
   check("drawer 可送出房級討論", (await page.getByTestId("discussion-feed").innerText()).includes("drawer 打個招呼"));
   check("drawer 沒有把決定/投票/白板塞給對稿", await page.getByTestId("decision-area").count() === 0 && (await page.getByTestId("discussion-drawer").innerText()).includes("drawer 打個招呼"));
