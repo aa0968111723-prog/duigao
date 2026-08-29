@@ -4,8 +4,14 @@
 -- 為什麼需要這張表：配額如果算在前端，改一行 JS 就繞過了，而外部搜尋是**要
 -- 付錢**的。帳單不會自己停，所以上限必須算在後端，而後端要有地方記。
 --
--- 設計：**append-only**，沿用 0019 的稽核模式（先 grant insert，再 revoke
--- update/delete）。使用量記錄被改掉或刪掉，配額就形同虛設。
+-- 設計：**append-only**，而且 client 連 insert 都拿不到。
+--
+-- 這裡與 0019 的稽核表不同：0019 是「先 grant insert 再 revoke update/delete」
+-- （client 寫得進去但改不掉）。使用量不能讓 client 寫 —— 讓 client 決定
+-- 自己用了幾次，配額就形同虛設。所以這張表對 authenticated **只 grant
+-- select**，寫入完全走 service_role（bypass RLS）。
+--
+-- 對抗審查指出檔頭原本抄了 0019 的說法，與底下的 SQL 不符 —— 已改正。
 --
 -- **不記錄查詢原文**，只記 SHA-256。理由：
 --   * 配額只需要知道「發生過幾次」，不需要知道問了什麼。
@@ -49,10 +55,15 @@ create policy design_research_usage_select on public.design_research_usage
   for select to authenticated
   using (public.is_room_member(room_id));
 
--- 寫：沒有 client 政策。只有 service_role 進得來。
-revoke all on public.design_research_usage from anon;
+-- 權限：**先全部收回再逐項給**。
+--
+-- Supabase 的 default privileges 對新表是 `grant all to anon, authenticated`。
+-- 只做 `revoke insert, update, delete` 會留下 TRUNCATE —— 而 **RLS 不管
+-- TRUNCATE**，任何登入者都能把整張使用量表清空，等於把所有人的配額歸零。
+-- 這是 migration probe 誠實化之後實測到的（原本的 probe 用超級使用者，
+-- 證明不了任何權限）。
+revoke all on public.design_research_usage from anon, authenticated;
 grant select on public.design_research_usage to authenticated;
 
--- append-only：連 service_role 之外的角色都拿不到 insert，
--- 而且任何角色都改不動、刪不掉已經寫入的列（0019 的同一套手法）。
-revoke insert, update, delete on public.design_research_usage from authenticated;
+-- 寫入只有 service_role。edge function 走這條路。
+grant all on public.design_research_usage to service_role;

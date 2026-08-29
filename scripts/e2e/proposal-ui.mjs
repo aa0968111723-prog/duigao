@@ -162,6 +162,44 @@ try {
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
       check(`${size.label}：沒有橫向捲動`, overflowX <= 0, `溢出 ${overflowX}px`);
+
+      // **展開之後再驗一次。**
+      //
+      // 原本這一組檢查只在抽屜收合時跑（收合時只佔 7%，怎麼樣都會過）——
+      // 把 maxHeightRatio 改成 1.0 讓展開蓋滿整個畫面，這兩條照樣是綠的。
+      // 對抗審查指出的假綠。
+      if (size.expect === "sheet") {
+        await page.click('[data-testid="di-panel-handle"]');
+        await settle(page);
+      }
+      const expandedOccupied = await page.evaluate(() => {
+        const panel = document.querySelector('[data-testid="di-panel"]');
+        const box = panel.getBoundingClientRect();
+        return (box.width * box.height) / (window.innerWidth * window.innerHeight);
+      });
+      check(
+        `${size.label}：展開後仍 ≤ 80%`,
+        expandedOccupied <= 0.8,
+        `${(expandedOccupied * 100).toFixed(1)}%`,
+      );
+
+      // 展開後，作品**沒有被面板蓋住的那一段**必須還有可以互動的內容。
+      // 量的是面板上方那條空間的中點。
+      const expandedHit = await page.evaluate(() => {
+        const panel = document.querySelector('[data-testid="di-panel"]');
+        const box = panel.getBoundingClientRect();
+        const layout = panel.dataset.layout;
+        const x = layout === "split" ? Math.round(box.left / 2) : Math.round(window.innerWidth / 2);
+        const y = layout === "split" ? Math.round(window.innerHeight / 2) : Math.round(box.top / 2);
+        const hit = document.elementFromPoint(x, y);
+        const art = document.querySelector('[data-testid="artwork"]');
+        return { inside: art.contains(hit), x, y, tag: hit?.tagName ?? "none" };
+      });
+      check(
+        `${size.label}：展開後作品仍有可見區域`,
+        expandedHit.inside,
+        `(${expandedHit.x},${expandedHit.y}) 打到 ${expandedHit.tag}`,
+      );
     } finally {
       await context.close();
     }
@@ -324,21 +362,62 @@ try {
   }
 
   // -------------------------------------------------------------------------
+  // 5b. 沒有修改權限時，就算硬按也不會套用
+  // -------------------------------------------------------------------------
+  {
+    const context = await browser.newContext({
+      viewport: { width: SIZES[1].width, height: SIZES[1].height },
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    await page.goto(`${PAGE}?fixture=full&canApply=false`, { waitUntil: "load" });
+    await page.waitForSelector('[data-testid="di-panel"]');
+    try {
+      await page.click('[data-testid="di-panel-handle"]');
+      await settle(page);
+
+      const reason = await page.textContent('[data-testid="di-apply-reason"]');
+      check("沒有權限時說得出原因", /沒有修改作品的權限/.test(reason ?? ""), reason ?? "(無)");
+
+      // 把 disabled 拿掉再按 —— `disabled` 是畫面提示，不是安全機制。
+      await page.evaluate(() => {
+        document.querySelector('[data-testid="di-apply"]').removeAttribute("disabled");
+      });
+      await page.click('[data-testid="di-apply"]');
+      const applied = await page.textContent('[data-testid="applied"]');
+      check(
+        "拿掉 disabled 硬按也不會套用",
+        applied.includes("尚未套用"),
+        applied,
+      );
+    } finally {
+      await context.close();
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // 6. 三種「沒有結果」要顯示不同的訊息
   // -------------------------------------------------------------------------
   {
     const cases = [
       ["clean", /沒有找到可以量測的問題/, /不代表設計無法再進步/],
       ["needs-context", /還不能分析/, /色碼/],
-      ["failed", /這次分析沒有完成/, /503/],
+      // 正則要同時要求「有具體原因」與「沒有用罐頭句蓋掉」——
+      // 原本只查 /503/，而「請稍後再試（503）」也會過（對抗審查指出）。
+      ["failed", /這次分析沒有完成/, /503 上游無回應/, /請稍後再試/],
     ];
-    for (const [fixture, title, detail] of cases) {
+    for (const [fixture, title, detail, forbidden] of cases) {
       const { context, page } = await open(SIZES[1], fixture);
       try {
         await page.click('[data-testid="di-panel-handle"]');
+        await settle(page);
         const body = await page.textContent('[data-testid="di-panel"]');
         check(`${fixture}：標題正確`, title.test(body), body.slice(0, 60));
-        check(`${fixture}：說明具體（不是「請稍後再試」）`, detail.test(body));
+        check(`${fixture}：說明具體`, detail.test(body));
+        if (forbidden) {
+          check(`${fixture}：沒有用罐頭句蓋掉真正的原因`, !forbidden.test(body));
+        }
       } finally {
         await context.close();
       }

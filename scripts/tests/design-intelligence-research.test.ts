@@ -313,3 +313,85 @@ test("transport 丟例外不會讓整個功能崩掉", async () => {
   assert.equal(failureOf(result), "upstream-error");
   assert.equal((result as { retryable?: boolean }).retryable, true);
 });
+
+// ===========================================================================
+// 對抗審查（grok，PR-DI-03/04）後補的反例
+// ===========================================================================
+
+test("一方取消不會連坐另一方，也不會推進斷路器", async () => {
+  let release: (() => void) | null = null;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const rec = recorder(async () => {
+    await gate;
+    return { status: 200, body: OK_BODY };
+  });
+  const research = provider(rec, { circuitThreshold: 2 });
+
+  const controller = new AbortController();
+  const cancelled = research.search("內文對比要多少", { signal: controller.signal });
+  const innocent = research.search("內文對比要多少");
+
+  controller.abort();
+  const cancelledResult = await cancelled;
+  assert.equal(failureOf(cancelledResult), "timeout", "取消的那一方拿到取消");
+
+  release?.();
+  const innocentResult = await innocent;
+  assert.equal(
+    failureOf(innocentResult),
+    null,
+    "沒有取消的那一方不該被連坐 —— 它什麼都沒做錯",
+  );
+  assert.match(innocentResult.answer, /4\.5:1/);
+
+  // 而且那次取消不該被算成上游失敗
+  assert.equal(
+    research.diagnostics().consecutiveFailures,
+    0,
+    "使用者按取消不是服務故障，不該推進斷路器",
+  );
+});
+
+test("上游限流與自己的配額用完是兩件事", async () => {
+  const upstream = recorder(() => ({
+    status: 429,
+    body: { error: "UPSTREAM_RATE_LIMITED", detail: "外部研究服務回應 429" },
+  }));
+  const throttled = provider(upstream);
+  const result = await throttled.search("問題");
+  assert.equal(failureOf(result), "upstream-error", "上游限流不是「你用完了」");
+  assert.equal((result as { retryable?: boolean }).retryable, true, "上游限流等一下就好");
+  assert.equal(throttled.diagnostics().consecutiveFailures, 1, "上游限流算一次失敗");
+
+  const ourQuota = recorder(() => ({
+    status: 429,
+    body: { error: "QUOTA_EXCEEDED", detail: "這個房間今天的外部研究次數已達上限（40 次）" },
+  }));
+  const exhausted = provider(ourQuota);
+  const quota = await exhausted.search("問題");
+  assert.equal(failureOf(quota), "quota-exceeded");
+  assert.equal((quota as { retryable?: boolean }).retryable, false, "配額用完重試沒有用");
+  assert.equal(exhausted.diagnostics().consecutiveFailures, 0, "配額用完不是服務故障");
+});
+
+test("快取鍵含房間 id：共用實例時不會吃到別房的答案", async () => {
+  const rec = recorder();
+  const roomA = createResearchProvider({ roomId: "room-a", transport: rec.transport, now });
+  const roomB = createResearchProvider({ roomId: "room-b", transport: rec.transport, now });
+  await roomA.search("內文對比要多少");
+  await roomB.search("內文對比要多少");
+  assert.equal(rec.calls.length, 2, "不同房間各自查一次，不共用快取");
+});
+
+test("後端說成員身分查不到時，不會被誤報成「不是成員」", async () => {
+  const rec = recorder(() => ({
+    status: 503,
+    body: { error: "MEMBERSHIP_CHECK_FAILED", detail: "無法確認你的房間成員身分" },
+  }));
+  const research = provider(rec);
+  const result = await research.search("問題");
+  // 503 是「沒設定」的碼，但 error 欄位不同 —— 至少不能說成 not-a-member
+  assert.notEqual(failureOf(result), "not-a-member", "資料庫故障不是權限問題");
+});

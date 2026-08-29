@@ -187,10 +187,17 @@ Deno.serve(async (request: Request): Promise<Response> => {
     .eq("room_id", roomId)
     .limit(1);
   if (membershipError) {
-    return jsonResponse(403, { error: "NOT_A_MEMBER" });
+    // **查詢失敗不等於不是成員。** 把資料庫故障回成 403 NOT_A_MEMBER，
+    // 使用者會以為自己被踢出房間，而真正的問題（DB 掛了）沒有人知道。
+    // 兩種情況都不會送出外部請求（失敗封閉），但訊息必須分得出來。
+    return jsonResponse(503, {
+      error: "MEMBERSHIP_CHECK_FAILED",
+      detail: "無法確認你的房間成員身分，請稍後再試（這不是權限問題）",
+      retryable: true,
+    });
   }
   if (!membership || membership.length === 0) {
-    // RLS 讓非成員讀到空集合，而不是錯誤 —— 空集合就是「不是成員」。
+    // RLS 讓非成員讀到空集合，而不是錯誤 —— 空集合才是「不是成員」。
     return jsonResponse(403, { error: "NOT_A_MEMBER" });
   }
 
@@ -204,14 +211,32 @@ Deno.serve(async (request: Request): Promise<Response> => {
 
   // ---- 配額：在後端算，寫進 append-only 的使用量表 ----
   const admin = serviceKey ? createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } }) : null;
-  if (admin) {
+  if (!admin) {
+    // 沒有 service role key 就記不了用量，記不了用量就算不出配額 ——
+    // 那等於沒有上限。外部搜尋是要付錢的，所以這裡選擇**停下來**
+    // 而不是放行（對抗審查指出舊版是整段跳過，等於無限額度）。
+    return jsonResponse(503, {
+      error: "QUOTA_UNAVAILABLE",
+      detail: "無法記錄使用量，因此暫停外部研究以免產生無上限的費用",
+      retryable: false,
+    });
+  }
+  {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count } = await admin
+    const { count, error: countError } = await admin
       .from("design_research_usage")
       .select("id", { count: "exact", head: true })
       .eq("room_id", roomId)
       .gte("created_at", since);
-    if (typeof count === "number" && count >= DAILY_ROOM_LIMIT) {
+    if (countError || typeof count !== "number") {
+      // 同上：算不出用量就不放行。
+      return jsonResponse(503, {
+        error: "QUOTA_UNAVAILABLE",
+        detail: "無法讀取使用量，因此暫停外部研究以免產生無上限的費用",
+        retryable: true,
+      });
+    }
+    if (count >= DAILY_ROOM_LIMIT) {
       return jsonResponse(429, {
         error: "QUOTA_EXCEEDED",
         detail: `這個房間今天的外部研究次數已達上限（${DAILY_ROOM_LIMIT} 次）`,
@@ -307,8 +332,10 @@ Deno.serve(async (request: Request): Promise<Response> => {
   const usage = (payload.usage ?? {}) as Row;
 
   // ---- 記錄使用量（append-only；失敗不擋回應，但要說）----
+  // 寫入失敗時 `usageLogged: false` 會回給前端。這件事**必須被看見**：
+  // 一直寫不進去代表配額實際上是失效的。
   let usageLogged = false;
-  if (admin) {
+  {
     const { error: logError } = await admin.from("design_research_usage").insert({
       room_id: roomId,
       query_hash: await sha256Hex(query),

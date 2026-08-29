@@ -584,6 +584,34 @@ export function rankKnowledge(entries: KnowledgeEntry[]): KnowledgeEntry[] {
  *
  * **不自行消除衝突**（任務書第八節）：只標示出來，交給規則或人決定。
  */
+/**
+ * 把規則拆成「對象」與「數值」。
+ *
+ * 「內文行高 ≥ 1.5」→ 對象「內文行高」、數值 1.5
+ * 「內文行高 = 1.2」→ 對象「內文行高」、數值 1.2
+ *
+ * 對象取的是第一個比較運算子或數字之前的那一段，去掉空白與全形符號。
+ * 這是字面比對，不是語意理解 —— 見 findKnowledgeConflicts 裡的已知極限說明。
+ */
+function bySubject(
+  entries: readonly KnowledgeEntry[],
+): Map<string, Array<{ entry: KnowledgeEntry; value: number }>> {
+  const buckets = new Map<string, Array<{ entry: KnowledgeEntry; value: number }>>();
+  for (const entry of entries) {
+    for (const rule of entry.rules) {
+      const match = /^(.*?)[\s]*(?:[≥≤<>=]+|至少|不超過|最多|不得低於|不得超過)[\s]*([0-9]+(?:[.][0-9]+)?)/.exec(rule);
+      if (!match) continue;
+      const subject = match[1].replace(/[\s。，、：:]+/g, "");
+      const value = Number(match[2]);
+      if (!subject || !Number.isFinite(value)) continue;
+      const list = buckets.get(subject) ?? [];
+      list.push({ entry, value });
+      buckets.set(subject, list);
+    }
+  }
+  return buckets;
+}
+
 export function findKnowledgeConflicts(entries: KnowledgeEntry[]): Array<{
   category: string;
   context: string;
@@ -622,11 +650,32 @@ export function findKnowledgeConflicts(entries: KnowledgeEntry[]): Array<{
     const [category, context] = key.split("|");
     conflicts.push({ category, context, entryIds: list.map((entry) => entry.id) });
   }
-  // 通用條目會落進多個脈絡桶，同一組衝突可能被回報多次 —— 去重，
-  // 否則 UI 會顯示「有 5 組矛盾」而其實只有一組。
+  // 第二種衝突：**跨類別、同一個量測對象、不同的值**。
+  //
+  // 上面那一輪只在同類別內比對，於是品牌規範（brand-rules）的
+  // 「內文行高 = 1.2」與無障礙知識（typography）的「內文行高 ≥ 1.5」
+  // 落在不同桶，明明直接矛盾卻不回報 —— 這是驗收案例 E 實測到的，
+  // 而且是最容易真實發生的一種衝突（品牌規範與通用規範打架）。
+  //
+  // 做法：從規則文字裡抽出「對象」與「數值」。對象相同、數值不同就是衝突。
+  // **已知極限**：抽取靠的是字面，所以「一般內文與背景對比」與「內文對比」
+  // 會被當成兩個不同的對象。這條路擋得住直接的矛盾，擋不住換句話說的。
+  for (const [subject, list] of bySubject(live)) {
+    if (list.length < 2) continue;
+    const values = new Set(list.map((item) => item.value));
+    if (values.size < 2) continue;
+    conflicts.push({
+      category: "跨類別",
+      context: subject,
+      entryIds: [...new Set(list.map((item) => item.entry.id))],
+    });
+  }
+
+  // 同一組衝突可能被回報多次（通用條目會落進多個脈絡桶，跨類別那一輪也可能
+  // 重複）—— 去重，否則 UI 會顯示「有 5 組矛盾」而其實只有一組。
   const seenPairs = new Set<string>();
   return conflicts.filter((conflict) => {
-    const key = `${conflict.category}|${[...conflict.entryIds].sort().join(",")}`;
+    const key = [...conflict.entryIds].sort().join(",");
     if (seenPairs.has(key)) return false;
     seenPairs.add(key);
     return true;

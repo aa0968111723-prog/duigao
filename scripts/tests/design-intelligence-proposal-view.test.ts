@@ -285,3 +285,88 @@ test("按下去之前就要說會改什麼、怎麼還原", () => {
     revertNote: "沒有選擇方案",
   });
 });
+
+// ===========================================================================
+// 對抗審查（grok，PR-DI-04）後補的反例
+// ===========================================================================
+
+test("極矮的視窗下，收起的抽屜也不會蓋滿畫面", () => {
+  // 軟鍵盤彈出、分割視窗、桌機瀏覽器被拉扁，都會出現很矮的視窗。
+  // 固定 56px 的 peek 在 56px 高的視窗上就是 100%（對抗審查實測到的）。
+  // 高於 ~270px：遵守 12% 上限
+  for (const height of [300, 414, 800]) {
+    const viewport = { width: 360, height, coarsePointer: true };
+    const layout = layoutFor(viewport);
+    const collapsed = occupiedRatio(layout, viewport, false);
+    assert.ok(
+      collapsed <= 0.13,
+      `${height}px 高的視窗上，收起的抽屜佔了 ${Math.round(collapsed * 100)}%`,
+    );
+  }
+
+  // 低於 ~270px：32px 的可點下限勝出，而且要**明確**是那個值 ——
+  // 一個按不到的把手比一個稍微佔位的把手更糟。這是刻意的取捨，不是漏掉。
+  for (const height of [56, 90, 160]) {
+    const layout = layoutFor({ width: 360, height, coarsePointer: true });
+    assert.equal(layout.kind, "sheet");
+    if (layout.kind === "sheet") {
+      assert.equal(layout.peekPx, 32, `${height}px 高時應該退回可點的下限`);
+    }
+  }
+
+  // 而且無論多矮，peek 都不會超過原本的 56px
+  for (const height of [56, 300, 800, 2000]) {
+    const layout = layoutFor({ width: 360, height, coarsePointer: true });
+    if (layout.kind === "sheet") assert.ok(layout.peekPx <= 56);
+  }
+});
+
+test("橫放手機收起的抽屜也在上限內", () => {
+  const landscape = { width: 896, height: 414, coarsePointer: true };
+  const layout = layoutFor(landscape);
+  assert.ok(occupiedRatio(layout, landscape, false) <= 0.13);
+});
+
+test("斜向的快速滑動不會吃掉垂直捲動", () => {
+  // 49–57px 的垂直位移已經足夠捲一整條診斷。只看比例的話這兩下都會換頁。
+  assert.equal(swipeIntent({ dx: -70, dy: 49, elapsedMs: 80 }), null);
+  assert.equal(swipeIntent({ dx: -80, dy: 57, elapsedMs: 200 }), null);
+  // 幾乎水平的仍然要換頁
+  assert.equal(swipeIntent({ dx: -90, dy: 20, elapsedMs: 300 }), "next");
+  assert.equal(swipeIntent({ dx: -70, dy: 30, elapsedMs: 200 }), "next");
+});
+
+test("elapsedMs 為 0 或負數不會炸，也不會被當成無限快", () => {
+  assert.equal(swipeIntent({ dx: -30, dy: 5, elapsedMs: 0 }), null, "沒有時間資訊就當慢速");
+  assert.equal(swipeIntent({ dx: -30, dy: 5, elapsedMs: -100 }), null);
+  assert.equal(swipeIntent({ dx: -90, dy: 5, elapsedMs: 0 }), "next", "位移夠大本來就該換");
+});
+
+test("已經處理過的提案不會顯示「沒有找到問題」", () => {
+  // 使用者剛核准完，面板卻說「沒有找到可以量測的問題」是很怪的
+  //（對抗審查實測到的）。
+  const cases: Array<[DesignProposal["status"], RegExp]> = [
+    ["approved", /已經核准/],
+    ["applying", /正在套用/],
+    ["applied", /已經套用完成/],
+    ["rejected", /已經被否決/],
+    ["reverted", /已經復原/],
+  ];
+  for (const [status, expected] of cases) {
+    const state = panelStateFor(proposal({ status, diagnostics: [], alternatives: [] }));
+    assert.equal(state.kind, "notice", `${status} 應該是 notice`);
+    if (state.kind === "notice") {
+      assert.match(state.title, expected, `${status} 的訊息不對：${state.title}`);
+      assert.doesNotMatch(state.title, /沒有找到可以量測的問題/);
+    }
+  }
+});
+
+test("沒有修改權限的人不能套用，而且說得出原因", () => {
+  const gate = applyGate(proposal(), "a-1", false);
+  assert.equal(gate.enabled, false);
+  if (!gate.enabled) assert.match(gate.reason, /沒有修改作品的權限/);
+
+  // 有權限就照常
+  assert.deepEqual(applyGate(proposal(), "a-1", true), { enabled: true });
+});
