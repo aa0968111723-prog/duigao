@@ -10,9 +10,11 @@ This file is on the stacked tip `#120 → #124 → #125`. Docs are not IMPLEMENT
 |---|---|---|---|---|
 | #120 | `cursor/p0-main-remainders-70d9` | `main` | see that PR | session-entry, hideRoomChrome, GAP-05, V-04, human poll/decision titles |
 | #124 | `cursor/p0-discussion-tombstone-unread-70d9` | #120 | `10c9109` | 0031 tombstone + own unread watermark |
-| #125 | `cursor/p0-discussion-mentions-todos-70d9` | #124 | this tip | 0032 mentions + human todos + ephemeral typing; 0031 attribution fix |
+| #125 | `cursor/p0-discussion-mentions-todos-70d9` | #124 | `81db260`+ | 0032 mentions + human todos + ephemeral typing; 0031 attribution; RLS + jump + rail |
 
-`origin/main` @ `cd7eb5f` — production origin JSON 404 is recorded, not fixed.
+`origin/main` @ `cd7eb5f` — **not moved**. No merge this turn.
+
+Repo migration head: **0032**. No `0033_*.sql`.
 
 ## Evidenced on this stack
 
@@ -29,49 +31,66 @@ This file is on the stacked tip `#120 → #124 → #125`. Docs are not IMPLEMENT
 | 0032 mentions | author INSERT; mentioned user must be this room’s member; UPDATE forbidden |
 | 0032 todos | member SELECT; own INSERT; UPDATE author or `can_manage`; peer / stranger complete denied |
 | 0032 typing | presence `typing: boolean` only; no typing table |
-| UI todo complete aligned to RLS | `canCompleteRoomTodo` — author or `canManage`; AI/`agent`/`system` rejected |
-| Jump first-unread does not advance watermark | `suppressReadFromJump`; T-07; e2e 「未讀跳到水位之後」 |
+| UI todo complete aligned to RLS | `canCompleteRoomTodo` — author or `canManage` |
+| Jump first-unread does not advance watermark | `suppressReadFromJump`; T-07 |
+| Split View rail hides todos | `showTodos: false` on `wb-side-rail` |
+| Discussion reaction is binary 支持 | `room_discussion_supports` PK `(message_id, user_id)`; no `reaction_type`; D-11 |
+| `kind: quote` has no producer | reply uses `reply_to_id` + `quotedBody` snapshot; D-12 |
 | No 0033 / no receipts | no `0033_*.sql`; UI / SQL must not show 已讀／雙藍勾 |
 
-Local suites on the 0032 feature commit `c841418` (before this RLS / jump fix): M-01…M-07 **7/7**; `test:collaboration` **271/271**; `test:migrations` **378/378**; `test:collaboration-e2e` **138/138** locally. CI browser on that SHA **failed 137/138** (`未讀跳到水位之後`) — this tip fixes that race.
+## CI (this stack)
 
-#124 CI on `10c9109`: build / browser / migrations / agent-read-layer **success**.
+| SHA | browser | note |
+|---|---|---|
+| #124 `10c9109` | **success** | build / migrations / agent-read-layer success |
+| #125 `c841418` | **fail** `137/138` | `未讀跳到水位之後` |
+| #125 `15c59b3` | **fail** visual `11/15` | collaboration-e2e **138/138** (unread jump PASS) |
+| #125 `81db260` | **fail** at `test:video` | run `33266947044`: e2e **138/138**, visual **15/15**, review-viewer **27/27**; then `playerReady` 60s timeout after webm fixture. Unread jump / rail / visual were green. |
 
-#125 CI on `c841418`: build / migrations / agent-read-layer **success**; browser **failure** `33266334828`. Re-check after this push; do not claim green until terminal.
+Local: `test:visual` **15/15**. `test:collaboration` **273/273**. `test:migrations` **385/385**. D-01…D-12 **12/12**.
+
+## Inspected this turn — not wired
+
+### Reactions (`room_discussion_supports`)
+
+Table is **presence = 支持**. Columns: `message_id`, `room_id`, `user_id`, `created_at`. PK `(message_id, user_id)`. **No `reaction_type`.** Not 支持-only by CHECK — it has no type column at all, so it cannot honestly store a second reaction kind without 0033 (new column + CHECK) or a new table.
+
+Video already has a **closed time-anchored** set (`ok` / `confused` / `slow` / `fast` / `fun` / `love` on `video_reactions`). Those labels (太慢／太快) are about playback, not chat. Copying them onto discussion would be a fake product. Discussion’s closed set is one verb: **支持**. Left as-is. **No 0033.**
+
+### `kind: quote`
+
+CHECK in 0014/0018 allows `quote`. Zero send-path producers (`kind: "quote"` absent from `RoomDiscussion.tsx` / `App.tsx` / `collaborationRepository.ts`). Honest quoting is already **reply**: `reply_to_id` + live resolve + `quotedBody` snapshot when the source is missing. A second `kind: quote` card would duplicate that cite type. Left unmodeled.
 
 ## Unmodeled (intentional — do not add)
 
 - Read receipts / 已讀／雙藍勾
-- Typing **table** (channel presence only)
-- `kind: quote` producer
-- Six-emoji reactions (`room_discussion_supports` is binary 支持)
+- Typing **table**
+- `kind: quote` producer (reply already cites)
+- Multi-emoji discussion reactions (would need 0033 column; no honest closed chat set)
 
 ## Deploy-blocked
 
 - 0031 / 0032 are **not** applied to the production database. Do not apply.
-- Production origin JSON 404 ≠ success. `/functions/v1/voice-token`, `/rest/v1/`, `/api/health` return `{"ok":false,"code":"NOT_FOUND","message":"this origin has no API"}`. `/` is SPA HTML 200.
+- Production origin JSON 404 ≠ success.
 - Canva / CUTOS / Perplexity production secrets unverified.
 - Stale drafts `#95→#115`, `#88`, `#104`, `#119` stay human rebase / CONFLICTING.
 - `#120` / `#124` / `#125` stay mergeable **in order**. `AUTOMERGE REQUIRES AGENT_GATE_PASS`.
 - This file is incomplete evidence. Goal remains open.
 
-## Adversarial RLS (0031 + 0032) — this tip
+## Adversarial RLS (0031 + 0032)
 
 | Attack | Verdict | Fix / probe |
 |---|---|---|
-| BOLA tombstone `deleted_by` forged to another uuid | **real hole** | `deleted_by := caller` (0031 + 0032 replace so 0031 replay cannot restore `coalesce`) |
-| Cross-room mention (owner in both rooms mentions capRoom-only reviewer on otherRoom message) | denied | WITH CHECK + trigger; e2e 「不能在這房提及只屬於另一房的人」 |
-| Mention UPDATE rehang `mentioned_user_id` | denied | GRANT insert-only + UPDATE trigger `discussion-mention-update-forbidden` |
-| Peer reviewer completes another member’s todo | denied | UPDATE USING author / `can_manage`; row stays `open` |
-| Stranger completes a todo in another room | denied | RLS + row stays `open` |
-| Unread watermark UPDATE / rehang `user_id` for another user | denied | own-row USING + WITH CHECK + trigger |
-| Jump first-unread forges “caught up” | **UX hole** | jump must not call `onMarkRead` on feed-end intersection |
-
-Not holes: members reading room mentions (same chat, not a second inbox); owner/`can_manage` completing a member todo; unread SELECT own-row only (that is why it is not a receipt).
+| BOLA tombstone `deleted_by` forged | **fixed** | `deleted_by := caller` |
+| Cross-room mention | denied | WITH CHECK + trigger |
+| Mention UPDATE rehang | denied | INSERT-only + UPDATE trigger |
+| Peer / stranger todo complete | denied | author / `can_manage` |
+| Unread watermark forge / rehang | denied | own-row + trigger |
+| Jump first-unread marks latest | **fixed** | `suppressReadFromJump` |
 
 ## Production (re-curl this turn)
 
-Re-curled 2026-08-29 17:48 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1748.txt`):
+Re-curled 2026-08-29 18:00 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1802.txt`):
 
 | Path | HTTP | Type | Body |
 |---|---|---|---|

@@ -3,7 +3,7 @@
  * Run: tsx --test scripts/tests/discussion-honesty.test.ts
  */
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -158,4 +158,29 @@ test("D-10: 討論建立投票要人填題目，空正文不是投票", () => {
   assert.match(ws, /discussion-poll-question/);
   assert.match(ws, /discussion-create-poll-save/);
   assert.match(ws, /boardPollWrite/);
+});
+
+test("D-11: 討論支持是二元 支持；不能假裝成影片六態，也不開 0033", () => {
+  const sql = src("supabase/migrations/0014_collaboration_workspace.sql");
+  assert.match(sql, /create table if not exists public\.room_discussion_supports/);
+  assert.match(sql, /primary key \(message_id, user_id\)/);
+  assert.doesNotMatch(sql, /room_discussion_supports[\s\S]{0,500}reaction_type/);
+  assert.equal(existsSync(resolve(ROOT, "supabase/migrations/0033_discussion_reactions.sql")), false);
+  const ui = src("src/features/room-discussion/RoomDiscussion.tsx");
+  assert.match(ui, /支持/);
+  assert.doesNotMatch(ui, /REACTION_TYPES|reaction_type/);
+  const video = src("src/lib/types.ts");
+  assert.match(video, /REACTION_TYPES = \["ok", "confused", "slow", "fast", "fun", "love"\]/);
+  assert.match(video, /export type VideoReaction/);
+});
+
+test("D-12: kind quote 沒有生產者；引用走 reply_to_id，不另開一種訊息", () => {
+  const send = [
+    src("src/features/room-discussion/RoomDiscussion.tsx"),
+    src("src/App.tsx"),
+    src("src/cloud/collaborationRepository.ts"),
+  ].join("\n");
+  assert.doesNotMatch(send, /kind:\s*["']quote["']/);
+  assert.match(src("src/features/room-discussion/RoomDiscussion.tsx"), /replyToId|quotedBody/);
+  assert.match(src("src/features/collaboration/replies.ts"), /replySnippet/);
 });
