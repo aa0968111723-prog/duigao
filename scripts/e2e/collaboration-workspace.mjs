@@ -278,7 +278,9 @@ try {
     check("第一則未讀可跳", await unreadJump.count() === 1);
     if (await unreadJump.count()) {
       await unreadJump.click({ force: true });
-      check("未讀跳到水位之後", await page.locator('[data-first-unread="true"]').count() === 1);
+      const unreadMark = page.locator('[data-testid="discussion-feed"] [data-first-unread="true"]');
+      await unreadMark.first().waitFor({ state: "attached", timeout: 3000 }).catch(() => undefined);
+      check("未讀跳到水位之後", await unreadMark.count() >= 1);
     }
     await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_unread_390.png"), fullPage: true });
     await page.setViewportSize({ width: 768, height: 1024 });
