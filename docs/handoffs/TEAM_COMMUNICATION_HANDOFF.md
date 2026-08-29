@@ -13,7 +13,7 @@ worktree：`D:/duigao-comm`（獨立；不與其他代理共用）
 
 | 檔案 | 原因 | 最小介面 | 與誰可能衝突 | 建議 |
 |---|---|---|---|---|
-| `supabase/migrations/0029_discussion_author_integrity.sql`（新增） | 補 `room_discussion_messages` 的作者完整性洞（見 §3） | 只動 `room_discussion_insert` policy＋新增 `guard_discussion_message_write` trigger。不碰白板表、不碰 design knowledge 表 | 編號層面與 #78（0022–0026）／#88（0027）／DI（0028）**不衝突**，但套用順序有風險（見 §2） | 本線 |
+| `supabase/migrations/0022_discussion_author_integrity.sql`（新增） | 補 `room_discussion_messages` 的作者完整性洞（見 §3） | 只動 `room_discussion_insert` policy＋新增 `guard_discussion_message_write` trigger。不碰白板表、不碰 design knowledge 表 | 編號層面與 #78（0022–0026）／#88（0027）／DI（0028）**不衝突**，但套用順序有風險（見 §2） | 本線 |
 | `scripts/e2e/migrations.mjs` | 加 9 條真角色 RLS 探針（作者完整性＋0014 replay 存活） | 只新增 `section()` 與 `ok()`，不改既有探針 | 白板線與 DI 線也會往這支加自己的 section | 各自加自己的 section，合併時取聯集 |
 | `src/App.tsx` | `sendLink` 需要把回覆對象帶進連結卡（原本會整個丟掉） | 只改 `sendLink` 一個 callback 的簽章與 body | 其他線也在改 App.tsx（3175 行的共用檔） | 本線；衝突面很小（單一 callback） |
 | `src/features/multi-room/MultiBranchRoom.tsx` | `onSendDiscussionLink` 型別跟著 `sendLink` 走 | 只改 prop 型別一行 | 白板線在同檔改白板 pane | 本線；不同區塊 |
@@ -29,21 +29,21 @@ Intelligence schema、Canva OAuth、CUTOS 編輯器、planform-iso 3D、正式�
 完整預約表見 `docs/team-communication/MIGRATION_RESERVATION.md`。
 
 事實：`main` 到 `0021`；#78 佔 `0022–0026`；#88 佔 `0027`；DI02–DI06 五條分支
-共用 `0028`（**尚無 PR 追蹤**）。本線取 `0029`（全 46 條 remote 分支列舉後
+共用 `0028`（**尚無 PR 追蹤**）。本線取 `0022`（全 46 條 remote 分支列舉後
 確認無人佔用）。
 
 **風險與需要人類處理的事**：正式庫目前在 `0021`。若 PR-COMM-00 先合併並套用
-`0029`，之後 #78／#88 合併時 `0022–0027` 會比已套用的 `0029` 舊，Supabase CLI
+`0022`，之後 #78／#88 合併時 `0022–0027` 會比已套用的 `0022` 舊，Supabase CLI
 會回報 migration history mismatch。
 
 建議合併順序（由下而上）：
 
 ```
-#78 (0022–0026)  →  #88 (0027)  →  DI (0028，需先開 PR)  →  PR-COMM-00 (0029)
+#78 (0022–0026)  →  #88 (0027)  →  DI (0028，需先開 PR)  →  PR-COMM-00 (0022 — 見下方衝突警告)
 ```
 
 若人類決定讓 PR-COMM-00 先合併，套用 `0022–0028` 時需要 `--include-all`，
-或把 `0029` 重新編號到當時的最大編號 +1。本線可以配合重新編號 —— 0029 的
+或把 `0022` 重新編號到當時的最大編號 +1。本線可以配合重新編號 —— 0022 的
 內容不依賴任何其他 migration 的編號，只依賴 0014 已存在。
 
 ---
@@ -65,14 +65,14 @@ Intelligence schema、Canva OAuth、CUTOS 編輯器、planform-iso 3D、正式�
 正是決策與待辦往回指的原始證據。0019 早就把同一類問題（actor 冒名）當成必須
 擋下的類別，這條線只是沒補到訊息表。
 
-`0029` 之後：
+`0022` 之後：
 
 ```
   ✓ 成員可以用自己的 uid 發討論訊息
   ✓ 冒名發訊息（author_user_id 填別人的 uid）被擋
   ✓ 作者不能把自己的訊息改成別人發的
   ✓ 管理者也不能改寫訊息作者（洗白作者身分）
-  ✓ 重跑 0014 之後仍然擋得住冒名發訊息（0029 的 trigger 不被 replay 洗掉）
+  ✓ 重跑 0014 之後仍然擋得住冒名發訊息（0022 的 trigger 不被 replay 洗掉）
   ✓ 重跑 0014 之後成員仍然發得出自己的訊息（護欄沒有擋到正常路徑）
 ```
 
@@ -97,7 +97,7 @@ Intelligence schema、Canva OAuth、CUTOS 編輯器、planform-iso 3D、正式�
 |---|---|---|---|
 | SEC-01 | `upsert_visual_proposal` 是 SECURITY DEFINER，用呼叫端給的 `p_room_id` 授權，卻用 `id` 單獨定位並更新該列 —— 跨房寫入 | `supabase/migrations/0017_author_acl.sql` | 安全線／視覺提案線 |
 | SEC-05 / SEC-10 | `messages_all`、`strokes_all` 仍是 `for all` 給任何房間成員：分享連結進來的 reviewer 可以改／刪整個房間的舊聊天與所有人的標註 | `0001_cloud_rooms.sql` | 安全線 |
-| SEC-03 / SEC-04 | `comments_insert` 沒有 `author_user_id = auth.uid()`；`comments_update` 讓任何成員改寫別人回饋的內容與作者欄 | `0001`／`0002` | 回饋線（與本線 0029 同一類問題，同一個解法形狀） |
+| SEC-03 / SEC-04 | `comments_insert` 沒有 `author_user_id = auth.uid()`；`comments_update` 讓任何成員改寫別人回饋的內容與作者欄 | `0001`／`0002` | 回饋線（與本線 0022 同一類問題，同一個解法形狀） |
 | SEC-12 | `0001/0002/0005/0012` 的表仍停在 Supabase 預設 `GRANT ALL TO anon, authenticated`，含 RLS 管不到的 TRUNCATE | 同上 | 安全線 |
 | SEC-08 | canva-bridge OAuth callback 沒綁發起流程的瀏覽器 | `supabase/functions/canva-bridge` | Canva 線 |
 | SEC-09 | `room_members` 沒有 DELETE policy 也沒有 RPC —— 外流的邀請連結等於永久授權 | `0001`／`0007` | 安全線 |

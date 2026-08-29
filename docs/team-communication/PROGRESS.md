@@ -56,7 +56,7 @@ base：`origin/main` @ `2a9d7a0`
 
 P0 修復：
 
-- `supabase/migrations/0029_discussion_author_integrity.sql` — 訊息作者不可
+- `supabase/migrations/0022_discussion_author_integrity.sql` — 訊息作者不可
   偽造、不可改寫；trigger 同時凍結 `room_id` 與 `created_at`，且能撐過
   0014 replay。
 - `src/features/collaboration/replies.ts` ＋ UI 接線 — 引用改成解析而不是複製，
@@ -100,8 +100,11 @@ workflow 子代理做多角度稽核：
 
 ### 阻塞
 
-- **BLOCKED_MIGRATION_ORDER**：`0022–0028` 全部未合併，正式庫在 `0021`。
-  PR-COMM-02 之後每一階段都需要新表，必須等人類決定 #78／#88／DI 的合併順序。
+- **BLOCKED_MIGRATION_ORDER**：本線的 `0022` 與 #78 的 `0022` **必然撞號**
+  —— repo 的 release gate 要求編號連續，兩條分支都從 `main`（0021）長出來，
+  各自只能取下一號。撞號一定會被 gate 抓到（`duplicate prefix`），不會靜默
+  出事，但需要人類決定合併順序：建議 #78 先，本線 rebase 後重新編號。
+  詳見 `MIGRATION_RESERVATION.md`。
 - **BLOCKED_TWO_ACCOUNT_E2E**：沒有第二個測試帳號與可連線的 Supabase 環境變數。
 - **BLOCKED_REAL_DEVICE**：沒有真機／真瀏覽器可驗收。
 
@@ -117,7 +120,7 @@ f2adcb8 PR-COMM-00: 訊息作者可被偽造，回覆是失去來源的複製品
 
 ### 下一步
 
-1. 人類 review [#94](https://github.com/aa0968111723-prog/duigao/pull/94)，決定 `0029` 的合併與套用順序。
+1. 人類 review [#94](https://github.com/aa0968111723-prog/duigao/pull/94)，決定 `0022` 的合併與套用順序。
 2. `0022–0028` 定案後解除 migration 凍結。
 3. 開始 PR-COMM-01（捲動管理、輸入列、草稿持久化、outbox 持久化）——
    這一階段**不需要新表**，可以在凍結期間進行。

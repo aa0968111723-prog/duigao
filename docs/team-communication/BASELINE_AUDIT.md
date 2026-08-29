@@ -38,8 +38,8 @@
 | A1 | **回覆指不回來源**。`replyToId` 寫進資料庫，但 `grep -rn replyToId src/` 顯示**沒有任何 UI 讀它**；畫面只顯示 `payload.quotedBody` —— 送出當下複製的字串。點不下去、來源被編輯後停在舊字、來源被刪除後變成孤兒。 | [原始碼] `RoomDiscussion.tsx:248,326`（修正前）→ **本 PR 已修** |
 | A2 | **回覆時只貼一條網址，回覆對象整個消失**。連結卡分支 `if (…test(text) && api.onSendLink?.(text)) { … return; }` 不帶 `replyToId`。 | [原始碼] → **本 PR 已修** |
 | A3 | **點了「回覆」之後沒有任何取消方式**。唯一線索是 placeholder，打第一個字就消失，之後每一句都會被當成該則的回覆送出。 | [原始碼] → **本 PR 已修** |
-| A4 | **訊息作者可以被偽造**。任何成員都能 insert 一列 `author_user_id = <別人的 uid>`。 | [實測] → **本 PR 已修（0029）** |
-| A5 | **管理者可以改寫別人訊息的作者**。 | [實測] → **本 PR 已修（0029）** |
+| A4 | **訊息作者可以被偽造**。任何成員都能 insert 一列 `author_user_id = <別人的 uid>`。 | [實測] → **本 PR 已修（0022）** |
+| A5 | **管理者可以改寫別人訊息的作者**。 | [實測] → **本 PR 已修（0022）** |
 | A6 | **房間搜尋說謊**。輸入框寫「搜尋房間內容」，實際只比對 branch 名稱，卻對討論、企劃內文、附件回「找不到相關內容」。 | [待複驗] `MultiBranchRoom.tsx:825,874` |
 | A7 | **三條白板 e2e 檢查寫死 `true`**，永遠不會失敗。 | [原始碼] `collaboration-workspace.mjs:261,269,272` — **不屬本線，已交接** |
 | A8 | 語音「還在準備」文案對已設定 LiveKit 的部署也會出現（health 探測失敗一次就整個 session 說謊）。 | [待複驗] |
@@ -82,13 +82,13 @@ Presence 只 `track({ at: Date.now() })`，只讀
 
 ## 5. RLS
 
-`room_discussion_messages`（0014 ＋ 本 PR 的 0029）：
+`room_discussion_messages`（0014 ＋ 本 PR 的 0022）：
 
 | 動作 | Policy |
 |---|---|
 | SELECT | `is_room_member(room_id)` |
-| INSERT | `is_room_member(room_id) and (author_user_id is null or author_user_id = auth.uid())` ← **0029 補上後半** |
-| UPDATE | `is_room_member and (author_user_id = auth.uid() or can_manage_media)`，**且 trigger 凍結 `author_user_id` / `room_id` / `created_at`** ← 0029 |
+| INSERT | `is_room_member(room_id) and (author_user_id is null or author_user_id = auth.uid())` ← **0022 補上後半** |
+| UPDATE | `is_room_member and (author_user_id = auth.uid() or can_manage_media)`，**且 trigger 凍結 `author_user_id` / `room_id` / `created_at`** ← 0022 |
 | DELETE | `is_room_member and (author_user_id = auth.uid() or can_manage_media)` — hard delete，**沒有 tombstone** |
 
 `room_discussion_supports`：PK `(message_id, user_id)`，INSERT/DELETE 都綁
@@ -207,7 +207,7 @@ composer 是 `position: fixed` 騎在 `--kb` 上，`env(safe-area-inset-bottom)`
 | [#88](https://github.com/aa0968111723-prog/duigao/pull/88) | `agent/design-intelligence-perplexity` | 0027（design knowledge） | 無 |
 | DI02–DI06 | 五條分支共用 0028 | 0028 | **無 PR 追蹤 —— 需要人類處理** |
 
-本線取 **0029**（列舉全部 46 條 remote 分支後確認無人佔用）。
+本線取 **0022**（repo 的 release gate 要求編號連續，見 MIGRATION_RESERVATION）。
 套用順序風險見 `MIGRATION_RESERVATION.md` 與 handoff。
 
 ---

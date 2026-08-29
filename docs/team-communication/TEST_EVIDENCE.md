@@ -35,9 +35,10 @@ PG_BIN=/d/pgsql-dl/x/pgsql/bin npm run test:migrations
 |---|---|
 | base（`2a9d7a0`，未動任何東西） | **242/242 通過** |
 | 加入 9 條作者完整性探針、尚未修 | **246/248 通過** — 2 條紅燈，都是真缺陷 |
-| 加入 `0029` 第一版（`security invoker`） | **243/251** — 8 條紅燈，**修錯了**（見下） |
-| 加入 `0029` 第二版（`security definer`） | **251/251 通過** |
+| 加入 `0022` 第一版（`security invoker`） | **243/251** — 8 條紅燈，**修錯了**（見下） |
+| 加入 `0022` 第二版（`security definer`） | **251/251 通過** |
 | 修掉自己寫的假綠探針＋補表情回應 RLS | **257/257 通過** |
+| 依 repo 的 release gate 把 `0029` 改號為 `0022` | **257/257 通過**（純改檔名，內容不變） |
 
 ### 2.1 缺陷存在的證據（修之前）
 
@@ -53,7 +54,7 @@ PG_BIN=/d/pgsql-dl/x/pgsql/bin npm run test:migrations
 
 ### 2.2 第一版修法是假綠（如實記錄）
 
-`0029` 的 trigger 一開始寫成 `security invoker`。`authenticated` 沒有 schema
+`0022` 的 trigger 一開始寫成 `security invoker`。`authenticated` 沒有 schema
 `auth` 的 USAGE，於是：
 
 ```
@@ -79,7 +80,7 @@ PG_BIN=/d/pgsql-dl/x/pgsql/bin npm run test:migrations
 
 協作工作台：0014 可以重跑
   ✓ 重跑 0014 之後 tables / policies / triggers 數量不變
-  ✓ 重跑 0014 之後仍然擋得住冒名發訊息（0029 的 trigger 不被 replay 洗掉）
+  ✓ 重跑 0014 之後仍然擋得住冒名發訊息（0022 的 trigger 不被 replay 洗掉）
   ✓ 重跑 0014 之後成員仍然發得出自己的訊息（護欄沒有擋到正常路徑）
 
 251/251 通過

@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0029 — 討論訊息的作者完整性（PR-COMM-00）
+-- 0022 — 討論訊息的作者完整性（PR-COMM-00）
 --
 -- 稽核（scripts/e2e/migrations.mjs「討論訊息作者完整性」節）用真實角色對真
 -- PostgreSQL 打出來的兩個洞：
@@ -98,7 +98,7 @@ end;
 $$;
 
 comment on function public.guard_discussion_message_write() is
-  '討論訊息的作者／房間／發出時間不可偽造也不可改寫（0029）。與 policy 重複是刻意的：0014 可重跑，replay 會重建它的 insert policy，trigger 不會被 replay 動到。';
+  '討論訊息的作者／房間／發出時間不可偽造也不可改寫（0022）。與 policy 重複是刻意的：0014 可重跑，replay 會重建它的 insert policy，trigger 不會被 replay 動到。';
 
 -- trigger function 不需要被任何人直接呼叫（trigger 由系統呼叫，不看 EXECUTE）。
 -- 沿用 0010／0017 的紀律：預設的 PUBLIC EXECUTE 一律收回。
@@ -110,4 +110,4 @@ create trigger room_discussion_guard_write
   for each row execute function public.guard_discussion_message_write();
 
 comment on policy room_discussion_insert on public.room_discussion_messages is
-  '房間成員可發言，且只能以自己的身分發言（0029）。NULL = 不屬於任何平台帳號的匯入列。';
+  '房間成員可發言，且只能以自己的身分發言（0022）。NULL = 不屬於任何平台帳號的匯入列。';

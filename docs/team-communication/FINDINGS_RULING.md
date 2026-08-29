@@ -32,7 +32,7 @@
 
 | 發現 | 裁決 | 證據 |
 |---|---|---|
-| 任何成員可用別人的 uid 發討論訊息 | **accepted** | 真 PostgreSQL 真角色探針（修前紅、修後綠）。**對抗層在 0029 落地後重讀，判 refuted —— 理由正是「0029 已經關掉這個洞」，等於獨立確認修復有效** |
+| 任何成員可用別人的 uid 發討論訊息 | **accepted** | 真 PostgreSQL 真角色探針（修前紅、修後綠）。**對抗層在 0022 落地後重讀，判 refuted —— 理由正是「0022 已經關掉這個洞」，等於獨立確認修復有效** |
 | 管理者可改寫訊息作者 | **accepted** | 同上 |
 | 回覆指不回來源、引用是失去來源的複製品 | **accepted** | `grep -rn replyToId src/` 全 repo 只有寫入端 |
 | 點了「回覆」之後沒有任何取消方式 | **accepted** | 對抗層 CONFIRMED |
@@ -69,7 +69,7 @@
 
 | 發現 | 建議擁有者 |
 |---|---|
-| `comments` INSERT 沒有把 `author_user_id` 綁在 `auth.uid()` —— 回饋可被冒名 | 回饋線（與本線 0029 同一類，同一個解法形狀） |
+| `comments` INSERT 沒有把 `author_user_id` 綁在 `auth.uid()` —— 回饋可被冒名 | 回饋線（與本線 0022 同一類，同一個解法形狀） |
 | `comments` UPDATE 沒有作者綁定也沒有欄位凍結 —— 任何成員可改寫他人回饋並奪取作者 | 回饋線 |
 | `messages`（0001 legacy 聊天）仍是 `for all` 成員即可 —— 可整包改寫或清空 | 安全線 |
 | `room_members` 沒有 DELETE policy 也沒有 RPC —— 外流邀請連結等於永久授權 | 安全線 |
@@ -98,7 +98,7 @@
 | `strokes` 是 `for all` 成員即可 —— 任何人可刪別人的標註 | 程式碼屬實，但那是產品刻意出貨的設計（共同標註），不是 RLS 疏漏 |
 | 0001/0002/0005/0012 的表沒有撤銷預設 `GRANT ALL`（含 TRUNCATE） | 觀察屬實，但推翻理由指出 shim 與實際專案的預設權限狀態不同 —— **本線判定為「證據不足以定案，需要對真專案 probe」**，已寫進 handoff 由安全線用真專案確認（見 §五） |
 | 同一房開兩條 Realtime channel 並永久洩漏 | Realtime client 以 topic 去重，宣稱的後果不成立 |
-| 本分支出貨 0029 卻在自己的預約文件寫「本階段不新增 migration」 | **裁決 partially-accepted**：對抗層判 refuted（沒有使用者可見失敗），但**文件與程式碼確實不一致，那是我自己的錯**。已改寫 `MIGRATION_RESERVATION.md`，寫清楚為什麼改變決定、以及套用順序的風險 |
+| 本分支出貨新 migration 卻在自己的預約文件寫「本階段不新增 migration」 | **裁決 partially-accepted**：對抗層判 refuted（沒有使用者可見失敗），但**文件與程式碼確實不一致，那是我自己的錯**。已改寫 `MIGRATION_RESERVATION.md`，寫清楚為什麼改變決定、以及套用順序的風險 |
 
 ---
 

@@ -1326,11 +1326,11 @@ try {
   const collabBefore = collabShape();
   psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
   ok("重跑 0014 之後 tables / policies / triggers 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
-  // 0014 會 drop/create 同名的 room_discussion_insert policy，所以 0029 的
-  // 修補若只寫在 policy 上，任何一次 replay 都會把冒名的洞放回來。0029 因此
+  // 0014 會 drop/create 同名的 room_discussion_insert policy，所以 0022 的
+  // 修補若只寫在 policy 上，任何一次 replay 都會把冒名的洞放回來。0022 因此
   // 同時掛 trigger；這裡就是驗那道護欄真的撐過 replay。
   ok(
-    "重跑 0014 之後仍然擋得住冒名發訊息（0029 的 trigger 不被 replay 洗掉）",
+    "重跑 0014 之後仍然擋得住冒名發訊息（0022 的 trigger 不被 replay 洗掉）",
     as(reviewer, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body) values ('${capRoom}'::uuid, '${owner}'::uuid, 'Owner', 'replay 之後的冒名');`).failed,
   );
   ok(
