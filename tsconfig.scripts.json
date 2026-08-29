@@ -16,6 +16,7 @@
     "scripts/tests/history-layers.test.ts",
     "scripts/tests/plan-draft.test.ts",
     "scripts/tests/design-intelligence-*.ts",
+    "scripts/tests/ai-external-handoff.test.ts",
     "src/features/design-intelligence"
   ]
 }

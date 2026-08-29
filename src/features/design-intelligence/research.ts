@@ -16,6 +16,7 @@
  * 後端也有一份配額。兩邊都要有，理由不同：前端這份是為了不浪費（省掉根本
  * 不必送的請求），後端那份是為了守住（前端的檢查改一行 JS 就繞過了）。
  */
+import { acceptResearchSuccessBody } from "./honesty";
 import { buildResearchQuery, quoteUntrusted, trustForExternal } from "./sanitize";
 import { disabledResearchResult, type ProviderStatus, type ResearchFilters, type ResearchProvider } from "./providers";
 import { parseResearchSources } from "./schema";
@@ -343,6 +344,15 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
         recordFailure(now);
         return withMeta(emptyResult(query, now, {}), {
           failure: response.status === 504 ? "timeout" : "upstream-error",
+          retryable: true,
+        });
+      }
+
+      if (!acceptResearchSuccessBody(response.body)) {
+        recordFailure(now);
+        return withMeta(emptyResult(query, now, {}), {
+          failure: "upstream-error",
+          failureDetail: "研究回應不是有效結果（SPA HTML 或缺欄不得當成成功）",
           retryable: true,
         });
       }
