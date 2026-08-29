@@ -17,6 +17,7 @@ export {
   readInviteFromUrl,
   readRoomLink,
   replaceUrlWithInvite,
+  roomLinkIdentity,
   type RoomLink,
   type RoomTarget,
   type UrlInvite,
