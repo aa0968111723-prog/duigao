@@ -172,7 +172,7 @@ import {
   loadBoardSnapshot,
   queuePendingEdit,
   mergeDiscussionSnapshot,
-  retainMentionedUserIds,
+  mergeDiscussionRowState,
   reconcileNodes,
   saveBoardSnapshot,
 } from "./features/collaboration/offline";
@@ -630,7 +630,7 @@ export function App() {
         // 讀取失敗造成的空討論不覆蓋畫面上已有的對話（見上方註解）。
         // 只在「同一間房」時保留 —— 換房時 current 是上一間房，
         // 沿用它會把別間房的訊息畫進這間房。
-        discussion: retainMentionedUserIds(current?.discussion, mergeDiscussionSnapshot(current, normalized)),
+        discussion: mergeDiscussionRowState(current?.discussion, mergeDiscussionSnapshot(current, normalized)),
         // 專案房不可被快照「降級」：loadRoomFull 的 projectMode 推斷在
         // room_mode PATCH 還沒落地、又只有一個分支時會誤判 single，
         // 那會讓房間殼整個掉出去換成單房對稿樹。
@@ -1929,7 +1929,10 @@ export function App() {
       const userId = cloud.userId ?? guest?.id;
       const patch = discussionEditPatch(body);
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
-      if (!userId || !patch || !current || !canEditDiscussion(current, userId)) return;
+      if (!userId || !patch || !current) return;
+      // Bind can swap guest.id → cloud.userId after send; the author row
+      // still has the id used at insert. Either id may edit.
+      if (!canEditDiscussion(current, userId) && !(guest && canEditDiscussion(current, guest.id))) return;
       const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
       updateRoom((r) => ({
         ...r,

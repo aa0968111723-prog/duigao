@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { indexMessages, replySnippet, resolveReply, REPLY_SNIPPET_MAX } from "../../src/features/collaboration/replies.ts";
-import { mergeDiscussionSnapshot, retainMentionedUserIds } from "../../src/features/collaboration/offline.ts";
+import { mergeDiscussionRowState, mergeDiscussionSnapshot, retainMentionedUserIds } from "../../src/features/collaboration/offline.ts";
 import type { DiscussionMessage } from "../../src/features/collaboration/types.ts";
 
 function message(over: Partial<DiscussionMessage> & { id: string }): DiscussionMessage {
@@ -178,4 +178,21 @@ test("快照帶了提及列就採用伺服器的，不留樂觀殘值", () => {
     [{ id: "m1", mentionedUserIds: ["u-b"] }],
   );
   assert.deepEqual(incoming, [{ id: "m1", mentionedUserIds: ["u-b"] }]);
+});
+
+test("insert 快照不得蓋掉本機已編輯的正文與已編輯標", () => {
+  const merged = mergeDiscussionRowState(
+    [{ id: "m1", body: "先把招生流程攤在白板上（改過）", updatedAt: 50, payload: { edited: true } }],
+    [{ id: "m1", body: "先把招生流程攤在白板上", updatedAt: 10, payload: {} }],
+  );
+  assert.equal(merged?.[0]?.body, "先把招生流程攤在白板上（改過）");
+  assert.equal(merged?.[0]?.payload?.edited, true);
+});
+
+test("伺服器較新的編輯仍覆蓋本機", () => {
+  const merged = mergeDiscussionRowState(
+    [{ id: "m1", body: "本機舊", updatedAt: 10, payload: { edited: true } }],
+    [{ id: "m1", body: "雲端新", updatedAt: 80, payload: { edited: true } }],
+  );
+  assert.equal(merged?.[0]?.body, "雲端新");
 });
