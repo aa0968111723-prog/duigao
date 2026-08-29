@@ -81,7 +81,7 @@ test("SPA HTML / failed realtime must not look like applied", () => {
   assert.equal(rejected.messages[0].id, "keep");
 });
 
-test("older duplicate loses; newer update replaces; delete is idempotent", () => {
+test("older duplicate loses; newer update replaces; delete becomes a tombstone", () => {
   const seed = applyDiscussionRealtime([], { op: "upsert", message: msg("m1", { body: "v1", updatedAt: 20 }) });
   const older = applyDiscussionRealtime(seed.messages, { op: "upsert", message: msg("m1", { body: "old", updatedAt: 5 }) });
   assert.equal(older.applied, false);
@@ -91,7 +91,8 @@ test("older duplicate loses; newer update replaces; delete is idempotent", () =>
   assert.equal(newer.messages[0].body, "v2");
   const del = applyDiscussionRealtime(newer.messages, { op: "delete", id: "m1" });
   assert.equal(del.applied, true);
-  assert.equal(del.messages.length, 0);
+  assert.equal(del.messages.length, 1, "0031: DELETE echo becomes a tombstone, not a vanish");
+  assert.ok(del.messages[0].deletedAt);
   const delAgain = applyDiscussionRealtime(del.messages, { op: "delete", id: "m1" });
   assert.equal(delAgain.applied, false);
 });

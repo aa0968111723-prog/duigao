@@ -84,6 +84,15 @@ export type DiscussionRow = {
   reply_to_id: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+};
+
+export type DiscussionReadRow = {
+  room_id: string;
+  user_id: string;
+  last_read_message_id: string | null;
+  last_read_at: string;
 };
 
 type SupportRow = { message_id: string; room_id: string; user_id: string };
@@ -190,6 +199,8 @@ export function discussionFromRow(row: DiscussionRow): DiscussionMessage | null 
     replyToId: row.reply_to_id ?? undefined,
     createdAt: ms(row.created_at),
     updatedAt: ms(row.updated_at),
+    deletedAt: row.deleted_at ? ms(row.deleted_at) : undefined,
+    deletedBy: row.deleted_by ?? undefined,
   };
 }
 
@@ -662,6 +673,45 @@ export async function updateDiscussion(supabase: SupabaseClient, message: Pick<D
   if (!accepted.ok) {
     throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : (error?.message ?? "discussion update failed"), "discussion");
   }
+}
+
+/** 0031: soft-delete only. Filter by id + room_id so a cross-room id cannot move. */
+export async function tombstoneDiscussion(supabase: SupabaseClient, message: Pick<DiscussionMessage, "id" | "roomId">): Promise<void> {
+  const { data, error } = await supabase.from("room_discussion_messages").update({
+    deleted_at: new Date().toISOString(),
+  }).eq("id", message.id).eq("room_id", message.roomId).abortSignal(AbortSignal.timeout(12000));
+  const accepted = acceptDiscussionInsert({ error, data });
+  if (!accepted.ok) {
+    throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : (error?.message ?? "discussion tombstone failed"), "discussion");
+  }
+}
+
+export async function loadDiscussionRead(supabase: SupabaseClient, roomId: string): Promise<{ lastReadMessageId?: string; lastReadAt: number } | null> {
+  const { data, error } = await supabase
+    .from("room_discussion_reads")
+    .select("last_read_message_id, last_read_at")
+    .eq("room_id", roomId)
+    .maybeSingle();
+  if (error) throw new CloudError(error.message, "discussion-read");
+  const row = data as Pick<DiscussionReadRow, "last_read_message_id" | "last_read_at"> | null;
+  if (!row) return null;
+  return {
+    lastReadMessageId: row.last_read_message_id ?? undefined,
+    lastReadAt: ms(row.last_read_at),
+  };
+}
+
+export async function upsertDiscussionRead(
+  supabase: SupabaseClient,
+  roomId: string,
+  watermark: { lastReadMessageId?: string; lastReadAt: number },
+): Promise<void> {
+  const { error } = await supabase.from("room_discussion_reads").upsert({
+    room_id: roomId,
+    last_read_message_id: watermark.lastReadMessageId ?? null,
+    last_read_at: new Date(watermark.lastReadAt).toISOString(),
+  }, { onConflict: "room_id,user_id" });
+  if (error) throw new CloudError(error.message, "discussion-read");
 }
 
 export async function insertDiscussion(supabase: SupabaseClient, message: DiscussionMessage): Promise<void> {

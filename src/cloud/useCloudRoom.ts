@@ -93,6 +93,8 @@ import {
   insertAiApplyAudit,
   insertDiscussion,
   updateDiscussion as repoUpdateDiscussion,
+  tombstoneDiscussion as repoTombstoneDiscussion,
+  upsertDiscussionRead as repoUpsertDiscussionRead,
   insertEdge,
   discussionFromRow,
   nodeFromRow,
@@ -142,6 +144,8 @@ export type CloudWrites = {
   votePoll: (vote: PollVote) => void;
   insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
   updateDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
+  tombstoneDiscussion?: (message: Pick<import("../features/collaboration/types").DiscussionMessage, "id" | "roomId">) => Promise<boolean>;
+  upsertDiscussionRead?: (watermark: { roomId: string; lastReadMessageId?: string; lastReadAt: number }) => Promise<boolean>;
   /** AI 套用稽核列（0019）。回傳成敗；失敗不重試 — 討論串訊息是人看的 fallback。 */
   recordAiApplyAudit?: (entry: { proposalId: string; proposalType: string; label: string }) => Promise<boolean>;
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
@@ -1163,6 +1167,27 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
         return true;
       } catch {
         setStatus("offline-pending");
+        return false;
+      }
+    },
+    tombstoneDiscussion: async (message) => {
+      if (!supabase || !boundRef.current) return false;
+      setStatus("syncing");
+      try {
+        await repoTombstoneDiscussion(supabase, { id: message.id, roomId: boundRef.current });
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+        return true;
+      } catch {
+        setStatus("offline-pending");
+        return false;
+      }
+    },
+    upsertDiscussionRead: async (watermark) => {
+      if (!supabase || !boundRef.current) return false;
+      try {
+        await repoUpsertDiscussionRead(supabase, boundRef.current, watermark);
+        return true;
+      } catch {
         return false;
       }
     },

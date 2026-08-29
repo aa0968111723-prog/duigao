@@ -1,6 +1,6 @@
 /**
- * Discussion extras that already have columns/kinds (0014/0018/0022).
- * No mention / unread / receipt / todo / deleted_at — those stay unmodeled.
+ * Discussion extras typed by 0014/0018/0022 plus 0031 tombstone / unread watermark.
+ * Mentions, typing, todo, and receipts stay unmodeled.
  */
 import type { DiscussionKind, DiscussionMessage, DiscussionPayload } from "./types";
 import { replySnippet } from "./replies";
@@ -14,14 +14,88 @@ export function messageIsEdited(message: Pick<DiscussionMessage, "createdAt" | "
 }
 
 export function canEditDiscussion(
-  message: Pick<DiscussionMessage, "authorId" | "kind" | "payload">,
+  message: Pick<DiscussionMessage, "authorId" | "kind" | "payload" | "deletedAt">,
   userId: string,
   sendState?: "sending" | "failed" | string,
 ): boolean {
   if (!userId || sendState === "sending" || sendState === "failed") return false;
+  if (message.deletedAt) return false;
   if (message.payload.legacy) return false;
   if (message.kind !== "text") return false;
   return message.authorId === userId;
+}
+
+export function messageIsTombstoned(message: Pick<DiscussionMessage, "deletedAt">): boolean {
+  return Boolean(message.deletedAt);
+}
+
+/** Author or can_manage. Tombstone is UPDATE deleted_at, never a hard delete. */
+export function canTombstoneDiscussion(
+  message: Pick<DiscussionMessage, "authorId" | "deletedAt">,
+  userId: string,
+  canManage: boolean,
+  sendState?: "sending" | "failed" | string,
+): boolean {
+  if (!userId || sendState === "sending" || sendState === "failed") return false;
+  if (message.deletedAt) return false;
+  return message.authorId === userId || canManage;
+}
+
+/** 0022 freezes room_id / author / created_at — this patch must not carry them. */
+export function discussionTombstonePatch(): { deleted_at: string } {
+  return { deleted_at: new Date().toISOString() };
+}
+
+export type DiscussionReadWatermark = {
+  roomId: string;
+  lastReadMessageId?: string;
+  lastReadAt: number;
+};
+
+export function firstUnreadMessageId(
+  messages: Pick<DiscussionMessage, "id" | "createdAt">[],
+  watermark: { lastReadMessageId?: string; lastReadAt?: number } | null | undefined,
+): string | null {
+  const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  if (!sorted.length) return null;
+  if (!watermark) return sorted[0].id;
+  if (watermark.lastReadMessageId) {
+    const idx = sorted.findIndex((item) => item.id === watermark.lastReadMessageId);
+    if (idx >= 0) return sorted[idx + 1]?.id ?? null;
+  }
+  if (watermark.lastReadAt) {
+    return sorted.find((item) => item.createdAt > watermark.lastReadAt!)?.id ?? null;
+  }
+  return sorted[0].id;
+}
+
+export function unreadCount(
+  messages: Pick<DiscussionMessage, "id" | "createdAt">[],
+  watermark: { lastReadMessageId?: string; lastReadAt?: number } | null | undefined,
+): number {
+  const first = firstUnreadMessageId(messages, watermark);
+  if (!first) return 0;
+  const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  const idx = sorted.findIndex((item) => item.id === first);
+  return idx < 0 ? 0 : sorted.length - idx;
+}
+
+/** Watermark only moves forward along createdAt. */
+export function nextReadWatermark(
+  current: DiscussionReadWatermark | null | undefined,
+  message: Pick<DiscussionMessage, "id" | "roomId" | "createdAt">,
+): DiscussionReadWatermark {
+  if (current && current.roomId === message.roomId) {
+    if (current.lastReadAt > message.createdAt) return current;
+    if (current.lastReadAt === message.createdAt && current.lastReadMessageId && current.lastReadMessageId > message.id) {
+      return current;
+    }
+  }
+  return {
+    roomId: message.roomId,
+    lastReadMessageId: message.id,
+    lastReadAt: message.createdAt,
+  };
 }
 
 /** 0022: body may change; author / room / created_at must not travel in the patch. */

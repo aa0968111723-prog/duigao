@@ -251,6 +251,65 @@ try {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
+    await page.getByTestId("discussion-tombstone-btn").first().click();
+    check("tombstone 畫墓碑，不是消失", await page.getByTestId("discussion-tombstone").count() >= 1);
+    check("tombstone 之後列還在 feed", await page.locator('[data-testid^="discussion-"]').count() >= 1);
+    check("tombstone 畫面沒有已讀回條", !(await page.getByTestId("discussion-feed").innerText()).includes("已讀"));
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_tombstone_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_tombstone_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+
+    const unreadIds = await page.locator("[id^='rd-msg-']").evaluateAll((els) =>
+      els.map((el) => el.id.replace("rd-msg-", "")).filter(Boolean),
+    );
+    const unreadRoomId = await page.getByTestId("multi-branch-room").getAttribute("data-room-id");
+    const unreadGuest = await page.evaluate(() => {
+      try { return JSON.parse(localStorage.getItem("duigao.guest") || "null"); } catch { return null; }
+    });
+    if (unreadIds[0] && unreadRoomId && unreadGuest?.id) {
+      await page.evaluate(async ({ roomId, userId, lastReadMessageId }) => {
+        await new Promise((resolve, reject) => {
+          const req = indexedDB.open("duigao", 5);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains("discussion-reads")) {
+              db.createObjectStore("discussion-reads", { keyPath: "key" });
+            }
+          };
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction("discussion-reads", "readwrite");
+            tx.objectStore("discussion-reads").put({
+              key: `${roomId}:${userId}`,
+              roomId,
+              userId,
+              lastReadMessageId,
+              lastReadAt: 1,
+            });
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror = () => reject(tx.error);
+          };
+        });
+      }, { roomId: unreadRoomId, userId: unreadGuest.id, lastReadMessageId: unreadIds[0] });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 20000 });
+      check("第一則未讀可跳", await page.getByTestId("jump-first-unread").count() === 1);
+      await page.getByTestId("jump-first-unread").click();
+      check("未讀跳到水位之後", await page.locator('[data-first-unread="true"]').count() === 1);
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_unread_390.png"), fullPage: true });
+      await page.setViewportSize({ width: 768, height: 1024 });
+      await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_unread_768.png"), fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+    } else {
+      check("第一則未讀可跳", false, "missing room/guest/message ids");
+    }
+
     await page.getByRole("button", { name: "白板", exact: true }).click();
     await page.getByLabel("白板名稱").fill("招生規劃");
     await page.getByRole("button", { name: "建立白板" }).click();
