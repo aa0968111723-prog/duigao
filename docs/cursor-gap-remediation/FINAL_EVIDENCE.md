@@ -1,8 +1,8 @@
 # Gap-remediation — incremental evidence（未完成）
 
-核對時間：2026-08-29（續）。本檔只列有權威證據的項目。**全站目標未完成。** 不是 merge／deploy 許可。
+核對時間：2026-08-29（語音九態 restack 續）。本檔只列有權威證據的項目。**全站目標未完成。** 不是 merge／deploy 許可。
 
-現行 `origin/main`：`444ae9d`（`Handoff: remaining gaps and merge order (#99)`）。含已合併的 #97 與 #99。
+現行 `origin/main`：`196b3a3`（`PR-RESOLVE-01: Home offline and cloud-unset truthful state (#105)`）。含已合併的 #97、#99、#105。#96 仍開著（證據檔在此分支）。
 
 ---
 
@@ -12,6 +12,7 @@
 |---|---|
 | **#97** | Merged。`src/cloud/apiResponse.ts` 在 main。正式站**未**部署此碼。 |
 | **#99** | Merged 2026-08-29T14:38:18Z。`docs/cursor-gap-remediation/REMAINING.md` 與 `scripts/tests/remaining-gaps.test.ts` 在 main。 |
+| **#105** | Merged 2026-08-29T15:02:35Z。自稱「替代 #96」。`homeEntryStatus.ts` 現在在 main。**未關閉 #96。** |
 
 ---
 
@@ -86,13 +87,101 @@ Agent-review（本分支，self）：
 
 ## 仍 incomplete（已知 leftover）
 
-- 正式站 SPA catch-all（平台／Zeabur）；#97 只在 main client
-- #96 / #98 尚未合進 main（browser 已綠、mergeable clean）
-- #95 stack 往上合 main 停在 MultiBranchRoom（#101 vs #100 chrome）
-- Session-entry 只在 #95 疊層，不在 main / #102
-- V-04 Leave-during-reconnecting（#95 `RoomDiscussion` dock）
-- #78／#88 人類 rebase 與 migration 重編號
-- Typing／逐人 presence（未建模）
+- 正式站 SPA catch-all（平台／Zeabur）；#97 只在 main client，**未部署**
+- #96 仍開著；Home 誠實狀態已由 **#105** 合進 main（`196b3a3`）。#96 的 `FINAL_EVIDENCE` 仍是本檔
+- #98 九態仍只在 `cursor/p0-voice-truthful-state-70d9` @ `54a6bd1`（base 仍記 `444ae9d`；main 已前移）
+- #95 @ `26ad4a6` 吃過 `444ae9d`，**還沒**吃 `196b3a3`（#105）
+- #109 / #111 / #112 / 語音 restack **未合 main**，也未互相 squash
+- #78／#88 人類 rebase 與 migration 重編號（main `0022` vs #78 `0022`–`0026` vs #95 `0023`）
+- Typing／逐人 presence（未建模；不要發明 schema）
 - Production Canva／CUTOS／Perplexity secret 未驗證
-- #100–#102 產品碼不在 main
+- 競爭 `resolve/pr-*` drafts（#106–#110）— 除非撞線否則不要動
 - 全站目標
+
+---
+
+## 本回合 live GitHub（語音 restack 後再抓；不沿用舊 SHA）
+
+| 項 | Head | Base | 備註 |
+|---|---|---|---|
+| **main** | `196b3a3672ca` | — | #105 已合 |
+| **#96** | `10fcb903a256`（本檔再推一次） | main（GitHub 仍顯示 `444ae9d`） | 證據檔；不要當 #105 的替代去合 |
+| **#98** | `54a6bd167582` | main `444ae9d` | **未 reset**。九態只在這條 main 線 |
+| **#95** | `26ad4a65ea6b` | main `444ae9d` | TUS／library；未吃 #105 |
+| **#109** | `5df06eb3c57d` | #95 `26ad4a6` | Parent 已開。空房／auth-loading／permission-denied |
+| **#111** | `5d21d66bcf8f` | #109 `5df06eb` | UX restack。**未 reset** 舊 #101 `4f966a3` |
+| **#112** | `5ff07a7ec1a5` | #111 `5d21d66` | Realtime + V-04 helper。**未 reset** 舊 #102 `3622181`。仍是四態直到 restack |
+| **語音 restack** | `477da1ad08a5` | **必須** `#112` `cursor/p1-realtime-offline-restack-70d9` | PR create **403**。Compare 見下 |
+| **#78 / #88** | `84d3f3e` / `32e3bca` | stale main | CONFLICTING |
+
+---
+
+## 本回合：#109 session-entry（parent 已開）
+
+| 項 | 證據 |
+|---|---|
+| PR | https://github.com/aa0968111723-prog/duigao/pull/109 |
+| Head | `5df06eb3c57dd754b4db9e7081e1f9d764eba143` |
+| Base | `cursor/complete-missing-features-0897` @ `26ad4a6`。**不要** base=`main` |
+
+---
+
+## 本回合：#111 UX restack（parent 已開）
+
+| 項 | 證據 |
+|---|---|
+| PR | https://github.com/aa0968111723-prog/duigao/pull/111 |
+| Head | `5d21d66bcf8f85798a59a60eecbd0a341ed4f534` |
+| Base | `cursor/p0-session-room-entry-70d9` @ `5df06eb` |
+| 做了 | #101 更多／對話白板／768 split／44px **加上** #95 `hideRoomChrome` |
+| 沒做 | 未 reset 舊 `cursor/p1-mobile-tablet-ux-70d9` |
+
+---
+
+## 本回合：#112 realtime restack + V-04 helper（parent 已開）
+
+| 項 | 證據 |
+|---|---|
+| PR | https://github.com/aa0968111723-prog/duigao/pull/112 |
+| Head | `5ff07a7ec1a5607396156d751bfb0303e28bf98c` |
+| Base | `cursor/p1-mobile-tablet-ux-restack-70d9` @ `5d21d66` |
+| 做了 | `applyDiscussionRealtime` / `acceptRealtimePayload` / `flushOutboxOnOnline(ownerId)`；`voiceDockShowsLeave` 接受 `live` **與** `reconnecting` |
+| 沒做 | 未重寫 `useVoiceRoom`（當時仍四態）；未 reset 舊 #102 |
+
+---
+
+## 本回合：九態語音 restack 疊在 #112
+
+| 項 | 證據 |
+|---|---|
+| Branch | `cursor/p0-voice-nine-state-restack-70d9` @ `477da1ad08a5134e32789f0ec956d1ed9a87972c` |
+| **必須的 base** | `cursor/p1-realtime-offline-restack-70d9`（#112 @ `5ff07a7`）。**不要** base=`main`，**不要** reset #98 |
+| Compare | https://github.com/aa0968111723-prog/duigao/compare/cursor/p1-realtime-offline-restack-70d9...cursor/p0-voice-nine-state-restack-70d9?expand=1 |
+| PR | `create_pull_request` **403**。請人工開，base 必須是上面那條 |
+| 調和 | `voiceToken.ts` 同時走 #97 `parseFunctionPayload` 與 #98 `parseVoiceTokenPayload`（`wss:`/`ws:` + 有限 TTL）。未覆寫 #97 |
+| V-04 | `RoomDiscussion` 改讀 `voiceDockShowsLeave(api.voice.phase ?? api.voice.state)`。九態把 `reconnecting` 映成 dock `connecting`，只讀 `state` 會讓離開鈕消失 |
+| V-07 | `scheduleTokenRefresh` 仍先 `setMuted(true)` + `disconnect` 再 `setPhase("reconnecting")` |
+| 清場 | token 拒絕先 `abandonFailedJoin` 再 `setError`；`liveVoice` 只在 `sessionEstablished` 後轉發 `onDisconnected` |
+
+測試（restack 頭 `477da1a`）：
+
+| Script | 結果 |
+|---|---|
+| `test:voice-state` | 先因缺 `voiceState.ts` 紅 0/1，落地後 **16/16** |
+| `test:voice-dock-leave` | 先因未讀 `phase` 紅 0/2，落地後 **2/2** |
+| `test:collaboration` | **151/151**（含 voice-state + dock leave） |
+| `test:api-response` | **17/17** |
+| `remaining-gaps` | **4/4**（R-03 走九態臂） |
+| `test:multi-branch-e2e` | **54/54** — 假 LiveKit →「語音連線失敗，稍後再試一次。」；live=0 zombies=0 |
+| `test:voice-honesty-e2e` | **22/22**（390 + 768） |
+| `agent:gate` | **PASS**（含 `build:local`） |
+
+Browser 390 / 768（`/opt/cursor/artifacts`）：
+
+- `voice-honesty-not-configured-{390,768}.png` — 真房間殼，「語音服務尚未設定」，無「已連線」
+- `voice-honesty-connection-failed-{390,768}.png` — 真房間殼，按開始語音後「語音連線失敗，稍後再試一次。」，無離開鈕、無「已連線」
+- `voice-honesty-permission-denied-room-{390,768}.png` — **同一次失敗 join 之後**把 `.rd-voice-error` 換成 `voicePhaseMessage("permission-denied")`（假 wss 在 getUserMedia 前就失敗，無法真打到 NotAllowed）。文案本身由 `test:voice-state` 保證不含「已連線」
+- `voice-honesty-permission-denied-{390,768}.png` + `voice-honesty-dock.html` — 三態 fixture
+- 先紅紀錄：`voice-state-fail.log`、`voice-dock-leave-fail.log`
+
+未做：未把 #78/#88 拆上來；未發明 typing/presence；未改正式庫；未 deploy；未 merge 任何 PR。
