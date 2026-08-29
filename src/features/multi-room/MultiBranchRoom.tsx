@@ -807,7 +807,12 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       window.removeEventListener("orientationchange", sync);
     };
   }, []);
-  const chrome = firstLayerChrome({ moreOpen, width: viewportWidth, composerActive });
+  const hideRoomChrome = isMobile && composerActive && !search.trim();
+  const chrome = firstLayerChrome({
+    moreOpen: moreOpen && !hideRoomChrome,
+    width: viewportWidth,
+    composerActive: hideRoomChrome,
+  });
   const tabletSplit = chrome.tabletSplit;
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
@@ -869,7 +874,12 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     setMoreOpen(false);
   };
 
+  useEffect(() => {
+    if (hideRoomChrome && moreOpen) closeMoreFromAction();
+  }, [hideRoomChrome, moreOpen]);
+
   const toggleMore = () => {
+    if (hideRoomChrome) return;
     if (moreOpenRef.current) {
       if (moreHistoryOpen()) {
         history.back();
@@ -1012,9 +1022,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     <div
       className={`project-room${tabletSplit ? " is-tablet-split" : ""}`}
       data-testid="multi-branch-room"
-      data-more-open={moreOpen ? "true" : "false"}
+      data-more-open={moreOpen && !hideRoomChrome ? "true" : "false"}
       data-tablet-split={tabletSplit ? "true" : "false"}
       data-first-layer={!inShellBranch && !pushedPane ? "true" : "false"}
+      data-composer-active={hideRoomChrome ? "true" : "false"}
     >
       <header className="project-room-header" data-testid="room-first-layer-top">
         {inShellBranch ? (
@@ -1023,25 +1034,29 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="返回"><BrandMark compact /></button>
         )}
         <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
-        <span className="project-presence" data-testid="room-presence">{api.online > 0 ? `${api.online} 人在線` : "在線"}</span>
-        <button
-          type="button"
-          className="project-voice-chip"
-          data-testid="room-voice-chip"
-          onClick={() => { setDiscussPane("chat"); setMoreOpen(false); }}
-        >
-          語音
-        </button>
-        <button
-          type="button"
-          className="project-room-more-btn"
-          data-testid="room-more"
-          aria-label="更多"
-          aria-expanded={moreOpen}
-          onClick={toggleMore}
-        >
-          更多
-        </button>
+        {!hideRoomChrome && (
+          <>
+            <span className="project-presence" data-testid="room-presence">{api.online > 0 ? `${api.online} 人在線` : "在線"}</span>
+            <button
+              type="button"
+              className="project-voice-chip"
+              data-testid="room-voice-chip"
+              onClick={() => { setDiscussPane("chat"); closeMoreFromAction(); }}
+            >
+              語音
+            </button>
+            <button
+              type="button"
+              className="project-room-more-btn"
+              data-testid="room-more"
+              aria-label="更多"
+              aria-expanded={moreOpen}
+              onClick={toggleMore}
+            >
+              更多
+            </button>
+          </>
+        )}
       </header>
 
       {/* 掛在殼上而不是分支詳情裡：上傳期間人常常按「‹」回房間看別的東西，
@@ -1164,7 +1179,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
               </section>
             )}
           </main>
-          {moreOpen && (
+          {moreOpen && !hideRoomChrome && (
             <aside className="project-more-sheet" data-testid="room-more-sheet" aria-label="更多">
               <div className="project-search-wrap">
                 <span aria-hidden>⌕</span>

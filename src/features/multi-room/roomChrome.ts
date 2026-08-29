@@ -19,6 +19,7 @@ export type FirstLayerChrome = {
   persistentSecondary: string[];
   visibleSecondary: readonly string[];
   tabletSplit: boolean;
+  hideRoomChrome: boolean;
 };
 
 export function firstLayerChrome(input: {
@@ -26,13 +27,17 @@ export function firstLayerChrome(input: {
   width: number;
   composerActive?: boolean;
 }): FirstLayerChrome {
-  const tabletSplit = input.width >= 768 && input.moreOpen;
+  // Phone composer focus wins over 更多. Tablet (>=768) keeps split.
+  const hideRoomChrome = Boolean(input.composerActive) && input.width < 768;
+  const moreOpen = hideRoomChrome ? false : input.moreOpen;
+  const tabletSplit = input.width >= 768 && moreOpen;
   return {
     top: FIRST_LAYER_TOP,
     tabs: FIRST_LAYER_TABS,
     persistentSecondary: [],
-    visibleSecondary: input.moreOpen ? SECONDARY_CHROME : [],
+    visibleSecondary: moreOpen ? SECONDARY_CHROME : [],
     tabletSplit,
+    hideRoomChrome,
   };
 }
 
