@@ -10,3 +10,4 @@ output/
 
 # Claude Design canvas build output (2.5MB editor payload; re-seed from .design-board sources)
 .design-board/duigao-design-board.html
+dist-harness/

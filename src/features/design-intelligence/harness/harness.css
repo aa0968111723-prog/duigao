@@ -1,0 +1,40 @@
+/* 驗收 harness 的最小樣式。不進正式 bundle。 */
+:root {
+  --surface: #ffffff;
+  --border: #e3e5ea;
+  --border-strong: #c6c9d1;
+  --text-primary: #16181d;
+  --text-muted: #6b7280;
+  --chip: #eef0f4;
+  --accent: #6157ef;
+  --accent-contrast: #ffffff;
+  --danger: #b3261e;
+  --danger-surface: #fdeceb;
+  --warning-surface: #fff6e5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #f4f5f7;
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif;
+}
+
+.harness {
+  min-height: 100dvh;
+}
+
+/* 「作品」。刻意置中且有足夠高度，讓驗收可以在它的中心點做 elementFromPoint。 */
+.harness__artwork {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  min-height: 100dvh;
+  padding: 24px;
+  text-align: center;
+}
+
+.harness__artwork h1 { margin: 0; font-size: 24px; line-height: 1.3; }
+.harness__artwork p { margin: 0; line-height: 1.6; }

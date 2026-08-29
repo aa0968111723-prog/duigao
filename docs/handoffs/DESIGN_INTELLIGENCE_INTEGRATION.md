@@ -108,3 +108,78 @@
 
 若順序相反，本分支需要 renumber migration 並重跑 probe（白板工作線先前
 處理過同樣的撞號，流程已驗證過）。
+
+---
+
+## H-7【全庫性質，非本分支引入】40 張表把 `TRUNCATE` 給了 `authenticated`
+
+- **怎麼發現的**：本分支的 migration probe 原本用無角色的 `psql`（也就是超級
+  使用者）去驗「service 路徑寫得進去」。對抗審查指出那證明不了任何權限，
+  改成真正的 `set role service_role` 之後，順帶查了 grant 的實際內容，
+  才發現 `authenticated` 一直握有 `TRUNCATE`。
+
+- **成因**：Supabase 的 default privileges 對 `public` schema 的新表是
+  `grant all to anon, authenticated`（`scripts/e2e/supabase-shim.sql:38`
+  刻意重現了這個行為，註解也寫明「migrations rely on that and never grant
+  per table」）。所以每一張沒有明確 `revoke all` 的表都帶著 `TRUNCATE`、
+  `REFERENCES`、`TRIGGER`。
+
+- **為什麼重要**：**RLS 不管 `TRUNCATE`。** 所有的 policy 對它一條都攔不住。
+
+- **實測清單**（40 張，全部是其他工作線建立的）：
+
+  ```
+  asset_analysis, asset_analysis_jobs, asset_document_chunks, asset_embeddings,
+  asset_human_metadata, asset_regions, asset_relations, asset_video_segments,
+  collaboration_audit_events, comment_replies, comment_supports, comments,
+  content_relations, decision_records, intelligent_assets, library_assets,
+  messages, plan_documents, presentation_state, proposal_preferences,
+  room_branches, room_discussion_messages, room_discussion_supports,
+  room_members, room_poll_votes, room_polls, rooms, share_previews, strokes,
+  version_review_briefs, version_review_progress, version_verdicts, versions,
+  video_reactions, visual_proposals, voice_session_participants, voice_sessions,
+  whiteboard_edges, whiteboard_nodes, whiteboards
+  ```
+
+- **實際可利用性：低。** 這一點要說清楚，不要誇大：
+  - PostgREST（supabase-js 走的那條路）**不提供 `TRUNCATE`** ——
+    它只映射 SELECT / INSERT / UPDATE / DELETE / RPC。
+  - 全庫沒有任何使用者可呼叫、又會執行動態 SQL 的 RPC
+    （`0015` 裡的 `execute format` 在 migration 自己的 DO 區塊裡，
+    以 migration owner 身分執行，不是 RPC）。
+  - 直接的 Postgres 連線需要資料庫密碼，`anon` / `authenticated` 角色拿不到。
+
+  所以這是**縱深防禦的缺口**，不是一扇敞開的門。但修它的成本是每張表一行，
+  而一旦將來有任何路徑通到 `TRUNCATE`（一個 `security invoker` 的動態 SQL
+  RPC、或開放直連），RLS 提供的保護是**零**。
+
+- **建議修法**（本分支的 `0027`／`0028` 已採用）：
+
+  ```sql
+  revoke all on public.<table> from anon, authenticated;
+  grant select, insert, update, delete on public.<table> to authenticated;
+  grant all on public.<table> to service_role;
+  ```
+
+  順序是關鍵：先 `revoke all` 才能清掉 default privileges 帶進來的
+  `TRUNCATE`／`REFERENCES`／`TRIGGER`。只做 `revoke insert, update, delete`
+  會留下它們。
+
+- **建議由誰處理**：不屬單一工作線 —— 建議由負責資料庫的人開一個獨立的
+  migration 統一處理，並在 `migrations.mjs` 加一條「沒有任何 public 表把
+  TRUNCATE 給 authenticated」的通用 probe，讓它不會再退回去。
+
+- **本分支不動它的理由**：那 40 張表分屬多條工作線的 migration，
+  而且修它需要一個涵蓋全庫的新 migration —— 那不是「Design Intelligence」
+  這條工作線該夾帶的東西。本分支自己的兩張表已經修好並有 probe。
+
+---
+
+## H-8【已修，供其他工作線參考】edge function 的 POST 路徑測得到
+
+`scripts/e2e/edge-function.mjs` 的 `loadEdgeHandler` 可以把任一 edge function
+載進 Node，接管 `globalThis.fetch` 之後連 supabase-js 的出站請求都能攔。
+`scripts/tests/design-research-function.test.mjs` 是完整的範例。
+
+這代表 H-1 的那個 ReferenceError（`asset-analysis/index.ts:511`）**是測得到的**
+—— 只要有人替那支函式寫一條 POST 路徑的測試。
