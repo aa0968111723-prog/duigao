@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptPollVoteAck } from "./pollVoteAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -1062,11 +1063,16 @@ export async function insertPoll(supabase: SupabaseClient, poll: RoomPoll): Prom
 }
 
 export async function votePoll(supabase: SupabaseClient, vote: PollVote): Promise<void> {
-  const { error } = await supabase.from("room_poll_votes").upsert(
-    { poll_id: vote.pollId, room_id: vote.roomId, option: vote.option },
-    { onConflict: "poll_id,user_id" },
-  );
+  const { data, error } = await supabase
+    .from("room_poll_votes")
+    .upsert(
+      { poll_id: vote.pollId, room_id: vote.roomId, option: vote.option },
+      { onConflict: "poll_id,user_id" },
+    )
+    .select("poll_id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "poll-vote");
+  acceptPollVoteAck(data);
 }
 
 /** Mark a room as a video room. Used when a video room is created in the cloud. */

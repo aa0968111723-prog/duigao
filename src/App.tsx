@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isVoteNotSaved } from "./cloud/pollVoteAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -1674,6 +1675,9 @@ export function App() {
 
   const voteProjectPoll = useCallback(
     (vote: PollVote) => {
+      const previous = (roomRef.current?.pollVotes ?? []).find(
+        (item) => item.pollId === vote.pollId && item.userId === vote.userId,
+      );
       updateRoom((r) => ({
         ...r,
         pollVotes: [
@@ -1681,9 +1685,24 @@ export function App() {
           vote,
         ],
       }));
-      cloudRef.current.writes.votePoll(vote);
+      void cloudRef.current.writes.votePoll(vote).catch((err) => {
+        if (!isVoteNotSaved(err)) return;
+        updateRoom((r) => {
+          const current = (r.pollVotes ?? []).find((item) => item.pollId === vote.pollId && item.userId === vote.userId);
+          if (!current || current.option !== vote.option) return r;
+          return {
+            ...r,
+            pollVotes: previous
+              ? (r.pollVotes ?? []).map((item) =>
+                  item.pollId === vote.pollId && item.userId === vote.userId ? previous : item,
+                )
+              : (r.pollVotes ?? []).filter((item) => !(item.pollId === vote.pollId && item.userId === vote.userId)),
+          };
+        });
+        showToast("這一票沒有存成，請再試一次。", { tone: "error" });
+      });
     },
-    [updateRoom],
+    [showToast, updateRoom],
   );
 
   const sendDiscussion = useCallback(
