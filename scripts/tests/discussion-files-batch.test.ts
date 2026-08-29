@@ -21,7 +21,7 @@ function msg(id: string, authorId: string, roomId = "r"): DiscussionMessage {
 }
 
 test("positive: real insert and matching storage path succeed", () => {
-  assert.deepEqual(acceptDiscussionInsert({ error: null, data: null }), { ok: true, reason: "inserted" });
+  assert.deepEqual(acceptDiscussionInsert({ error: null, data: { id: "m1" } }), { ok: true, reason: "inserted" });
   assert.deepEqual(
     acceptStorageUpload({ error: null, data: { path: "rooms/r/attachments/m/a.bin" }, expectedPath: "rooms/r/attachments/m/a.bin" }),
     { ok: true },
@@ -71,6 +71,15 @@ test("negative: failed / incomplete upload is not complete and percent is not 10
 test("negative: missing API / generic failure is not a sent message", () => {
   assert.deepEqual(acceptDiscussionInsert({ error: new Error("JWT expired") }), { ok: false, code: "FAILED" });
   const landed = applyIdempotentInsert(new Set(), "m1", { ok: false, code: "FAILED" });
+  assert.equal(landed.created, false);
+  assert.equal(landed.landedIds.size, 0);
+});
+
+test("negative: zero-row insert is not a sent message", () => {
+  assert.deepEqual(acceptDiscussionInsert({ error: null, data: null }), { ok: false, code: "ZERO_ROW" });
+  assert.deepEqual(acceptDiscussionInsert({ error: null, data: {} }), { ok: false, code: "ZERO_ROW" });
+  assert.deepEqual(acceptDiscussionInsert({ error: null, data: { id: "  " } }), { ok: false, code: "ZERO_ROW" });
+  const landed = applyIdempotentInsert(new Set(), "m1", { ok: false, code: "ZERO_ROW" });
   assert.equal(landed.created, false);
   assert.equal(landed.landedIds.size, 0);
 });
@@ -138,6 +147,7 @@ test("wiring: insert and upload paths call the honesty helpers", () => {
   const hook = readFileSync(resolve(ROOT, "src/hooks/useDiscussionOutbox.ts"), "utf8");
   const store = readFileSync(resolve(ROOT, "src/lib/store.ts"), "utf8");
   assert.match(repo, /acceptDiscussionInsert/);
+  assert.match(repo, /select\("id"\)\s*\.\s*maybeSingle\(\)/);
   assert.match(assets, /acceptStorageUpload/);
   assert.match(hook, /ownerId/);
   assert.match(store, /ownerId/);
