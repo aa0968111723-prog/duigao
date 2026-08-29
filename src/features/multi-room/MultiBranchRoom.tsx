@@ -50,7 +50,7 @@ export type MultiBranchRoomApi = {
   userId?: string | null;
   canManage: boolean;
   activeBranchId: string | null;
-  onOpenBranch: (branchId: string, opts?: { startTime?: number }) => void;
+  onOpenBranch: (branchId: string, opts?: { startTime?: number; endTime?: number; region?: import("../../lib/types").AnnotationRegion; versionId?: string; planSectionId?: string }) => void;
   loadingBranchId?: string | null;
   onBackToRoom: () => void;
   onCreateContent: (type: BranchType, name: string, files: FileList | null) => void;
@@ -89,6 +89,7 @@ export type MultiBranchRoomApi = {
   sendChat: () => void;
   onSendDiscussion: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
   onSupportDiscussion: (messageId: string, add: boolean) => void;
+  onEditDiscussion?: (messageId: string, body: string) => void;
   onCreateWhiteboard: (title: string) => void;
   onArchiveWhiteboard: (id: string) => void;
   onOpenWhiteboard: (id: string | null) => void;
@@ -807,7 +808,12 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       window.removeEventListener("orientationchange", sync);
     };
   }, []);
-  const chrome = firstLayerChrome({ moreOpen, width: viewportWidth, composerActive });
+  const hideRoomChrome = isMobile && composerActive && !search.trim();
+  const chrome = firstLayerChrome({
+    moreOpen: moreOpen && !hideRoomChrome,
+    width: viewportWidth,
+    composerActive: hideRoomChrome,
+  });
   const tabletSplit = chrome.tabletSplit;
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
@@ -869,7 +875,12 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     setMoreOpen(false);
   };
 
+  useEffect(() => {
+    if (hideRoomChrome && moreOpen) closeMoreFromAction();
+  }, [hideRoomChrome, moreOpen]);
+
   const toggleMore = () => {
+    if (hideRoomChrome) return;
     if (moreOpenRef.current) {
       if (moreHistoryOpen()) {
         history.back();
@@ -916,7 +927,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [api.workspace, pushedPane, moreOpen, api.onBackToRoom]);
 
-  const openBranch = (branchId: string, opts?: { startTime?: number }) => {
+  const openBranch = (branchId: string, opts?: { startTime?: number; endTime?: number; region?: import("../../lib/types").AnnotationRegion; versionId?: string; planSectionId?: string }) => {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合
     api.onOpenBranch(branchId, opts);
   };
@@ -965,6 +976,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                         else api.sendChat();
                       },
                       onSupport: api.onSupportDiscussion,
+                      onEditMessage: api.onEditDiscussion,
                       onCreatePoll: createPoll,
                       onAddToBoard: api.onAddMessageToBoard,
                       onOpenBoardNode: (whiteboardId, nodeId) => {
@@ -1012,9 +1024,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     <div
       className={`project-room${tabletSplit ? " is-tablet-split" : ""}`}
       data-testid="multi-branch-room"
-      data-more-open={moreOpen ? "true" : "false"}
+      data-more-open={moreOpen && !hideRoomChrome ? "true" : "false"}
       data-tablet-split={tabletSplit ? "true" : "false"}
       data-first-layer={!inShellBranch && !pushedPane ? "true" : "false"}
+      data-composer-active={hideRoomChrome ? "true" : "false"}
     >
       <header className="project-room-header" data-testid="room-first-layer-top">
         {inShellBranch ? (
@@ -1023,25 +1036,29 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="返回"><BrandMark compact /></button>
         )}
         <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
-        <span className="project-presence" data-testid="room-presence">{api.online > 0 ? `${api.online} 人在線` : "在線"}</span>
-        <button
-          type="button"
-          className="project-voice-chip"
-          data-testid="room-voice-chip"
-          onClick={() => { setDiscussPane("chat"); setMoreOpen(false); }}
-        >
-          語音
-        </button>
-        <button
-          type="button"
-          className="project-room-more-btn"
-          data-testid="room-more"
-          aria-label="更多"
-          aria-expanded={moreOpen}
-          onClick={toggleMore}
-        >
-          更多
-        </button>
+        {!hideRoomChrome && (
+          <>
+            <span className="project-presence" data-testid="room-presence">{api.online > 0 ? `${api.online} 人在線` : "在線"}</span>
+            <button
+              type="button"
+              className="project-voice-chip"
+              data-testid="room-voice-chip"
+              onClick={() => { setDiscussPane("chat"); closeMoreFromAction(); }}
+            >
+              語音
+            </button>
+            <button
+              type="button"
+              className="project-room-more-btn"
+              data-testid="room-more"
+              aria-label="更多"
+              aria-expanded={moreOpen}
+              onClick={toggleMore}
+            >
+              更多
+            </button>
+          </>
+        )}
       </header>
 
       {/* 掛在殼上而不是分支詳情裡：上傳期間人常常按「‹」回房間看別的東西，
@@ -1164,7 +1181,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
               </section>
             )}
           </main>
-          {moreOpen && (
+          {moreOpen && !hideRoomChrome && (
             <aside className="project-more-sheet" data-testid="room-more-sheet" aria-label="更多">
               <div className="project-search-wrap">
                 <span aria-hidden>⌕</span>

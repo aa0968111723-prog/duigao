@@ -72,7 +72,7 @@ export type EdgeRow = {
   created_at: string;
 };
 
-type DiscussionRow = {
+export type DiscussionRow = {
   id: string;
   room_id: string;
   author_user_id: string | null;
@@ -651,6 +651,17 @@ export async function loadBoardVersion(
 export async function deleteEdge(supabase: SupabaseClient, roomId: string, edgeId: string): Promise<void> {
   const { error } = await supabase.from("whiteboard_edges").delete().eq("id", edgeId).eq("room_id", roomId);
   if (error) throw new CloudError(error.message, "whiteboard-edge");
+}
+
+export async function updateDiscussion(supabase: SupabaseClient, message: Pick<DiscussionMessage, "id" | "roomId" | "body" | "payload">): Promise<void> {
+  const { data, error } = await supabase.from("room_discussion_messages").update({
+    body: message.body,
+    payload: message.payload ?? {},
+  }).eq("id", message.id).eq("room_id", message.roomId).abortSignal(AbortSignal.timeout(12000));
+  const accepted = acceptDiscussionInsert({ error, data });
+  if (!accepted.ok) {
+    throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : (error?.message ?? "discussion update failed"), "discussion");
+  }
 }
 
 export async function insertDiscussion(supabase: SupabaseClient, message: DiscussionMessage): Promise<void> {

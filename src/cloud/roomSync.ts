@@ -1,6 +1,7 @@
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import type { BranchRow, CommentRow, MessageRow, PlanRow, PollRow, PollVoteRow, ProposalRow, RelationRow, RoomRow, StrokeRow, VersionRow } from "./types";
 import type { EdgeRow, NodeRow, FrameRow } from "./collaborationRepository";
+import { acceptRealtimePayload } from "./realtimeApply";
 
 export type SyncHandlers = {
   onRoom?: (row: RoomRow) => void;
@@ -30,7 +31,15 @@ export type SyncHandlers = {
    */
   getPresenceIdentity?: () => { boardId: string | null };
   onStatus?: (connected: boolean) => void;
+  /** 討論列增量：不走整房 reload。SPA HTML / 無 id 的 payload 在此丟棄。 */
+  onDiscussionUpsert?: (row: Record<string, unknown>) => void;
+  onDiscussionDelete?: (id: string) => void;
 };
+
+function acceptedRow(payload: unknown): Record<string, unknown> | null {
+  const result = acceptRealtimePayload(payload);
+  return result.ok ? result.row : null;
+}
 
 export type Unsubscribe = () => void;
 
@@ -52,14 +61,19 @@ export type RoomSubscription = Unsubscribe & {
   retrack: () => void;
 };
 
-export function subscribeRoom(
+export async function subscribeRoom(
   supabase: SupabaseClient,
   roomId: string,
   userId: string,
   handlers: SyncHandlers,
-): RoomSubscription {
+): Promise<RoomSubscription> {
+  const topic = `room:${roomId}`;
+  // channel() reuses a leftover joined channel; adding .on() after subscribe()
+  // throws and used to flip a loaded empty room into a fake load-error.
+  const leftovers = supabase.getChannels().filter((ch) => ch.topic === `realtime:${topic}` || ch.topic === topic);
+  await Promise.all(leftovers.map((ch) => supabase.removeChannel(ch)));
   const filter = `room_id=eq.${roomId}`;
-  const channel: RealtimeChannel = supabase.channel(`room:${roomId}`, {
+  const channel: RealtimeChannel = supabase.channel(topic, {
     config: { presence: { key: userId } },
   });
   // **不送姓名**（自審 P1）：Realtime 的 presence 是 channel 層的東西，
@@ -167,7 +181,18 @@ export function subscribeRoom(
       const id = (p.old as { id?: string })?.id;
       if (id) handlers.onBoardEdgeDelete?.(id);
     })
-    .on("postgres_changes", { event: "*", schema: "public", table: "room_discussion_messages", filter }, () => handlers.onProjectChange?.())
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "room_discussion_messages", filter }, (p) => {
+      const row = acceptedRow(p.new);
+      if (row) handlers.onDiscussionUpsert?.(row);
+    })
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "room_discussion_messages", filter }, (p) => {
+      const row = acceptedRow(p.new);
+      if (row) handlers.onDiscussionUpsert?.(row);
+    })
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "room_discussion_messages", filter: undefined }, (p) => {
+      const id = (p.old as { id?: string })?.id;
+      if (id) handlers.onDiscussionDelete?.(id);
+    })
     .on("postgres_changes", { event: "*", schema: "public", table: "room_discussion_supports", filter }, () => handlers.onProjectChange?.())
     .on("postgres_changes", { event: "*", schema: "public", table: "decision_records", filter }, () => handlers.onProjectChange?.())
     .on("presence", { event: "sync" }, () => {
