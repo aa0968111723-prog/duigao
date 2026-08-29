@@ -884,11 +884,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
 
   useEffect(() => {
     const onPop = () => {
-      if (moreOpenRef.current) {
-        setMoreOpen(false);
-        return;
-      }
-      setPushedPane(null);
+      if (moreOpenRef.current) setMoreOpen(false);
+      // 不可以在這裡收推進面板：對稿 overlay / 白板 Focus 的
+      // historyLayers 程式性關層會 history.back() 吃掉自己那格，那次
+      // popstate 不是「使用者要關內容面板」。面板必須跨 overlay 保留。
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);

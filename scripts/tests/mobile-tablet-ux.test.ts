@@ -74,6 +74,15 @@ test("safe area, keyboard, 44px touch, overflow, reduced motion, orientation", (
   assert.match(css, /-webkit-touch-callout:\s*none/);
 });
 
+test("popstate that closes 更多 must not also wipe the pushed pane", () => {
+  const shell = src("src/features/multi-room/MultiBranchRoom.tsx");
+  assert.match(shell, /historyLayers\(\)\.push\("content-overlay"/);
+  const pop = shell.match(/const onPop = \(\) => \{[\s\S]*?addEventListener\("popstate"/);
+  assert.ok(pop, "more-sheet popstate listener");
+  assert.match(pop[0], /moreOpenRef\.current/);
+  assert.doesNotMatch(pop[0], /setPushedPane\(null\)/);
+});
+
 test("negative control: a first layer that always paints 總覽 would fail the helper", () => {
   const honest = firstLayerChrome({ moreOpen: false, width: 360 });
   assert.equal(firstLayerHasPersistentSecondary(honest), false);
