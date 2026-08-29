@@ -1,0 +1,7 @@
+# Zeabur static Caddy (only if output_dir is set). Prefer serve-origin.mjs.
+/functions/*  /app-origin-api-404.json  404
+/api/*        /app-origin-api-404.json  404
+/rest/*       /app-origin-api-404.json  404
+/functions    /app-origin-api-404.json  404
+/api          /app-origin-api-404.json  404
+/rest         /app-origin-api-404.json  404
