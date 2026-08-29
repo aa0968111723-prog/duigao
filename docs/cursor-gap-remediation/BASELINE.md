@@ -68,6 +68,12 @@ This is the SPA catch-all. **HTTP 200 on those paths is not backend success.**
 Production bundle host (hostname only): `https://uanurolzzgshxrqbooix.supabase.co`.  
 Bundle also contains LiveKit client code and both voice copy strings (`語音服務尚未設定` and the older `語音房間還在準備`). No service-role value was printed; `service_role` / `sb_secret_` matches are the **client-side rejection strings** in `src/cloud/config.ts`.
 
+## Production first paint (Playwright)
+
+Without a `#room=` hash, production is **not** the create-room Home first. It is the guest display-name onboard（「歡迎加入對稿空間」「你的顯示名稱」「開始」）. After a local name, Home shows 建立活動房 / 圖片文宣對稿 / 影片對稿. On 390 the first fold is dominated by hero + 建立活動房.
+
+`/functions/v1/voice-token` on the **app origin** is HTTP 200 HTML that paints a **blank white** mobile screen — proof that catch-all 200 is not an API.
+
 ## First safe P0 batch (this PR)
 
 Does **not** touch #78 / #88 / #95 owned cores (`App.tsx`, whiteboard schema, DI, discussion outbox, video TUS).

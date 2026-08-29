@@ -1,64 +1,66 @@
 # TEST_BASELINE
 
-Recorded on `cursor/gap-remediation-audit-70d9` from `origin/main` @ `398960d`.  
-`package.json` has **no** `"test"` script. Commands below are the real scripts (discovered, not guessed).
+Recorded on `cursor/gap-remediation-audit-70d9` @ `eb5e4b5` then gate-fix commit.  
+Base: `origin/main` @ `398960d`.  
+`package.json` has **no** `"test"` script.
 
-## Scripts in package.json
+## Scripts discovered in package.json
 
-| Script | Purpose |
-|---|---|
-| `npm run build` | check-cloud-env --strict + tsc + vite (needs VITE_* or fails) |
-| `npm run build:local` | tsc + vite without env gate |
-| `npm run check:cloud-env` | env gate only |
-| `npm run test:share-e2e` | `scripts/e2e/share-flow.mjs` |
-| `npm run test:share-preview` | `scripts/e2e/share-preview.mjs` |
-| `npm run test:video` | `scripts/e2e/video-flow.mjs` |
-| `npm run test:review-viewer` | `scripts/e2e/review-viewer.mjs` |
-| `npm run test:viewer-geometry` | geometry unit |
-| `npm run test:asset-intelligence` | AI / proposals / strip |
-| `npm run test:asset-intelligence-e2e` | browser AI |
-| `npm run test:multi-branch` | branches + video-media + canva/cutos + **api-response (this PR)** |
-| `npm run test:collaboration` | workspace / outbox / replies / anchors / planform |
-| `npm run test:multi-branch-e2e` | browser multi-branch |
-| `npm run test:collaboration-e2e` | browser collab |
-| `npm run test:migrations` | real PostgreSQL + RLS |
-| `npm run test:design-intelligence` | schema only on main |
-| `npm run test:agent` | agent-layer |
-| `npm run test:edge-cors` | edge CORS |
-| `npm run test:api-response` | **new** SPA/HTML/missing-key honesty |
-| `npm run agent:gate` | release gate |
-| `npm test` | **MISSING** — do not invent a green |
-
-## Results this session
-
-Filled after the commands actually ran. See `PROGRESS.md` for updates.
-
-| Command | Result | Notes |
+| Script | Ran | Result |
 |---|---|---|
-| `npm run test:api-response` | *(pending in this file; updated after run)* | |
-| `npm run test:multi-branch` | | |
-| `npm run test:agent` | | |
-| `npm run test:edge-cors` | | |
-| `npm run test:asset-intelligence` | | |
-| `npm run test:collaboration` | | |
-| `npm run test:viewer-geometry` | | |
-| `npm run test:design-intelligence` | | |
-| `npm run test:migrations` | | needs local postgres |
-| `npm run test:share-e2e` | | playwright + mock |
-| `npm run test:share-preview` | | |
-| `npm run test:video` | | |
-| `npm run test:review-viewer` | | |
-| `npm run test:multi-branch-e2e` | | |
-| `npm run test:collaboration-e2e` | | |
-| `npm run test:asset-intelligence-e2e` | | |
-| `npm run build:local` | | |
-| `npm run build` | | expected fail without VITE_* |
-| `npm run agent:gate` | | |
+| `npm run test:api-response` | yes | **17/17 pass** (new) |
+| `npm run test:agent` | yes | **16/16** |
+| `npm run test:edge-cors` | yes | **5/5** |
+| `npm run test:multi-branch` | yes | **42/42** (includes api-response) |
+| `npm run test:asset-intelligence` | yes | **15/15** |
+| `npm run test:collaboration` | yes | **106/106** |
+| `npm run test:viewer-geometry` | yes | **5/5** |
+| `npm run test:design-intelligence` | yes | **20/20** |
+| `npm run test:migrations` | yes (`PG_BIN=/usr/lib/postgresql/16/bin REQUIRE_PG=1`) | **257/257** |
+| `npm run test:share-preview` | yes | **163/163** |
+| `npm run test:share-e2e` | yes | **72/72** |
+| `npm run test:review-viewer` | yes | **27/27** |
+| `npm run test:video` | yes | **165/165** |
+| `npm run test:multi-branch-e2e` | yes | **54/54** |
+| `npm run test:collaboration-e2e` | yes | **43/43** |
+| `npm run test:asset-intelligence-e2e` | yes | pass (AI apply-back path) |
+| `npm run build:local` | yes | tsc + vite **pass** |
+| `npm run build` | yes | **exit 1** — missing VITE_* (honest; not faked) |
+| `npm run agent:gate` | yes | **PASS** after test fixture stopped using an `sb_secret_*` lookalike |
+| `npm test` | n/a | **script does not exist** |
 
-## Negative controls this PR must keep
+First `test:migrations` without Postgres printed 「找不到 PostgreSQL…略過」 and exited 0. That is **not** a gate. Re-ran with real PG 16 + `REQUIRE_PG=1`.
 
-1. SPA HTML 200 ≠ function success (`parseFunctionPayload` → `SPA_HTML`)
-2. `{ ok: true }` without token/versionId → `MISSING_KEYS`
-3. `check-cloud-env --strict` with empty keys exits ≠ 0
-4. service-role-shaped `VITE_SUPABASE_PUBLISHABLE_KEY` exits ≠ 0
-5. A status-only helper **would** accept production HTML (documented so nobody “simplifies” the parser)
+## Negative controls (this PR)
+
+| Case | Evidence |
+|---|---|
+| SPA HTML 200 ≠ success | `parseFunctionPayload(SPA_HTML)` → `SPA_HTML`; production `/functions/v1/voice-token` is 200 `text/html` |
+| `{ ok: true }` without token keys | `MISSING_KEYS` |
+| `{ ok: true }` import without `versionId` | rejected |
+| status-only helper would accept HTML | negative-control test documents the bug |
+| mutation: drop Content-Type html check | mutated parser accepts; real parser rejects |
+| empty VITE keys | `check-cloud-env --strict` exit ≠ 0 |
+| key containing `service_role` | `check-cloud-env --strict` exit ≠ 0 |
+
+## Production UI (Playwright, no invite/PII)
+
+| Viewport | File | What it shows |
+|---|---|---|
+| 360 / 390 / 412 | `prod-home-*-*.png` | Guest name onboard（顯示名稱／開始） |
+| 768 / 820 | same | same onboard, wider card |
+| 390 after name | `prod-home-after-name-phone-390x844.png` | Home + 建立活動房 |
+| 768 after name | `prod-home-after-name-tablet-768x1024.png` | Home + 活動房／圖片／影片三卡 |
+| 390 `/functions/v1/voice-token` | `prod-spa-catchall-voice-token-390.png` | **blank white** SPA 200 |
+
+Did not: create a live room, capture invite fragments, upload unpublished files, or open private messages.
+
+## Not run / limited
+
+| Item | Why |
+|---|---|
+| `supabase` CLI | not installed |
+| Live production SQL | forbidden |
+| Physical iPhone / LINE | no device |
+| Two-client live | no second account |
+| #78 / #88 / #95 suites on their branches | not our code |

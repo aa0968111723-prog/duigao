@@ -197,7 +197,7 @@ test("service-role-shaped publishable key is rejected by check-cloud-env", () =>
       ...process.env,
       NODE_ENV: "production",
       VITE_SUPABASE_URL: "https://example.supabase.co",
-      VITE_SUPABASE_PUBLISHABLE_KEY: "sb_secret_this_must_never_ship_to_the_browser",
+      VITE_SUPABASE_PUBLISHABLE_KEY: "not-a-real-key-contains-service_role-marker",
     },
   });
   assert.notEqual(result.status, 0);
