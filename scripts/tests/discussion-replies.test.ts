@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { indexMessages, replySnippet, resolveReply, REPLY_SNIPPET_MAX } from "../../src/features/collaboration/replies.ts";
+import { mergeDiscussionSnapshot } from "../../src/features/collaboration/offline.ts";
 import type { DiscussionMessage } from "../../src/features/collaboration/types.ts";
 
 function message(over: Partial<DiscussionMessage> & { id: string }): DiscussionMessage {
@@ -118,4 +119,44 @@ test("引用摘要壓成一行並截斷，手機上不吃掉整張訊息卡", ()
 
 test("完全沒有文字的來源不會產生空白引用", () => {
   assert.equal(replySnippet(message({ id: "empty", body: "   " })), "（沒有文字內容）");
+});
+
+// ---------------------------------------------------------------------------
+// 快照合併：一次讀取失敗不得清空整條討論串（PR-COMM-00）
+// ---------------------------------------------------------------------------
+
+test("伺服器有回答：採用伺服器的討論，即使是空的（空就是真的空）", () => {
+  const kept = mergeDiscussionSnapshot(
+    { id: "room-1", discussion: [{ id: "m1" }] },
+    { id: "room-1", discussion: [] },
+  );
+  assert.deepEqual(kept, []);
+});
+
+test("查詢失敗（快照沒帶討論）：保留畫面上已有的對話，不抹掉", () => {
+  const kept = mergeDiscussionSnapshot(
+    { id: "room-1", discussion: [{ id: "m1" }, { id: "m2" }] },
+    { id: "room-1" },
+  );
+  assert.deepEqual(kept, [{ id: "m1" }, { id: "m2" }]);
+});
+
+test("查詢失敗且換了房：不得把上一間房的訊息畫進這一間", () => {
+  const kept = mergeDiscussionSnapshot(
+    { id: "room-A", discussion: [{ id: "a1" }] },
+    { id: "room-B" },
+  );
+  assert.equal(kept, undefined);
+});
+
+test("第一次載入就失敗：沒有現況可保留，回 undefined 而不是假的空陣列", () => {
+  assert.equal(mergeDiscussionSnapshot(null, { id: "room-1" }), undefined);
+});
+
+test("伺服器回答時一律採用，不會被同房的舊資料蓋回去", () => {
+  const kept = mergeDiscussionSnapshot(
+    { id: "room-1", discussion: [{ id: "old" }] },
+    { id: "room-1", discussion: [{ id: "new" }] },
+  );
+  assert.deepEqual(kept, [{ id: "new" }]);
 });
