@@ -362,6 +362,14 @@ test("SSRF：等價寫法的內網與 metadata 網址一樣要擋", () => {
     "https://8.8.8.8/",
     "https://intranet/",                    // 單標籤 → 只可能是內網
     "https://metadata/",
+    // 把 IP 編進主機名的萬用 DNS：字串上完全不是 IP 字面值，
+    // 但會解析回內網位址（對抗審查實測到的）。
+    "https://169.254.169.254.nip.io/latest/meta-data/",
+    "https://127.0.0.1.nip.io/",
+    "https://10.0.0.1.sslip.io/",
+    "https://192-168-1-1.sslip.io/",
+    "https://127.0.0.1.localtest.me/",
+    "https://anything.lvh.me/",
   ]) {
     assert.equal(isSafePublicUrl(evil), false, `應該擋下：${evil}`);
   }
@@ -370,6 +378,9 @@ test("SSRF：等價寫法的內網與 metadata 網址一樣要擋", () => {
     "https://www.w3.org/TR/WCAG22/",
     "https://developer.mozilla.org/en-US/docs/Web/CSS",
     "https://example.co.uk/a?b=c#d",
+    // 正常網域裡出現數字不該被誤殺
+    "https://www.w3.org/TR/WCAG22/#contrast-minimum",
+    "https://web.dev/articles/color-and-contrast-accessibility",
   ]) {
     assert.equal(isSafePublicUrl(good), true, `不該擋下：${good}`);
   }

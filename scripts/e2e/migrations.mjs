@@ -1513,7 +1513,8 @@ try {
   // (b) 讀：通用知識任何登入者都讀得到（設計原則每個房間都需要）
   ok("成員讀得到通用知識", Number(as(owner, `select count(*) from public.design_knowledge where project_specific is null;`).out) >= 7);
   ok("非本房成員也讀得到通用知識", Number(as(reviewer, `select count(*) from public.design_knowledge where project_specific is null;`).out) >= 7);
-  ok("anon 讀不到任何知識", asAnon(`select count(*) from public.design_knowledge;`).out !== "7");
+  // `!== "7"` 是假綠：anon 讀到 1 列專案規範也會通過，seed 變 8 列後全讀到也通過。
+  ok("anon 讀不到任何知識", asAnon(`select count(*) from public.design_knowledge;`).out === "0" || asAnon(`select count(*) from public.design_knowledge;`).failed);
 
   // (c) 寫：**通用知識沒有 client 政策** — 任何登入者都寫不進去。
   // 這是本表最重要的一條：讓任何人寫全域知識＝讓任何人污染所有房間的 AI 判斷依據。
@@ -1590,6 +1591,55 @@ try {
     as(owner, `update public.design_knowledge set summary = 'x', version = 1 where id = '${knId}'::uuid;`).failed,
   );
 
+  // (l) 跨房：非成員讀不到、也刪不掉別人房間的專案規範。
+  //
+  // 這一組是對抗審查指出的假綠補洞：原本沒有任何 stranger 的負例，
+  // 把 SELECT 政策改成 using (true)、或把 DELETE 的 can_manage_media 拿掉，
+  // 現有斷言全都還是綠的。
+  ok(
+    "非成員讀不到別房的專案規範",
+    as(stranger, `select count(*) from public.design_knowledge where project_specific = '${capRoom}'::uuid;`).out === "0",
+  );
+  ok(
+    "非成員刪不掉別房的專案規範",
+    as(stranger, `delete from public.design_knowledge where project_specific = '${capRoom}'::uuid;`).failed ||
+      psql(`select count(*) from public.design_knowledge where project_specific = '${capRoom}'::uuid;`).out !== "0",
+  );
+  ok(
+    "reviewer 刪不掉專案規範（can_manage_media 擋下）",
+    as(reviewer, `delete from public.design_knowledge where project_specific = '${capRoom}'::uuid;`).failed ||
+      psql(`select count(*) from public.design_knowledge where project_specific = '${capRoom}'::uuid;`).out !== "0",
+  );
+  ok(
+    "非成員改不掉別房的專案規範",
+    as(stranger, `update public.design_knowledge set summary = '被改掉了' where project_specific = '${capRoom}'::uuid;`).failed ||
+      psql(`select count(*) from public.design_knowledge where summary = '被改掉了';`).out === "0",
+  );
+
+  // (m) 只有空白的規則也不算規則（array[' '] 的 cardinality 是 1，
+  // 而 array_position 抓不到「只有空白」—— 對抗審查實測到的洞）。
+  for (const [label, literal] of [
+    ["半形空白", "array[' ']"],
+    ["定位字元", "array[E'\t']"],
+    ["換行", "array[E'\n']"],
+    ["不斷行空白", "array[E'\u00a0']"],
+  ]) {
+    ok(
+      `只有${label}的規則寫不進去`,
+      psql(`insert into public.design_knowledge (category, title, summary, rules) values ('color', '空白偽裝', '摘要', ${literal});`, { expectError: true }).failed,
+    );
+  }
+
+  // (n) 高信任等級必須留下審查時間
+  ok(
+    "宣稱 approved 但沒有 reviewed_at 會被擋",
+    as(owner, `insert into public.design_knowledge (category, title, summary, rules, project_specific, created_by, status, trust_level) values ('brand-rules', '未經審查就自稱已核准', '摘要', array['規則'], '${capRoom}'::uuid, '${owner}'::uuid, 'approved', 'approved');`).failed,
+  );
+  ok(
+    "補上 reviewed_at 後可以寫入",
+    !as(owner, `insert into public.design_knowledge (category, title, summary, rules, project_specific, created_by, status, trust_level, reviewed_at) values ('brand-rules', '審查過的規範', '摘要', array['規則'], '${capRoom}'::uuid, '${owner}'::uuid, 'approved', 'project', now());`).failed,
+  );
+
   // (k) 冪等：重跑不炸、seed 不重複、policy 形狀不變
   const knShape = () => psql(`select
     (select count(*) from pg_policies where tablename = 'design_knowledge') || '/' ||
@@ -1597,6 +1647,46 @@ try {
   const knBefore = knShape();
   psqlFile(join(MIGRATIONS, "0027_design_knowledge.sql"));
   ok("重跑 0027 後 policy 數與 seed 筆數不變", knBefore === knShape(), `${knBefore} → ${knShape()}`);
+
+  section("0028：外部研究使用量（append-only、後端才能寫）");
+  psqlFile(join(MIGRATIONS, "0028_design_research_usage.sql"));
+
+  // 先用 service 身分寫一筆（edge function 走的就是這條路）
+  const usageHash = "a".repeat(64);
+  ok(
+    "service 路徑寫得進使用量",
+    !psql(`insert into public.design_research_usage (room_id, query_hash, source_count) values ('${capRoom}'::uuid, '${usageHash}', 3);`, { expectError: true }).failed,
+  );
+
+  ok("房內成員讀得到自己房間的用量", as(owner, `select count(*) from public.design_research_usage where room_id = '${capRoom}'::uuid;`).out === "1");
+
+  // 寫：**沒有 client 政策**。讓 client 寫使用量＝讓 client 自己決定用了幾次。
+  ok(
+    "登入者寫不進使用量",
+    as(owner, `insert into public.design_research_usage (room_id, query_hash) values ('${capRoom}'::uuid, '${"b".repeat(64)}');`).failed,
+  );
+  ok(
+    "登入者改不掉已寫入的使用量",
+    as(owner, `update public.design_research_usage set source_count = 0 where room_id = '${capRoom}'::uuid;`).failed,
+  );
+  ok(
+    "登入者刪不掉使用量（append-only）",
+    as(owner, `delete from public.design_research_usage where room_id = '${capRoom}'::uuid;`).failed,
+  );
+  ok("anon 讀不到使用量", asAnon(`select count(*) from public.design_research_usage;`).out === "0" || asAnon(`select count(*) from public.design_research_usage;`).failed);
+
+  // 不存查詢原文：欄位只收 64 字元的雜湊
+  ok(
+    "查詢原文塞不進去（欄位只收 64 字元雜湊）",
+    psql(`insert into public.design_research_usage (room_id, query_hash) values ('${capRoom}'::uuid, '海報的對比要多少才夠');`, { expectError: true }).failed,
+  );
+
+  const usageShape = () => psql(`select
+    (select count(*) from pg_policies where tablename = 'design_research_usage') || '/' ||
+    (select count(*) from public.design_research_usage);`).out;
+  const usageBefore = usageShape();
+  psqlFile(join(MIGRATIONS, "0028_design_research_usage.sql"));
+  ok("重跑 0028 後 policy 數與資料不變", usageBefore === usageShape(), `${usageBefore} → ${usageShape()}`);
 
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {

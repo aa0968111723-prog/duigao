@@ -203,3 +203,85 @@ test("作品類型會帶進檢索，而且說得出是因為哪個脈絡命中",
   const wrongType = retrieveKnowledge([videoRule], { goal: "幫我看看", targetType: "poster" });
   assert.equal(wrongType.hits.length, 0);
 });
+
+// ===========================================================================
+// 對抗審查（grok，PR-DI-01）後補的反例
+// ===========================================================================
+
+test("空字串或缺欄的 projectSpecific 不會被當成通用知識", () => {
+  // 舊版用 truthy 判斷（`if (entry.projectSpecific && ...)`），於是
+  // `projectSpecific: ""` 直接被當成通用知識放行 —— 而那正是攻擊者控制的欄位。
+  const blank = entry({
+    id: "blank",
+    title: "對比",
+    trustLevel: "project",
+    status: "approved",
+    projectSpecific: "",
+  });
+  const result = retrieveKnowledge([blank], { goal: "對比", projectId: "room-1" });
+  assert.equal(result.hits.length, 0, "空字串的 projectSpecific 不是「通用」，是壞資料");
+  assert.equal(result.excluded[0]?.reason, "專案識別碼格式不正確");
+
+  // 只有空白也一樣
+  const spaces = retrieveKnowledge([{ ...blank, id: "spaces", projectSpecific: "   " }], {
+    goal: "對比",
+    projectId: "room-1",
+  });
+  assert.equal(spaces.hits.length, 0);
+});
+
+test("機器搜來的結果不能靠自帶 projectSpecific 免詞面命中", () => {
+  // 機器結果可以自己帶一個 projectSpecific。parseKnowledgeEntry 會把信任降成
+  // machine，但如果檢索只看 projectSpecific，那條降級過的結果仍然免詞面命中
+  // 直接進 hits —— 這不是跨房外洩，是污染本房的檢索。
+  const machineClaim = entry({
+    id: "machine-claim",
+    title: "網路上看到的配色建議",
+    summary: "與提問完全無關的內容",
+    rules: ["用漸層"],
+    trustLevel: "machine",
+    status: "machine-researched",
+    projectSpecific: "room-1",
+  });
+  const result = retrieveKnowledge([machineClaim], { goal: "行高", projectId: "room-1" });
+  assert.equal(result.hits.length, 0, "信任等級不是 project 就不該享有免命中豁免");
+  assert.equal(result.excluded[0]?.reason, "與這次的提問無關");
+
+  // 真正的專案規範仍然享有豁免
+  const realRule = retrieveKnowledge([{ ...machineClaim, id: "real", trustLevel: "project", status: "approved" }], {
+    goal: "行高",
+    projectId: "room-1",
+  });
+  assert.equal(realRule.hits.length, 1);
+});
+
+test("沒有標脈絡的規則與有標脈絡的規則之間的矛盾要被回報", () => {
+  // 舊版把沒有 applicableContexts 的條目放進一個叫 "*" 的桶，於是
+  //「行高 1.5（不限脈絡）」與「行高 1.2（web）」落在不同桶，明顯互斥卻不回報。
+  const general = entry({
+    id: "general",
+    category: "typography",
+    title: "行高 1.5",
+    summary: "內文行高至少 1.5",
+    rules: ["行高 ≥ 1.5"],
+    applicableContexts: [],
+    trustLevel: "approved",
+    status: "approved",
+    contentHash: "h-general",
+  });
+  const webOnly = entry({
+    id: "web",
+    category: "typography",
+    title: "行高 1.2",
+    summary: "網頁上行高 1.2 即可",
+    rules: ["行高 = 1.2"],
+    applicableContexts: ["web"],
+    trustLevel: "approved",
+    status: "approved",
+    contentHash: "h-web",
+  });
+  const result = retrieveKnowledge([general, webOnly], { goal: "行高", targetType: "website" });
+  assert.equal(result.hits.length, 2, "兩條都要留著給人看");
+  assert.equal(result.conflicts.length, 1, `矛盾要被回報且只回報一次，實得 ${result.conflicts.length}`);
+  assert.deepEqual(result.conflicts[0].entryIds.sort(), ["general", "web"]);
+});

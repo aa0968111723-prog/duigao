@@ -279,3 +279,87 @@ test("完全合格的作品不會被硬挑毛病", () => {
   );
   assert.equal(result.length, 0, "為了看起來有在工作而製造問題，比不分析更糟");
 });
+
+// ===========================================================================
+// 對抗審查（grok，PR-DI-02）後補的反例
+// ===========================================================================
+
+test("WCAG 大字看的是字重，不是「這是不是標題」", () => {
+  // 19px 的非粗體標題不是大字（14pt 粗體才是），要 4.5:1。
+  // 舊版拿 isHeading 當粗體的代理，這個灰就被放行了。
+  const grey = color("text-primary", "#949494"); // 白底約 3.03:1
+  const base = { id: "h", label: "主標", lineHeight: 1.2, charsPerLine: 20, isHeading: true };
+
+  const thin19 = analyzeContrast(
+    facts({ colors: [color("surface", "#ffffff"), grey], textBlocks: [{ ...base, fontSizePx: 19 }] }),
+  );
+  assert.equal(thin19.length, 1, "19px 非粗體要用 4.5:1，3.03 過不了");
+
+  const bold19 = analyzeContrast(
+    facts({
+      colors: [color("surface", "#ffffff"), grey],
+      textBlocks: [{ ...base, fontSizePx: 19, fontWeight: 700 }],
+    }),
+  );
+  assert.equal(bold19.length, 0, "19px 粗體才算大字，3:1 過得了");
+
+  const large = analyzeContrast(
+    facts({
+      colors: [color("surface", "#ffffff"), grey],
+      textBlocks: [{ ...base, fontSizePx: 24, fontWeight: 400, isHeading: false }],
+    }),
+  );
+  assert.equal(large.length, 0, "24px 任何字重都算大字");
+});
+
+test("對比取最差底色，不是只看 surface", () => {
+  // background 白、surface 黑、字灰：只看 surface 會得到 9.04 而漏報，
+  // 但這個字疊在白底上只有 2.32。schema.ts 早就記錄過同一個反例。
+  const result = analyzeContrast(
+    facts({
+      colors: [
+        color("background", "#ffffff"),
+        color("surface", "#000000"),
+        color("text-primary", "#aaaaaa"),
+      ],
+      textBlocks: [
+        { id: "body", label: "內文", fontSizePx: 16, lineHeight: 1.6, charsPerLine: 60, isHeading: false },
+      ],
+    }),
+  );
+  assert.equal(result.length, 1, "最差情況不及格就要報");
+  assert.match(result[0].evidence, /2[.]3[0-9]:1/, `應取最差值，實得：${result[0].evidence}`);
+  assert.match(result[0].evidence, /#ffffff/, "要說明是對哪個底色算的");
+
+  // 反過來排一次：這樣「取第一個底色」與「取最差底色」才分得出來
+  //（變異測試指出上面那組的第一個剛好就是最差的，所以殺不死「取第一個」）。
+  const reversed = analyzeContrast(
+    facts({
+      colors: [
+        color("background", "#000000"),
+        color("surface", "#ffffff"),
+        color("text-primary", "#aaaaaa"),
+      ],
+      textBlocks: [
+        { id: "body", label: "內文", fontSizePx: 16, lineHeight: 1.6, charsPerLine: 60, isHeading: false },
+      ],
+    }),
+  );
+  assert.equal(reversed.length, 1, "順序不該影響結果");
+  assert.match(reversed[0].evidence, /2[.]3[0-9]:1/, `取第一個底色會得到 9.04，實得：${reversed[0].evidence}`);
+  assert.match(reversed[0].evidence, /surface/, "最差的是 surface(#ffffff)");
+});
+
+test("色彩角色對不到色票時說算不出來，不沉默跳過", () => {
+  const result = analyzeContrast(
+    facts({
+      colors: [color("surface", "#ffffff"), color("text-secondary", "#cccccc")],
+      textBlocks: [
+        { id: "body", label: "內文", fontSizePx: 16, lineHeight: 1.6, charsPerLine: 60, isHeading: false },
+      ],
+    }),
+  );
+  assert.equal(result.length, 1, "沉默跳過會讓人以為「檢查過沒問題」");
+  assert.match(result[0].issue, /找不到/);
+  assert.match(result[0].evidence, /text-secondary/, "要說明目前有哪些角色可用");
+});

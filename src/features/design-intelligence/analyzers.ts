@@ -27,6 +27,14 @@ export type DesignFacts = {
     lineHeight: number;
     charsPerLine: number;
     isHeading: boolean;
+    /**
+     * 字重。WCAG 的「大字」定義是 **18pt（≈24px）任何字重**，或
+     * **14pt（≈18.66px）且粗體**。舊版拿 `isHeading` 當粗體的代理，
+     * 於是 19px 的非粗體標題被當成大字用 3:1 門檻 —— 實際上它要 4.5:1
+     * （對抗審查實測到的）。標題不等於粗體，所以字重要獨立給。
+     * 沒給時視為 400（一般字重），也就是走比較嚴的門檻。
+     */
+    fontWeight?: number;
     /** 這段文字用的色彩角色（對應 colors 裡的 role）。 */
     colorRole?: ColorToken["role"];
   }>;
@@ -103,9 +111,15 @@ export function adjustToContrast(hex: string, against: string, target: number): 
   return distance(darker) <= distance(lighter) ? darker : lighter;
 }
 
-/** WCAG 2.2：大字門檻較寬（≥24px，或粗體標題 ≥18.66px）。 */
-function contrastTargetFor(fontSizePx: number, isHeading: boolean): number {
-  return fontSizePx >= 24 || (isHeading && fontSizePx >= 18.66) ? 3 : 4.5;
+/**
+ * WCAG 2.2 的「大字」門檻：18pt（≈24px）任何字重，或 14pt（≈18.66px）粗體。
+ *
+ * 粗體看的是**字重**，不是「這是不是標題」。19px 的非粗體標題不是大字，
+ * 要 4.5:1。
+ */
+function contrastTargetFor(fontSizePx: number, fontWeight: number): number {
+  const isBold = fontWeight >= 700;
+  return fontSizePx >= 24 || (isBold && fontSizePx >= 18.66) ? 3 : 4.5;
 }
 
 function severityForContrast(actual: number, target: number): Severity {
@@ -122,14 +136,36 @@ function severityForContrast(actual: number, target: number): Severity {
  */
 export function analyzeContrast(facts: DesignFacts): Diagnostic[] {
   const byRole = new Map(facts.colors.map((token) => [token.role, token]));
-  const surface = byRole.get("surface") ?? byRole.get("background") ?? null;
+  // 取**所有**可能的底色並算最差值，與 schema.ts 的 parseColorTokens 同一套
+  // 規則。舊版用 `surface ?? background`，於是 background #ffffff +
+  // surface #000000 + text #aaaaaa 只對黑色算出 9.04 而漏報 —— 那個字在白底
+  // 上其實是 2.32（對抗審查實測到的，schema.ts 早就記錄過同一個反例）。
+  const surfaces = (["background", "surface"] as const)
+    .map((role) => byRole.get(role))
+    .filter((token): token is NonNullable<typeof token> => Boolean(token));
   const diagnostics: Diagnostic[] = [];
 
   for (const block of facts.textBlocks) {
-    const token = block.colorRole ? byRole.get(block.colorRole) : byRole.get("text-primary");
-    if (!token) continue;
+    const role = block.colorRole ?? "text-primary";
+    const token = byRole.get(role);
+    if (!token) {
+      // 指定了色彩角色卻找不到對應色票 —— 沉默跳過會讓人以為「檢查過沒問題」。
+      diagnostics.push({
+        id: diagnosticId("contrast-missing", block.id),
+        dimension: "color",
+        measured: true,
+        location: block.label,
+        issue: `找不到「${role}」的色碼，無法計算對比`,
+        impact: "這段文字有沒有讀得到，目前無法判斷",
+        evidence: `色票裡沒有 ${role}；已宣告的角色：${[...byRole.keys()].join("、") || "（無）"}`,
+        recommendation: `補上 ${role} 的色碼，或指定這段文字實際使用的色彩角色`,
+        severity: "minor",
+        confidence: 1,
+      });
+      continue;
+    }
 
-    if (!surface) {
+    if (!surfaces.length) {
       diagnostics.push({
         id: diagnosticId("contrast", block.id),
         dimension: "color",
@@ -137,7 +173,7 @@ export function analyzeContrast(facts: DesignFacts): Diagnostic[] {
         location: block.label,
         issue: "沒有宣告背景色或表面色，無法計算對比",
         impact: "無法判斷這段文字在實際背景上讀不讀得到",
-        evidence: `色票裡有 ${token.role}（${token.hex}），但沒有 background 或 surface`,
+        evidence: `色票裡有 ${token.role}（${token.hex}），但沒有 background 也沒有 surface`,
         recommendation: "補上作品的背景色碼，或指定這段文字疊在哪個面上",
         severity: "minor",
         confidence: 1,
@@ -145,9 +181,17 @@ export function analyzeContrast(facts: DesignFacts): Diagnostic[] {
       continue;
     }
 
-    const ratio = contrastRatio(token.hex, surface.hex);
-    if (ratio === null) continue;
-    const target = contrastTargetFor(block.fontSizePx, block.isHeading);
+    // 這一層不知道每個字實際疊在哪個面上（那要版面資訊），所以取最差情況。
+    let worst: { hex: string; role: string; ratio: number } | null = null;
+    for (const candidate of surfaces) {
+      const ratio = contrastRatio(token.hex, candidate.hex);
+      if (ratio === null) continue;
+      if (!worst || ratio < worst.ratio) worst = { hex: candidate.hex, role: candidate.role, ratio };
+    }
+    if (!worst) continue;
+    const surface = { hex: worst.hex, role: worst.role };
+    const ratio = worst.ratio;
+    const target = contrastTargetFor(block.fontSizePx, block.fontWeight ?? 400);
     if (ratio >= target) continue;
 
     const fixed = adjustToContrast(token.hex, surface.hex, target);
@@ -163,7 +207,7 @@ export function analyzeContrast(facts: DesignFacts): Diagnostic[] {
       impact: block.isHeading
         ? "標題在強光下或縮圖尺寸會讀不到，社群平台的縮圖尤其明顯"
         : "內文在手機上、光線強的環境、或視力較弱的人眼中會讀不清楚",
-      evidence: `量測：${token.hex} 疊在 ${surface.hex} 上 = ${ratio.toFixed(2)}:1（字級 ${block.fontSizePx}px，門檻 ${target}:1，目前等級 ${wcagLevel(ratio)}）`,
+      evidence: `量測：${token.hex} 疊在最差的底色 ${surface.role}（${surface.hex}）上 = ${ratio.toFixed(2)}:1（字級 ${block.fontSizePx}px、字重 ${block.fontWeight ?? 400}，門檻 ${target}:1，目前等級 ${wcagLevel(ratio)}）`,
       recommendation:
         fixed && fixedRatio !== null
           ? `把 ${token.role} 從 ${token.hex} 改為 ${fixed}（疊在 ${surface.hex} 上是 ${fixedRatio.toFixed(2)}:1，達標）`

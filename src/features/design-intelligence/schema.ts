@@ -347,6 +347,21 @@ const BLOCKED_HOSTS = new Set([
   "localhost", "metadata.google.internal", "metadata", "instance-data",
 ]);
 
+/**
+ * 已知會解析到迴環位址的網域。
+ *
+ * **這份清單一定不完整，而且不可能完整** —— 任何人都能把自己的網域的 A record
+ * 指到 127.0.0.1，字串上完全看不出來。所以這裡列的只是常見的開發用別名，
+ * 不是防線。
+ *
+ * 真正的防線是結構上的：本專案**從不 fetch 外部回傳的網址**。研究層拿到的
+ * 網址只作為「來源出處」顯示給人看，由使用者自己決定要不要點。
+ * `ResearchProvider.fetchRelevantSnippets` 因此**沒有實作** ——
+ * 一旦實作它，就必須在解析出 IP 之後、連線之前再檢查一次，而那是 fetch
+ * 那一端的責任，不是這個字串檢查函式做得到的。
+ */
+const LOOPBACK_ALIAS_DOMAINS = ["lvh.me", "vcap.me", "localtest.me", "nip.io", "sslip.io", "traefik.me"];
+
 /** 主機名是不是 IP 字面值（IPv4 點分四段或方括號 IPv6）。 */
 function isIpLiteral(host: string): boolean {
   if (host.startsWith("[")) return true; // URL parser 只有 IPv6 會加方括號
@@ -365,8 +380,14 @@ export function isSafePublicUrl(raw: string): boolean {
   const host = url.hostname.toLowerCase().replace(/\.+$/, "");
   if (!host) return false;
   if (isIpLiteral(host)) return false;
+  // 把 IP 編進主機名的萬用 DNS 服務：`169.254.169.254.nip.io` 會解析回
+  // 169.254.169.254，但字串上完全不是 IP 字面值。對抗審查實測到的。
+  // 不列舉服務名（nip.io / sslip.io / localtest.me / lvh.me 列不完），
+  // 直接看主機名裡有沒有嵌著一個點分四段的位址。
+  if (/(^|[.-])\d{1,3}[.-]\d{1,3}[.-]\d{1,3}[.-]\d{1,3}([.-]|$)/.test(host)) return false;
   if (BLOCKED_HOSTS.has(host)) return false;
   if (BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return false;
+  if (LOOPBACK_ALIAS_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) return false;
   // 沒有點的單標籤主機名（`https://intranet/`）只可能是內網
   if (!host.includes(".")) return false;
   return true;
@@ -568,10 +589,27 @@ export function findKnowledgeConflicts(entries: KnowledgeEntry[]): Array<{
   context: string;
   entryIds: string[];
 }> {
+  // 沒有標 applicableContexts 的條目是**通用於該類別**的，不是「屬於一個叫
+  // * 的脈絡」。舊版把它放進 `*` 桶，於是「行高 1.5（不限脈絡）」與
+  // 「行高 1.2（web）」落在不同桶，明顯互斥卻不回報 —— 對抗審查實測到的。
+  const live = entries.filter((entry) => entry.status !== "deprecated");
+  const contextsByCategory = new Map<string, Set<string>>();
+  for (const entry of live) {
+    const set = contextsByCategory.get(entry.category) ?? new Set<string>();
+    for (const context of entry.applicableContexts) set.add(context);
+    contextsByCategory.set(entry.category, set);
+  }
+
   const buckets = new Map<string, KnowledgeEntry[]>();
-  for (const entry of entries) {
-    if (entry.status === "deprecated") continue;
-    for (const context of entry.applicableContexts.length ? entry.applicableContexts : ["*"]) {
+  for (const entry of live) {
+    const known = contextsByCategory.get(entry.category) ?? new Set<string>();
+    // 通用條目進入該類別的每一個脈絡桶；沒有任何脈絡時退回單一的「不限」桶。
+    const contexts = entry.applicableContexts.length
+      ? entry.applicableContexts
+      : known.size
+        ? [...known]
+        : ["不限"];
+    for (const context of contexts) {
       const key = `${entry.category}|${context}`;
       buckets.set(key, [...(buckets.get(key) ?? []), entry]);
     }
@@ -584,7 +622,15 @@ export function findKnowledgeConflicts(entries: KnowledgeEntry[]): Array<{
     const [category, context] = key.split("|");
     conflicts.push({ category, context, entryIds: list.map((entry) => entry.id) });
   }
-  return conflicts;
+  // 通用條目會落進多個脈絡桶，同一組衝突可能被回報多次 —— 去重，
+  // 否則 UI 會顯示「有 5 組矛盾」而其實只有一組。
+  const seenPairs = new Set<string>();
+  return conflicts.filter((conflict) => {
+    const key = `${conflict.category}|${[...conflict.entryIds].sort().join(",")}`;
+    if (seenPairs.has(key)) return false;
+    seenPairs.add(key);
+    return true;
+  });
 }
 
 // ---- 提案狀態機 -----------------------------------------------------------

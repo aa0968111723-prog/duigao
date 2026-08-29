@@ -71,6 +71,19 @@ const TARGET_CONTEXTS: Record<DesignTargetType, readonly string[]> = {
   board: ["whiteboard", "canvas", "mobile"],
 };
 
+/**
+ * 正規化專案識別碼。
+ *
+ * `null` = 通用知識；字串 = 專案 id；`"invalid"` = 壞資料（空字串、只有
+ * 空白）。刻意把壞資料跟「通用」分開 —— 兩者的處置完全不同。
+ */
+function normalizeProjectId(value: string | null | undefined): string | null | "invalid" {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return "invalid";
+  const trimmed = value.trim();
+  return trimmed === "" ? "invalid" : trimmed;
+}
+
 export function retrieveKnowledge(
   entries: readonly KnowledgeEntry[],
   query: KnowledgeQuery,
@@ -83,8 +96,18 @@ export function retrieveKnowledge(
       excluded.push({ entryId: entry.id, reason: "已停用的知識條目" });
       continue;
     }
-    // 別房的專案規範一律不納入 —— 這是 RLS 之外的第二道
-    if (entry.projectSpecific && entry.projectSpecific !== (query.projectId ?? null)) {
+    // 別房的專案規範一律不納入 —— 這是 RLS 之外的第二道。
+    //
+    // 用「正規化後嚴格比較」而不是 truthy 判斷：`projectSpecific: ""` 或
+    // 缺欄在 truthy 判斷下會被當成通用知識直接放行，而那正是攻擊者能控制的
+    // 欄位（對抗審查實測到的）。空字串不是「通用」，是「壞資料」。
+    const owner = normalizeProjectId(entry.projectSpecific);
+    const current = normalizeProjectId(query.projectId);
+    if (owner === "invalid") {
+      excluded.push({ entryId: entry.id, reason: "專案識別碼格式不正確" });
+      continue;
+    }
+    if (owner !== null && owner !== current) {
       excluded.push({ entryId: entry.id, reason: "屬於其他專案的規範" });
       continue;
     }
@@ -123,7 +146,12 @@ export function retrieveKnowledge(
 
     // 專案規範就算字面沒對上也要納入 —— 品牌規範不該因為使用者沒說出
     // 「品牌色」三個字就被略過。
-    if (entry.projectSpecific) {
+    //
+    // 但**只有信任等級真的是 project 的**才享有這個豁免。機器搜來的結果
+    // 可以自己帶一個 `projectSpecific`，`parseKnowledgeEntry` 會把信任降成
+    // machine，可是如果這裡只看 `projectSpecific`，那條降級過的機器結果
+    // 仍然免詞面命中直接進 hits —— 不是跨房外洩，是污染本房檢索。
+    if (normalizeProjectId(entry.projectSpecific) !== null && entry.trustLevel === "project") {
       matchedOn.push("這個專案的自有規範");
     } else if (!matchedOn.length) {
       excluded.push({ entryId: entry.id, reason: "與這次的提問無關" });

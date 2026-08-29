@@ -29,6 +29,27 @@
 -- 冪等：create ... if not exists ＋ drop policy if exists 後重建。
 -- ---------------------------------------------------------------------------
 
+-- 規則裡不能有「只有空白」的項目。
+--
+-- 用 immutable 函式而不是 array_position：`array[' ']` 的 cardinality 是 1、
+-- 也找不到精確的空字串，所以舊的 CHECK 放行了它 —— 與 array_length 回 NULL
+-- 是同一類的洞（都是對抗審查實測到的）。client 的 stringList 會 trim 後退件，
+-- 但直接打 REST 的不會經過 client。
+create or replace function public.design_knowledge_rules_ok(p_rules text[])
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select cardinality(p_rules) between 1 and 20
+     and not exists (
+       -- btrim 預設**只去半形空格** —— tab、換行與不斷行空白都留得下來，
+       -- probe 實測 array[E'\t'] 會過關。字元集要明寫出來。
+       select 1 from unnest(p_rules) as r
+        where r is null or btrim(r, E' \t\n\r\f' || chr(160) || chr(9) || chr(11)) = ''
+     );
+$$;
+
 create table if not exists public.design_knowledge (
   id uuid primary key default extensions.gen_random_uuid(),
 
@@ -44,14 +65,10 @@ create table if not exists public.design_knowledge (
 
   -- rules 是這張表的核心：沒有可執行規則的條目不算知識，
   -- 所以 CHECK 要求至少一條、且每條不得為空字串。
-  -- cardinality 而非 array_length：array_length('{}', 1) 回傳 **NULL**，
-  -- 而 CHECK 遇到 NULL 一律放行 —— 用 array_length 的話「零規則」會過關
-  -- （migration probe 實測到的）。cardinality 對空陣列回 0，才擋得住。
-  rules text[] not null check (
-    cardinality(rules) between 1 and 20
-    and array_position(rules, '') is null
-    and array_position(rules, null::text) is null
-  ),
+  -- 見上面 design_knowledge_rules_ok 的說明：array_length 對空陣列回 NULL
+  -- 而 CHECK 遇到 NULL 一律放行；array_position 又抓不到「只有空白」。
+  -- 兩個洞都是實測出來的，所以判斷集中在一個 immutable 函式裡。
+  rules text[] not null check (public.design_knowledge_rules_ok(rules)),
   exceptions text[] not null default '{}',
   applicable_contexts text[] not null default '{}',
 
@@ -96,6 +113,22 @@ create table if not exists public.design_knowledge (
   -- trust_level='project' 必須真的屬於某個專案
   constraint design_knowledge_project_trust_needs_room check (
     trust_level <> 'project' or project_specific is not null
+  ),
+
+  -- 高信任等級必須留下審查痕跡。
+  --
+  -- 誠實說明這條擋得住什麼、擋不住什麼：資料庫**無法**驗證一條知識到底是
+  -- 人審過的還是模型生的 —— 那是 client 的 provenance 負責的
+  -- （schema.ts 的 parseKnowledgeEntry）。舊版的
+  -- design_knowledge_machine_not_approved 只在 status='machine-researched'
+  -- 時發動，而 status 同樣由寫入端自己填，所以直接打 REST 的人只要改成
+  -- status='approved' 就整條繞過 —— 對抗審查指出這是「名實不符的第二道門」，
+  -- 屬實。
+  --
+  -- 這條做得到的是：讓「宣稱已核准」必須同時留下 reviewed_at，
+  -- 使高信任等級的條目在稽核時至少有一個可以對照的時間點，而不是零成本。
+  constraint design_knowledge_high_trust_needs_review check (
+    trust_level not in ('approved', 'project') or reviewed_at is not null
   )
 );
 

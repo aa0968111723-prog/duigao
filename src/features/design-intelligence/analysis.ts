@@ -81,6 +81,31 @@ export type AnalysisOutcome = {
   knowledgeUsed: string[];
 };
 
+/**
+ * 讓一個 promise 可以被 AbortSignal 打斷。
+ *
+ * 底層的工作不會真的停下來（沒有辦法強迫別人的 promise 停），但**呼叫端會
+ * 立刻收到取消**，不會被一個卡住的 `status()` 綁住。
+ */
+async function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw new AnalysisCancelledError();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new AnalysisCancelledError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function checkCancelled(signal?: AbortSignal): void {
   if (signal?.aborted) throw new AnalysisCancelledError();
 }
@@ -171,17 +196,45 @@ export function validateAlternativeDiversity(alternatives: readonly DesignAltern
     );
   }
 
+  // 只比維度標籤不夠：模型可以把同一組「改成 #ff0000」分別標成 color、
+  // typography、layout，維度集合就變得不一樣了，但實際上仍是同一件事
+  // （對抗審查實測到的）。所以也要比**改動的內容本身**。
+  const contentOf = (alternative: DesignAlternative) =>
+    alternative.changes
+      .map((change) => `${change.target}→${change.change}`.replace(/\s+/g, ""))
+      .sort()
+      .join("|");
+  const contents = alternatives.filter((alternative) => alternative.changes.length).map(contentOf);
+  if (contents.length > 1 && new Set(contents).size < contents.length) {
+    problems.push("有方案的實際改動內容完全相同，只有維度標籤不同 —— 換標籤不等於換方向");
+  }
+
   const union = new Set([...dims.values()].flatMap((set) => [...set]));
   if (union.size < 2) {
     problems.push(`所有方案加起來只碰到 ${union.size} 個維度，稱不上三個方向`);
   }
 
+  // 強度必須是一條光譜。逐對比較**所有存在的**組合，而不是只比相鄰的兩級 ——
+  // 缺了 balanced 時，「保守碰五個維度、大膽只碰一個」原本會整個跳過檢查
+  //（對抗審查實測到的）。
   const size = (strategy: AlternativeStrategy) => dims.get(strategy)?.size ?? 0;
-  if (dims.has("bold") && dims.has("balanced") && size("bold") < size("balanced")) {
-    problems.push("大膽方案改動的維度比平衡方案還少，方向的強度標錯了");
-  }
-  if (dims.has("balanced") && dims.has("conservative") && size("balanced") < size("conservative")) {
-    problems.push("平衡方案改動的維度比保守方案還少，方向的強度標錯了");
+  const rank: AlternativeStrategy[] = ["conservative", "balanced", "bold"];
+  const label: Record<AlternativeStrategy, string> = {
+    conservative: "保守方案",
+    balanced: "平衡方案",
+    bold: "大膽方案",
+  };
+  for (let i = 0; i < rank.length; i += 1) {
+    for (let j = i + 1; j < rank.length; j += 1) {
+      const weaker = rank[i];
+      const stronger = rank[j];
+      if (!dims.has(weaker) || !dims.has(stronger)) continue;
+      if (size(stronger) < size(weaker)) {
+        problems.push(
+          `${label[stronger]}改動的維度（${size(stronger)}）比${label[weaker]}（${size(weaker)}）還少，方向的強度標錯了`,
+        );
+      }
+    }
   }
   return problems;
 }
@@ -226,15 +279,28 @@ export async function analyzeDesign(
   let modelDiagnostics: Diagnostic[] = [];
   let alternatives: DesignAlternative[] = [];
   let usedProvider: string | null = null;
+  let diversityFailed = false;
 
   if (needs.length) {
-    const selection = await selectProvider(deps.providers ?? [], needs);
+    // selectProvider 會 await 每個 provider 的 status()。某個 provider 的
+    // status() 卡住時，取消訊號原本完全無效（對抗審查實測到的）——
+    // 用 Promise.race 讓取消能穿透這一段。
+    const selection = await raceWithAbort(selectProvider(deps.providers ?? [], needs), signal);
     gaps = selection.gaps;
     if (!selection.provider) {
       risks.push("目前沒有可用的 AI 分析服務，以下只有本地量測得出的結果");
     } else {
-      usedProvider = selection.provider.id;
       try {
+        // 這裡刻意**沒有**再放一次 checkCancelled：`raceWithAbort` 已經涵蓋
+        // 從進入這個區塊到 selectProvider 結束的整段等待，兩者之間沒有其他
+        // await，所以那行檢查永遠不可能觸發。變異測試證實了這件事
+        //（把它拿掉，測試全綠）。
+        //
+        // 一條不可能觸發的檢查就是裝飾，而這個分支剛把 canTransition 從
+        // 死碼接回真正的閘門 —— 不能自己又留一條。
+        //
+        // 取消在這一段的實際防線是把 signal 傳給 provider，讓它中止自己的
+        // 網路請求；下面就是那件事。
         const response = await selection.provider.analyze({
           needs,
           goal: input.goal,
@@ -253,6 +319,10 @@ export async function analyzeDesign(
           signal,
         });
         gaps = [...gaps, ...response.gaps];
+        // 成功回來才算「用過這個 provider」。在 try 之前就設，會讓
+        // provider 丟例外之後 rationale 仍宣稱「AI 分析由 X 提供」，
+        // 與 risks 裡的「AI 分析沒有完成」互相矛盾（對抗審查實測到的）。
+        usedProvider = selection.provider.id;
 
         // 模型輸出一律過驗證。沒過的丟掉並記錄理由 ——
         // 「AI 回了 5 條，3 條格式不符已略過」是使用者有權知道的事。
@@ -293,6 +363,7 @@ export async function analyzeDesign(
     }
   } else if (alternatives.length) {
     const diversityProblems = validateAlternativeDiversity(alternatives);
+    diversityFailed = diversityProblems.length > 0;
     if (diversityProblems.length) {
       rejected.push(...diversityProblems);
       // 不是全丟掉 —— 保留方案但把問題寫進風險，讓人自己判斷
@@ -326,7 +397,9 @@ export async function analyzeDesign(
     contextSummary: input.contextSummary,
     diagnostics,
     alternatives,
-    recommendedAlternativeId: alternatives[0]?.id ?? null,
+    // 多樣性檢查沒過時**不給推薦**。模型只要把 bold 排第一，
+    // 「推薦」就會落在一個已知有問題的方案上（對抗審查實測到的）。
+    recommendedAlternativeId: diversityFailed ? null : (alternatives[0]?.id ?? null),
     preview: null,
     patch: null, // 套用計畫由 adapter 產生，而且要人類確認後才會有
     rationale: buildRationale(diagnostics, alternatives, usedProvider),
