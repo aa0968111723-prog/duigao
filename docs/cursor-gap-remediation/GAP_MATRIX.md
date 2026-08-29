@@ -368,6 +368,30 @@ Every row is grounded in source, HTTP, GitHub, or a test. TODOs alone are not de
 
 ---
 
+## GAP-00-016
+
+| Field | Value |
+|---|---|
+| ID | GAP-00-016 |
+| 領域 | room entry / first paint |
+| 問題 | 正式站無 `#room=` 時第一屏是顯示名稱 onboard，不是建立房。App origin 的 `/functions/v1/voice-token` 是空白白屏（仍 HTTP 200 HTML）。 |
+| 重現步驟 | Playwright 開 https://duigao-k7q2.zeabur.app/ 於 390×844；再開 `/functions/v1/voice-token`。截圖在 `/opt/cursor/artifacts`。 |
+| 預期行為 | 第一屏要有 Loading/Empty/Error 之一，不可空白。API 路徑不該當產品頁。 |
+| 實際行為 | Onboard 有內容（可接受）。Catch-all API 路徑空白白屏。 |
+| 裝置 | 360–820 皆 onboard；390 catch-all 空白 |
+| 嚴重度 | P2（onboard 可用）；空白 catch-all 是 001 的 UI 後果 |
+| 影響 | 誤開 API 路徑的人看到空白。 |
+| 根因 | SPA rewrite + 無該路徑的錯誤殼。 |
+| 相關檔案 | `src/App.tsx` onboard（#78/#95 擁有，不改） |
+| 相關資料表 | none |
+| 相關 PR | this |
+| 是否可立即修 | catch-all 不該修成「假裝 API」；錯誤殼要動 App 路由 |
+| 需要的測試 | Playwright first-paint |
+| 修復分支 | pause App.tsx |
+| 狀態 | OPEN（記錄） |
+
+---
+
 ## Severity rollup
 
 | Sev | IDs | This PR |
