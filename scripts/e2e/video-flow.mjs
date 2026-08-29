@@ -254,15 +254,32 @@ async function uploadVideo(page, buffer, fileName = "cut.webm") {
   });
 }
 
-const playerReady = (page) =>
-  page.waitForFunction(
-    () => {
+async function playerReady(page) {
+  await page.waitForSelector("video.v-video", { timeout: 45000 });
+  try {
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector("video.v-video");
+        return Boolean(v && v.readyState >= 1);
+      },
+      null,
+      { timeout: 15000 },
+    );
+  } catch {
+    await page.evaluate(() => {
       const v = document.querySelector("video.v-video");
-      return Boolean(v && v.readyState >= 1);
-    },
-    null,
-    { timeout: 60000 },
-  );
+      if (v && v.readyState < 1) v.load();
+    });
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector("video.v-video");
+        return Boolean(v && v.readyState >= 1);
+      },
+      null,
+      { timeout: 30000 },
+    );
+  }
+}
 
 const currentTime = (page) => page.evaluate(() => document.querySelector("video.v-video")?.currentTime ?? -1);
 const videoDuration = (page) =>
