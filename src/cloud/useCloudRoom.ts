@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isPollNotSaved } from "./pollInsertAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -136,7 +137,7 @@ export type CloudWrites = {
   savePlan: (plan: PlanDocument) => void;
   createRelation: (relation: ContentRelation) => void;
   deleteRelation: (relationId: string) => void;
-  createPoll: (poll: RoomPoll) => void;
+  createPoll: (poll: RoomPoll) => Promise<void>;
   votePoll: (vote: PollVote) => void;
   insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
   /** AI 套用稽核列（0019）。回傳成敗；失敗不重試 — 討論串訊息是人看的 fallback。 */
@@ -1083,7 +1084,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     savePlan: (plan) => run(`plan:${plan.branchId}`, () => upsertPlan(supabase!, plan, boundRef.current!)),
     createRelation: (relation) => run(`relation:${relation.id}`, () => insertRelation(supabase!, relation)),
     deleteRelation: (relationId) => run(`relation-del:${relationId}`, () => deleteRelation(supabase!, boundRef.current!, relationId)),
-    createPoll: (poll) => run(`poll:${poll.id}`, () => insertPoll(supabase!, poll)),
+    createPoll: async (poll) => {
+      const rid = boundRef.current;
+      const key = `poll:${poll.id}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await insertPoll(supabase, poll);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isPollNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => insertPoll(supabase, poll),
+        });
+        setStatus("offline-pending");
+      }
+    },
     votePoll: (vote) => run(`vote:${vote.pollId}:${vote.userId}`, () => votePoll(supabase!, vote)),
     // 討論訊息要能在 UI 上呈現「未送出／重試」，所以回傳可等待的成敗，
     // 而且失敗不進 pending 佇列（keyed run 也不用）— 重試的唯一擁有者是

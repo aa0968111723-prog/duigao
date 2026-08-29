@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isPollNotSaved } from "./cloud/pollInsertAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -1667,7 +1668,14 @@ export function App() {
       }
       const nextPoll = { ...poll, createdBy: cloud.userId ?? poll.createdBy };
       updateRoom((r) => ({ ...r, polls: [...(r.polls ?? []), nextPoll] }));
-      cloudRef.current.writes.createPoll(nextPoll);
+      void cloudRef.current.writes.createPoll(nextPoll).catch((err) => {
+        if (!isPollNotSaved(err)) return;
+        updateRoom((r) => ({
+          ...r,
+          polls: (r.polls ?? []).filter((item) => item.id !== nextPoll.id),
+        }));
+        showToast("待決策沒有加上，請再試一次。", { tone: "error" });
+      });
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, showToast, updateRoom],
   );

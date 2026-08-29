@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptPollInsertAck } from "./pollInsertAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -1051,14 +1052,19 @@ export async function deleteRelation(supabase: SupabaseClient, roomId: string, r
 }
 
 export async function insertPoll(supabase: SupabaseClient, poll: RoomPoll): Promise<void> {
-  const { error } = await supabase.from("room_polls").insert({
-    id: poll.id,
-    room_id: poll.roomId,
-    question: poll.question,
-    options: poll.options,
-    created_by: isUuid(poll.createdBy) ? poll.createdBy : null,
-  });
+  const { data, error } = await supabase
+    .from("room_polls")
+    .insert({
+      id: poll.id,
+      room_id: poll.roomId,
+      question: poll.question,
+      options: poll.options,
+      created_by: isUuid(poll.createdBy) ? poll.createdBy : null,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "poll");
+  acceptPollInsertAck(data);
 }
 
 export async function votePoll(supabase: SupabaseClient, vote: PollVote): Promise<void> {
