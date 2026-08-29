@@ -152,6 +152,16 @@ test("T-07 unread: 水位之後的第一則；沒有已讀回條", () => {
   const ui = src("src/features/room-discussion/RoomDiscussion.tsx");
   assert.match(ui, /jump-first-unread/);
   assert.match(ui, /firstUnreadMessageId/);
+  assert.match(
+    ui,
+    /if \(latest && unreadId && unreadId !== latest\.id\) return;/,
+    "T-07: 短 feed 滑到底不可把水位刷到最新，否則第一則未讀標記會被抹掉",
+  );
+  assert.match(
+    ui,
+    /if \(sourceId === firstUnreadIdRef\.current\) pinnedToLatest\.current = false/,
+    "T-07: 跳到第一則未讀時不可維持 pinned-to-latest",
+  );
   assert.doesNotMatch(ui, /雙藍勾|(?<!未)已讀/);
 });
 

@@ -219,6 +219,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimer = useRef<number | null>(null);
   const jumpToMessage = (sourceId: string) => {
+    if (sourceId === firstUnreadIdRef.current) pinnedToLatest.current = false;
     const el = typeof document !== "undefined" ? document.getElementById(`rd-msg-${sourceId}`) : null;
     el?.scrollIntoView({ block: "center", behavior: "smooth" });
     setHighlightId(sourceId);
@@ -237,6 +238,8 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     () => firstUnreadMessageId(messages, api.readWatermark),
     [messages, api.readWatermark],
   );
+  const firstUnreadIdRef = useRef(firstUnreadId);
+  firstUnreadIdRef.current = firstUnreadId;
   const unread = useMemo(
     () => unreadCount(messages, api.readWatermark),
     [messages, api.readWatermark],
@@ -270,6 +273,11 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       if (entry?.isIntersecting) {
         setShowJumpLatest(false);
         const latest = lastMessageRef.current;
+        const unreadId = firstUnreadIdRef.current;
+        // Short feed: jumping to first-unread still leaves the end on screen.
+        // Marking latest read here would wipe data-first-unread on the row
+        // the person just asked to see.
+        if (latest && unreadId && unreadId !== latest.id) return;
         if (latest) api.onMarkRead?.(latest.id);
       }
     }, { threshold: 0.01 });
