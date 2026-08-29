@@ -1,10 +1,10 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-29T00:29:22.000Z",
+  "generatedAt": "2026-08-29T02:41:58.000Z",
   "git": {
-    "branch": "agent/di02-analysis-engine",
-    "sha": "05b5bd1881f3af0dd28d3b164303e245606e7d61",
+    "branch": "agent/di03-research",
+    "sha": "0e007b8676551b7d119376648199f86c0b95d75f",
     "mainSha": "b0f7a1bf3f7422977f41c855c62a4d6a8478cf04",
     "dirty": true
   },
@@ -33,9 +33,8 @@
       "Deployment config"
     ],
     "openPrs": {
-      "status": "unknown",
-      "items": [],
-      "reason": "gh returned invalid JSON"
+      "status": "available",
+      "items": []
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -981,7 +980,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0027",
+    "repoMigrationHead": "0028",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -1004,10 +1003,11 @@
       "supabase/migrations/0019_ai_apply_audit.sql",
       "supabase/migrations/0020_canva_bridge.sql",
       "supabase/migrations/0021_canva_design_pages.sql",
-      "supabase/migrations/0027_design_knowledge.sql"
+      "supabase/migrations/0027_design_knowledge.sql",
+      "supabase/migrations/0028_design_research_usage.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0027",
+    "productionMigrationExpectation": "0028",
     "requiresLiveCheck": true
   },
   "tests": {
@@ -1018,6 +1018,7 @@
       "npm run test:collaboration",
       "npm run test:collaboration-e2e",
       "npm run test:design-intelligence",
+      "npm run test:design-research-fn",
       "npm run test:edge-cors",
       "npm run test:migrations",
       "npm run test:multi-branch",
@@ -1150,10 +1151,6 @@
       "code": "FEATURE_CLAIM_MISMATCH",
       "feature": "video-transcode",
       "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
-    },
-    {
-      "code": "OPEN_PRS_UNKNOWN",
-      "message": "gh returned invalid JSON"
     }
   ],
   "releaseReadiness": {
@@ -1198,8 +1195,8 @@
       },
       {
         "code": "SECRETS_NOT_EMITTED",
-        "ok": true,
-        "message": "No secret, access token, JWT, or invite-token value was emitted."
+        "ok": false,
+        "message": "Secret-like values were found in agent output or changed files."
       },
       {
         "code": "SOURCE_TEST_EVIDENCE",
