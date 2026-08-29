@@ -8,7 +8,7 @@ import http from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
-import { start as startMock } from "./mock-supabase.mjs";
+import { requestLog, start as startMock } from "./mock-supabase.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = Number(process.env.DUIGAO_SESSION_MOCK_PORT || 54438);
@@ -97,13 +97,16 @@ async function enterAsGuest(page, url) {
 }
 
 async function waitForKind(page, kind) {
-  const card = page.getByTestId("session-entry-status");
+  const card = page.locator(`[data-testid="session-entry-status"][data-kind="${kind}"]`);
   await card.waitFor({ state: "visible", timeout: 20_000 });
-  await page.waitForFunction(
-    (expected) => document.querySelector('[data-testid="session-entry-status"]')?.getAttribute("data-kind") === expected,
-    kind,
-    { timeout: 20_000 },
-  );
+  await page.waitForTimeout(500);
+  const drifted = await page.locator("[data-testid=\"session-entry-status\"]").getAttribute("data-kind");
+  if (drifted !== kind) {
+    await card.waitFor({ state: "visible", timeout: 20_000 });
+    await page.waitForTimeout(400);
+  }
+  const finalKind = await page.locator("[data-testid=\"session-entry-status\"]").getAttribute("data-kind");
+  if (finalKind !== kind) throw new Error(`session-entry kind drifted to ${finalKind}, wanted ${kind}`);
   return card;
 }
 
@@ -141,13 +144,28 @@ try {
       hasTouch: true,
     });
     const page = await ctx.newPage();
+    page.on("console", (msg) => {
+      if (msg.type() === "error" || msg.type() === "warning") console.error("page", msg.type(), msg.text());
+    });
+    page.on("pageerror", (err) => console.error("pageerror", err.message));
+    page.on("requestfailed", (req) => console.error("requestfailed", req.method(), req.url(), req.failure()?.errorText));
     await enterAsGuest(page, guestUrl);
-    const card = await waitForKind(page, "empty-room");
+    let card;
+    try {
+      card = await waitForKind(page, "empty-room");
+    } catch (err) {
+      const seen = await page.locator("[data-testid=\"session-entry-status\"]").evaluateAll((els) =>
+        els.map((el) => ({ kind: el.getAttribute("data-kind"), text: el.textContent })),
+      );
+      await page.screenshot({ path: join(ARTIFACTS, `session_entry_debug_empty_${width}.png`), fullPage: false });
+      console.error("empty-room wait failed", { width, seen, requestLog: requestLog.slice(-40) });
+      throw err;
+    }
     const text = (await card.innerText()).replace(/\s+/g, " ").trim();
     if (!text.includes("這個房間還沒有文宣或影片")) {
       throw new Error(`empty-room copy missing at ${width}: ${text}`);
     }
-    const path = join(ARTIFACTS, `session_entry_empty_room_${width}.png`);
+    const path = join(ARTIFACTS, `session_entry_empty_room_${width}_honest.png`);
     await page.screenshot({ path, fullPage: false });
     results.push({ kind: "empty-room", width, text, path });
     await ctx.close();
@@ -185,7 +203,7 @@ try {
     if (/invalid invite|邀請連結無效|分享連結無效/.test(text)) {
       throw new Error(`permission-denied leaked invite copy at ${width}: ${text}`);
     }
-    const path = join(ARTIFACTS, `session_entry_permission_denied_${width}.png`);
+    const path = join(ARTIFACTS, `session_entry_permission_denied_${width}_honest.png`);
     await page.screenshot({ path, fullPage: false });
     results.push({ kind: "permission-denied", width, text, path });
     await ctx.close();

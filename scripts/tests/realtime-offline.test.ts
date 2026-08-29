@@ -119,3 +119,12 @@ test("wiring: room sync rejects bad payloads and discussion no longer whole-room
   assert.match(core, /flushOutboxOnOnline/);
   assert.match(hook, /isolateOutboxForOwner/);
 });
+
+test("re-bind drops leftover realtime channels so subscribe() does not fake a load-error", () => {
+  const sync = readFileSync(resolve(ROOT, "src/cloud/roomSync.ts"), "utf8");
+  const cloud = readFileSync(resolve(ROOT, "src/cloud/useCloudRoom.ts"), "utf8");
+  assert.match(sync, /removeChannel/);
+  assert.match(sync, /getChannels/);
+  assert.match(cloud, /await subscribeRoom/);
+  assert.match(cloud, /Snapshot already landed/);
+});

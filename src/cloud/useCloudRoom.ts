@@ -623,7 +623,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
             }
           });
         });
-        unsubRef.current = subscribeRoom(supabase, targetRoomId, (await supabase.auth.getUser()).data.user?.id ?? "anon", {
+        try {
+          unsubRef.current = await subscribeRoom(supabase, targetRoomId, (await supabase.auth.getUser()).data.user?.id ?? "anon", {
           onRoom: scheduleReload,
           onCommentUpsert: scheduleReload,
           onStrokeInsert: scheduleReload,
@@ -662,9 +663,20 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
               // 刻意 loadWhiteboard 補齊斷線期間漏掉的增量。
               if (activeWhiteboardRef.current) void loadWhiteboard(activeWhiteboardRef.current);
             }
-            setStatus((s) => (connected ? (pending.current.length ? "offline-pending" : "synced") : "connecting"));
+            setStatus((s) => {
+              if (connected) return pending.current.length ? "offline-pending" : "synced";
+              // A loaded snapshot is not "正在確認身分". Realtime drop stays
+              // on the last honest room state until the next successful bind.
+              if (s === "synced" || s === "offline-pending" || s === "error") return s;
+              return "connecting";
+            });
           },
         });
+        } catch {
+          // Snapshot already landed. Realtime is transient; a leftover channel
+          // must not turn a loaded empty room into a fake load-error.
+          unsubRef.current = () => undefined;
+        }
       } catch (err) {
         if (cancelled) return;
         if (isInvalidInvite(err)) {

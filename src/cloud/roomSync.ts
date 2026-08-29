@@ -37,14 +37,19 @@ export type Unsubscribe = () => void;
  * count. Realtime is transient: the source of truth stays in Postgres, so a
  * missed event is healed by the next loadRoom.
  */
-export function subscribeRoom(
+export async function subscribeRoom(
   supabase: SupabaseClient,
   roomId: string,
   userId: string,
   handlers: SyncHandlers,
-): Unsubscribe {
+): Promise<Unsubscribe> {
+  const topic = `room:${roomId}`;
+  // channel() reuses a leftover joined channel; adding .on() after subscribe()
+  // throws and used to flip a loaded empty room into a fake load-error.
+  const leftovers = supabase.getChannels().filter((ch) => ch.topic === `realtime:${topic}` || ch.topic === topic);
+  await Promise.all(leftovers.map((ch) => supabase.removeChannel(ch)));
   const filter = `room_id=eq.${roomId}`;
-  const channel: RealtimeChannel = supabase.channel(`room:${roomId}`, {
+  const channel: RealtimeChannel = supabase.channel(topic, {
     config: { presence: { key: userId } },
   });
 
