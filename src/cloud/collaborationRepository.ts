@@ -653,6 +653,16 @@ export async function deleteEdge(supabase: SupabaseClient, roomId: string, edgeI
   if (error) throw new CloudError(error.message, "whiteboard-edge");
 }
 
+export async function updateDiscussion(supabase: SupabaseClient, message: Pick<DiscussionMessage, "id" | "roomId" | "body">): Promise<void> {
+  const { data, error } = await supabase.from("room_discussion_messages").update({
+    body: message.body,
+  }).eq("id", message.id).eq("room_id", message.roomId).abortSignal(AbortSignal.timeout(12000));
+  const accepted = acceptDiscussionInsert({ error, data });
+  if (!accepted.ok) {
+    throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : (error?.message ?? "discussion update failed"), "discussion");
+  }
+}
+
 export async function insertDiscussion(supabase: SupabaseClient, message: DiscussionMessage): Promise<void> {
   // 討論訊息的 insert 必須有 deadline（PR-08b 離線矩陣發現）：行動網路
   // 死區（與 CDP offline 模擬一致）的 fetch 會「懸掛而非拒絕」— 沒有

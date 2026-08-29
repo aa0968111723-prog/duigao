@@ -92,6 +92,7 @@ import {
   insertDecision,
   insertAiApplyAudit,
   insertDiscussion,
+  updateDiscussion as repoUpdateDiscussion,
   insertEdge,
   discussionFromRow,
   nodeFromRow,
@@ -140,6 +141,7 @@ export type CloudWrites = {
   createPoll: (poll: RoomPoll) => void;
   votePoll: (vote: PollVote) => void;
   insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
+  updateDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
   /** AI 套用稽核列（0019）。回傳成敗；失敗不重試 — 討論串訊息是人看的 fallback。 */
   recordAiApplyAudit?: (entry: { proposalId: string; proposalType: string; label: string }) => Promise<boolean>;
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
@@ -1148,6 +1150,18 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
           setStatus(pending.current.length ? "offline-pending" : "synced");
           return true;
         }
+        setStatus("offline-pending");
+        return false;
+      }
+    },
+    updateDiscussion: async (message) => {
+      if (!supabase || !boundRef.current) return false;
+      setStatus("syncing");
+      try {
+        await repoUpdateDiscussion(supabase, message);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+        return true;
+      } catch {
         setStatus("offline-pending");
         return false;
       }

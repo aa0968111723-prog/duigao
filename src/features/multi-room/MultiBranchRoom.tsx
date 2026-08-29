@@ -89,6 +89,7 @@ export type MultiBranchRoomApi = {
   sendChat: () => void;
   onSendDiscussion: (input?: { body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => void;
   onSupportDiscussion: (messageId: string, add: boolean) => void;
+  onEditDiscussion?: (messageId: string, body: string) => void;
   onCreateWhiteboard: (title: string) => void;
   onArchiveWhiteboard: (id: string) => void;
   onOpenWhiteboard: (id: string | null) => void;
@@ -975,6 +976,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                         else api.sendChat();
                       },
                       onSupport: api.onSupportDiscussion,
+                      onEditMessage: api.onEditDiscussion,
                       onCreatePoll: createPoll,
                       onAddToBoard: api.onAddMessageToBoard,
                       onOpenBoardNode: (whiteboardId, nodeId) => {

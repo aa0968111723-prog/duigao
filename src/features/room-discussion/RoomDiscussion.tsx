@@ -2,6 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { UniversalIntake, type IntakeHandle } from "../../components/UniversalIntake";
 import { anchorFromDiscussion, openTarget } from "../../lib/contextAnchor";
 import { indexMessages, replySnippet, resolveReply, type ReplyReference } from "../collaboration/replies";
+import {
+  attachmentCiteReply,
+  canEditDiscussion,
+  decisionDraftTitle,
+  discussionEditPatch,
+  messageIsEdited,
+  workCiteFromBoard,
+  workCiteFromBranch,
+} from "../collaboration/discussionHonesty";
 import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
@@ -28,6 +37,8 @@ export type RoomDiscussionApi = {
   onOpenBoardNode: (whiteboardId: string, nodeId?: string) => void;
   onCreateDecision: (title: string) => void;
   onFinalizeDecision: (id: string) => void;
+  /** 作者改自己的文字。0022 允許改 body，不改作者。 */
+  onEditMessage?: (messageId: string, body: string) => void;
   onOpenContent?: (branchId: string) => void;
   hideTabs?: boolean;
   pane?: "chat" | "board";
@@ -174,6 +185,10 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [menuId, setMenuId] = useState<string | null>(null);
   const [boardPick, setBoardPick] = useState<DiscussionMessage | null>(null);
   const [reply, setReply] = useState<DiscussionMessage | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [decisionDraft, setDecisionDraft] = useState("");
+  const [citeSheet, setCiteSheet] = useState<"work" | "attachment" | null>(null);
 
   const showDecisions = api.showDecisions ?? true;
   const showRoomActions = api.showRoomActions ?? true;
@@ -323,7 +338,29 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         <div>
           <div className="project-section-title-row">
             <h3>待決定</h3>
-            {api.canManage && <button type="button" className="project-text-button" aria-label="新增待決定" onClick={() => api.onCreateDecision("待決定：主視覺")}>新增</button>}
+            {api.canManage && (
+              <form
+                className="rd-decision-draft"
+                data-testid="decision-draft"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const title = decisionDraftTitle(decisionDraft);
+                  if (!title) return;
+                  api.onCreateDecision(title);
+                  setDecisionDraft("");
+                }}
+              >
+                <input
+                  className="text-input"
+                  value={decisionDraft}
+                  onChange={(event) => setDecisionDraft(event.target.value)}
+                  aria-label="待決定草稿"
+                  placeholder="待決定標題"
+                  data-testid="decision-draft-input"
+                />
+                <button type="submit" className="project-text-button" data-testid="decision-draft-add" disabled={!decisionDraftTitle(decisionDraft)}>新增</button>
+              </form>
+            )}
           </div>
           {pending.map((item) => (
             <article className="rd-decision" key={item.id} data-testid={`decision-${item.id}`}>
@@ -356,9 +393,37 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               <header>
                 <span className="rd-dot" style={{ background: message.authorColor }} />
                 <b>{message.authorName}</b>
+                {messageIsEdited(message) ? <span className="rd-edited" data-testid="discussion-edited">已編輯</span> : null}
                 <time>{timeLabel(message.createdAt)}</time>
               </header>
-              <p>{message.body}</p>
+              {editingId === message.id ? (
+                <form
+                  className="rd-edit-form"
+                  data-testid="discussion-edit-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const patch = discussionEditPatch(editDraft);
+                    if (!patch || !api.onEditMessage) return;
+                    api.onEditMessage(message.id, patch.body);
+                    setEditingId(null);
+                  }}
+                >
+                  <textarea
+                    className="text-input"
+                    value={editDraft}
+                    onChange={(event) => setEditDraft(event.target.value)}
+                    aria-label="編輯訊息"
+                    data-testid="discussion-edit-input"
+                    rows={3}
+                  />
+                  <div className="rd-actions">
+                    <button type="submit" data-testid="discussion-edit-save" disabled={!discussionEditPatch(editDraft)}>儲存</button>
+                    <button type="button" onClick={() => setEditingId(null)}>取消</button>
+                  </div>
+                </form>
+              ) : (
+                <p>{message.body}</p>
+              )}
               <ReplyRef reference={resolveReply(message, byId)} onJump={jumpToMessage} />
               {(message.kind === "whiteboard" || message.kind === "node") && (
                 <button
@@ -409,6 +474,13 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               <div className="rd-actions">
                 <button type="button" onClick={() => setReply(message)}>回覆</button>
                 <button type="button" onClick={() => api.onSupport(message.id, !supported)}>支持{supportCount ? ` ${supportCount}` : ""}</button>
+                {api.onEditMessage && canEditDiscussion(message, api.userId, sendState) && (
+                  <button
+                    type="button"
+                    data-testid="discussion-edit"
+                    onClick={() => { setEditingId(message.id); setEditDraft(message.body); }}
+                  >編輯</button>
+                )}
                 {showRoomActions && api.canManage && <button type="button" onClick={() => api.onCreatePoll(message.body || "要不要這樣做？", ["贊成", "再想想"])}>建立投票</button>}
                 {showRoomActions && <button type="button" onClick={() => setBoardPick(message)}>加入白板</button>}
               </div>
@@ -494,6 +566,22 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               </button>
             </>
           )}
+          <button
+            type="button"
+            className="rd-attach-button"
+            aria-label="引用房間內容"
+            data-testid="composer-cite-work"
+            onClick={() => setCiteSheet("work")}
+          >引用</button>
+          {api.messages.some((item) => item.kind === "attachment") && (
+            <button
+              type="button"
+              className="rd-attach-button"
+              aria-label="引用附件"
+              data-testid="composer-cite-attachment"
+              onClick={() => setCiteSheet("attachment")}
+            >附件</button>
+          )}
           {api.attachUpload && (
             <div
               className={`rd-attach-progress${api.attachUpload.phase === "failed" ? " is-failed" : ""}`}
@@ -544,6 +632,87 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               {!api.boards.some((board) => !board.archivedAt) && <p className="project-muted">先建立一塊白板</p>}
             </div>
             <button type="button" className="project-sheet-close" onClick={() => setBoardPick(null)}>取消</button>
+          </section>
+        </div>
+      )}
+      {citeSheet === "work" && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setCiteSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="引用房間內容">
+            <div className="wb-sheet" data-testid="cite-work">
+              <h3>引用房間內容</h3>
+              <p className="project-muted">卡片只記既有分支／白板 id，不改原稿。</p>
+              <div className="wb-options">
+                {(api.room.branches ?? []).map((branch) => {
+                  const cite = workCiteFromBranch(branch);
+                  if (!cite) return null;
+                  return (
+                    <button
+                      type="button"
+                      className="wb-card"
+                      key={branch.id}
+                      data-testid={`cite-work-${branch.id}`}
+                      onClick={() => {
+                        api.onSend({ kind: cite.kind, body: cite.body, payload: cite.payload });
+                        setCiteSheet(null);
+                      }}
+                    >
+                      {branch.name}
+                    </button>
+                  );
+                })}
+                {api.boards.filter((board) => !board.archivedAt).map((board) => {
+                  const cite = workCiteFromBoard(board);
+                  return (
+                    <button
+                      type="button"
+                      className="wb-card"
+                      key={board.id}
+                      data-testid={`cite-work-board-${board.id}`}
+                      onClick={() => {
+                        api.onSend({ kind: cite.kind, body: cite.body, payload: cite.payload });
+                        setCiteSheet(null);
+                      }}
+                    >
+                      {board.title}
+                    </button>
+                  );
+                })}
+              </div>
+              {!(api.room.branches ?? []).some((branch) => workCiteFromBranch(branch)) && !api.boards.some((board) => !board.archivedAt) && (
+                <p className="project-muted">這個房間還沒有文宣、影片、企劃或白板可以引用。</p>
+              )}
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => setCiteSheet(null)}>取消</button>
+          </section>
+        </div>
+      )}
+      {citeSheet === "attachment" && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setCiteSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="引用附件">
+            <div className="wb-sheet" data-testid="cite-attachment">
+              <h3>引用附件</h3>
+              <p className="project-muted">回覆既有附件卡，不另建一列假附件。</p>
+              {api.messages.filter((item) => item.kind === "attachment").map((item) => {
+                const cite = attachmentCiteReply(item);
+                if (!cite) return null;
+                return (
+                  <button
+                    type="button"
+                    className="wb-card"
+                    key={item.id}
+                    data-testid={`cite-attachment-${item.id}`}
+                    onClick={() => {
+                      const source = api.messages.find((row) => row.id === cite.replyToId);
+                      if (source) setReply(source);
+                      setCiteSheet(null);
+                    }}
+                  >
+                    {cite.quotedBody}
+                  </button>
+                );
+              })}
+            </div>
+            <button type="button" className="project-sheet-close" onClick={() => setCiteSheet(null)}>取消</button>
           </section>
         </div>
       )}

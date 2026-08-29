@@ -213,6 +213,26 @@ try {
     await page.getByRole("button", { name: "送出" }).click();
     check("房間討論可送出文字", (await page.getByTestId("discussion-feed").innerText()).includes("先把招生流程攤在白板上"));
     check("送出後看得到最新一則", await page.locator('[data-testid="discussion-feed"] [data-latest="true"]').innerText().then((text) => text.includes("先把招生流程攤在白板上")));
+    await page.getByTestId("discussion-edit").click();
+    await page.getByTestId("discussion-edit-input").fill("先把招生流程攤在白板上（改過）");
+    await page.getByTestId("discussion-edit-save").click();
+    check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
+    check("改過的訊息標已編輯", await page.getByTestId("discussion-edited").count() === 1);
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_edit_390.png"), fullPage: true });
+    await page.getByTestId("decision-draft-input").fill("主視覺採 B");
+    await page.getByTestId("decision-draft-add").click();
+    check("待決定草稿要人填標題", (await page.getByTestId("decision-area").innerText()).includes("主視覺採 B"));
+    await page.getByTestId("composer-cite-work").click();
+    await page.waitForSelector('[data-testid="cite-work"]', { timeout: 8000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_cite_work_390.png"), fullPage: true });
+    await page.getByTestId("cite-work").getByRole("button", { name: "擺攤文宣" }).click();
+    check("引用文宣卡進討論", (await page.getByTestId("discussion-feed").innerText()).includes("擺攤文宣"));
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_cite_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
     await page.getByRole("button", { name: "白板", exact: true }).click();
     await page.getByLabel("白板名稱").fill("招生規劃");

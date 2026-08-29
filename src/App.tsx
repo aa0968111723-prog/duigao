@@ -141,6 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
+import { canEditDiscussion, discussionEditPatch, isMemberActor } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -1869,6 +1870,22 @@ export function App() {
     [cloud.userId, guest, updateRoom],
   );
 
+  const editDiscussion = useCallback(
+    (messageId: string, body: string) => {
+      const userId = cloud.userId ?? guest?.id;
+      const patch = discussionEditPatch(body);
+      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
+      if (!userId || !patch || !current || !canEditDiscussion(current, userId)) return;
+      const next = { ...current, body: patch.body, updatedAt: Date.now() };
+      updateRoom((r) => ({
+        ...r,
+        discussion: (r.discussion ?? []).map((item) => item.id === messageId ? next : item),
+      }));
+      void cloudRef.current.writes.updateDiscussion?.(next);
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
   const createWhiteboard = useCallback(
     (title: string): Whiteboard | undefined => {
       if (cloud.boundRoomId && !cloud.canManageMedia) {
@@ -2130,6 +2147,11 @@ export function App() {
 
   const createDecision = useCallback(
     (title: string, source?: { type: "poll"; id: string }, status: "pending" | "decided" = "pending") => {
+      const actor = cloud.userId ?? guest?.id ?? "local";
+      if (!isMemberActor(actor)) {
+        showToast("AI 不能代替成員建立決策。", { tone: "error" });
+        return;
+      }
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者不能建立決策紀錄。", { tone: "error" });
         return;
@@ -2144,7 +2166,7 @@ export function App() {
         sourceId: source?.id,
         createdBy: cloud.userId ?? guest?.id ?? "local",
         finalizedAt: status === "decided" ? Date.now() : undefined,
-        finalizedBy: status === "decided" ? cloud.userId ?? guest?.id : undefined,
+        finalizedBy: status === "decided" ? actor : undefined,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         version: 1,
@@ -2157,6 +2179,11 @@ export function App() {
 
   const finalizeDecision = useCallback(
     (id: string) => {
+      const actor = cloud.userId ?? guest?.id ?? "local";
+      if (!isMemberActor(actor)) {
+        showToast("AI 不能代替成員確認決策。", { tone: "error" });
+        return;
+      }
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者不能標示決策。", { tone: "error" });
         return;
@@ -3206,6 +3233,7 @@ export function App() {
         sendChat: () => sendDiscussion(),
         onSendDiscussion: sendDiscussion,
         onSupportDiscussion: supportDiscussion,
+        onEditDiscussion: editDiscussion,
         onCreateWhiteboard: createWhiteboard,
         onArchiveWhiteboard: archiveWhiteboard,
         onOpenWhiteboard: (id) => {
