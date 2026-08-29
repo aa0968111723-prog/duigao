@@ -107,10 +107,13 @@ export function swipeIntent(sample: SwipeSample): "prev" | "next" | null {
   const absX = Math.abs(sample.dx);
   const absY = Math.abs(sample.dy);
   if (absX < 12) return null;                    // 誤觸
-  // 垂直位移的**絕對上限**：40px 已經足夠捲動一整條診斷，
-  // 只看比例的話「dx -70 / dy 49」也算換頁，而那一下使用者是想捲清單的
-  //（對抗審查實測到的）。比例與絕對值兩條都要過。
-  if (absY > 40) return null;
+  // 比例 2.0：水平位移要有垂直的兩倍才算換頁。
+  //
+  // 這一條自己就處理掉所有的捲動情境（-70/49 與 -80/57 都被擋下）。
+  // 曾經另外加過一個「垂直位移不得超過 40px」的絕對上限，但變異測試指出
+  // 它殺不死 —— 而追下去發現它不只冗餘，還**有害**：
+  // 「水平 200px、垂直 60px」是一次明確的滑動意圖，那個上限會把它擋掉。
+  // 已移除。
   if (absX < absY * 2) return null;              // 主要是垂直，讓它捲動
   const fast = sample.elapsedMs > 0 && absX / sample.elapsedMs > 0.5; // px/ms
   if (absX < 56 && !fast) return null;           // 慢速的短滑動不算

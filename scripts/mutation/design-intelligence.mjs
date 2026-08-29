@@ -109,7 +109,7 @@ const MUTANTS = [
   [F.sanitize, "外部內容可以是 approved", 'return content.suspicious.length > 0 ? "unverified" : "machine";', 'return "machine";'],
 
   // ---- 研究層 ----
-  [F.research, "快取鍵不含房間 id", "    const cacheKey = `${options.roomId}|${query}`;", "    const cacheKey = query;"],
+  [F.research, "快取鍵不含房間 id", "  return `${roomId}|${query}`;", "  return query;"],
   [F.research, "共用請求吃第一個呼叫端的 signal", "        response = await options.transport({ roomId: options.roomId, query, timeoutMs: filters?.timeoutMs });", "        response = await options.transport({ roomId: options.roomId, query, timeoutMs: filters?.timeoutMs }, filters?.signal);"],
   [F.research, "上游限流被當成自己的配額用完", '        const upstream = response.body.error === "UPSTREAM_RATE_LIMITED";', "        const upstream = false;"],
   [F.research, "沒設定也累積成斷路器失敗", "      if (response.status === 503) {", "      if (false) {"],
@@ -118,7 +118,7 @@ const MUTANTS = [
 
   // ---- 提案呈現 ----
   [F.proposalView, "沒有權限也放行", '  if (!canApply) return { enabled: false, reason: "你在這個房間沒有修改作品的權限" };', ""],
-  [F.proposalView, "斜向手勢也算換頁", "  if (absY > 40) return null;", ""],
+  [F.proposalView, "斜向手勢也算換頁（比例放寬到 1.4）", "  if (absX < absY * 2) return null;", "  if (absX < absY * 1.4) return null;"],
   [F.proposalView, "滑到頭會繞回", "  return Math.max(0, Math.min(count - 1, target));", "  return ((target % count) + count) % count;"],
   [F.proposalView, "極矮視窗不限制 peek", "    const peekPx = Math.max(32, Math.min(56, Math.round(viewport.height * 0.12)));", "    const peekPx = 56;"],
   [F.proposalView, "已處理的提案仍說「沒有找到問題」", "  const processed = PROCESSED[proposal.status];", "  const processed = undefined as string | undefined;"],

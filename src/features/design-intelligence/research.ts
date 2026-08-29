@@ -139,6 +139,22 @@ function raceSignal<T>(promise: Promise<T>, signal: AbortSignal | undefined, onA
   });
 }
 
+/**
+ * 快取鍵。
+ *
+ * **匯出是為了讓它可以被直接斷言。** 目前每個房間各有自己的 provider 實例，
+ * 所以快取本來就不會跨房共用 —— 也就是說「鍵裡有沒有 roomId」用行為測不出來
+ * （變異測試證實：拿掉 roomId，所有測試仍然全綠）。
+ *
+ * 但那個「不會跨房」是**呼叫端的用法**，不是這個模組保證的事。哪天有人共用
+ * 一個實例，甲房就會吃到乙房的答案，而那是靜默的跨租戶洩漏。
+ *
+ * 所以把契約本身變成可測的：鍵必須包含 roomId。
+ */
+export function cacheKeyFor(roomId: string, query: string): string {
+  return `${roomId}|${query}`;
+}
+
 export function createResearchProvider(options: ResearchProviderOptions): ResearchProvider & {
   diagnostics(): ResearchDiagnostics;
   clearCache(): void;
@@ -205,12 +221,7 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
     }
     const query = built.query;
 
-    // 快取鍵含 roomId。
-    //
-    // 目前每個房間各有自己的 provider 實例，所以快取本來就不會跨房共用；
-    // 但那是**呼叫端的用法**，不是這個模組保證的事。哪天有人共用一個實例，
-    // 甲房就會吃到乙房的答案。把 roomId 放進鍵裡，讓它不依賴用法。
-    const cacheKey = `${options.roomId}|${query}`;
+    const cacheKey = cacheKeyFor(options.roomId, query);
     const cached = cache.get(cacheKey);
     if (cached && now - cached.storedAt < config.cacheTtlMs) {
       return { ...cached.result, cacheStatus: "hit" };

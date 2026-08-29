@@ -9,6 +9,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import {
+  cacheKeyFor,
   createResearchProvider,
   failureOf,
   researchToKnowledgeCandidates,
@@ -49,8 +50,28 @@ function recorder(initial: () => { status: number; body: Record<string, unknown>
     respond: (fn) => {
       responder = fn;
     },
-    transport: async (body) => {
+    transport: async (body, signal) => {
       calls.push({ query: body.query });
+      // **真的尊重 signal。** 測試用的 transport 如果忽略它，
+      // 「把呼叫端的 signal 傳給共用請求」這個錯誤就殺不死了 ——
+      // 變異測試指出過（假的替身讓真的錯誤看起來沒差別）。
+      if (signal) {
+        return await new Promise((resolve, reject) => {
+          const onAbort = () => reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
+          if (signal.aborted) return onAbort();
+          signal.addEventListener("abort", onAbort, { once: true });
+          Promise.resolve(responder()).then(
+            (value) => {
+              signal.removeEventListener("abort", onAbort);
+              resolve(value);
+            },
+            (error) => {
+              signal.removeEventListener("abort", onAbort);
+              reject(error);
+            },
+          );
+        });
+      }
       return responder();
     },
   };
@@ -437,4 +458,16 @@ test("status() 記得後端真的說過什麼，不會一直宣稱就緒", async
   research.clearCache();
   await research.search("另一個問題");
   assert.equal((await research.status()).state, "ready");
+});
+
+test("快取鍵一定包含房間 id（契約，不是靠用法）", () => {
+  // 這條用不出行為來測：每個房間各有自己的 provider 實例，所以拿掉 roomId
+  // 之後所有行為測試仍然全綠（變異測試證實）。但那個「不會跨房」是呼叫端的
+  // 用法，不是這個模組保證的事 —— 共用一個實例就是靜默的跨租戶洩漏。
+  // 所以直接斷言契約本身。
+  const a = cacheKeyFor("room-a", "內文對比要多少");
+  const b = cacheKeyFor("room-b", "內文對比要多少");
+  assert.notEqual(a, b, "不同房間、同一個問題必須是不同的鍵");
+  assert.ok(a.includes("room-a"));
+  assert.equal(cacheKeyFor("room-a", "內文對比要多少"), a, "同樣的輸入要得到同樣的鍵");
 });

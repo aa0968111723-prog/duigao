@@ -337,13 +337,23 @@ test("橫放手機收起的抽屜也在上限內", () => {
   assert.ok(occupiedRatio(layout, landscape, false) <= 0.13);
 });
 
-test("斜向的快速滑動不會吃掉垂直捲動", () => {
-  // 49–57px 的垂直位移已經足夠捲一整條診斷。只看比例的話這兩下都會換頁。
+test("斜向的滑動不會吃掉垂直捲動，但大幅度的滑動仍然換頁", () => {
+  // 49–57px 的垂直位移已經足夠捲一整條診斷。
   assert.equal(swipeIntent({ dx: -70, dy: 49, elapsedMs: 80 }), null);
   assert.equal(swipeIntent({ dx: -80, dy: 57, elapsedMs: 200 }), null);
   // 幾乎水平的仍然要換頁
   assert.equal(swipeIntent({ dx: -90, dy: 20, elapsedMs: 300 }), "next");
   assert.equal(swipeIntent({ dx: -70, dy: 30, elapsedMs: 200 }), "next");
+
+  // **大幅度的斜向滑動是明確的意圖，不該被擋。**
+  // 曾經加過「垂直位移不得超過 40px」的絕對上限，那會把下面這兩下擋掉 ——
+  // 使用者橫向拉了 200px，那不是在捲清單。
+  assert.equal(swipeIntent({ dx: -200, dy: 60, elapsedMs: 300 }), "next");
+  assert.equal(swipeIntent({ dx: 300, dy: 80, elapsedMs: 400 }), "prev");
+
+  // 比例是唯一的判準。邊界寫清楚：**未達兩倍才擋**，剛好兩倍就通過。
+  assert.equal(swipeIntent({ dx: -99, dy: 50, elapsedMs: 300 }), null, "1.98 倍不夠");
+  assert.equal(swipeIntent({ dx: -100, dy: 50, elapsedMs: 300 }), "next", "剛好 2 倍通過");
 });
 
 test("elapsedMs 為 0 或負數不會炸，也不會被當成無限快", () => {
