@@ -47,7 +47,7 @@ export function DiscussionDrawer({
   onAttach?: (files: File[]) => void;
   attachBusy?: boolean;
   onReject?: (reason: string) => void;
-  onSendLink?: (url: string) => boolean;
+  onSendLink?: (url: string, reply?: { replyToId: string; quotedBody: string }) => boolean;
   resolveAssetUrl?: (path: string) => Promise<string>;
 }) {
   const [draft, setDraft] = useState("");

@@ -54,3 +54,29 @@
 .rd-voice-btn { min-height: 32px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line, rgba(0,0,0,0.15)); background: transparent; color: inherit; cursor: pointer; }
 .rd-voice-btn.is-leave { color: var(--danger); border-color: rgba(215,79,104,.35); }
 .rd-voice-error { color: var(--danger); width: 100%; }
+
+/* 引用（PR-COMM-00）
+   引用是「指向來源」而不是「複製來源」：resolved 是可點的按鈕，點了回到
+   來源訊息；missing 是靜態卡，明講來源不在，快照只當引述。 */
+.rd-quote-link { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; border: 0; border-left: 3px solid var(--line); cursor: pointer; }
+.rd-quote-link:hover, .rd-quote-link:focus-visible { background: var(--panel); }
+.rd-quote.is-orphan { border-left: 3px solid var(--line-soft); color: var(--ink-faint); font-style: italic; }
+.rd-quote-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ink-dim); }
+.rd-quote-body { display: block; font-size: 13px; color: var(--ink-dim); overflow-wrap: anywhere; }
+.rd-quote-edited { font-weight: 400; font-size: 11px; color: var(--ink-faint); }
+/* 跳到來源之後短暫標記，讓「就是這一則」看得出來。 */
+.rd-msg.is-highlight { border-color: var(--accent, #c45c4a); background: var(--raise); }
+@media (prefers-reduced-motion: no-preference) {
+  .rd-msg.is-highlight { transition: background .3s ease, border-color .3s ease; }
+}
+
+/* composer 的回覆列：回覆中要看得見、而且要取消得掉。
+   舊版唯一的線索是 placeholder，打第一個字就消失，之後每一句都會被當成
+   那則的回覆送出（稽核 MSG-10）。 */
+.rd-composer { flex-wrap: wrap; }
+.rd-reply-bar { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; margin-bottom: 6px; border-radius: 10px; background: var(--raise); border-left: 3px solid var(--line); }
+.rd-reply-bar-text { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-reply-cancel { flex: 0 0 auto; min-width: 32px; min-height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-faint); font-size: 14px; cursor: pointer; }
+
+/* 長網址／長路徑不得撐爆訊息卡並讓整頁橫向捲動（360px 稽核 MSG-11）。 */
+.rd-msg p, .rd-msg .rd-attachment-name { overflow-wrap: anywhere; }

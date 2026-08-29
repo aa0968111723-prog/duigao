@@ -1227,6 +1227,97 @@ try {
   );
   ok("匿名讀不到白板 / 討論 / 決策", asAnon(`select count(*) from public.whiteboards;`).out !== "1" && asAnon(`select count(*) from public.room_discussion_messages;`).out !== "1");
 
+  // -------------------------------------------------------------------------
+  // 討論訊息的作者完整性（PR-COMM-00）
+  //
+  // 0019 的稽核列已經把「actor 冒名」當成必須擋下的類別，同一個房間裡卻可以
+  // 用別人的 uid 發討論訊息 — 訊息才是「誰同意了什麼」的原始證據。這組探針
+  // 用真實角色（不是超級使用者）直接打資料庫，繞過 client：任何成員都能用
+  // supabase-js 送出同樣的 insert。
+  // -------------------------------------------------------------------------
+  section("討論訊息作者完整性：0014 room_discussion_messages");
+  const forgedMsg = psql("select gen_random_uuid();").out;
+  const honestMsg = psql("select gen_random_uuid();").out;
+  const honest = as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${honestMsg}'::uuid, '${capRoom}'::uuid, '${reviewer}'::uuid, 'Reviewer', '我同意 B 版');`);
+  ok(
+    "成員可以用自己的 uid 發討論訊息",
+    !honest.failed,
+    honest.err,
+  );
+  const forge = as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${forgedMsg}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid, 'Owner', '我同意 B 版');`);
+  ok(
+    "冒名發訊息（author_user_id 填別人的 uid）被擋",
+    forge.failed,
+    forge.failed ? "" : "reviewer 成功以 owner 身分發言 — 決策證據可被偽造",
+  );
+  const relabel = as(reviewer, `update public.room_discussion_messages set author_user_id = '${owner}'::uuid where id = '${honestMsg}'::uuid;`);
+  ok(
+    "作者不能把自己的訊息改成別人發的",
+    relabel.failed || as(owner, `select author_user_id from public.room_discussion_messages where id = '${honestMsg}'::uuid;`).out === reviewer,
+    "編輯訊息不得改變作者",
+  );
+  const ownerRelabel = as(owner, `update public.room_discussion_messages set author_user_id = '${stranger}'::uuid where id = '${honestMsg}'::uuid;`);
+  ok(
+    "管理者也不能改寫訊息作者（洗白作者身分）",
+    ownerRelabel.failed || as(owner, `select author_user_id from public.room_discussion_messages where id = '${honestMsg}'::uuid;`).out === reviewer,
+    "can_manage_media 不該等於可以重寫作者",
+  );
+  ok(
+    "非成員不能對別人的房間發訊息",
+    as(stranger, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body) values ('${capRoom}'::uuid, '${stranger}'::uuid, 'Stranger', '插話');`).failed,
+  );
+  // 跨房回覆：複合外鍵 (reply_to_id, room_id) 應該擋下「在 B 房回覆 A 房的訊息」。
+  // 這條**必須**配一個正向對照：只驗負面的話，任何一種失敗（欄位打錯、
+  // 權限不足、SQL 語法錯）都會讓探針變綠 —— 本檔第一版就是欄位數與值數
+  // 對不上，於是它每次都「通過」，而且通過的原因跟外鍵毫無關係。
+  const crossRoomReply = as(owner, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body, reply_to_id) values ('${otherRoom}'::uuid, '${owner}'::uuid, 'Owner', '跨房回覆', '${honestMsg}'::uuid);`);
+  const sameRoomNoReply = as(owner, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body) values ('${otherRoom}'::uuid, '${owner}'::uuid, 'Owner', '同一句話但不回覆');`);
+  ok(
+    "reply_to_id 不能指向別的房間的訊息（且同一句話拿掉 reply_to_id 就寫得進去）",
+    crossRoomReply.failed && !sameRoomNoReply.failed,
+    crossRoomReply.failed
+      ? (sameRoomNoReply.failed ? `正向對照也失敗，所以上面那個失敗不能歸因於外鍵：${sameRoomNoReply.err}` : "")
+      : "跨房回覆竟然寫得進去",
+  );
+
+  // room_discussion_supports 是討論路徑上唯一一張完全沒有 RLS 探針的表
+  // （表情回應就存在這裡）。PK 是 (message_id, user_id)，insert/delete 都綁
+  // user_id = auth.uid()。client 的取消支持沒有帶 user_id 篩選，靠的正是
+  // 這條 delete policy 把範圍限制在自己那列 —— 沒有探針的話，policy 一旦
+  // 鬆掉，「取消自己的支持」會變成「清掉所有人的支持」而沒有人會發現。
+  section("表情回應：0014 room_discussion_supports RLS");
+  ok(
+    "成員可以支持一則訊息（user_id 由 default auth.uid() 填）",
+    !as(reviewer, `insert into public.room_discussion_supports (message_id, room_id) values ('${honestMsg}'::uuid, '${capRoom}'::uuid);`).failed,
+  );
+  ok(
+    "同一人同一則不會重複計數（PK 擋住）",
+    as(reviewer, `insert into public.room_discussion_supports (message_id, room_id) values ('${honestMsg}'::uuid, '${capRoom}'::uuid);`).failed
+      && as(owner, `select count(*) from public.room_discussion_supports where message_id = '${honestMsg}'::uuid;`).out === "1",
+  );
+  ok(
+    "不能以別人的身分支持",
+    as(reviewer, `insert into public.room_discussion_supports (message_id, room_id, user_id) values ('${honestMsg}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid);`).failed,
+  );
+  as(owner, `insert into public.room_discussion_supports (message_id, room_id) values ('${honestMsg}'::uuid, '${capRoom}'::uuid);`);
+  // client 端的取消支持是 delete ... eq(message_id).eq(room_id)，**沒有**帶
+  // user_id。RLS 必須把它限制在自己那列，否則一個人取消支持會清掉全部。
+  as(reviewer, `delete from public.room_discussion_supports where message_id = '${honestMsg}'::uuid and room_id = '${capRoom}'::uuid;`);
+  ok(
+    "取消支持只會刪掉自己那一列（client 的 delete 沒帶 user_id，靠 RLS 收斂）",
+    as(owner, `select count(*) from public.room_discussion_supports where message_id = '${honestMsg}'::uuid;`).out === "1"
+      && as(owner, `select count(*) from public.room_discussion_supports where message_id = '${honestMsg}'::uuid and user_id = '${owner}'::uuid;`).out === "1",
+  );
+  ok(
+    "非成員讀不到也寫不了別房的表情回應",
+    as(stranger, `select count(*) from public.room_discussion_supports where message_id = '${honestMsg}'::uuid;`).out === "0"
+      && as(stranger, `insert into public.room_discussion_supports (message_id, room_id) values ('${honestMsg}'::uuid, '${capRoom}'::uuid);`).failed,
+  );
+  ok(
+    "支持不能指向別的房間的訊息（複合外鍵）",
+    as(owner, `insert into public.room_discussion_supports (message_id, room_id) values ('${honestMsg}'::uuid, '${otherRoom}'::uuid);`).failed,
+  );
+
   section("協作工作台：0014 可以重跑");
   const collabShape = () => psql(`select
     (select count(*) from information_schema.tables where table_name in ('whiteboards','whiteboard_nodes','whiteboard_edges','room_discussion_messages','decision_records','voice_sessions')) || '/' ||
@@ -1235,6 +1326,17 @@ try {
   const collabBefore = collabShape();
   psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
   ok("重跑 0014 之後 tables / policies / triggers 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
+  // 0014 會 drop/create 同名的 room_discussion_insert policy，所以 0022 的
+  // 修補若只寫在 policy 上，任何一次 replay 都會把冒名的洞放回來。0022 因此
+  // 同時掛 trigger；這裡就是驗那道護欄真的撐過 replay。
+  ok(
+    "重跑 0014 之後仍然擋得住冒名發訊息（0022 的 trigger 不被 replay 洗掉）",
+    as(reviewer, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body) values ('${capRoom}'::uuid, '${owner}'::uuid, 'Owner', 'replay 之後的冒名');`).failed,
+  );
+  ok(
+    "重跑 0014 之後成員仍然發得出自己的訊息（護欄沒有擋到正常路徑）",
+    !as(reviewer, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body) values ('${capRoom}'::uuid, '${reviewer}'::uuid, 'Reviewer', 'replay 之後的正常發言');`).failed,
+  );
 
   section("素材庫：0016 RLS");
   const libRoom = psql("select gen_random_uuid();").out;

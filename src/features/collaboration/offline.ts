@@ -321,3 +321,26 @@ export function reconcileNodes(local: WhiteboardNode[], remote: WhiteboardNode[]
   for (const id of deleted) if (id) byId.delete(id);
   return [...byId.values()];
 }
+
+/**
+ * 快照裡的討論該不該覆蓋畫面上的討論（PR-COMM-00）。
+ *
+ * `loadCollaborationSummary` 原本把每個查詢結果寫成 `res.data ?? []`，於是一次
+ * 暫時性的 PostgREST 失敗會變成「這間房沒有訊息」，接著整包快照替換
+ * `room.discussion`，還會被寫回 IndexedDB —— 一次讀取失敗同時清空畫面與快取。
+ * 現在該函式改成拋錯，呼叫端的 catch 保持欄位不動，快照因此帶著
+ * `discussion === undefined` 抵達。
+ *
+ * 三條規則：
+ *   - 伺服器有回答（即使是空陣列）→ 採用。空就是真的空，不作弊。
+ *   - 伺服器沒回答（undefined）且是同一間房 → 保留現況，不抹掉。
+ *   - 伺服器沒回答且換了房 → 不可沿用上一間房的訊息，回 undefined。
+ */
+export function mergeDiscussionSnapshot<T>(
+  current: { id: string; discussion?: T[] } | null | undefined,
+  incoming: { id: string; discussion?: T[] },
+): T[] | undefined {
+  if (incoming.discussion !== undefined) return incoming.discussion;
+  if (current && current.id === incoming.id) return current.discussion;
+  return undefined;
+}

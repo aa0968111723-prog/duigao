@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiscussionMessage } from "../features/collaboration/types";
-import { reconcileOutbox, type OutboxEntry } from "./discussionOutboxCore";
+import { blockedRepliesTo, failedBlockingParentId, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "./discussionOutboxCore";
 
 export type OutboxState = "sending" | "failed";
 
@@ -33,6 +33,12 @@ export function useDiscussionOutbox(args: {
 } {
   const { insert, bound, boundRoomId, localRoomId, serverIds } = args;
   const [entries, setEntries] = useState<Record<string, OutboxEntry>>({});
+  // dispatch 需要讀「現在」的 entries／serverIds 才能判斷回覆的來源落地沒有，
+  // 而它是 useCallback([]) 的閉包 —— 用 ref 讀，不把它們放進相依。
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const serverIdsRef = useRef(serverIds);
+  serverIdsRef.current = serverIds;
   const insertRef = useRef(insert);
   insertRef.current = insert;
   const boundRef = useRef({ bound, boundRoomId });
@@ -41,6 +47,10 @@ export function useDiscussionOutbox(args: {
   const dispatch = useCallback(async (message: DiscussionMessage) => {
     const doInsert = insertRef.current;
     if (!doInsert) return;
+    // 回覆的來源還沒落地就先扣住：複合外鍵 (reply_to_id, room_id) 要求來源那
+    // 一列已經在資料庫裡，先送會撞外鍵變成「未送出」。來源 ack 之後下面會
+    // 把它放出去。entry 維持 sending —— 它確實還在排隊，不是失敗。
+    if (!isReplyParentReady(message, entriesRef.current, serverIdsRef.current)) return;
     const stampRoomId = boundRef.current.boundRoomId;
     const stamped = stampRoomId ? { ...message, roomId: stampRoomId } : message;
     const ok = await doInsert(stamped).catch(() => false);
@@ -52,7 +62,10 @@ export function useDiscussionOutbox(args: {
       if (entry.state === "acked") return current;
       if (ok) {
         // 成功 ≠ 快照已包含：轉 acked 留著當 ghost，等 serverIds 對帳。
-        return { ...current, [message.id]: { message: stamped, state: "acked" } };
+        const next = { ...current, [message.id]: { message: stamped, state: "acked" as const } };
+        // 來源落地了 → 被它擋住的回覆現在送得出去。
+        for (const waiting of blockedRepliesTo(message.id, next)) void dispatch(waiting);
+        return next;
       }
       // 死區 fetch 懸掛→abort 落地時網路常已恢復（PR-08b）：onLine 且
       // 這輪還沒自動補送過 → 立刻補一次（id 不變，重複=duplicate-key=
@@ -79,7 +92,17 @@ export function useDiscussionOutbox(args: {
     (messageId: string) => {
       setEntries((current) => {
         const entry = current[messageId];
-        if (!entry || entry.state !== "failed") return current;
+        if (!entry) return current;
+        // 回覆卡在失敗的來源後面時，重試要從來源開始 —— 先重送回覆一樣會
+        // 撞外鍵。來源 ack 之後 dispatch 會把等著的回覆放出去。
+        const blockingId = failedBlockingParentId(entry.message, current, serverIdsRef.current);
+        if (blockingId) {
+          const parent = current[blockingId];
+          if (!parent) return current;
+          void dispatch(parent.message);
+          return { ...current, [blockingId]: { ...parent, state: "sending", autoRetried: false } };
+        }
+        if (entry.state !== "failed") return current;
         void dispatch(entry.message);
         // 手動重試重置 autoRetried：這是新的一輪。
         return { ...current, [messageId]: { ...entry, state: "sending", autoRetried: false } };
@@ -146,7 +169,10 @@ export function useDiscussionOutbox(args: {
   const ghosts: DiscussionMessage[] = [];
   for (const [id, entry] of Object.entries(entries)) {
     if (!belongsNow(entry.message)) continue; // 換房瞬間的殘影也不畫
-    if (entry.state !== "acked") sendStates[id] = entry.state;
+    // 卡在失敗來源後面的回覆一起顯示失敗：永遠的「送出中」是假的送出中。
+    if (entry.state !== "acked") {
+      sendStates[id] = failedBlockingParentId(entry.message, entries, serverIds) ? "failed" : entry.state;
+    }
     if (!serverIds.has(id)) ghosts.push(entry.message);
   }
   ghosts.sort((a, b) => a.createdAt - b.createdAt);

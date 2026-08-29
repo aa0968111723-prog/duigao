@@ -199,6 +199,16 @@ export async function loadCollaborationSummary(supabase: SupabaseClient, roomId:
     supabase.from("decision_records").select("*").eq("room_id", roomId).order("updated_at", { ascending: false }),
     supabase.from("rooms").select("allow_board_edit").eq("id", roomId).maybeSingle(),
   ]);
+  // 查詢失敗不得退化成「這間房沒有訊息」。每個結果都寫成 `res.data ?? []`，
+  // 所以一次暫時性的 PostgREST 失敗（網路抖動、5xx、RLS 改動）會讓整條討論串
+  // 變成空陣列 —— 而快照會整包替換 room.discussion，還會被寫回 IndexedDB。
+  // 也就是一次讀取失敗可以同時清空畫面與本機快取。
+  //
+  // 這裡改成拋出。呼叫端（roomRepository 的 `catch { /* 0014 not applied yet */ }`）
+  // 因此保持欄位不動，而 App 的 applyRemoteRoom 有「空的不覆蓋非空的」防護，
+  // 使用者看到的是上一份好的快照，不是被抹掉的對話。
+  const failed = [boardsRes, discussionRes, supportsRes, decisionsRes, roomRes].find((res) => res.error);
+  if (failed?.error) throw new CloudError(failed.error.message, "collaboration-summary");
   return {
     whiteboards: ((boardsRes.data as WhiteboardRow[] | null) ?? []).map(whiteboardFromRow),
     nodes: [],

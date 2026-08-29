@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reconcileOutbox, type OutboxEntry } from "../../src/hooks/discussionOutboxCore.ts";
+import { blockedRepliesTo, failedBlockingParentId, isReplyParentReady, reconcileOutbox, type OutboxEntry } from "../../src/hooks/discussionOutboxCore.ts";
 import type { DiscussionMessage } from "../../src/features/collaboration/types.ts";
 
 function message(id: string, roomId: string): DiscussionMessage {
@@ -86,4 +86,81 @@ test("剛綁定：只補送屬於本房的 sending，failed/acked 不動", () =>
     { prevLocalRoomId: "cloud_y", prevBoundRoomId: null, localRoomId: "cloud_y", boundRoomId: "cloud_y" },
   );
   assert.deepEqual(toFlush.map((m) => m.id), ["s1"]);
+});
+
+// ---------------------------------------------------------------------------
+// 回覆順序（PR-COMM-00）
+//
+// (reply_to_id, room_id) 是複合外鍵，來源那一列必須先在資料庫裡。outbox 對
+// 每則訊息各發各的 insert，所以「回覆自己剛送出的那則」會賽跑。
+// ---------------------------------------------------------------------------
+
+function replyMessage(id: string, roomId: string, replyToId: string): DiscussionMessage {
+  return { ...message(id, roomId), replyToId };
+}
+
+test("來源還在 sending：回覆先扣住，不送出去撞外鍵", () => {
+  const entries = Object.fromEntries([entry("m1", "r", "sending")]);
+  const reply = replyMessage("m2", "r", "m1");
+  assert.equal(isReplyParentReady(reply, entries, new Set()), false);
+});
+
+test("來源已 acked：insert 已被接受，row 存在，回覆送得出去", () => {
+  const entries = Object.fromEntries([entry("m1", "r", "acked")]);
+  assert.equal(isReplyParentReady(replyMessage("m2", "r", "m1"), entries, new Set()), true);
+});
+
+test("來源在伺服器快照裡：本來就在資料庫，送得出去", () => {
+  assert.equal(isReplyParentReady(replyMessage("m2", "r", "m1"), {}, new Set(["m1"])), true);
+});
+
+test("來源根本不在 outbox：那是既有的伺服器訊息，不扣", () => {
+  assert.equal(isReplyParentReady(replyMessage("m2", "r", "old"), {}, new Set()), true);
+});
+
+test("沒有 replyToId 的一般訊息永遠不被扣住", () => {
+  const entries = Object.fromEntries([entry("m1", "r", "failed")]);
+  assert.equal(isReplyParentReady(message("m2", "r"), entries, new Set()), true);
+});
+
+test("來源 ack 之後放出被擋住的回覆，且照 createdAt 排序", () => {
+  const entries: Record<string, OutboxEntry> = {
+    m1: { message: message("m1", "r"), state: "acked" },
+    r2: { message: { ...replyMessage("r2", "r", "m1"), createdAt: 20 }, state: "sending" },
+    r1: { message: { ...replyMessage("r1", "r", "m1"), createdAt: 10 }, state: "sending" },
+    other: { message: replyMessage("other", "r", "zzz"), state: "sending" },
+  };
+  assert.deepEqual(blockedRepliesTo("m1", entries).map((m) => m.id), ["r1", "r2"]);
+});
+
+test("已經 failed 的回覆不會被 ack 路徑偷偷重送（重試是使用者的決定）", () => {
+  const entries: Record<string, OutboxEntry> = {
+    m1: { message: message("m1", "r"), state: "acked" },
+    r1: { message: replyMessage("r1", "r", "m1"), state: "failed" },
+  };
+  assert.deepEqual(blockedRepliesTo("m1", entries), []);
+});
+
+test("來源失敗時回覆一起算失敗 — 不得永遠停在假的「送出中」", () => {
+  const entries: Record<string, OutboxEntry> = {
+    m1: { message: message("m1", "r"), state: "failed" },
+    r1: { message: replyMessage("r1", "r", "m1"), state: "sending" },
+  };
+  assert.equal(failedBlockingParentId(entries.r1.message, entries, new Set()), "m1");
+});
+
+test("來源只是還在飛（sending）不算失敗：那時候「送出中」是誠實的", () => {
+  const entries: Record<string, OutboxEntry> = {
+    m1: { message: message("m1", "r"), state: "sending" },
+    r1: { message: replyMessage("r1", "r", "m1"), state: "sending" },
+  };
+  assert.equal(failedBlockingParentId(entries.r1.message, entries, new Set()), null);
+});
+
+test("來源失敗但其實已經在伺服器快照裡：不算擋路", () => {
+  const entries: Record<string, OutboxEntry> = {
+    m1: { message: message("m1", "r"), state: "failed" },
+    r1: { message: replyMessage("r1", "r", "m1"), state: "sending" },
+  };
+  assert.equal(failedBlockingParentId(entries.r1.message, entries, new Set(["m1"])), null);
 });
