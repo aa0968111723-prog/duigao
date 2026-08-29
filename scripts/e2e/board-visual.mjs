@@ -46,6 +46,39 @@ const SIZES = [
 
 void faults;
 
+async function dumpVisualPage(page) {
+  return page.evaluate(() => ({
+    href: location.href,
+    hasList: Boolean(document.querySelector('[data-testid="whiteboard-list"]')),
+    hasCanvas: Boolean(document.querySelector('[data-testid="wb-canvas"]')),
+    canvasBox: (() => {
+      const el = document.querySelector('[data-testid="wb-canvas"]');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    })(),
+    body: (document.body?.innerText || "").replace(/\s+/g, " ").slice(0, 280),
+  }));
+}
+
+/** Canvas uses flex:1 / min-height:0 — Playwright `visible` is false while the box is 0×0. */
+async function waitForWbCanvas(page) {
+  try {
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('[data-testid="wb-canvas"]');
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 40 && r.height > 40;
+      },
+      null,
+      { timeout: 45000 },
+    );
+  } catch {
+    throw new Error(`wb-canvas never usable: ${JSON.stringify(await dumpVisualPage(page))}`);
+  }
+}
+
 // ---- build＋static serve（沿 collaboration-workspace 模式） ----
 import http from "node:http";
 import { readFile } from "node:fs/promises";
@@ -122,8 +155,8 @@ try {
     const roomId = roomRow?.room_id ?? rows.whiteboards[0]?.room_id ?? null;
 
     await page.getByLabel("白板名稱").fill("視覺基準板");
-    await page.getByRole("button", { name: "建立白板" }).click();
-    await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+    await page.getByLabel("白板名稱").press("Enter");
+    await waitForWbCanvas(page);
     // 回列表拍「板清單」狀態
     await page.locator(".wb-focus-top .project-back-button").click({ force: true });
     await page.waitForSelector(".wb-list", { timeout: 10000 });
@@ -153,7 +186,7 @@ try {
       });
     }
     await page.locator(".wb-card").first().click();
-    await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+    await waitForWbCanvas(page);
     await page.waitForFunction(() => document.querySelectorAll(".wb-node").length >= 10, null, { timeout: 15000 });
     // 整理視角：固定 camera（fitCamera 由整理鍵觸發較穩定 — 直接等渲染穩）
     await page.waitForTimeout(600);
