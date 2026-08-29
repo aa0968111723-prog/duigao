@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isBranchNotSaved } from "./cloud/branchUpdateAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -1604,13 +1605,34 @@ export function App() {
         showToast("檢視者不能修改分支設定。", { tone: "error" });
         return;
       }
+      const previous = (roomRef.current ? normalizeRoomBranches(roomRef.current).branches ?? [] : []).find((branch) => branch.id === branchId);
       updateRoom((r) => ({
         ...r,
         branches: (normalizeRoomBranches(r).branches ?? []).map((branch) =>
           branch.id === branchId ? { ...branch, ...patch, updatedAt: Date.now() } : branch,
         ),
       }));
-      cloudRef.current.writes.updateBranch(branchId, patch);
+      void cloudRef.current.writes.updateBranch(branchId, patch).catch((err) => {
+        if (!isBranchNotSaved(err) || !previous) return;
+        updateRoom((r) => ({
+          ...r,
+          branches: (normalizeRoomBranches(r).branches ?? []).map((branch) => {
+            if (branch.id !== branchId) return branch;
+            const stillOurs =
+              (patch.name === undefined || branch.name === patch.name) &&
+              (patch.sortOrder === undefined || branch.sortOrder === patch.sortOrder) &&
+              (patch.status === undefined || branch.status === patch.status);
+            if (!stillOurs) return branch;
+            return {
+              ...branch,
+              ...(patch.name !== undefined ? { name: previous.name } : {}),
+              ...(patch.sortOrder !== undefined ? { sortOrder: previous.sortOrder } : {}),
+              ...(patch.status !== undefined ? { status: previous.status } : {}),
+            };
+          }),
+        }));
+        showToast("分支設定沒有存成，請再試一次。", { tone: "error" });
+      });
     },
     [cloud.boundRoomId, cloud.canManageMedia, showToast, updateRoom],
   );

@@ -23,6 +23,7 @@ import { roomMediaType } from "../lib/types";
 import { normalizeRoomBranches } from "../lib/roomBranches";
 import { ensureSession } from "./auth";
 import { CloudError } from "./errors";
+import { acceptBranchUpdateAck } from "./branchUpdateAck";
 import {
   dataUrlToBlob,
   proposalAssetPath,
@@ -1013,8 +1014,15 @@ export async function updateBranch(
     ...(patch.status !== undefined ? { status: patch.status } : {}),
     updated_at: new Date().toISOString(),
   };
-  const { error } = await supabase.from("room_branches").update(row).eq("id", branchId).eq("room_id", roomId);
+  const { data, error } = await supabase
+    .from("room_branches")
+    .update(row)
+    .eq("id", branchId)
+    .eq("room_id", roomId)
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "branch");
+  acceptBranchUpdateAck(data);
 }
 
 export async function upsertPlan(supabase: SupabaseClient, plan: PlanDocument, roomId: string): Promise<void> {

@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isBranchNotSaved } from "./branchUpdateAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -132,7 +133,7 @@ export type CloudWrites = {
   addVersion: (label: string, sortOrder: number, imageDataUrl: string, branchId?: string) => void;
   /** Resolves after the branch FK exists, so a first version/plan can follow it. */
   createBranch: (branch: RoomBranch) => Promise<void>;
-  updateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => void;
+  updateBranch: (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => Promise<void>;
   savePlan: (plan: PlanDocument) => void;
   createRelation: (relation: ContentRelation) => void;
   deleteRelation: (relationId: string) => void;
@@ -1079,7 +1080,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       });
     },
     createBranch: (branch) => runAndWait(`branch-insert:${branch.id}`, () => insertBranch(supabase!, branch)),
-    updateBranch: (branchId, patch) => run(`branch:${branchId}`, () => updateBranch(supabase!, boundRef.current!, branchId, patch)),
+    updateBranch: async (branchId, patch) => {
+      const rid = boundRef.current;
+      const key = `branch:${branchId}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await updateBranch(supabase, rid, branchId, patch);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isBranchNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => updateBranch(supabase, rid, branchId, patch),
+        });
+        setStatus("offline-pending");
+      }
+    },
     savePlan: (plan) => run(`plan:${plan.branchId}`, () => upsertPlan(supabase!, plan, boundRef.current!)),
     createRelation: (relation) => run(`relation:${relation.id}`, () => insertRelation(supabase!, relation)),
     deleteRelation: (relationId) => run(`relation-del:${relationId}`, () => deleteRelation(supabase!, boundRef.current!, relationId)),
