@@ -1171,7 +1171,19 @@ export async function start(port = PORT, options = {}) {
       CUTOS_API_KEY: "e2e-cutos-key",
     });
   }
-  return new Promise((resolve) => server.listen(port, () => resolve(server)));
+  return new Promise((resolve, reject) => {
+    const onError = (err) => {
+      server.off("listening", onListen);
+      reject(err);
+    };
+    const onListen = () => {
+      server.off("error", onError);
+      resolve(server);
+    };
+    server.once("error", onError);
+    server.once("listening", onListen);
+    server.listen(port, "127.0.0.1");
+  });
 }
 
 // `node scripts/e2e/mock-supabase.mjs` runs it standalone for manual poking.
