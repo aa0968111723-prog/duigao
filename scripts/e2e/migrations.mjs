@@ -1227,6 +1227,50 @@ try {
   );
   ok("匿名讀不到白板 / 討論 / 決策", asAnon(`select count(*) from public.whiteboards;`).out !== "1" && asAnon(`select count(*) from public.room_discussion_messages;`).out !== "1");
 
+  // -------------------------------------------------------------------------
+  // 討論訊息的作者完整性（PR-COMM-00）
+  //
+  // 0019 的稽核列已經把「actor 冒名」當成必須擋下的類別，同一個房間裡卻可以
+  // 用別人的 uid 發討論訊息 — 訊息才是「誰同意了什麼」的原始證據。這組探針
+  // 用真實角色（不是超級使用者）直接打資料庫，繞過 client：任何成員都能用
+  // supabase-js 送出同樣的 insert。
+  // -------------------------------------------------------------------------
+  section("討論訊息作者完整性：0014 room_discussion_messages");
+  const forgedMsg = psql("select gen_random_uuid();").out;
+  const honestMsg = psql("select gen_random_uuid();").out;
+  const honest = as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${honestMsg}'::uuid, '${capRoom}'::uuid, '${reviewer}'::uuid, 'Reviewer', '我同意 B 版');`);
+  ok(
+    "成員可以用自己的 uid 發討論訊息",
+    !honest.failed,
+    honest.err,
+  );
+  const forge = as(reviewer, `insert into public.room_discussion_messages (id, room_id, author_user_id, author_name, body) values ('${forgedMsg}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid, 'Owner', '我同意 B 版');`);
+  ok(
+    "冒名發訊息（author_user_id 填別人的 uid）被擋",
+    forge.failed,
+    forge.failed ? "" : "reviewer 成功以 owner 身分發言 — 決策證據可被偽造",
+  );
+  const relabel = as(reviewer, `update public.room_discussion_messages set author_user_id = '${owner}'::uuid where id = '${honestMsg}'::uuid;`);
+  ok(
+    "作者不能把自己的訊息改成別人發的",
+    relabel.failed || as(owner, `select author_user_id from public.room_discussion_messages where id = '${honestMsg}'::uuid;`).out === reviewer,
+    "編輯訊息不得改變作者",
+  );
+  const ownerRelabel = as(owner, `update public.room_discussion_messages set author_user_id = '${stranger}'::uuid where id = '${honestMsg}'::uuid;`);
+  ok(
+    "管理者也不能改寫訊息作者（洗白作者身分）",
+    ownerRelabel.failed || as(owner, `select author_user_id from public.room_discussion_messages where id = '${honestMsg}'::uuid;`).out === reviewer,
+    "can_manage_media 不該等於可以重寫作者",
+  );
+  ok(
+    "非成員不能對別人的房間發訊息",
+    as(stranger, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body) values ('${capRoom}'::uuid, '${stranger}'::uuid, 'Stranger', '插話');`).failed,
+  );
+  ok(
+    "reply_to_id 不能指向別的房間的訊息",
+    as(owner, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body, reply_to_id) values ('${otherRoom}'::uuid, '${otherRoom}'::uuid, '${owner}'::uuid, 'Owner', '跨房回覆', '${honestMsg}'::uuid);`).failed,
+  );
+
   section("協作工作台：0014 可以重跑");
   const collabShape = () => psql(`select
     (select count(*) from information_schema.tables where table_name in ('whiteboards','whiteboard_nodes','whiteboard_edges','room_discussion_messages','decision_records','voice_sessions')) || '/' ||
@@ -1235,6 +1279,17 @@ try {
   const collabBefore = collabShape();
   psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
   ok("重跑 0014 之後 tables / policies / triggers 數量不變", collabBefore === collabShape(), `${collabBefore} → ${collabShape()}`);
+  // 0014 會 drop/create 同名的 room_discussion_insert policy，所以 0029 的
+  // 修補若只寫在 policy 上，任何一次 replay 都會把冒名的洞放回來。0029 因此
+  // 同時掛 trigger；這裡就是驗那道護欄真的撐過 replay。
+  ok(
+    "重跑 0014 之後仍然擋得住冒名發訊息（0029 的 trigger 不被 replay 洗掉）",
+    as(reviewer, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body) values ('${capRoom}'::uuid, '${owner}'::uuid, 'Owner', 'replay 之後的冒名');`).failed,
+  );
+  ok(
+    "重跑 0014 之後成員仍然發得出自己的訊息（護欄沒有擋到正常路徑）",
+    !as(reviewer, `insert into public.room_discussion_messages (room_id, author_user_id, author_name, body) values ('${capRoom}'::uuid, '${reviewer}'::uuid, 'Reviewer', 'replay 之後的正常發言');`).failed,
+  );
 
   section("素材庫：0016 RLS");
   const libRoom = psql("select gen_random_uuid();").out;

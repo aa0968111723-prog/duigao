@@ -1568,7 +1568,7 @@ export function App() {
 
   // 連結卡：無 storage 物件；渲染端只接受 http/https（貼上端也先驗一次）。
   const sendLink = useCallback(
-    (url: string) => {
+    (url: string, reply?: { replyToId: string; quotedBody: string }) => {
       let parsed: URL;
       try {
         parsed = new URL(url);
@@ -1576,7 +1576,14 @@ export function App() {
         return false;
       }
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-      sendDiscussion({ kind: "link", body: parsed.href, payload: { href: parsed.href, title: parsed.hostname } });
+      // 回覆時貼一條網址仍然是「對那則的回覆」。少帶 replyToId 的話這條連結卡
+      // 會變成沒有出處的孤兒（稽核 FEA-5）。
+      sendDiscussion({
+        kind: "link",
+        body: parsed.href,
+        payload: { href: parsed.href, title: parsed.hostname, ...(reply ? { quotedBody: reply.quotedBody } : {}) },
+        replyToId: reply?.replyToId,
+      });
       return true;
     },
     [sendDiscussion],

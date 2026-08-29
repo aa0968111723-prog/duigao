@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { UniversalIntake, type IntakeHandle } from "../../components/UniversalIntake";
 import { anchorFromDiscussion, openTarget } from "../../lib/contextAnchor";
+import { indexMessages, replySnippet, resolveReply, type ReplyReference } from "../collaboration/replies";
 import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
@@ -42,8 +43,12 @@ export type RoomDiscussionApi = {
   onAttach?: (files: File[]) => void;
   attachBusy?: boolean;
   onReject?: (reason: string) => void;
-  /** 貼上／送出偵測為純 URL 時建立連結卡；回 false 則按一般文字送出。 */
-  onSendLink?: (url: string) => boolean;
+  /**
+   * 貼上／送出偵測為純 URL 時建立連結卡；回 false 則按一般文字送出。
+   * 第二個參數是「這則連結卡是誰的回覆」— 少了它，回覆某人時只貼一條網址
+   * 會把回覆對象整個丟掉（稽核 FEA-5／MSG-10）。
+   */
+  onSendLink?: (url: string, reply?: { replyToId: string; quotedBody: string }) => boolean;
   /** 附件卡的 signed URL 解析（App 持有 client 與快取；本元件純呈現）。 */
   resolveAssetUrl?: (path: string) => Promise<string>;
   /**
@@ -114,6 +119,41 @@ function AttachmentCard({ message, resolve }: { message: DiscussionMessage; reso
 }
 
 
+/**
+ * 訊息卡上的引用列。解析結果由 `resolveReply` 提供 —— 這裡只負責呈現，
+ * 而且對兩種狀態說不同的話：
+ *   resolved → 原作者＋摘要，可以點回去看來源。
+ *   missing  → 明講「來源不在這份對話裡」，當初的快照標成引述、不冒充現況。
+ * 兩者都不會渲染成一段沒有出處的文字（十五：不得複製出失去來源的孤立內容）。
+ */
+function ReplyRef({ reference, onJump }: { reference: ReplyReference; onJump: (sourceId: string) => void }) {
+  if (reference.state === "none") return null;
+  if (reference.state === "missing") {
+    return (
+      <div className="rd-quote is-orphan" data-testid="reply-ref-missing">
+        <span className="rd-quote-head">來源不在這份對話裡</span>
+        {reference.snapshot ? <span className="rd-quote-body">「{reference.snapshot}」</span> : null}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="rd-quote rd-quote-link"
+      data-testid="reply-ref"
+      onClick={() => onJump(reference.sourceId)}
+      aria-label={`回覆 ${reference.authorName}：${reference.snippet}。點擊回到來源訊息`}
+    >
+      <span className="rd-quote-head">
+        <span className="rd-dot" style={{ background: reference.authorColor }} aria-hidden />
+        {reference.authorName}
+        {reference.edited ? <span className="rd-quote-edited">已編輯</span> : null}
+      </span>
+      <span className="rd-quote-body">{reference.snippet}</span>
+    </button>
+  );
+}
+
 function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("zh-Hant", { hour: "2-digit", minute: "2-digit" });
 }
@@ -140,6 +180,20 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     () => [...api.messages].sort((a, b) => a.createdAt - b.createdAt),
     [api.messages],
   );
+  // 引用解析用的索引。ghost（尚未落地的樂觀列）已經併在 api.messages 裡，
+  // 所以剛送出的回覆立刻就解析得到來源，不會先閃一下「來源不在」。
+  const byId = useMemo(() => indexMessages(messages), [messages]);
+  // 跳到來源之後短暫標記，讓使用者看得出「就是這一則」。
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const highlightTimer = useRef<number | null>(null);
+  const jumpToMessage = (sourceId: string) => {
+    const el = typeof document !== "undefined" ? document.getElementById(`rd-msg-${sourceId}`) : null;
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setHighlightId(sourceId);
+    if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
+    highlightTimer.current = window.setTimeout(() => setHighlightId(null), 1600);
+  };
+  useEffect(() => () => { if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current); }, []);
 
   if ((api.pane ?? pane) === "board") {
     return null;
@@ -234,8 +288,9 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           const readOnly = Boolean((message.payload as { legacy?: boolean }).legacy);
           return (
             <article
-              className={`rd-msg${sendState === "sending" ? " is-sending" : ""}${sendState === "failed" ? " is-failed" : ""}`}
+              className={`rd-msg${sendState === "sending" ? " is-sending" : ""}${sendState === "failed" ? " is-failed" : ""}${highlightId === message.id ? " is-highlight" : ""}`}
               key={message.id}
+              id={`rd-msg-${message.id}`}
               data-testid={`discussion-${message.id}`}
               onContextMenu={(event) => { event.preventDefault(); setMenuId(message.id); }}
             >
@@ -245,7 +300,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                 <time>{timeLabel(message.createdAt)}</time>
               </header>
               <p>{message.body}</p>
-              {message.payload.quotedBody ? <div className="rd-quote">{message.payload.quotedBody}</div> : null}
+              <ReplyRef reference={resolveReply(message, byId)} onJump={jumpToMessage} />
               {(message.kind === "whiteboard" || message.kind === "node") && (
                 <button
                   type="button"
@@ -318,15 +373,40 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
             const text = api.draft.trim();
             if (!text) return;
             // 純 URL 送出成連結卡；其他一律文字。onSendLink 拒收就退回文字。
-            if (/^https?:\/\/\S+$/i.test(text) && api.onSendLink?.(text)) {
+            // 回覆對象要一起帶過去 —— 舊版在這條分支直接 return，於是
+            // 「回覆某人時只貼一條網址」會把回覆整個丟掉（稽核 FEA-5）。
+            const replyPayload = reply ? { replyToId: reply.id, quotedBody: replySnippet(reply) } : undefined;
+            if (/^https?:\/\/\S+$/i.test(text) && api.onSendLink?.(text, replyPayload)) {
               api.setDraft("");
               setReply(null);
               return;
             }
-            api.onSend({ body: text, replyToId: reply?.id, payload: reply ? { quotedBody: reply.body } : {} });
+            api.onSend({
+              body: text,
+              replyToId: reply?.id,
+              // quotedBody 只是「來源不在時還能看到什麼」的備援快照。
+              // 現況一律由 resolveReply 從來源現值算出來。
+              payload: reply ? { quotedBody: replySnippet(reply) } : {},
+            });
             setReply(null);
           }}
         >
+          {reply && (
+            <div className="rd-reply-bar" data-testid="composer-reply-bar">
+              <span className="rd-reply-bar-text">
+                回覆 <b>{reply.authorName}</b>：{replySnippet(reply)}
+              </span>
+              <button
+                type="button"
+                className="rd-reply-cancel"
+                aria-label="取消回覆"
+                data-testid="composer-reply-cancel"
+                onClick={() => setReply(null)}
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {api.onAttach && (
             <>
               <UniversalIntake ref={attachRef} profile="attachment" mode="trigger" onFiles={(files) => files && api.onAttach?.([...files])} onReject={api.onReject} />

@@ -123,7 +123,7 @@ export type MultiBranchRoomApi = {
   onAttachDiscussion?: (files: File[]) => void;
   attachBusy?: boolean;
   onIntakeReject?: (reason: string) => void;
-  onSendDiscussionLink?: (url: string) => boolean;
+  onSendDiscussionLink?: (url: string, reply?: { replyToId: string; quotedBody: string }) => boolean;
   resolveAssetUrl?: (path: string) => Promise<string>;
 };
 
