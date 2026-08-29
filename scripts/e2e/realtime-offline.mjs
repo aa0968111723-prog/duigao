@@ -11,7 +11,6 @@ import { mkdtempSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { rows, start as startMock } from "./mock-supabase.mjs";
-import { ensureRoomMore } from "./room-more.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54428;
@@ -100,25 +99,32 @@ try {
   const pageA = await ctxA.newPage();
   const pageB = await ctxB.newPage();
 
+  // Capture the invite at create time. ShareSheet hides `.m-share-url` while
+  // the OG card is building, so an empty room never exposes the input.
+  let createdRoomId = "";
+  let createdInvite = "";
+  pageA.on("request", (req) => {
+    if (!req.url().includes("/rpc/create_room_with_invite")) return;
+    try {
+      const body = req.postDataJSON();
+      createdRoomId = String(body?.p_room_id ?? "");
+      createdInvite = String(body?.p_invite_token ?? "");
+    } catch {
+      /* ignore */
+    }
+  });
+
   await pageA.goto(APP, { waitUntil: "domcontentloaded" });
   await pageA.fill("input.text-input", "A 編輯");
   await pageA.click("button.btn-primary");
   await pageA.waitForSelector(".home-picks", { timeout: 20000 });
   await pageA.getByRole("button", { name: /建立活動房/ }).click();
   await pageA.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
-
-  // B must join via fragment invite (page URL without #invite is permission-denied).
-  await ensureRoomMore(pageA);
-  await pageA.locator(".project-share-button").click();
-  await pageA.waitForSelector("input.m-share-url", { timeout: 30000 });
-  const shareUrl = await pageA.locator("input.m-share-url").inputValue();
-  await pageA.locator(".m-modal").getByRole("button", { name: "關閉", exact: true }).click().catch(() => undefined);
-  if (!(await pageA.locator('[data-testid="discussion-feed"]').count())) {
-    await pageA.getByRole("button", { name: "對話", exact: true }).click().catch(() => undefined);
+  if (!createdRoomId || !createdInvite) {
+    throw new Error("create_room_with_invite was not captured");
   }
-  await pageA.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
 
-  await pageB.goto(`${APP}${new URL(shareUrl).hash}`, { waitUntil: "domcontentloaded" });
+  await pageB.goto(`${APP}#room=${encodeURIComponent(createdRoomId)}&invite=${encodeURIComponent(createdInvite)}`, { waitUntil: "domcontentloaded" });
   if (await pageB.locator("input.text-input").count()) {
     await pageB.fill("input.text-input", "B 檢視");
     await pageB.click("button.btn-primary");
