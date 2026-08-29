@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isDecisionNotSaved } from "./decisionAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -89,7 +90,7 @@ import { mergeRoomBranch } from "../lib/roomBranches";
 import { uuid } from "../lib/id";
 import {
   edgeFromRow,
-  insertDecision,
+  insertDecision as repoInsertDecision,
   insertAiApplyAudit,
   insertDiscussion,
   insertEdge,
@@ -157,7 +158,7 @@ export type CloudWrites = {
   restoreNode?: (node: import("../features/collaboration/types").WhiteboardNode) => void;
   insertOperation?: (op: import("../features/collaboration/types").WhiteboardOperation) => void;
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
-  createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
+  createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => Promise<void>;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   setAllowBoardEdit?: (allow: boolean) => void;
   toggleSupport: (commentId: string, add: boolean) => void;
@@ -1163,7 +1164,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     // op 入帳 best-effort：duplicate（重試）在 repository 折成成功；
     // 失敗只損 undo 粒度不損資料 — 不進佇列、不擋操作（ADR-014）。
     insertOperation: (op) => run(`op:${op.opId}`, () => repoInsertOperation(supabase!, { ...op, roomId: boundRef.current! })),
-    createDecision: (decision) => run(`decision-insert:${decision.id}`, () => insertDecision(supabase!, decision)),
+    createDecision: async (decision) => {
+      const rid = boundRef.current;
+      const key = `decision-insert:${decision.id}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await repoInsertDecision(supabase, decision);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isDecisionNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => repoInsertDecision(supabase, decision),
+        });
+        setStatus("offline-pending");
+      }
+    },
     updateDecision: (decision) => run(`decision:${decision.id}`, () => repoUpdateDecision(supabase!, decision)),
     setAllowBoardEdit: (allow) => run("allow-board-edit", () => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),
     toggleSupport: (commentId, add) => run(`comment-support:${commentId}`, () => setSupport(supabase!, boundRef.current!, commentId, add)),

@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isDecisionNotSaved } from "./cloud/decisionAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -2138,7 +2139,14 @@ export function App() {
         version: 1,
       };
       updateRoom((r) => ({ ...r, decisions: [decision, ...(r.decisions ?? [])] }));
-      cloudRef.current.writes.createDecision?.(decision);
+      void cloudRef.current.writes.createDecision?.(decision)?.catch((err) => {
+        if (!isDecisionNotSaved(err)) return;
+        updateRoom((r) => ({
+          ...r,
+          decisions: (r.decisions ?? []).filter((item) => item.id !== decision.id),
+        }));
+        showToast("待決定沒有建立，請再試一次。", { tone: "error" });
+      });
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
   );

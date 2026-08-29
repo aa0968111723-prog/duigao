@@ -13,6 +13,7 @@ import type {
 import { FRAME_KINDS } from "../features/collaboration/types";
 import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaboration/types";
 import { acceptDiscussionInsert } from "./discussionWrite";
+import { acceptDecisionInsertAck } from "./decisionAck";
 import { CloudError } from "./errors";
 
 type WhiteboardRow = {
@@ -704,19 +705,24 @@ export async function setDiscussionSupport(supabase: SupabaseClient, roomId: str
 }
 
 export async function insertDecision(supabase: SupabaseClient, decision: DecisionRecord): Promise<void> {
-  const { error } = await supabase.from("decision_records").insert({
-    id: decision.id,
-    room_id: decision.roomId,
-    title: decision.title,
-    body: decision.body,
-    status: decision.status,
-    source_type: decision.sourceType ?? null,
-    source_id: decision.sourceId ?? null,
-    created_by: isUuid(decision.createdBy) ? decision.createdBy : null,
-    finalized_at: decision.finalizedAt ? new Date(decision.finalizedAt).toISOString() : null,
-    finalized_by: decision.finalizedBy && isUuid(decision.finalizedBy) ? decision.finalizedBy : null,
-  });
+  const { data, error } = await supabase
+    .from("decision_records")
+    .insert({
+      id: decision.id,
+      room_id: decision.roomId,
+      title: decision.title,
+      body: decision.body,
+      status: decision.status,
+      source_type: decision.sourceType ?? null,
+      source_id: decision.sourceId ?? null,
+      created_by: isUuid(decision.createdBy) ? decision.createdBy : null,
+      finalized_at: decision.finalizedAt ? new Date(decision.finalizedAt).toISOString() : null,
+      finalized_by: decision.finalizedBy && isUuid(decision.finalizedBy) ? decision.finalizedBy : null,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "decision");
+  acceptDecisionInsertAck(data);
 }
 
 export async function updateDecision(supabase: SupabaseClient, decision: DecisionRecord): Promise<void> {
