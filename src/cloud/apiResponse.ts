@@ -2,9 +2,10 @@
  * Edge / HTTP payload honesty.
  *
  * Production Zeabur (`https://duigao-k7q2.zeabur.app/`) is a Vite SPA.
+ * Origin traffic is `scripts/serve-origin.mjs` (not zbpack static dist).
  * `vercel.json` and `Caddyfile` must not rewrite `/functions`, `/api`, or
- * `/rest` to `index.html` (see `spaFallback.ts`). If the platform still
- * catch-alls those paths, this parser still rejects HTML.
+ * `/rest` to `index.html` (see `spaFallback.ts`). If a host still catch-alls
+ * those paths, this parser still rejects HTML.
  *
  * A client that only checks `response.ok` / status 200 would treat that
  * catch-all as a successful API. This module is the shared rejection gate:

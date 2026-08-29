@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { isAppOriginApiPath, shouldSpaFallback } from "../../src/cloud/spaFallback.ts";
+import {
+  isAppOriginApiPath as originIsApiPath,
+  listenOrigin,
+  ORIGIN_API_NOT_FOUND,
+} from "../serve-origin.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -50,6 +55,76 @@ test("vercel.json must not rewrite API prefixes to index.html", () => {
   }
   const blob = JSON.stringify(vercel);
   assert.doesNotMatch(blob, /"\/\(\.\*\)"/);
+});
+
+test("zbpack must start the origin server, not static dist (Vite would SPA-fallback)", () => {
+  const zbpack = JSON.parse(readFileSync(resolve(ROOT, "zbpack.json"), "utf8")) as {
+    output_dir?: string;
+    start_command?: string;
+  };
+  assert.equal(zbpack.output_dir, undefined, "output_dir makes Zeabur ignore start_command and catch-all HTML");
+  assert.equal(zbpack.start_command, "node scripts/serve-origin.mjs");
+  const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8")) as { scripts?: Record<string, string> };
+  assert.equal(pkg.scripts?.start, "node scripts/serve-origin.mjs");
+});
+
+test("origin server and client spaFallback agree on API prefixes", () => {
+  for (const path of API_PATHS) {
+    assert.equal(originIsApiPath(path), isAppOriginApiPath(path), path);
+  }
+  for (const path of SPA_PATHS) {
+    assert.equal(originIsApiPath(path), isAppOriginApiPath(path), path);
+  }
+});
+
+test("origin server returns JSON 404 for /functions /api /rest; SPA for client routes", async () => {
+  const fixture = resolve(ROOT, "output", "origin-fixture");
+  rmSync(fixture, { recursive: true, force: true });
+  mkdirSync(fixture, { recursive: true });
+  writeFileSync(join(fixture, "index.html"), "<!doctype html><title>spa</title>");
+  writeFileSync(join(fixture, "ok.js"), "export default 1");
+  const server = await listenOrigin({ root: fixture, port: 0, host: "127.0.0.1" });
+  const port = (server.address() as { port: number }).port;
+  try {
+    const get = async (path: string, method = "GET") => {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`, { method });
+      return { status: res.status, type: res.headers.get("content-type") ?? "", body: await res.text() };
+    };
+    for (const path of API_PATHS) {
+      const jsonGet = await get(path);
+      assert.equal(jsonGet.status, 404, path);
+      assert.match(jsonGet.type, /application\/json/);
+      assert.equal(jsonGet.body, ORIGIN_API_NOT_FOUND);
+      assert.doesNotMatch(jsonGet.body, /<!doctype html>/i);
+      const jsonPost = await get(path, "POST");
+      assert.equal(jsonPost.status, 404, `POST ${path}`);
+      assert.match(jsonPost.type, /application\/json/);
+    }
+    const home = await get("/");
+    assert.equal(home.status, 200);
+    assert.match(home.type, /text\/html/);
+    assert.match(home.body, /<!doctype html>/i);
+    const login = await get("/login");
+    assert.equal(login.status, 200);
+    assert.match(login.body, /<!doctype html>/i);
+    const asset = await get("/ok.js");
+    assert.equal(asset.status, 200);
+    assert.match(asset.type, /javascript/);
+  } finally {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test("public/_redirects is a static-host fallback for the same prefixes", () => {
+  const redirects = readFileSync(resolve(ROOT, "public/_redirects"), "utf8");
+  const json = readFileSync(resolve(ROOT, "public/app-origin-api-404.json"), "utf8");
+  assert.match(redirects, /\/functions/);
+  assert.match(redirects, /\/api/);
+  assert.match(redirects, /\/rest/);
+  assert.match(redirects, / 404/);
+  assert.equal(JSON.parse(json).ok, false);
+  assert.equal(JSON.parse(json).code, "NOT_FOUND");
 });
 
 test("Caddyfile returns JSON 404 for app-origin API prefixes, not index.html", () => {

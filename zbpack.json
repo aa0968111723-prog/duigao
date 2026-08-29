@@ -1,4 +1,4 @@
 {
   "build_command": "npm run build",
-  "output_dir": "dist"
+  "start_command": "node scripts/serve-origin.mjs"
 }
