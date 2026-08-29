@@ -48,5 +48,7 @@ test("playerReady waits 90s for the element or an honest fail card (CI 332681761
   assert.match(ready, /video\.v-video/);
   assert.match(ready, /onboard-card/);
   assert.match(ready, /初始化沒完成|上傳失敗/);
+  assert.match(ready, /ignoreFailCard/);
   assert.doesNotMatch(ready, /waitForSelector\("video\.v-video"/);
+  assert.match(src, /playerReady\(Q, \{ ignoreFailCard: true/);
 });

@@ -271,18 +271,24 @@ async function dumpPlayerWait(page) {
  * `test:collaboration-e2e` on that SHA. Wait for the element (not box-size)
  * or an honest fail card; never treat a hung home screen as ready.
  */
-async function playerReady(page) {
+async function playerReady(page, opts = {}) {
+  // Check 24 retries from a fail card that still says「初始化沒完成」.
+  // Treating that leftover copy as a new failure returns before the player
+  // can mount (CI 33268904599, 170/171).
+  const ignoreFailCard = opts.ignoreFailCard === true;
+  const timeout = opts.timeout ?? 90000;
   let phase = "missing";
   try {
     const handle = await page.waitForFunction(
-      () => {
+      (skipFail) => {
         if (document.querySelector("video.v-video")) return "player";
+        if (skipFail) return false;
         const text = document.querySelector(".onboard-card")?.textContent ?? "";
         if (/初始化沒完成|檢查網路|無法上傳|上傳失敗/.test(text)) return "fail";
         return false;
       },
-      null,
-      { timeout: 90000 },
+      ignoreFailCard,
+      { timeout },
     );
     phase = await handle.jsonValue();
   } catch {
@@ -1680,8 +1686,14 @@ try {
     // 重試：從失敗卡重新選同一支檔
     const retryZone = Q.locator(".onboard-card input[type=file]").first();
     await retryZone.setInputFiles({ name: "setup-dies.webm", mimeType: "video/webm", buffer: SHORT });
-    const playerCame = await playerReady(Q).then(() => true).catch(() => false);
-    check("24. 重試成功進到播放器", playerCame);
+    let playerDetail = "";
+    const playerCame = await playerReady(Q, { ignoreFailCard: true, timeout: 120000 })
+      .then(() => true)
+      .catch((err) => {
+        playerDetail = String(err?.message ?? err).slice(0, 280);
+        return false;
+      });
+    check("24. 重試成功進到播放器", playerCame, playerDetail);
     check(
       "24. 重試沿用死亡當下那間房，沒有另開新房",
       [...cloudRooms.keys()].filter((id) => !roomIdsBefore.has(id)).length === 1,
