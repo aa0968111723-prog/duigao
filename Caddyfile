@@ -1,0 +1,21 @@
+# App origin: client routes SPA-fallback. Backend prefixes must not become index.html.
+# Zeabur static/Caddy hosts that honor this file should 404 JSON for /functions /api /rest.
+{
+	admin off
+}
+
+:{$PORT:8080} {
+	root * dist
+	encode gzip
+
+	@backend path /api /api/* /functions /functions/* /rest /rest/*
+	handle @backend {
+		header Content-Type application/json; charset=utf-8
+		respond `{"ok":false,"code":"NOT_FOUND","message":"this origin has no API"}` 404
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
