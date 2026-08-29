@@ -33,6 +33,23 @@ export function isInvalidInvite(err: unknown): boolean {
 }
 
 /**
+ * Post-join RLS / membership denial. Join itself still raises `invalid invite`
+ * so a bad token cannot leak whether the room exists.
+ */
+export function isPermissionDenied(err: unknown): boolean {
+  const m = messageOf(err).toLowerCase();
+  if (m.includes("invalid invite")) return false;
+  if (m.includes("permission denied for schema auth")) return false;
+  return (
+    m.includes("42501") ||
+    m.includes("row-level security") ||
+    m.includes("permission denied for table") ||
+    m.includes("permission denied for relation") ||
+    m.includes("not a member")
+  );
+}
+
+/**
  * A retried insert that already landed (the reply was lost, not the write).
  * Queued tasks treat this as success so reconnects never duplicate entities
  * and never re-queue forever.

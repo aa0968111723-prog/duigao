@@ -52,7 +52,7 @@ test("shell first layer is gated by more, not permanently painted", () => {
   assert.match(shell, /moreOpen/);
   assert.match(shell, /open-\$\{item\.id\}-pane|open-overview-pane/);
   // Secondary chrome must not render on the first layer.
-  assert.match(shell, /moreOpen && \(/);
+  assert.match(shell, /moreOpen &&(?: !hideRoomChrome &&)? \(/);
   assert.doesNotMatch(shell, /project-entry-chips[\s\S]{0,80}hidden=\{hideRoomChrome\}/);
   assert.match(shell, /popstate|duigaoMore/);
 });
@@ -72,6 +72,20 @@ test("safe area, keyboard, 44px touch, overflow, reduced motion, orientation", (
   assert.match(shell, /is-tablet-split|data-tablet-split|tabletSplit/);
   assert.match(shell, /onContextMenu|duigaoMore/);
   assert.match(css, /-webkit-touch-callout:\s*none/);
+});
+
+test("focused composer hides phone chrome and cannot keep 更多 open", () => {
+  const composing = firstLayerChrome({ moreOpen: true, width: 360, composerActive: true });
+  assert.equal(composing.hideRoomChrome, true);
+  assert.deepEqual(composing.visibleSecondary, []);
+  assert.equal(composing.tabletSplit, false);
+  const tablet = firstLayerChrome({ moreOpen: true, width: 768, composerActive: true });
+  assert.equal(tablet.hideRoomChrome, false);
+  assert.equal(tablet.tabletSplit, true);
+  const shell = src("src/features/multi-room/MultiBranchRoom.tsx");
+  assert.match(shell, /hideRoomChrome/);
+  assert.match(shell, /data-composer-active/);
+  assert.match(shell, /moreOpen && !hideRoomChrome/);
 });
 
 test("collaboration e2e opens content pane via 更多, not a first-layer button", () => {

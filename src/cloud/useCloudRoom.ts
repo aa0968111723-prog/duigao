@@ -30,7 +30,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isDuplicateKey, isInvalidInvite, isPermissionDenied, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -92,7 +92,9 @@ import {
   insertDecision,
   insertAiApplyAudit,
   insertDiscussion,
+  updateDiscussion as repoUpdateDiscussion,
   insertEdge,
+  discussionFromRow,
   nodeFromRow,
   insertWhiteboard,
   loadWhiteboardGraph,
@@ -139,6 +141,7 @@ export type CloudWrites = {
   createPoll: (poll: RoomPoll) => void;
   votePoll: (vote: PollVote) => void;
   insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
+  updateDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
   /** AI 套用稽核列（0019）。回傳成敗；失敗不重試 — 討論串訊息是人看的 fallback。 */
   recordAiApplyAudit?: (entry: { proposalId: string; proposalType: string; label: string }) => Promise<boolean>;
   setDiscussionSupport?: (messageId: string, add: boolean) => void;
@@ -242,6 +245,7 @@ type Params = {
   onSnapshot: (room: Room) => void;
   /** 白板增量（PR-02c）：走專屬回呼，不經 applyRemoteRoom（deep-link 消耗不得重跑）。 */
   onBoardPatch?: (patch: BoardPatch) => void;
+  onDiscussionPatch?: (patch: { op: "upsert"; message: import("../features/collaboration/types").DiscussionMessage } | { op: "delete"; id: string }) => void;
   /**
    * 板級自癒（Grok pr02c F3）：整板以雲端 graph 替換 — 走 applyRemoteRoom
    * 會被空陣列守門與 reconcile 的「本地補回」擋住，斷線期間的 DELETE
@@ -309,11 +313,12 @@ function rememberCloudRoom(localRoomId: string, roomId: string, token: string, p
  * Binds the active room to the cloud when configured. Inert (returns
  * local-only) otherwise, so the local IndexedDB + PeerJS path is untouched.
  */
-export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, onBoardReplace, showToast }: Params) {
+export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast }: Params) {
   const [status, setStatus] = useState<SyncStatus>(isCloudConfigured ? "connecting" : "local-only");
   const [online, setOnline] = useState(0);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteInvalid, setInviteInvalid] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   /**
    * This visitor's capability in the bound room. Null until the first snapshot
    * lands (and in a local-only session); the UI treats "unknown" as "cannot
@@ -345,6 +350,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   activeWhiteboardRef.current = activeWhiteboardId ?? null;
   const onBoardPatchRef = useRef(onBoardPatch);
   onBoardPatchRef.current = onBoardPatch;
+  const onDiscussionPatchRef = useRef(onDiscussionPatch);
+  onDiscussionPatchRef.current = onDiscussionPatch;
   const onBoardReplaceRef = useRef(onBoardReplace);
   onBoardReplaceRef.current = onBoardReplace;
   roomRef.current = room;
@@ -408,7 +415,14 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       // is exactly the "at least reload after reconnect" the spec asks for.
       const selectedMediaType = selectedBranch?.branchType === "video" ? "video" : roomMediaType(nextRoom);
       void reloadReview(rid, selectedMediaType);
-    } catch {
+    } catch (err) {
+      // Join already succeeded; a later rooms/versions RLS denial is not a
+      // flaky retry and must not look like an empty room.
+      if (isPermissionDenied(err)) {
+        setPermissionDenied(true);
+        setStatus("error");
+        throw err;
+      }
       setStatus("error");
     }
   }, [supabase, onSnapshot, reloadReview]);
@@ -605,6 +619,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     unsubRef.current = null;
     setStatus("connecting");
     setInviteInvalid(false);
+    setPermissionDenied(false);
     (async () => {
       try {
         const sessionUserId = await ensureSession(supabase);
@@ -644,10 +659,9 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
             }
           });
         });
-        // presence key 必須與 cloud.userId 同源（P8）：舊寫法用 getUser()
-        // （會打網路，失敗回 "anon"），自我過濾卻比對 ensureSession 的 id —
-        // 兩者分歧時使用者會在「也在這塊板」看到自己。
-        unsubRef.current = subscribeRoom(supabase, targetRoomId, sessionUserIdRef.current ?? "anon", {
+        try {
+          // presence key 必須與 cloud.userId 同源（P8）。
+          unsubRef.current = await subscribeRoom(supabase, targetRoomId, sessionUserIdRef.current ?? "anon", {
           onRoom: scheduleReload,
           onCommentUpsert: scheduleReload,
           onStrokeInsert: scheduleReload,
@@ -678,6 +692,11 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
             if (edge) onBoardPatchRef.current?.({ type: "edge-insert", edge });
           },
           onBoardEdgeDelete: (id) => onBoardPatchRef.current?.({ type: "edge-delete", id }),
+          onDiscussionUpsert: (row) => {
+            const message = discussionFromRow(row as import("./collaborationRepository").DiscussionRow);
+            if (message) onDiscussionPatchRef.current?.({ op: "upsert", message });
+          },
+          onDiscussionDelete: (id) => onDiscussionPatchRef.current?.({ op: "delete", id }),
           // frames 即時（WB04）：別人建/移/刪的區塊直接進畫面
           onBoardFrameUpsert: (row) => {
             const frame = frameFromRow(row);
@@ -696,14 +715,28 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
               if (activeWhiteboardRef.current) void loadWhiteboard(activeWhiteboardRef.current);
               reviveExtraRef.current?.(); // frames 不在 graph 裡，另外補（R2）
             }
-            setStatus((s) => (connected ? (pending.current.length ? "offline-pending" : "synced") : "connecting"));
+            setStatus((s) => {
+              if (connected) return pending.current.length ? "offline-pending" : "synced";
+              // A loaded snapshot is not "正在確認身分". Realtime drop stays
+              // on the last honest room state until the next successful bind.
+              if (s === "synced" || s === "offline-pending" || s === "error") return s;
+              return "connecting";
+            });
           },
         });
+        } catch {
+          // Snapshot already landed. Realtime is transient; a leftover channel
+          // must not turn a loaded empty room into a fake load-error.
+          unsubRef.current = () => undefined;
+        }
       } catch (err) {
         if (cancelled) return;
         if (isInvalidInvite(err)) {
           setInviteInvalid(true);
           showToast("這個分享連結已失效，請向主辦方取得新連結", { tone: "error" });
+        } else if (isPermissionDenied(err)) {
+          setPermissionDenied(true);
+          showToast("沒有權限進入這個房間", { tone: "error" });
         }
         setStatus("error");
       }
@@ -751,6 +784,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   /** 再試一次: reload when bound, otherwise redo auth + join + load from scratch. */
   const retry = useCallback(() => {
     setInviteInvalid(false);
+    setPermissionDenied(false);
     if (boundRef.current) {
       void (async () => {
         await flushPending();
@@ -1120,6 +1154,18 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
         return false;
       }
     },
+    updateDiscussion: async (message) => {
+      if (!supabase || !boundRef.current) return false;
+      setStatus("syncing");
+      try {
+        await repoUpdateDiscussion(supabase, message);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+        return true;
+      } catch {
+        setStatus("offline-pending");
+        return false;
+      }
+    },
     setDiscussionSupport: (messageId, add) => run(`support:${messageId}`, () => repoSetDiscussionSupport(supabase!, boundRef.current!, messageId, add)),
     createWhiteboard: (board) => run(`whiteboard-insert:${board.id}`, () => insertWhiteboard(supabase!, board)),
     updateWhiteboard: (board) => run(`whiteboard:${board.id}`, () => repoUpdateWhiteboard(supabase!, board)),
@@ -1202,6 +1248,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     online,
     inviteUrl,
     inviteInvalid,
+    permissionDenied,
     boundRoomId: boundRef.current,
     role,
     // A local-only room has no membership row and no server to ask; it belongs

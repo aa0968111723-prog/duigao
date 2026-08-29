@@ -531,7 +531,7 @@ test("第一屏契約如今綁在真殼上：討論根＋對話/白板 tabs＋�
   assert.match(shell, />對話</);
   assert.match(shell, />白板</);
   assert.match(shell, /data-testid="room-more"/);
-  assert.match(shell, /moreOpen && \(/);
+  assert.match(shell, /moreOpen &&(?: !hideRoomChrome &&)? \(/);
   const discussion = readFileSync(resolve(ROOT, "src/features/room-discussion/RoomDiscussion.tsx"), "utf8");
   assert.match(discussion, /voice-boundary/);
 });
