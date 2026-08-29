@@ -188,6 +188,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [decisionDraft, setDecisionDraft] = useState("");
+  const [decisionDraftOpen, setDecisionDraftOpen] = useState(false);
   const [citeSheet, setCiteSheet] = useState<"work" | "attachment" | null>(null);
 
   const showDecisions = api.showDecisions ?? true;
@@ -338,30 +339,42 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
         <div>
           <div className="project-section-title-row">
             <h3>待決定</h3>
-            {api.canManage && (
-              <form
-                className="rd-decision-draft"
-                data-testid="decision-draft"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const title = decisionDraftTitle(decisionDraft);
-                  if (!title) return;
-                  api.onCreateDecision(title);
-                  setDecisionDraft("");
-                }}
-              >
-                <input
-                  className="text-input"
-                  value={decisionDraft}
-                  onChange={(event) => setDecisionDraft(event.target.value)}
-                  aria-label="待決定草稿"
-                  placeholder="待決定標題"
-                  data-testid="decision-draft-input"
-                />
-                <button type="submit" className="project-text-button" data-testid="decision-draft-add" disabled={!decisionDraftTitle(decisionDraft)}>新增</button>
-              </form>
+            {api.canManage && !decisionDraftOpen && (
+              <button
+                type="button"
+                className="project-text-button"
+                aria-label="新增待決定"
+                data-testid="decision-draft-open"
+                onClick={() => setDecisionDraftOpen(true)}
+              >新增</button>
             )}
           </div>
+          {api.canManage && decisionDraftOpen && (
+            <form
+              className="rd-decision-draft"
+              data-testid="decision-draft"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const title = decisionDraftTitle(decisionDraft);
+                if (!title) return;
+                api.onCreateDecision(title);
+                setDecisionDraft("");
+                setDecisionDraftOpen(false);
+              }}
+            >
+              <input
+                className="text-input"
+                value={decisionDraft}
+                onChange={(event) => setDecisionDraft(event.target.value)}
+                aria-label="待決定草稿"
+                placeholder="待決定標題"
+                data-testid="decision-draft-input"
+                autoFocus
+              />
+              <button type="submit" className="project-text-button" data-testid="decision-draft-add" disabled={!decisionDraftTitle(decisionDraft)}>新增</button>
+              <button type="button" className="project-text-button" onClick={() => { setDecisionDraft(""); setDecisionDraftOpen(false); }}>取消</button>
+            </form>
+          )}
           {pending.map((item) => (
             <article className="rd-decision" key={item.id} data-testid={`decision-${item.id}`}>
               <strong>{item.title}</strong>
@@ -570,9 +583,10 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
             type="button"
             className="rd-attach-button"
             aria-label="引用房間內容"
+            title="引用房間內容"
             data-testid="composer-cite-work"
             onClick={() => setCiteSheet("work")}
-          >引用</button>
+          >引</button>
           {api.messages.some((item) => item.kind === "attachment") && (
             <button
               type="button"

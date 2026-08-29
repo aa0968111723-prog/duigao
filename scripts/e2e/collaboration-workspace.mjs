@@ -220,6 +220,7 @@ try {
     check("改過的訊息標已編輯", await page.getByTestId("discussion-edited").count() === 1);
     mkdirSync("/opt/cursor/artifacts", { recursive: true });
     await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_edit_390.png"), fullPage: true });
+    await page.getByTestId("decision-draft-open").click();
     await page.getByTestId("decision-draft-input").fill("主視覺採 B");
     await page.getByTestId("decision-draft-add").click();
     check("待決定草稿要人填標題", (await page.getByTestId("decision-area").innerText()).includes("主視覺採 B"));

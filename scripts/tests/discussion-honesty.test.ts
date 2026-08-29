@@ -104,6 +104,8 @@ test("D-07: 未建模的提及／未讀／回條／tombstone 不得假裝存在"
   assert.match(ws, /onEditMessage|discussion-edit|已編輯/);
   assert.match(ws, /composer-cite-work|cite-work/);
   assert.match(ws, /decision-draft/);
+  assert.match(ws, /decision-draft-open/);
+  assert.doesNotMatch(ws, /待決定：主視覺/);
   const sql = [
     src("supabase/migrations/0014_collaboration_workspace.sql"),
     src("supabase/migrations/0018_discussion_attachments.sql"),
