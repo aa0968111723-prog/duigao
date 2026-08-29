@@ -26,24 +26,30 @@ agent 16、edge-cors 5）；`tsc --noEmit` 乾淨；`npm run build` 綠。
 
 （無 —— 六個階段都已完成並開出 PR）
 
-## PR 鏈
+## PR 鏈（重要：鏈斷過，已修）
 
-| PR | 階段 | base |
-|---|---|---|
-| [#88](https://github.com/aa0968111723-prog/duigao/pull/88) | PR-DI-01 設計知識系統 | `main` |
-| [#89](https://github.com/aa0968111723-prog/duigao/pull/89) | PR-DI-02 分析引擎 ＋ DI-01/02 審查修正 | #88 |
-| [#90](https://github.com/aa0968111723-prog/duigao/pull/90) | PR-DI-03 研究層 | #89 |
-| [#91](https://github.com/aa0968111723-prog/duigao/pull/91) | PR-DI-04 手機／平板介面 | #90 |
-| [#92](https://github.com/aa0968111723-prog/duigao/pull/92) | PR-DI-05 外部工具契約 | #91 |
-| （本分支）| PR-DI-06 完整評估 ＋ DI-03/04 審查修正 | #92 |
+| PR | 階段 | base | 狀態 |
+|---|---|---|---|
+| [#86](https://github.com/aa0968111723-prog/duigao/pull/86) | PR-DI-00 稽核與契約 | `main` | 已合併 |
+| [#88](https://github.com/aa0968111723-prog/duigao/pull/88) | **DI-01～06 完整交付** | `main` | **開啟中 —— 這是唯一到 main 的入口** |
+| [#89](https://github.com/aa0968111723-prog/duigao/pull/89) | PR-DI-02 | `agent/design-intelligence-perplexity` | MERGED（只到上一層） |
+| [#90](https://github.com/aa0968111723-prog/duigao/pull/90) | PR-DI-03 | `agent/di02-analysis-engine` | MERGED（只到上一層） |
+| [#91](https://github.com/aa0968111723-prog/duigao/pull/91) | PR-DI-04 | `agent/di03-research` | MERGED（只到上一層） |
+| [#92](https://github.com/aa0968111723-prog/duigao/pull/92) | PR-DI-05 | `agent/di04-proposal-ui` | MERGED（只到上一層） |
+| [#93](https://github.com/aa0968111723-prog/duigao/pull/93) | PR-DI-06 | `agent/di05-adapters` | MERGED（只到上一層） |
 
-PR-DI-00 是 [#86](https://github.com/aa0968111723-prog/duigao/pull/86)，已合併。
+**#89–#93 顯示 MERGED，但 `main` 一行都沒有拿到** —— 它們的 base 是另一條代理
+分支，每次合併只把內容帶進直接的上一層。白板那條線踩過同一個坑
+（#78→#81→#84），那次是由下而上的順序問題，這次是由上而下時只有相鄰兩層接上。
 
-**堆疊的原因**：任務書要求小而獨立可回退的 PR，但同時禁止 force push。
-每個階段完成後才開新分支，所以修正只能落在後續的 PR 裡 ——
-每個 PR 的描述都寫明它帶了哪些屬於前一個 PR 的修正。
+已把鏈尖 `agent/di06-evaluation` 合回 #88 的 head，並用
+`git diff origin/agent/di06-evaluation` 為空驗證兩邊的樹逐位元組相同。
 
-## 評估報告
+**教訓**：堆疊 PR 在「不得 force push」的限制下，每個階段都應該直接以 `main`
+為 base 並在描述裡標明依賴，而不是互相堆疊 —— 否則合併順序決定了內容會不會
+真的到達 `main`，而那件事在 GitHub 的 UI 上看不出來（全部顯示 MERGED）。
+
+## 評估報告## 評估報告
 
 `docs/design-intelligence/EVALUATION.md` —— 七個驗收案例、測試總覽、
 安全、行動裝置實測數字、被抓到的 29 個問題、誠實的限制清單。

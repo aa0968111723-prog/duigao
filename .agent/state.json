@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-29T05:40:12.000Z",
+  "generatedAt": "2026-08-29T05:57:41.000Z",
   "git": {
-    "branch": "agent/di06-evaluation",
-    "sha": "ebcc158c52d889b774db753ac476bace578d289e",
+    "branch": "agent/design-intelligence-perplexity",
+    "sha": "88d2c7a066f3405507c1bf4a19d184aa3555002a",
     "mainSha": "2a9d7a018836e7ec913f009f2f7a5d5b8b25fbff",
-    "dirty": true
+    "dirty": false
   },
   "project": {
     "name": "duigao",
