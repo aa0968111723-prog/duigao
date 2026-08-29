@@ -124,7 +124,7 @@ test("M-07 mutation: 拿掉 mentions / isMemberActor 結案會讓契約失敗", 
   assert.match(sql, /room_todos/);
   assert.match(honesty, /canCompleteTodo/);
   assert.match(honesty, /filterMentionableMembers/);
-  assert.match(ui, /canCompleteTodo|isMemberActor/);
+  assert.match(ui, /canCompleteRoomTodo|canCompleteTodo|isMemberActor/);
   const stripped = honesty.replace(/export function canCompleteTodo[\s\S]*?\n\}/, "export function canCompleteTodo() { return true; }");
   assert.notEqual(stripped, honesty);
   assert.equal(canCompleteTodo("ai"), false);
