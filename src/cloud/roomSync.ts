@@ -1,6 +1,6 @@
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import type { BranchRow, CommentRow, MessageRow, PlanRow, PollRow, PollVoteRow, ProposalRow, RelationRow, RoomRow, StrokeRow, VersionRow } from "./types";
-import type { EdgeRow, NodeRow } from "./collaborationRepository";
+import type { EdgeRow, NodeRow, FrameRow } from "./collaborationRepository";
 
 export type SyncHandlers = {
   onRoom?: (row: RoomRow) => void;
@@ -15,9 +15,20 @@ export type SyncHandlers = {
   /** 開著的白板即時 row-patch（PR-02c）：不再整房 reload。 */
   onBoardNodeUpsert?: (row: NodeRow) => void;
   onBoardNodeDelete?: (id: string) => void;
+  /** frames 即時（WB04）：WB03 只在開板時載一次，別人建的區塊看不到。 */
+  onBoardFrameUpsert?: (row: FrameRow) => void;
+  onBoardFrameDelete?: (id: string) => void;
   onBoardEdgeInsert?: (row: EdgeRow) => void;
   onBoardEdgeDelete?: (id: string) => void;
   onPresence?: (count: number) => void;
+  /** 具名在場者（WB04）：誰在線上、各自開著哪塊板。無游標流。 */
+  onPresenceList?: (people: PresencePerson[]) => void;
+  /**
+   * 目前開著的白板 id。channel 重建時 track 的初值就靠它 — 舊寫法初始化成
+   * null，重訂閱後即使人還在板上也顯示「不在板上」，要等下一次開關板才
+   * 修正（Grok F3）。**刻意不含姓名**：presence payload 沒有 RLS（P1）。
+   */
+  getPresenceIdentity?: () => { boardId: string | null };
   onStatus?: (connected: boolean) => void;
 };
 
@@ -28,16 +39,39 @@ export type Unsubscribe = () => void;
  * count. Realtime is transient: the source of truth stays in Postgres, so a
  * missed event is healed by the next loadRoom.
  */
+export type PresencePerson = {
+  /** presence key＝auth uid。姓名不走線路（P1），由客戶端對照成員清單。 */
+  userId: string;
+  /** 這個人此刻開著的白板 id（null＝不在白板上）。 */
+  boardId: string | null;
+  at: number;
+};
+
+export type RoomSubscription = Unsubscribe & {
+  /** 身分或所在板變了：重新 track（開關板時呼叫，不是每次移動）。 */
+  retrack: () => void;
+};
+
 export function subscribeRoom(
   supabase: SupabaseClient,
   roomId: string,
   userId: string,
   handlers: SyncHandlers,
-): Unsubscribe {
+): RoomSubscription {
   const filter = `room_id=eq.${roomId}`;
   const channel: RealtimeChannel = supabase.channel(`room:${roomId}`, {
     config: { presence: { key: userId } },
   });
+  // **不送姓名**（自審 P1）：Realtime 的 presence 是 channel 層的東西，
+  // postgres_changes 有 RLS 擋、presence 沒有 — 這個 topic 名稱只含房間
+  // uuid（邀請連結裡就有），任何持公開 anon key 的人都能 join 並讀到
+  // payload。WB04 一度把姓名與「開著哪塊板」放進來，等於把成員名單publish
+  // 給房外。現在只送不透明的 id 與 boardId（id 本來就是 presence key），
+  // 姓名在客戶端用房內成員清單（走 RLS）對照出來。
+  const trackPayload = () => {
+    const live = handlers.getPresenceIdentity?.() ?? { boardId: null };
+    return { at: Date.now(), boardId: live.boardId };
+  };
 
   channel
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, (p) =>
@@ -110,7 +144,23 @@ export function subscribeRoom(
       const id = (p.old as { id?: string })?.id;
       if (id) handlers.onBoardNodeDelete?.(id);
     })
+    // frames（0023）：與節點同樣走 row-patch — 不觸發整房快照
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "whiteboard_frames", filter }, (p) =>
+      handlers.onBoardFrameUpsert?.(p.new as FrameRow),
+    )
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "whiteboard_frames", filter }, (p) =>
+      handlers.onBoardFrameUpsert?.(p.new as FrameRow),
+    )
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_frames", filter: undefined }, (p) => {
+      const id = (p.old as { id?: string })?.id;
+      if (id) handlers.onBoardFrameDelete?.(id);
+    })
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "whiteboard_edges", filter }, (p) =>
+      handlers.onBoardEdgeInsert?.(p.new as EdgeRow),
+    )
+    // edge UPDATE（WB04）：0022 之後 edges 有 label/handle/version 可以改，
+    // 但只訂了 INSERT/DELETE — 別人改的線標籤在對方重載前都看不到。
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "whiteboard_edges", filter }, (p) =>
       handlers.onBoardEdgeInsert?.(p.new as EdgeRow),
     )
     .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_edges", filter: undefined }, (p) => {
@@ -121,15 +171,46 @@ export function subscribeRoom(
     .on("postgres_changes", { event: "*", schema: "public", table: "room_discussion_supports", filter }, () => handlers.onProjectChange?.())
     .on("postgres_changes", { event: "*", schema: "public", table: "decision_records", filter }, () => handlers.onProjectChange?.())
     .on("presence", { event: "sync" }, () => {
-      handlers.onPresence?.(Object.keys(channel.presenceState()).length);
+      const state = channel.presenceState() as Record<string, Array<Record<string, unknown>>>;
+      handlers.onPresence?.(Object.keys(state).length);
+      const people: PresencePerson[] = [];
+      for (const [key, metas] of Object.entries(state)) {
+        // 取 `at` 最新的一筆（P9）：metas 是 join 順序，同一人多開一個分頁
+        // 時「最後一筆」會是那個沒開板的新分頁 — 他就從「在板上」名單消失。
+        let meta: Record<string, unknown> = {};
+        let newest = -1;
+        for (const item of metas) {
+          const at = typeof item.at === "number" ? item.at : 0;
+          if (at >= newest) {
+            newest = at;
+            meta = item;
+          }
+        }
+        people.push({
+          userId: key,
+          boardId: typeof meta.boardId === "string" ? meta.boardId : null,
+          at: newest < 0 ? 0 : newest,
+        });
+      }
+      handlers.onPresenceList?.(people);
     })
     .subscribe((status) => {
       const connected = status === "SUBSCRIBED";
       handlers.onStatus?.(connected);
-      if (connected) void channel.track({ at: Date.now() });
+      if (connected) void channel.track(trackPayload());
     });
 
-  return () => {
-    void supabase.removeChannel(channel);
+  // 身分／所在板變動時重新 track（**只在開關板時**，不是每次移動 —
+  // 「行動裝置友善的在場感：不送游標、不送 16ms 心跳」的既有紀律）。
+  // 真值一律現查 getPresenceIdentity()，這裡不留可能過期的副本。
+  const retrack = () => {
+    void channel.track(trackPayload());
   };
+
+  return Object.assign(
+    () => {
+      void supabase.removeChannel(channel);
+    },
+    { retrack },
+  );
 }

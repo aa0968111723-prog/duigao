@@ -35,10 +35,22 @@ production。**
   ADR-014（entity-level OCC＋append-only operations）、
   rounds/wb00/{wireflow,migration-plan,test-plan,parallel-agents-conflict-report}。
   不宣稱任何功能完成。
-- 序列：WB01 canonical schema（0021–0024）→ WB02 手機 Focus Mode →
-  WB03 雙向連結 → WB04 Realtime/presence → WB05 平板/Pencil → WB06 AI。
-- 平行衝突：open PR #71 動 MultiBranchRoom/RoomDiscussion/App.tsx，
-  與 WB02 重疊 — 開工前重查（rounds/wb00/parallel-agents-conflict-report.md）。
+- PR-WB01（#78，待人類審）：0021–0024 migrations（探針 281/281）＋
+  tombstone 資料層（ADR-011 關閉）＋operations 純函式層（op_id 冪等＋
+  field_mask undo）＋anchor message/plan-section 臂。Grok wb01 輪 8
+  findings 全採納。本機全綠矩陣。
+- PR-WB02（進行中）：手機 Focus Mode — 畫布 48%→**86%**（e2e 實測斷言
+  ≥75%）、手勢仲裁狀態機（pinch清drag/slop/雙指平移/pointer雙擊/套索）、
+  node registry、undo/redo（operations 執行端）、鍵盤避讓、back 階梯、
+  FAB 條件不渲染、frames 渲染＋建立、視覺回歸 12 基準（pixelmatch）。
+  偏差清單見 rounds/wb00/wireflow.md 附錄；真機檢查點模板
+  rounds/wb02/real-device-checklist.md。
+- 序列：WB03 雙向連結 → WB04 Realtime/presence → WB05 平板/Pencil →
+  WB06 AI。
+- 平行衝突更新：#71（設計看板＋活動房去重）**已於 2026-08-28 合併**，
+  main 的 App.tsx/MultiBranchRoom/RoomDiscussion 已含其變更 — WB01 已
+  合併最新 main（App.tsx 自動合併乾淨）；WB02 開工時以合併後 main 為底、
+  尊重 #71 的 UI 決策（AI 入口/＋ 的新形狀）。
 
 ## 已合併（時序）
 

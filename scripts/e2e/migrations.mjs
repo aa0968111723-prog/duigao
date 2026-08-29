@@ -1612,6 +1612,133 @@ try {
   psqlFile(join(MIGRATIONS, "0023_video_optimize.sql"));
   ok("0023 可以重複套用且欄位數不變", optimizeBefore === optimizeShape() && optimizeBefore === "3", `${optimizeBefore} → ${optimizeShape()}`);
 
+  section("0024–0028：canonical whiteboard schema（WB01）");
+  psqlFile(join(MIGRATIONS, "0024_whiteboard_canonical_columns.sql"));
+  psqlFile(join(MIGRATIONS, "0025_whiteboard_frames.sql"));
+  psqlFile(join(MIGRATIONS, "0026_whiteboard_operations.sql"));
+  psqlFile(join(MIGRATIONS, "0027_whiteboard_versions.sql"));
+
+  // (a) NOT VALID 約束必須真的 validate 過（Grok wb00 F4：只驗存在會假綠）
+  ok(
+    "link_pair 與 parent_group_fk 均 convalidated",
+    psql(`select bool_and(convalidated) from pg_constraint where conname in ('whiteboard_nodes_link_pair','whiteboard_nodes_parent_group_fk');`).out === "t",
+  );
+
+  // (b) z_index 不變式（Grok wb00 F5）：node >= 0、frame < 0
+  ok("node z_index < 0 被 CHECK 擋下", as(owner, `insert into public.whiteboard_nodes (whiteboard_id, room_id, node_type, content, z_index) values ('${collabBoard}'::uuid, '${capRoom}'::uuid, 'text', '{}'::jsonb, -1);`).failed);
+  const wbFrame = psql("select gen_random_uuid();").out;
+  ok("frame z_index >= 0 被 CHECK 擋下", as(owner, `insert into public.whiteboard_frames (id, whiteboard_id, room_id, title, z_index) values ('${wbFrame}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, '規劃區', 0);`).failed);
+  ok("合法 frame 建得起來（owner）", !as(owner, `insert into public.whiteboard_frames (id, whiteboard_id, room_id, title) values ('${wbFrame}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, '規劃區');`).failed);
+  ok("rotation 超界被 CHECK 擋下", as(owner, `update public.whiteboard_nodes set rotation = 361 where id = '${collabNode}'::uuid;`).failed);
+
+  // (c) edges OCC（0021 補；先前 edges 零 OCC）
+  const occEdgeA = psql("select gen_random_uuid();").out;
+  const occNodeB = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}';
+    insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${occNodeB}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'text', '{}'::jsonb);
+    insert into public.whiteboard_edges (id, whiteboard_id, room_id, source_node_id, target_node_id, edge_type) values ('${occEdgeA}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, '${collabNode}'::uuid, '${occNodeB}'::uuid, 'default');`);
+  ok("edge 正常 update 會被 trigger 進版", !as(owner, `update public.whiteboard_edges set label = '流程' where id = '${occEdgeA}'::uuid;`).failed && as(owner, `select version from public.whiteboard_edges where id = '${occEdgeA}'::uuid;`).out === "2");
+  ok("edge stale-write 被擋（version 倒退）", as(owner, `update public.whiteboard_edges set label = 'x', version = 1 where id = '${occEdgeA}'::uuid;`).failed);
+  ok("edge handle 詞彙外被 CHECK 擋下", as(owner, `update public.whiteboard_edges set source_handle = 'diagonal' where id = '${occEdgeA}'::uuid;`).failed);
+
+  // (d) tombstone：soft-delete 走 OCC；REST 硬刪已被 revoke
+  const tombNode = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}'; insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${tombNode}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'text', '{"text":"要刪的"}'::jsonb);`);
+  ok("soft-delete 帶過期 version 走 stale-write（ADR-011 關閉）", as(owner, `update public.whiteboard_nodes set deleted_at = now(), version = 0 where id = '${tombNode}'::uuid;`).failed);
+  ok("soft-delete 帶當前 version 成功", !as(owner, `update public.whiteboard_nodes set deleted_at = now(), version = (select version from public.whiteboard_nodes where id = '${tombNode}'::uuid) where id = '${tombNode}'::uuid;`).failed);
+  ok("authenticated 的 REST 硬刪被 revoke", as(owner, `delete from public.whiteboard_nodes where id = '${tombNode}'::uuid;`).failed);
+  // get_whiteboard_context 不回墓碑（Grok wb00 F8 repro 5）
+  const ctxAfter = as(owner, `select public.get_whiteboard_context('${collabBoard}'::uuid)::text;`).out;
+  ok("get_whiteboard_context 不含墓碑節點", !ctxAfter.includes(tombNode));
+  ok("get_whiteboard_context 仍含活節點", ctxAfter.includes(collabNode));
+  // 第二條 AI 讀路（Grok wb01 F3 抓漏的 get_selected_board_context）
+  const selCtx = as(owner, `select public.get_selected_board_context('${collabBoard}'::uuid, array['${tombNode}','${collabNode}']::uuid[])::text;`).out;
+  ok("get_selected_board_context 不含墓碑節點", !selCtx.includes(tombNode));
+  ok("get_selected_board_context 仍含活節點", selCtx.includes(collabNode));
+  // frames 真的在 realtime publication 裡（Grok wb01 F4：shape 沒量到）
+  ok(
+    "whiteboard_frames 已加入 supabase_realtime publication",
+    psql(`select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'whiteboard_frames';`).out === "1",
+  );
+  // 0024 snapshot CHECK：缺 edges 陣列被拒（設計如此 — Grok wb01 F8c 記錄）
+  ok("快照缺 edges 陣列被 CHECK 擋下", as(owner, `insert into public.whiteboard_versions (id, whiteboard_id, room_id, snapshot, created_by) values (gen_random_uuid(), '${collabBoard}'::uuid, '${capRoom}'::uuid, '{"nodes":[]}'::jsonb, '${owner}'::uuid);`).failed);
+
+  // (e) group 環防護（Grok wb00 F4：FK 不防 A↔B）
+  const cycA = psql("select gen_random_uuid();").out;
+  const cycB = psql("select gen_random_uuid();").out;
+  psql(`set request.jwt.claim.sub = '${owner}';
+    insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values
+      ('${cycA}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'group', '{}'::jsonb),
+      ('${cycB}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'group', '{}'::jsonb);
+    update public.whiteboard_nodes set parent_group_id = '${cycA}'::uuid, version = version where id = '${cycB}'::uuid;`);
+  ok("group 環（A↔B）被 trigger 擋下", as(owner, `update public.whiteboard_nodes set parent_group_id = '${cycB}'::uuid, version = (select version from public.whiteboard_nodes where id = '${cycA}'::uuid) where id = '${cycA}'::uuid;`).failed);
+
+  // (f) operations：append-only＋actor 冒名＋op_id 冪等＋reviewer 兩態
+  const wbOp = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可寫 operation（actor=自己）",
+    !as(owner, `insert into public.whiteboard_operations (op_id, whiteboard_id, room_id, actor_user_id, op_type, entity_id, field_mask, before, after) values ('${wbOp}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid, 'node-move', '${collabNode}'::uuid, '{x,y}', '{"x":20}'::jsonb, '{"x":40}'::jsonb);`).failed,
+  );
+  ok("重複 op_id 被 unique 擋下（重試冪等的 DB 半邊）", as(owner, `insert into public.whiteboard_operations (op_id, whiteboard_id, room_id, actor_user_id, op_type, entity_id) values ('${wbOp}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, '${owner}'::uuid, 'node-move', '${collabNode}'::uuid);`).failed);
+  ok("actor 冒名（別人的 uid）被擋", as(owner, `insert into public.whiteboard_operations (op_id, whiteboard_id, room_id, actor_user_id, op_type, entity_id) values (gen_random_uuid(), '${collabBoard}'::uuid, '${capRoom}'::uuid, '${stranger}'::uuid, 'node-move', '${collabNode}'::uuid);`).failed);
+  ok("operations append-only（update 無授權）", as(owner, `update public.whiteboard_operations set field_mask = '{}' where op_id = '${wbOp}'::uuid;`).failed);
+  ok("operations append-only（delete 無授權）", as(owner, `delete from public.whiteboard_operations where op_id = '${wbOp}'::uuid;`).failed);
+  // reviewer 兩態（Grok wb00 F8：allow_board_edit 的真實語意）— 此刻 capRoom 為 true
+  ok(
+    "allow_board_edit=true 時 reviewer 可寫 operation（actor=自己）",
+    !as(reviewer, `insert into public.whiteboard_operations (op_id, whiteboard_id, room_id, actor_user_id, op_type, entity_id) values (gen_random_uuid(), '${collabBoard}'::uuid, '${capRoom}'::uuid, '${reviewer}'::uuid, 'node-update', '${collabNode}'::uuid);`).failed,
+  );
+  psql(`set request.jwt.claim.sub = '${owner}'; update public.rooms set allow_board_edit = false where id = '${capRoom}'::uuid;`);
+  ok(
+    "allow_board_edit=false 時 reviewer 寫 operation 被拒",
+    as(reviewer, `insert into public.whiteboard_operations (op_id, whiteboard_id, room_id, actor_user_id, op_type, entity_id) values (gen_random_uuid(), '${collabBoard}'::uuid, '${capRoom}'::uuid, '${reviewer}'::uuid, 'node-update', '${collabNode}'::uuid);`).failed,
+  );
+  psql(`set request.jwt.claim.sub = '${owner}'; update public.rooms set allow_board_edit = true where id = '${capRoom}'::uuid;`);
+  ok("stranger 讀不到 operations（RLS 濾掉非空表）", as(stranger, `select count(*) from public.whiteboard_operations;`).out === "0");
+  ok("anon 讀不到 operations", asAnon(`select count(*) from public.whiteboard_operations;`).failed);
+
+  // (g) versions：不可變快照＋shape CHECK
+  const wbVer = psql("select gen_random_uuid();").out;
+  ok(
+    "owner 可建快照（created_by=自己）",
+    !as(owner, `insert into public.whiteboard_versions (id, whiteboard_id, room_id, label, snapshot, created_by) values ('${wbVer}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, '定稿前', '{"nodes":[],"edges":[]}'::jsonb, '${owner}'::uuid);`).failed,
+  );
+  ok("快照 shape 不合（nodes 非陣列）被 CHECK 擋下", as(owner, `insert into public.whiteboard_versions (id, whiteboard_id, room_id, snapshot, created_by) values (gen_random_uuid(), '${collabBoard}'::uuid, '${capRoom}'::uuid, '{"nodes":{}}'::jsonb, '${owner}'::uuid);`).failed);
+  ok("快照不可變（update 無授權）", as(owner, `update public.whiteboard_versions set label = '改名' where id = '${wbVer}'::uuid;`).failed);
+  ok("stranger 讀不到快照", as(stranger, `select count(*) from public.whiteboard_versions;`).out === "0");
+
+  // (h) frames RLS：stranger/anon 全拒
+  ok("stranger 不能建 frame", as(stranger, `insert into public.whiteboard_frames (whiteboard_id, room_id, title) values ('${collabBoard}'::uuid, '${capRoom}'::uuid, 'x');`).failed);
+  ok("anon 讀不到 frames", asAnon(`select count(*) from public.whiteboard_frames;`).failed);
+  ok("frame 正常 update 進版（OCC trigger）", !as(owner, `update public.whiteboard_frames set title = '重規劃' where id = '${wbFrame}'::uuid;`).failed && as(owner, `select version from public.whiteboard_frames where id = '${wbFrame}'::uuid;`).out === "2");
+
+  // (i) 冪等重跑：shape 不變（含 convalidated 仍為 t）
+  const wbShape = () => psql(`select
+    (select count(*) from pg_policies where tablename in ('whiteboard_frames','whiteboard_operations','whiteboard_versions')) || '/' ||
+    (select bool_and(convalidated) from pg_constraint where conname in ('whiteboard_nodes_link_pair','whiteboard_nodes_parent_group_fk')) || '/' ||
+    (select count(*) from pg_trigger where tgname in ('whiteboard_edges_touch','whiteboard_frames_touch','whiteboard_nodes_group_cycle'));`).out;
+  const wbBefore = wbShape();
+  psqlFile(join(MIGRATIONS, "0024_whiteboard_canonical_columns.sql"));
+  psqlFile(join(MIGRATIONS, "0025_whiteboard_frames.sql"));
+  psqlFile(join(MIGRATIONS, "0026_whiteboard_operations.sql"));
+  psqlFile(join(MIGRATIONS, "0027_whiteboard_versions.sql"));
+  ok("重跑 0024–0028 後 shape 不變（9/true/3）", wbBefore === wbShape() && wbBefore === "9/true/3", `${wbBefore} → ${wbShape()}`);
+  ok("重跑後 REST 硬刪依然被 revoke", as(owner, `delete from public.whiteboard_nodes where id = '${tombNode}'::uuid;`).failed);
+
+  section("0026：freehand 詞彙（WB03）");
+  psqlFile(join(MIGRATIONS, "0028_whiteboard_freehand.sql"));
+  const fhNode = psql("select gen_random_uuid();").out;
+  ok("freehand 節點可插入", !as(owner, `insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${fhNode}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'freehand', '{"points":[[0,0],[10,10]]}'::jsonb);`).failed);
+  ok("詞彙外型別仍被 CHECK 擋下", as(owner, `insert into public.whiteboard_nodes (whiteboard_id, room_id, node_type, content) values ('${collabBoard}'::uuid, '${capRoom}'::uuid, 'scribble', '{}'::jsonb);`).failed);
+  // 0014 重放不得把 'freehand' 洗掉（inline CHECK 只在 create table 生效）
+  psqlFile(join(MIGRATIONS, "0014_collaboration_workspace.sql"));
+  const fhNode2 = psql("select gen_random_uuid();").out;
+  ok("0014 重放後 freehand 仍可插入", !as(owner, `insert into public.whiteboard_nodes (id, whiteboard_id, room_id, node_type, content) values ('${fhNode2}'::uuid, '${collabBoard}'::uuid, '${capRoom}'::uuid, 'freehand', '{}'::jsonb);`).failed);
+  // 0026 重放冪等
+  psqlFile(join(MIGRATIONS, "0028_whiteboard_freehand.sql"));
+  ok("0026 重放後 CHECK 恰一條", psql(`select count(*) from pg_constraint where conname = 'whiteboard_nodes_node_type_check';`).out === "1");
+  ok("0026 重放後 freehand 列仍在", psql(`select count(*) from public.whiteboard_nodes where id in ('${fhNode}'::uuid,'${fhNode2}'::uuid);`).out === "2");
+
   console.log(`\n${checks - failures}/${checks} 通過`);
 } finally {
   if (started) {

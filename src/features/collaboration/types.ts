@@ -11,6 +11,8 @@ export const NODE_TYPES = [
   "link",
   "group",
   "ai_result",
+  // WB03（0026）：手繪筆畫 — content.points 是相對節點左上的 [x,y][]
+  "freehand",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
@@ -90,6 +92,11 @@ export type NodeContent = {
   /** Mobile-safe presence stamp. Never a cursor stream. */
   lastWriterId?: string;
   lastWriterName?: string;
+  /** freehand（WB03）：相對節點左上的筆畫點；搬節點＝搬筆畫。 */
+  points?: [number, number][];
+  strokeWidth?: number;
+  /** WB05：每個點的筆壓（與 points 等長；沒有壓感時不存）。 */
+  pressures?: number[];
 };
 
 export type WhiteboardNode = {
@@ -109,6 +116,20 @@ export type WhiteboardNode = {
   createdAt: number;
   updatedAt: number;
   version: number;
+  // canonical 欄位（0021/0022，WB01）。optional：舊列走 DB default，
+  // 讀側以 ?? 補值；UI 消費屬 WB02。
+  rotation?: number;
+  zIndex?: number;
+  locked?: boolean;
+  /** 指向 versions.id：來源作品的「哪一版」（provenance 的版本半邊）。 */
+  sourceVersionId?: string;
+  /** ContextAnchor 序列化（jsonb）；形狀權威在 src/lib/contextAnchor。 */
+  anchor?: Record<string, unknown>;
+  updatedBy?: string;
+  /** tombstone（0021）：非空＝已刪。過濾點在 offline.ts 純函式，不散落 UI。 */
+  deletedAt?: number;
+  /** 空間容器歸屬（0022 frames）；不參與 paint order。 */
+  frameId?: string;
 };
 
 export type WhiteboardEdge = {
@@ -120,10 +141,74 @@ export type WhiteboardEdge = {
   edgeType: EdgeType;
   label: string;
   createdAt: number;
+  // 0021：edges 補 OCC 與出處（audit：先前零 OCC）
+  updatedAt?: number;
+  version?: number;
+  createdBy?: string;
+  sourceHandle?: EdgeHandle;
+  targetHandle?: EdgeHandle;
+};
+
+export const EDGE_HANDLES = ["top", "right", "bottom", "left", "auto"] as const;
+export type EdgeHandle = (typeof EDGE_HANDLES)[number];
+
+export const FRAME_KINDS = [
+  "frame", "zone", "swimlane", "kanban-column", "vote-area",
+  "status-needs-review", "status-needs-changes", "status-approved", "parking-lot",
+] as const;
+export type FrameKind = (typeof FRAME_KINDS)[number];
+
+/** 空間容器（0022）：與 group（選取聚合）不同語意。z 恆 < 0（DB CHECK）。 */
+export type WhiteboardFrame = {
+  id: string;
+  whiteboardId: string;
+  roomId: string;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  kind: FrameKind;
+  style: Record<string, unknown>;
+  zIndex: number;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  version: number;
+};
+
+export const WHITEBOARD_OP_TYPES = [
+  "node-create", "node-update", "node-delete", "node-move",
+  "edge-create", "edge-update", "edge-delete",
+  "frame-create", "frame-update", "frame-delete",
+  "board-arrange", "bulk-restore",
+] as const;
+export type WhiteboardOpType = (typeof WHITEBOARD_OP_TYPES)[number];
+
+/**
+ * append-only 操作事件（0023，ADR-014）。不是第二個 truth：套用順序由
+ * row state＋OCC 決定。opId 由 client 產生（重試冪等）；before/after 只含
+ * fieldMask 內欄位 — undo 永不整列還原。
+ */
+export type WhiteboardOperation = {
+  opId: string;
+  whiteboardId: string;
+  roomId: string;
+  actorUserId: string;
+  opType: WhiteboardOpType;
+  entityId: string;
+  fieldMask: string[];
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  createdAt: number;
 };
 
 export type DiscussionPayload = {
   quotedBody?: string;
+  /** message 錨（WB01）：引用房內另一則討論訊息。 */
+  messageId?: string;
+  /** plan-section 錨（WB01）：企劃分支內的段落 id。 */
+  planSectionId?: string;
   /** 唯讀併入的 legacy（0001 messages）列：討論表沒有這個 id，互動一律關閉。 */
   legacy?: boolean;
   /** attachment：room-assets 物件 key（永遠不是 signed URL）。 */

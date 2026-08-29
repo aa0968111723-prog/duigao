@@ -186,13 +186,32 @@ try {
   check("套用討論提案會寫入而不改原稿", await page.getByText("已套用。原稿沒有被改寫。").count() === 1);
   await page.getByTestId("apply-proposal").first().click();
   await page.waitForFunction(() => [...document.querySelectorAll("[data-testid=ai-proposal]")].filter((el) => el.textContent?.includes("已套用")).length >= 2, null, { timeout: 8000 });
-  check("套用白板提案走 0014 production node", await page.getByTestId("apply-proposal").count() === 0);
+  check("白板提案在房間層按下後不再直接落板", await page.getByTestId("apply-proposal").count() === 0);
   await page.getByLabel("關閉 AI").click();
+  // WB06/F1：房間層 AI 的 add_whiteboard_node 不再直接寫節點 —— 它會開板
+  // 並把提案交給白板預覽，使用者看到才決定。紅線（AI 不自動執行）原本
+  // 只守住板內入口那一半。
   await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 8000 });
-  await page.waitForFunction(() => Number(document.querySelector("[data-testid=wb-stats]")?.getAttribute("data-nodes") || 0) >= 1, null, { timeout: 8000 });
+  await page.waitForSelector('[data-testid="wb-ai-preview-bar"]', { timeout: 8000 });
+  const ghostLabel = await page.locator(".wb-node-ai-preview").first().innerText().catch(() => "");
+  check("房間層 AI 的白板提案改成板上預覽", ghostLabel.includes("擺攤主視覺"), ghostLabel);
+  const realNodes = await page.locator('[data-testid^="wb-node-"]').count();
+  check("按下套用前，板上沒有多出真的節點", realNodes === 0, `real=${realNodes}`);
+  // 使用者確認後才成為真節點
+  await page.getByTestId("wb-ai-apply").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-testid^="wb-node-"]').length >= 1,
+    null,
+    { timeout: 10000 },
+  );
   const nodeValue = await page.locator('[data-testid^="wb-node-"] textarea').first().inputValue().catch(() => "");
   const nodeLabel = await page.locator('[data-testid^="wb-node-"]').first().innerText().catch(() => "");
-  check("白板出現套用後的 production 節點", nodeValue.includes("擺攤主視覺") || nodeLabel.includes("擺攤主視覺"));
+  check("確認後白板出現 production 節點", nodeValue.includes("擺攤主視覺") || nodeLabel.includes("擺攤主視覺"));
+  // WB02 Focus Mode：殼 tabs 在全屏層之下 — 先退出白板
+  if (await page.locator(".wb-focus").count()) {
+    await page.locator(".wb-focus-top .project-back-button").click();
+    await page.waitForSelector(".wb-list", { timeout: 10000 });
+  }
   await page.getByRole("button", { name: "對話" }).click();
   check("討論看得到套用後的留言", (await page.locator("body").innerText()).includes("這張適合當擺攤紀錄"));
   await page.screenshot({ path: join(tempRoot, "asset-intelligence-android.png"), fullPage: false });

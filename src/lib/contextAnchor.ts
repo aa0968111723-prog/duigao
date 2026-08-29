@@ -17,7 +17,8 @@
  *
  * 已知缺口（契約點名、本 PR 不解）：
  *  - 意見列無法錨到 whiteboard_node（沒有欄位）。
- *  - 沒有 plan_section 錨（企劃段落）。
+ *  - （WB01 已補）message 與 plan-section 臂 — 意見列仍無表示法，
+ *    節點/討論兩機制有。
  *  - entity 錨的 plan / asset / discussion 臂沒有討論 payload 表示法
  *    （anchorToDiscussionPayload 回空）。
  *
@@ -44,7 +45,12 @@ export type ContextAnchor =
   // zone/object。三套既有機制目前都沒有它的表示法（已知缺口 —
   // adapters 回空、openTarget 回 none）；第二階段 live embed 探測完
   // host headers 後由 planform 表面自己消費。
-  | { type: "planform-scene"; projectId: string; targetId?: string };
+  | { type: "planform-scene"; projectId: string; targetId?: string }
+  // WB01（任務書 §14）：訊息錨（白板節點的 provenance — createSticky 的
+  // 「回得去原訊息」）與企劃段落錨。sectionId 是 plan_documents 內容裡的
+  // 段落識別（client 產生的穩定 id；DB 無獨立段落表 — 誠實記錄）。
+  | { type: "message"; messageId: string }
+  | { type: "plan-section"; branchId: string; sectionId?: string };
 
 /** 有 comment 欄位表示法的臂 — entity/board-node 寫不進意見列（已知缺口）。 */
 export type MediaAnchor = Extract<
@@ -163,6 +169,13 @@ export function anchorFromNode(node: NodeLinkFields): ContextAnchor {
         return { type: "video-point", time: start, ...ids };
       }
     }
+    // discussion link（WB03）：這顆節點是從某則討論訊息放上板的 —
+    // 錨是那則訊息，不是 entity 皮：openTarget 才走得到 discussion
+    // surface（「打開來源訊息」跳回討論）。entity 臂對 discussion 是
+    // 死路（openTarget 的 entity surface 沒人消費 discussion）。
+    if (node.linkedEntityType === "discussion") {
+      return { type: "message", messageId: node.linkedEntityId };
+    }
     return { type: "entity", entityType: node.linkedEntityType, entityId: node.linkedEntityId };
   }
   return { type: "board-node", whiteboardId: node.whiteboardId, nodeId: node.id };
@@ -185,6 +198,14 @@ export function anchorToNodeLink(anchor: ContextAnchor): {
     return {};
   };
   switch (anchor.type) {
+    case "message":
+      // 'discussion' 在 0014 的 CHECK 詞彙裡從第一天就存在、至今零生產者
+      // （audit §7 的 provenance 缺口）— 這裡是它的第一個合法寫入路徑。
+      return { linkedEntityType: "discussion", linkedEntityId: anchor.messageId };
+    case "plan-section":
+      // 節點機制單 link 位：段落細節（sectionId）由節點的 anchor jsonb 欄
+      // 保存（0021），link 只到分支層級。
+      return { linkedEntityType: "plan", linkedEntityId: anchor.branchId };
     case "entity":
       return { linkedEntityType: anchor.entityType, linkedEntityId: anchor.entityId };
     case "video-point":
@@ -211,6 +232,17 @@ export function entityAnchor(entityType: string, entityId: string): ContextAncho
  * （純文字/附件卡沒有錨）。
  */
 export function anchorFromDiscussion(payload: DiscussionPayload): ContextAnchor | null {
+  // 優先權（Grok wb01 F7）：whiteboardId 維持最高 — 既有 board-node 生產者
+  // 的 payload 永不被新臂遮蔽；messageId 只在沒有板參照時生效。
+  if (payload.whiteboardId) {
+    return { type: "board-node", whiteboardId: payload.whiteboardId, nodeId: payload.nodeId };
+  }
+  if (payload.messageId) {
+    return { type: "message", messageId: payload.messageId };
+  }
+  if (payload.branchId && payload.planSectionId) {
+    return { type: "plan-section", branchId: payload.branchId, sectionId: payload.planSectionId };
+  }
   if (payload.whiteboardId) {
     return { type: "board-node", whiteboardId: payload.whiteboardId, nodeId: payload.nodeId };
   }
@@ -238,6 +270,12 @@ export function anchorFromDiscussion(payload: DiscussionPayload): ContextAnchor 
  */
 export function anchorToDiscussionPayload(anchor: ContextAnchor): DiscussionPayload {
   switch (anchor.type) {
+    case "message":
+      return { messageId: anchor.messageId };
+    case "plan-section":
+      return anchor.sectionId
+        ? { branchId: anchor.branchId, planSectionId: anchor.sectionId }
+        : { branchId: anchor.branchId };
     case "board-node":
       return anchor.nodeId
         ? { whiteboardId: anchor.whiteboardId, nodeId: anchor.nodeId }
@@ -282,11 +320,16 @@ export type OpenTarget =
   | { surface: "board"; whiteboardId: string; nodeId?: string }
   | { surface: "content"; branchId: string; startTime?: number }
   | { surface: "entity"; entityType: LinkedEntityType; entityId: string }
+  | { surface: "discussion"; messageId: string }
   | { surface: "none" };
 
 export function openTarget(anchor: ContextAnchor | null): OpenTarget {
   if (!anchor) return { surface: "none" };
   switch (anchor.type) {
+    case "message":
+      return { surface: "discussion", messageId: anchor.messageId };
+    case "plan-section":
+      return { surface: "content", branchId: anchor.branchId };
     case "board-node":
       return { surface: "board", whiteboardId: anchor.whiteboardId, nodeId: anchor.nodeId };
     case "video-point":

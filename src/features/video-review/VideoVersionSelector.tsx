@@ -9,6 +9,7 @@ import { UniversalIntake } from "../../components/UniversalIntake";
  */
 
 type Props = {
+  extraChip?: import("react").ReactNode;
   versions: Version[];
   currentId: string;
   onSelect: (versionId: string) => void;
@@ -24,6 +25,7 @@ type Props = {
 };
 
 export function VideoVersionSelector({
+  extraChip,
   versions,
   currentId,
   onSelect,
@@ -100,6 +102,7 @@ export function VideoVersionSelector({
           <span aria-hidden>＋</span>
         </UniversalIntake>
       )}
+      {extraChip}
     </div>
   );
 }

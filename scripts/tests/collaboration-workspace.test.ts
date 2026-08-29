@@ -639,3 +639,59 @@ test("replaceBoardGraph：遠端已刪的節點消失、acked 清除；護盾節
   const typing = result.nodes.find((item) => (item as { id: string }).id === "typing");
   assert.equal((typing as { content: { text: string } }).content.text, "打字中"); // 打字中的內容保留
 });
+
+// ---- WB01 tombstone（0021）：三道防線各一條反例 ----------------------------
+
+const wbNode = (id: string, version: number): WhiteboardNode => ({
+  id,
+  whiteboardId: "board-1",
+  roomId: "room-1",
+  nodeType: "text",
+  x: 0,
+  y: 0,
+  width: 180,
+  height: 96,
+  content: { text: id },
+  createdBy: "u1",
+  createdAt: 1,
+  updatedAt: 1,
+  version,
+});
+
+test("tombstone patch：帶 deletedAt 的 upsert 視同刪除，不復活本地已刪節點", () => {
+  const alive = wbNode("t1", 5);
+  const state = { nodes: [wbNode("t2", 1)], edges: [] as WhiteboardEdge[] };
+  // 第二層防線：tombstone row 走 node-upsert 進來（Grok wb00 F3 repro 2）
+  const tomb = { ...alive, deletedAt: Date.now(), version: 9 };
+  const acked = new Map<string, number>();
+  const afterInsert = applyBoardPatches(state.nodes.concat(alive), state.edges, acked, [
+    { type: "node-upsert", node: tomb },
+  ], null);
+  assert.equal(afterInsert.nodes.some((n) => n.id === "t1"), false, "tombstone 必須把節點帶走");
+  // ack 水位不因墓碑推進（版本屬於墓碑列）
+  assert.equal(acked.get("t1"), undefined);
+  // 護盾中的節點讓路（拖曳/in-flight 不被遠端墓碑瞬移）
+  const shielded = applyBoardPatches([alive], [], new Map(), [
+    { type: "node-upsert", node: tomb },
+  ], new Set(["t1"]));
+  assert.equal(shielded.nodes.some((n) => n.id === "t1"), true, "護盾節點暫不移除");
+});
+
+test("tombstone reconcile：IDB 舊活列被雲端墓碑（較高 version）蓋掉後濾除；本地新建列保留", () => {
+  const localStale = wbNode("z1", 3);          // 快照裡的舊活列（雲端已刪）
+  const localNew = wbNode("z2", 1);            // 本地未同步的新建列（雲端沒有）
+  const cloudTomb = { ...wbNode("z1", 3), deletedAt: Date.now(), version: 4 };
+  const merged = reconcileNodes([localStale, localNew], [cloudTomb], []);
+  assert.equal(merged.some((n) => n.id === "z1"), false, "殭屍必須被墓碑消滅");
+  assert.equal(merged.some((n) => n.id === "z2"), true, "本地新建列不受影響");
+});
+
+test("tombstone replaceBoardGraph：整替時墓碑不進畫面", () => {
+  const graph = {
+    nodes: [wbNode("g1", 2), { ...wbNode("g2", 5), deletedAt: Date.now() }],
+    edges: [] as WhiteboardEdge[],
+  };
+  const out = replaceBoardGraph([], [], new Map(), "board-1", graph, null);
+  assert.deepEqual(out.nodes.map((n) => n.id), ["g1"]);
+});
+

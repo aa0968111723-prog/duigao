@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { historyLayers } from "../../lib/historyLayers";
+import { useIsTabletUp } from "../../hooks/useIsTabletUp";
+import { emptyPlan, shouldAdoptRemotePlan } from "./planDraft";
 import type {
   BranchStatus,
   BranchType,
@@ -89,6 +92,14 @@ export type MultiBranchRoomApi = {
   onCreateWhiteboard: (title: string) => void;
   onArchiveWhiteboard: (id: string) => void;
   onOpenWhiteboard: (id: string | null) => void;
+  /** WB02：frames／op 入帳／focus 通知（App 據此抑制 AssetAiFab）。 */
+  whiteboardFrames?: import("../collaboration/types").WhiteboardFrame[];
+  onCreateFrame?: (frame: import("../collaboration/types").WhiteboardFrame) => void;
+  onUpdateFrame?: (frame: import("../collaboration/types").WhiteboardFrame) => void;
+  onDeleteFrame?: (id: string) => void;
+  onEmitOperation?: (draft: import("../collaboration/operations").OperationDraft) => void;
+  onBoardFocusChange?: (focused: boolean) => void;
+  onRenameWhiteboard?: (id: string, title: string) => void;
   onUpsertNode: (node: WhiteboardNode, persist?: "now" | "end") => void;
   onUpsertNodes: (nodes: WhiteboardNode[]) => void;
   onDeleteNode: (id: string) => void;
@@ -103,6 +114,27 @@ export type MultiBranchRoomApi = {
   focusNodeId: string | null;
   online: number;
   editors: PresenceEditor[];
+  /** WB04：開著同一塊板的其他人（具名在場，無游標）。 */
+  boardPeople?: { userId: string; name: string }[];
+  onFrameDragState?: (id: string | null) => void;
+  onSnapshotBoard?: (label: string) => Promise<void>;
+  onListVersions?: () => Promise<import("../whiteboard/versions").BoardVersionSummary[]>;
+  onLoadVersion?: (versionId: string) => Promise<{ snapshot: import("../whiteboard/versions").BoardSnapshot; dropped: number }>;
+  onRestoreVersion?: (snapshot: import("../whiteboard/versions").BoardSnapshot) => Promise<{ applied: number; queued: boolean }>;
+  onAskBoardAi?: (
+    question: string,
+    context: {
+      nodes: import("../collaboration/types").WhiteboardNode[];
+      selectedIds: string[];
+      centerWorld: { x: number; y: number };
+    },
+  ) => Promise<import("../whiteboard/aiPreview").BoardAiPreview>;
+  stagedAiPreview?: import("../whiteboard/aiPreview").BoardAiPreview | null;
+  onConsumeStagedAiPreview?: () => void;
+  onApplyBoardAi?: (
+    plan: { nodes: import("../collaboration/types").WhiteboardNode[]; edges: import("../collaboration/types").WhiteboardEdge[] },
+    preview: import("../whiteboard/aiPreview").BoardAiPreview,
+  ) => Promise<{ applied: number; snapshotTaken: boolean }>;
   onShare: () => void;
   /** 改房間名字。刻意與 setTitle 分開：setTitle 在有 activeBranchId 時改的是分支名。 */
   onRenameRoom: (title: string) => void;
@@ -180,10 +212,6 @@ const PANE_META: { id: PushedPane; label: string; icon: string }[] = [
   { id: "content", label: "內容", icon: "▧" },
   { id: "plan", label: "企劃", icon: "☷" },
 ];
-
-function emptyPlan(branch: RoomBranch): PlanDocument {
-  return { branchId: branch.id, title: branch.name, description: "", blocks: [], updatedAt: Date.now() };
-}
 
 function branchHasType(branch: RoomBranch, type: BranchType): boolean {
   return branch.branchType === type || (type === "plan" && branch.branchType === "copy");
@@ -319,14 +347,20 @@ function PlanEditor({
     () => room.plans?.find((item) => item.branchId === branch.id) ?? emptyPlan(branch),
     [branch.id, branch.name, room.plans],
   );
-  const [draft, setDraft] = useState<PlanDocument>(saved);
+  const [draft, setDraftState] = useState<PlanDocument>(saved);
   const [relationTarget, setRelationTarget] = useState("");
+  // 「有未存編輯」旗標：所有使用者操作都經 setDraft 立旗，存檔後落旗。
+  const dirtyRef = useRef(false);
+  const setDraft: typeof setDraftState = (value) => {
+    dirtyRef.current = true;
+    setDraftState(value);
+  };
 
   // room.plans 的陣列身分每次快照都會變；無條件 reset 會把「打字中、還沒按
   // 完成」的 blocks 洗掉（realtime nudge → branch reload → echo 快照）。
-  // 只有遠端真的比較新（別人存的）才接受，否則保留本地編輯。
+  // 規則：有未存編輯就不接受任何遠端；乾淨時遠端較新才接受。
   useEffect(() => {
-    setDraft((current) => (saved.updatedAt > current.updatedAt ? saved : current));
+    setDraftState((current) => (shouldAdoptRemotePlan(saved, current, dirtyRef.current) ? saved : current));
   }, [saved]);
 
   const relations = (room.relations ?? []).filter(
@@ -414,7 +448,12 @@ function PlanEditor({
           <button type="button" onClick={() => addBlock("list")}>＋清單</button>
           <button type="button" onClick={() => addBlock("checklist")}>＋待辦</button>
           <button type="button" onClick={() => addBlock("link")}>＋連結</button>
-          <button type="button" className="project-save-button" onClick={() => onSave({ ...draft, updatedAt: Date.now() })}>完成</button>
+          <button type="button" className="project-save-button" onClick={() => {
+            const stamped = { ...draft, updatedAt: Date.now() };
+            dirtyRef.current = false; // 存了就不再是未存編輯 — 之後可接受別人的新版
+            setDraftState(stamped);
+            onSave(stamped);
+          }}>完成</button>
         </div>
       )}
       <section className="project-related">
@@ -723,7 +762,36 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   useViewport();
   // 討論是根畫面；總覽/內容/企劃是可返回的推進面板（Grok pr00 F1/F3）。
   const [pushedPane, setPushedPane] = useState<PushedPane | null>(null);
+  // Focus Mode（WB02）：白板全螢幕時抑制 project-fab（條件不渲染，非蓋住）
+  const [boardFocused, setBoardFocused] = useState(false);
+  // 平板 Split View 的討論側欄是否收起（手機用不到 — CSS 斷點控制顯示）
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const tabletUp = useIsTabletUp();
+  /** 側欄此刻是否真的要掛（與 CSS 斷點同源，避免中間影格與手機多掛一份）。 */
+  const railVisible = tabletUp && !railCollapsed;
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
+  // WB03「打開來源訊息」：關板→切對話→捲動到訊息＋1.6s 高亮。訊息元素
+  // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
+  const openDiscussionMessage = (messageId: string) => {
+    // Split View（平板）：討論就在左邊側欄，關掉白板反而把使用者正在看的
+    // 東西收走（自審 N13）。只有手機的「切 tab」語意才需要關板。
+    if (!railVisible) {
+      api.onOpenWhiteboard(null);
+      setDiscussPane("chat");
+    }
+    const started = performance.now();
+    const seek = () => {
+      const el = document.querySelector(`[data-testid="discussion-${messageId}"]`);
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("rd-msg-flash");
+        window.setTimeout(() => el.classList.remove("rd-msg-flash"), 1600);
+        return;
+      }
+      if (performance.now() - started < 1200) requestAnimationFrame(seek);
+    };
+    requestAnimationFrame(seek);
+  };
   const [search, setSearch] = useState("");
   const [composerActive, setComposerActive] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -766,6 +834,26 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     }
   }, [api.activeWhiteboardId]);
 
+  // WB03 疊加規則 3：對稿 overlay 疊在（可能開著的）白板 Focus 上時，
+  // back 先關 overlay — 透過 historyLayers 協調器與白板 focus 層排隊，
+  // 不再兩個 popstate listener 互踩（舊 bug：back 退了板、overlay 還在）。
+  const workspaceOpen = Boolean(api.workspace);
+  const mbrApiRef = useRef(api);
+  mbrApiRef.current = api;
+  const overlayPoppingRef = useRef(false);
+  useEffect(() => {
+    if (!workspaceOpen) return;
+    const remove = historyLayers().push("content-overlay", () => {
+      overlayPoppingRef.current = true;
+      mbrApiRef.current.onBackToRoom();
+      return "closed";
+    });
+    return () => {
+      remove(overlayPoppingRef.current);
+      overlayPoppingRef.current = false;
+    };
+  }, [workspaceOpen]);
+
   // 桌機 Escape：對稿 overlay 是最外層的「可返回」，讓工作區自己的
   // ladder（modal/sheet）先吃；事件冒泡到 document 而沒被吃掉才關 overlay。
   // 推進面板同理。
@@ -796,11 +884,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
 
   useEffect(() => {
     const onPop = () => {
-      if (moreOpenRef.current) {
-        setMoreOpen(false);
-        return;
-      }
-      setPushedPane(null);
+      if (moreOpenRef.current) setMoreOpen(false);
+      // 不可以在這裡收推進面板：對稿 overlay / 白板 Focus 的
+      // historyLayers 程式性關層會 history.back() 吃掉自己那格，那次
+      // popstate 不是「使用者要關內容面板」。面板必須跨 overlay 保留。
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -833,6 +920,64 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合
     api.onOpenBranch(branchId, opts);
   };
+
+  // 討論面板（WB05）：手機是 tab、平板是左側常駐欄 — 同一份 api 兩個
+  // 掛載點共用，不複製一份會漂走的設定。
+  // 用函式而不是 const：JSX 只在渲染時求值，宣告順序就不受 createPoll /
+  // openBranch 這些後面才宣告的相依限制（函式宣告會提升）。
+  /**
+   * pane 覆寫（WB05）：RoomDiscussion 在 `pane === "board"` 時自己 return
+   * null（手機是 tab、同時只有一個）。平板的側欄是**同時**顯示，所以要
+   * 明確傳 "chat" — 否則側欄是空的（e2e 抓到）。
+   */
+  function renderDiscussion(paneOverride?: "chat" | "board") {
+    return (
+                    <RoomDiscussion api={{
+                      room: normalized,
+                      guest: api.guest,
+                      userId: api.userId ?? api.guest.id,
+                      canManage: api.canManage,
+                      canTalk: true,
+                      messages: (() => {
+                        const base = api.room.discussion ?? [];
+                        const ids = new Set(base.map((m) => m.id));
+                        return [...base, ...(api.discussionGhosts ?? []).filter((m) => !ids.has(m.id))];
+                      })(),
+                      supports: api.room.discussionSupports ?? [],
+                      decisions: api.room.decisions ?? [],
+                      boards: api.room.whiteboards ?? [],
+                      hideTabs: true,
+                      sendStates: api.discussionSendStates,
+                      onRetry: api.onRetryDiscussion,
+                      onAttach: api.onAttachDiscussion,
+                      attachBusy: api.attachBusy,
+                      attachUpload: api.attachUpload,
+                      onComposerActive: setComposerActive,
+                      onReject: api.onIntakeReject,
+                      onSendLink: api.onSendDiscussionLink,
+                      resolveAssetUrl: api.resolveAssetUrl,
+                      voice: api.voice,
+                      pane: paneOverride ?? discussPane,
+                      draft: api.chatInput,
+                      setDraft: api.setChatInput,
+                      onSend: (input) => {
+                        if (input) api.onSendDiscussion(input);
+                        else api.sendChat();
+                      },
+                      onSupport: api.onSupportDiscussion,
+                      onCreatePoll: createPoll,
+                      onAddToBoard: api.onAddMessageToBoard,
+                      onOpenBoardNode: (whiteboardId, nodeId) => {
+                        setDiscussPane("board");
+                        api.onOpenWhiteboard(whiteboardId);
+                        api.onFocusNode?.(nodeId ?? null);
+                      },
+                      onCreateDecision: api.onCreateDecision,
+                      onFinalizeDecision: api.onFinalizeDecision,
+                      onOpenContent: openBranch,
+                    }} />
+    );
+  }
 
   const tabBranches = (type: BranchType) => branches.filter((branch) => branchHasType(branch, type) && branch.status !== "archived");
   const [createType, setCreateType] = useState<BranchType | undefined>();
@@ -957,6 +1102,18 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     roleAllowsEdit: api.canManage,
                     online: api.online,
                     editors: api.editors,
+                    boardPeople: api.boardPeople,
+                    railVisible,
+                    onToggleRail: tabletUp ? () => setRailCollapsed((current) => !current) : undefined,
+                    onFrameDragState: api.onFrameDragState,
+                    onSnapshotBoard: api.onSnapshotBoard,
+                    onListVersions: api.onListVersions,
+                    onLoadVersion: api.onLoadVersion,
+                    onRestoreVersion: api.onRestoreVersion,
+                    onAskBoardAi: api.onAskBoardAi,
+                    stagedAiPreview: api.stagedAiPreview,
+                    onConsumeStagedAiPreview: api.onConsumeStagedAiPreview,
+                    onApplyBoardAi: api.onApplyBoardAi,
                     isMobile,
                     focusNodeId: api.focusNodeId,
                     activeBoardId: api.activeWhiteboardId,
@@ -964,7 +1121,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onDragState: api.onBoardDragState,
                     onCreateBoard: api.onCreateWhiteboard,
                     onArchiveBoard: api.onArchiveWhiteboard,
-                    onRenameBoard: () => undefined,
+                    onRenameBoard: api.onRenameWhiteboard ?? (() => undefined),
                     onUpsertNode: api.onUpsertNode,
                     onDeleteNode: api.onDeleteNode,
                     onUpsertNodes: api.onUpsertNodes,
@@ -990,52 +1147,19 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onToggleAllowEdit: api.onToggleAllowBoardEdit,
                     allowBoardEdit: Boolean(api.room.allowBoardEdit),
                     canToggleOpenEdit: api.role === "owner" || (!api.role && api.canManage),
+                    frames: api.whiteboardFrames,
+                    onCreateFrame: api.onCreateFrame,
+                    onUpdateFrame: api.onUpdateFrame,
+                    onDeleteFrame: api.onDeleteFrame,
+                    onOpenDiscussionMessage: openDiscussionMessage,
+                    onEmitOperation: api.onEmitOperation,
+                    onFocusChange: (focused) => {
+                      setBoardFocused(focused);
+                      api.onBoardFocusChange?.(focused);
+                    },
                   }} />
                 ) : (
-                  <RoomDiscussion api={{
-                    room: normalized,
-                    guest: api.guest,
-                    userId: api.userId ?? api.guest.id,
-                    canManage: api.canManage,
-                    canTalk: true,
-                    messages: (() => {
-                      const base = api.room.discussion ?? [];
-                      const ids = new Set(base.map((m) => m.id));
-                      return [...base, ...(api.discussionGhosts ?? []).filter((m) => !ids.has(m.id))];
-                    })(),
-                    supports: api.room.discussionSupports ?? [],
-                    decisions: api.room.decisions ?? [],
-                    boards: api.room.whiteboards ?? [],
-                    hideTabs: true,
-                    sendStates: api.discussionSendStates,
-                    onRetry: api.onRetryDiscussion,
-                    onAttach: api.onAttachDiscussion,
-                    attachBusy: api.attachBusy,
-                    attachUpload: api.attachUpload,
-                    onComposerActive: setComposerActive,
-                    onReject: api.onIntakeReject,
-                    onSendLink: api.onSendDiscussionLink,
-                    resolveAssetUrl: api.resolveAssetUrl,
-                    voice: api.voice,
-                    pane: discussPane,
-                    draft: api.chatInput,
-                    setDraft: api.setChatInput,
-                    onSend: (input) => {
-                      if (input) api.onSendDiscussion(input);
-                      else api.sendChat();
-                    },
-                    onSupport: api.onSupportDiscussion,
-                    onCreatePoll: createPoll,
-                    onAddToBoard: api.onAddMessageToBoard,
-                    onOpenBoardNode: (whiteboardId, nodeId) => {
-                      setDiscussPane("board");
-                      api.onOpenWhiteboard(whiteboardId);
-                      api.onFocusNode?.(nodeId ?? null);
-                    },
-                    onCreateDecision: api.onCreateDecision,
-                    onFinalizeDecision: api.onFinalizeDecision,
-                    onOpenContent: openBranch,
-                  }} />
+                  renderDiscussion()
                 )}
               </section>
             )}
@@ -1147,6 +1271,17 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
       )}
       {createOpen && <CreateSheet initialType={createType} onClose={() => { setCreateOpen(false); setCreateType(undefined); }} onCreate={createContent} onCutosImport={api.cutosImport} canva={api.canva} onReject={api.onIntakeReject} />}
       {pollOpen && <PollSheet onClose={() => setPollOpen(false)} onCreate={createPoll} />}
+      {/* WB05 平板 Split View：白板全螢幕時，左側常駐討論欄。手機由 CSS
+          斷點隱藏（display:none），行為與之前完全一樣。 */}
+      {boardFocused && railVisible && (
+        <aside className="wb-side-rail" data-testid="wb-side-rail" aria-label="討論">
+          <div className="wb-side-rail-head">
+            <strong>討論</strong>
+            <button type="button" onClick={() => setRailCollapsed(true)} aria-label="收起討論">✕</button>
+          </div>
+          <div className="wb-side-rail-body">{renderDiscussion("chat")}</div>
+        </aside>
+      )}
       {api.workspace && (
         // 對稿工作區疊在討論殼上；殼不卸載，返回時狀態全在。此容器（與其
         // 祖先）不可有 transform/filter/contain，工作區自己的 fixed 底欄

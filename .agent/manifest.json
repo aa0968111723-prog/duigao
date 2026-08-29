@@ -70,7 +70,8 @@
     "npm run test:share-e2e",
     "npm run test:share-preview",
     "npm run test:video",
-    "npm run test:viewer-geometry"
+    "npm run test:viewer-geometry",
+    "npm run test:visual"
   ],
   "packageScripts": [
     "agent:context",
@@ -97,7 +98,9 @@
     "test:share-e2e",
     "test:share-preview",
     "test:video",
-    "test:viewer-geometry"
+    "test:viewer-geometry",
+    "test:visual",
+    "typecheck"
   ],
   "agentContextCommand": "npm run agent:context"
 }

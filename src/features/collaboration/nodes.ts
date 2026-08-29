@@ -20,6 +20,8 @@ const DEFAULT_SIZE: Record<NodeType, { width: number; height: number }> = {
   link: { width: 180, height: 72 },
   group: { width: 280, height: 200 },
   ai_result: { width: 200, height: 96 },
+  // freehand 實際尺寸由筆畫外接框決定（normalizeStroke）；這裡只是型別完備
+  freehand: { width: 120, height: 120 },
 };
 
 export function createNode(input: {
