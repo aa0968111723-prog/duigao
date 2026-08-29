@@ -41,20 +41,20 @@ export function sessionEntryStatus(input: {
     return { kind: "ready", headline: "", note: null, retry: "none" };
   }
 
-  if (input.permissionDenied) {
-    return {
-      kind: "permission-denied",
-      headline: "沒有權限進入這個房間",
-      note: "這個帳號讀不到房間內容。請向主辦方確認分享連結，或改用對方寄出的新連結。",
-      retry: "none",
-    };
-  }
-
   if (input.inviteInvalid) {
     return {
       kind: "invite-invalid",
       headline: "分享連結無效或已失效",
       note: "請向分享的人要一個新的連結。",
+      retry: "none",
+    };
+  }
+
+  if (input.permissionDenied) {
+    return {
+      kind: "permission-denied",
+      headline: "沒有權限進入這個房間",
+      note: "這個帳號讀不到房間內容。請向主辦方確認分享連結，或改用對方寄出的新連結。",
       retry: "none",
     };
   }
@@ -94,16 +94,20 @@ export function sessionEntryStatus(input: {
         retry: "cloud",
       };
     }
-    if (
-      input.cloudStatus === "synced" ||
-      input.cloudStatus === "offline-pending" ||
-      input.cloudStatus === "local-only"
-    ) {
+    if (input.cloudStatus === "synced" || input.cloudStatus === "offline-pending") {
       return {
         kind: "empty-room",
         headline: "這個房間還沒有文宣或影片",
         note: "房間已打開，只是還沒有版本。不是載入失敗。",
         retry: "none",
+      };
+    }
+    if (input.cloudStatus === "local-only") {
+      return {
+        kind: "load-error",
+        headline: "目前暫時無法載入這個討論，請稍後再試。",
+        note: "雲端房間還沒綁上，不能當成空房。",
+        retry: "cloud",
       };
     }
   }

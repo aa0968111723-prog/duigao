@@ -117,4 +117,5 @@ test("wiring: room sync rejects bad payloads and discussion no longer whole-room
   );
   assert.match(hook, /flushOutboxOnOnline/);
   assert.match(core, /flushOutboxOnOnline/);
+  assert.match(hook, /isolateOutboxForOwner/);
 });

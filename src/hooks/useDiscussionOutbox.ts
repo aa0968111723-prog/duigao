@@ -143,7 +143,10 @@ export function useDiscussionOutbox(args: {
         localRoomId,
         boundRoomId,
       });
-      for (const message of toFlush) void dispatch(message);
+      for (const message of toFlush) {
+        const row = next[message.id];
+        if (row && isolateOutboxForOwner({ [message.id]: row }, ownerRef.current)[message.id]) void dispatch(message);
+      }
       return next;
     });
   }, [localRoomId, boundRoomId, dispatch]);

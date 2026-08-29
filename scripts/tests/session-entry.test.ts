@@ -77,6 +77,23 @@ test("invite-invalid wins over a generic error and does not claim the room is lo
   assert.equal(entry.retry, "none");
 });
 
+test("invite-invalid wins over permission-denied so a bad token cannot leak the room", () => {
+  const entry = sessionEntryStatus({
+    ...guestBase,
+    cloudStatus: "error",
+    inviteInvalid: true,
+    permissionDenied: true,
+  });
+  assert.equal(entry.kind, "invite-invalid");
+  assert.doesNotMatch(entry.headline, /沒有權限|房間內容/);
+});
+
+test("cloud guest local-only is not an empty-room fake success", () => {
+  const entry = sessionEntryStatus({ ...guestBase, cloudStatus: "local-only" });
+  assert.notEqual(entry.kind, "empty-room");
+  assert.doesNotMatch(entry.headline, /還沒有文宣/);
+});
+
 test("legacy stalled stays the old-link story, not permission-denied", () => {
   const entry = sessionEntryStatus({
     ...guestBase,
