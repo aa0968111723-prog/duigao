@@ -106,11 +106,21 @@ test("五種要求驗證的尺寸都不會讓 AI 佔據主畫面", () => {
   for (const [label, width, height, coarse] of sizes) {
     const viewport = { width, height, coarsePointer: coarse };
     const layout = layoutFor(viewport);
-    const ratio = occupiedRatio(layout, viewport);
+    // 展開時（最壞情況）
+    const expanded = occupiedRatio(layout, viewport, true);
     assert.ok(
-      ratio <= 0.8,
-      `${label}：AI 面板佔了 ${Math.round(ratio * 100)}% 的畫面，主畫面被吃掉了`,
+      expanded <= 0.8,
+      `${label}：展開時 AI 面板佔了 ${Math.round(expanded * 100)}%，主畫面被吃掉了`,
     );
+    // 收起時（手機的預設狀態）—— 一打開就吃掉大半個畫面是很糟的第一印象
+    const collapsed = occupiedRatio(layout, viewport, false);
+    if (layout.kind === "sheet") {
+      assert.ok(
+        collapsed <= 0.12,
+        `${label}：收起的抽屜佔了 ${Math.round(collapsed * 100)}%，太高了`,
+      );
+      assert.ok(collapsed < expanded, "收起與展開必須是不同的值 —— 否則這個函式沒有在算實際值");
+    }
   }
 });
 
