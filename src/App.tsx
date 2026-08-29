@@ -169,6 +169,7 @@ import {
   reconcileNodes,
   saveBoardSnapshot,
 } from "./features/collaboration/offline";
+import { applyDiscussionRealtime } from "./cloud/realtimeApply";
 import "./usability.css";
 import "./features/whiteboard/whiteboard.css";
 import "./features/room-discussion/discussion.css";
@@ -544,7 +545,27 @@ export function App() {
     });
   }, []);
 
-  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onBoardReplace, showToast });
+  const onDiscussionPatch = useCallback((patch: { op: "upsert"; message: DiscussionMessage } | { op: "delete"; id: string }) => {
+    let applied = false;
+    setRoom((current) => {
+      if (!current) return current;
+      if (patch.op === "upsert" && patch.message.roomId !== current.id) return current;
+      const result = applyDiscussionRealtime(current.discussion ?? [], patch);
+      if (!result.applied) return current;
+      applied = true;
+      return { ...current, discussion: result.messages };
+    });
+    if (applied && patch.op === "upsert") {
+      setServerDiscussionIds((ids) => {
+        if (ids.has(patch.message.id)) return ids;
+        const next = new Set(ids);
+        next.add(patch.message.id);
+        return next;
+      });
+    }
+  }, []);
+
+  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
 
