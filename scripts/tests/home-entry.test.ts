@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { homeEntryStatus } from "../../src/components/homeEntryStatus.ts";
+import { roomLinkIdentity } from "../../src/cloud/invite.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -47,4 +48,23 @@ test("Home mounts the status helper and does not invent a second chat", () => {
   assert.match(home, /homeEntryStatus/);
   assert.match(home, /home-entry-status/);
   assert.doesNotMatch(home, /createChat|newChatSystem/);
+});
+
+test("same-tab invite after Home is not frozen by useMemo([])", () => {
+  const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
+  assert.match(app, /addEventListener\("hashchange"/);
+  assert.match(app, /setRoomLink\(readRoomLink\(\)\)/);
+  assert.match(app, /roomLinkIdentity/);
+  assert.doesNotMatch(app, /useMemo\(\(\) => readRoomLink\(\), \[\]\)/);
+});
+
+test("roomLinkIdentity changes when the fragment target changes", () => {
+  assert.equal(roomLinkIdentity({ kind: "none" }), "none");
+  assert.equal(roomLinkIdentity({ kind: "legacy", roomId: "ab12cd" }), "legacy:ab12cd");
+  const sameInvite = { kind: "cloud" as const, roomId: "r1", invite: "tok" };
+  assert.equal(roomLinkIdentity(sameInvite), roomLinkIdentity({ ...sameInvite }));
+  assert.notEqual(
+    roomLinkIdentity(sameInvite),
+    roomLinkIdentity({ ...sameInvite, whiteboardId: "wb" }),
+  );
 });
