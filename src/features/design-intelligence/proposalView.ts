@@ -53,9 +53,22 @@ export function layoutFor(viewport: ViewportInfo): PanelLayout {
   return { kind: "split", widthPx: Math.max(320, Math.min(420, width)) };
 }
 
-/** 面板實際會蓋住主畫面的比例。用來斷言「沒有佔據主畫面」。 */
-export function occupiedRatio(layout: PanelLayout, viewport: ViewportInfo): number {
-  if (layout.kind === "sheet") return layout.maxHeightRatio;
+/**
+ * 面板實際會蓋住主畫面的比例。用來斷言「沒有佔據主畫面」。
+ *
+ * 抽屜要看**現在是不是展開的**：收起來時只有一條（peek），展開才是上限。
+ * 舊版一律回 `maxHeightRatio`，函式名字說「實際佔用」但回的是最壞情況 ——
+ * 名實不符的函式在稽核時會給出錯誤的安全感。
+ */
+export function occupiedRatio(
+  layout: PanelLayout,
+  viewport: ViewportInfo,
+  expanded = true,
+): number {
+  if (layout.kind === "sheet") {
+    const heightPx = expanded ? viewport.height * layout.maxHeightRatio : layout.peekPx;
+    return heightPx / viewport.height;
+  }
   return layout.widthPx / viewport.width;
 }
 
