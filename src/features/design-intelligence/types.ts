@@ -67,6 +67,16 @@ export type Diagnostic = {
   severity: Severity;
   /** 0–1。低於 0.5 的診斷 UI 要標示「需要人確認」。 */
   confidence: number;
+  /**
+   * 這條診斷是**量出來的**（本地分析器算的）還是模型說的。
+   *
+   * 由來源決定，不由 payload 宣稱 —— `parseDiagnostics` 一律設成 false，
+   * 模型自己填 `measured: true` 沒有用。這跟知識庫的 provenance 是同一個
+   * 道理：讓不可信輸入自我認證，等於沒有認證。
+   */
+  measured: boolean;
+  /** 這條診斷屬於哪個改動維度（保守方案要靠它分類，不能靠猜 id 前綴）。 */
+  dimension?: ChangeDimension;
   /** 這條診斷引用了哪些知識條目（knowledge.id）。 */
   knowledgeRefs?: string[];
   /** 這條診斷引用了哪些外部來源（research source id）。 */
@@ -112,7 +122,28 @@ export type ColorToken = {
 export const ALTERNATIVE_STRATEGIES = ["conservative", "balanced", "bold"] as const;
 export type AlternativeStrategy = (typeof ALTERNATIVE_STRATEGIES)[number];
 
+/**
+ * 改動的維度。
+ *
+ * 存在的理由只有一個：任務書要求三個方案「必須真的不同，不能只是三組不同
+ * 顏色」。「真的不同」如果只靠人眼判斷就無法驗證，所以把它變成可檢查的
+ * 結構 —— 三個方案碰的維度集合不能完全一樣（見 `analysis.ts` 的
+ * `validateAlternativeDiversity`）。
+ */
+export const CHANGE_DIMENSIONS = [
+  "color",
+  "typography",
+  "layout",
+  "imagery",
+  "copy",
+  "motion",
+  "structure",
+  "interaction",
+] as const;
+export type ChangeDimension = (typeof CHANGE_DIMENSIONS)[number];
+
 export type DesignChange = {
+  dimension: ChangeDimension;
   /** 改哪裡。 */
   target: string;
   /** 改成什麼（具體值）。 */
@@ -202,6 +233,17 @@ export type DesignProposal = {
   approvedAt: number | null;
   appliedAt: number | null;
   revertedAt: number | null;
+  /**
+   * 這次失敗的原因。**唯一權威來源。**
+   *
+   * 不要用 `risks[0]` 代替：`risks` 是這份提案一路累積下來的歷史紀錄
+   *（沒有 AI provider、只有一個方案、知識有衝突…），失敗原因被 append
+   * 到尾巴，而讀取端取 `[0]` 拿到的是完全無關的舊訊息。
+   *
+   * 實測過的後果：套用失敗時面板顯示「只提供了一個保守方案…」，
+   * 而「Canva API 回 500」—— 使用者唯一能拿去處理的資訊 —— 完全不顯示。
+   */
+  failureReason: string | null;
   /** 套用前的版本（可回去的那一版）。 */
   baseRevision: string | null;
   /** 套用後產生的版本。 */
@@ -265,7 +307,15 @@ export type ResearchResult = {
   conflicts: Array<{ claim: string; sourceIds: string[]; note: string }>;
   usage: { inputTokens: number | null; outputTokens: number | null; requests: number };
   cost: { amount: number | null; currency: string | null; estimated: boolean };
-  cacheStatus: "hit" | "miss" | "bypass";
+  /**
+   * 這次結果從哪裡來。四種狀態對使用者的意義完全不同：
+   *   hit    = 用了快取，沒有花錢
+   *   miss   = 真的問了一次
+   *   dedup  = 有人正在問同一件事，共用那一次（也沒有多花錢）
+   *   bypass = 根本沒問（沒設定、被擋下、斷路器開著）
+   * 把 bypass 和 miss 混在一起，UI 就沒辦法分辨「查不到」與「沒設定」。
+   */
+  cacheStatus: "hit" | "miss" | "dedup" | "bypass";
 };
 
 // ---------------------------------------------------------------------------

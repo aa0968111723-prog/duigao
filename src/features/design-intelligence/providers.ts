@@ -192,6 +192,17 @@ export interface ResearchProvider {
   status(): Promise<ProviderStatus>;
   search(query: string, filters?: ResearchFilters): Promise<ResearchResult>;
   research(question: string, context: string, filters?: ResearchFilters): Promise<ResearchResult>;
+  /**
+   * **目前刻意不實作**（PR-DI-03 起）。
+   *
+   * 要抓任意外部網址，就必須在 DNS 解析出 IP 之後、建立連線之前再檢查一次
+   * 那個 IP 是不是內網 —— 字串層的 `isSafePublicUrl` 做不到這件事
+   * （`lvh.me` 這種網域字串上完全正常，A record 卻指向 127.0.0.1；
+   * 而且合法網域的 3xx 可以把請求導進 metadata endpoint）。
+   *
+   * 在有辦法做那層檢查之前，實作它就是給自己開一個 SSRF。回傳空陣列並在
+   * 文件裡說清楚，比做一個擋不住的版本誠實。
+   */
   fetchRelevantSnippets(urls: string[], query: string, filters?: ResearchFilters): Promise<ResearchSource[]>;
   verifyClaim(claim: string, filters?: ResearchFilters): Promise<ResearchResult>;
   getSources(result: ResearchResult): ResearchSource[];

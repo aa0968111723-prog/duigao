@@ -1,6 +1,6 @@
 # Design Intelligence — 進度
 
-分支：`agent/design-intelligence-perplexity`　基準：`origin/main` @ `2a17b7b`
+分支：`agent/design-intelligence-perplexity`　基準：`origin/main` @ `b0f7a1b`
 
 ## 已完成
 
@@ -24,19 +24,35 @@ agent 16、edge-cors 5）；`tsc --noEmit` 乾淨；`npm run build` 綠。
 
 ## 進行中
 
-（無）
+（無 —— 六個階段都已完成並開出 PR）
 
-## 下一步
+## PR 鏈（重要：鏈斷過，已修）
 
-**PR-DI-01 設計知識系統**
+| PR | 階段 | base | 狀態 |
+|---|---|---|---|
+| [#86](https://github.com/aa0968111723-prog/duigao/pull/86) | PR-DI-00 稽核與契約 | `main` | 已合併 |
+| [#88](https://github.com/aa0968111723-prog/duigao/pull/88) | **DI-01～06 完整交付** | `main` | **開啟中 —— 這是唯一到 main 的入口** |
+| [#89](https://github.com/aa0968111723-prog/duigao/pull/89) | PR-DI-02 | `agent/design-intelligence-perplexity` | MERGED（只到上一層） |
+| [#90](https://github.com/aa0968111723-prog/duigao/pull/90) | PR-DI-03 | `agent/di02-analysis-engine` | MERGED（只到上一層） |
+| [#91](https://github.com/aa0968111723-prog/duigao/pull/91) | PR-DI-04 | `agent/di03-research` | MERGED（只到上一層） |
+| [#92](https://github.com/aa0968111723-prog/duigao/pull/92) | PR-DI-05 | `agent/di04-proposal-ui` | MERGED（只到上一層） |
+| [#93](https://github.com/aa0968111723-prog/duigao/pull/93) | PR-DI-06 | `agent/di05-adapters` | MERGED（只到上一層） |
 
-- migration（從 `0027` 起編，見 handoff H-2 的撞號說明）
-- 兩段式 RLS：通用知識所有 authenticated 可讀／服務端可寫；
-  專案規範沿用 `is_room_member` 讀、`can_manage_media` 寫
-- 檢索：先沿用既有 lexical score（**誠實記錄**中文召回率未驗證），
-  不假裝有語意檢索（repo 沒有 pgvector，`asset_embeddings` 是死碼）
-- seed fixtures：WCAG 對比、觸控目標尺寸、行動裝置排版等可驗證的規則
-- migration probe（沿用 `npm run test:migrations` 的模式）
+**#89–#93 顯示 MERGED，但 `main` 一行都沒有拿到** —— 它們的 base 是另一條代理
+分支，每次合併只把內容帶進直接的上一層。白板那條線踩過同一個坑
+（#78→#81→#84），那次是由下而上的順序問題，這次是由上而下時只有相鄰兩層接上。
+
+已把鏈尖 `agent/di06-evaluation` 合回 #88 的 head，並用
+`git diff origin/agent/di06-evaluation` 為空驗證兩邊的樹逐位元組相同。
+
+**教訓**：堆疊 PR 在「不得 force push」的限制下，每個階段都應該直接以 `main`
+為 base 並在描述裡標明依賴，而不是互相堆疊 —— 否則合併順序決定了內容會不會
+真的到達 `main`，而那件事在 GitHub 的 UI 上看不出來（全部顯示 MERGED）。
+
+## 評估報告## 評估報告
+
+`docs/design-intelligence/EVALUATION.md` —— 七個驗收案例、測試總覽、
+安全、行動裝置實測數字、被抓到的 29 個問題、誠實的限制清單。
 
 ## 阻塞
 
@@ -61,6 +77,6 @@ agent 16、edge-cors 5）；`tsc --noEmit` 乾淨；`npm run build` 綠。
 | 工具 | 狀態 |
 |---|---|
 | `pplx`（Perplexity CLI） | **未安裝** |
-| `irm` | **未安裝** |
+| `irm` | **未安裝** —— PR-DI-00／01 的對抗審查用的是 `grok`，報告一律註明 |
 | xAI CLI | `grok` 1.0.5 可用 —— 階段審查用它，報告會註明「用的是 grok 不是 irm」 |
 | `claude` CLI | 不在 PATH（本代理跑在 Claude Code 內，屬預期） |

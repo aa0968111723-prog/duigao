@@ -25,6 +25,8 @@
 | 稽核開始 | `3d8b2cf95e47f082f47c18aca704bbf35fac8106` | `PR-GAP-00: 真實稽核、測試基線與 SPA 假成功防護 (#97)` |
 | 本檔寫入時 | `444ae9d330e8be9636b3fd8ce4e2cdcc0327d616` | `Handoff: remaining gaps and merge order (#99)` squash 合併 |
 | 2026-08-29 23:06 +08 | `196b3a3672ca240e123ba530b5d7cb2eed8048a5` | `PR-RESOLVE-01: Home offline and cloud-unset truthful state (#105)` |
+| 2026-08-29 23:12 +08 | `698595bb5c100decd4c0489e48b1d4feb50addd7` | `PR-RESOLVE-02` 語音九態 (#106) |
+| 2026-08-29 23:21 +08 | `097a6afe47cfff27e88e074cdfa390cbe9406126` | `PR-RESOLVE-03` 影片 TUS + SPA API routing (#107) |
 
 本地在稽核前曾停在 `9b8d388`（遠古 main）。已 fast-forward 到含 #97 的 tip，並合併 #99。
 
@@ -36,7 +38,9 @@
 |---|---|---|---|
 | **#97** | PR-GAP-00: 真實稽核、測試基線與 SPA 假成功防護 | `main` | squash 成 `3d8b2cf`，2026-08-29 14:22:28Z |
 | **#99** | Handoff: 剩餘缺陷與合併順序（無新產品修復） | `main` | squash 成 `444ae9d`，本輪合併。GitHub `mergeable_state=clean`；`browser` / `build` / `migrations` / `agent-read-layer` 皆 **success**。 |
-| **#105** | PR-RESOLVE-01: Home 離線／雲端未設定誠實狀態（替代 #96） | `main` | squash 成 `196b3a3`。GitHub required checks 全 success、`mergeable_state=clean` 後合併。 |
+| **#105** | PR-RESOLVE-01: Home 離線／雲端未設定誠實狀態（替代 #96） | `main` | squash 成 `196b3a3` |
+| **#106** | PR-RESOLVE-02: 語音九態（替代 #98） | `main` | squash 成 `698595b`；browser 全綠後合 |
+| **#107** | PR-RESOLVE-03: 影片 TUS + SPA routing（替代 #95） | `main` | squash 成 `097a6af`；in-repo `vercel.json`/`Caddyfile` 不再 rewrite `/functions` `/api` `/rest` |
 
 ## 未進 main（即使 GitHub 顯示 merged）
 
