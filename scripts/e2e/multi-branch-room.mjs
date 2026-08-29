@@ -323,13 +323,28 @@ try {
       );
     }
     faults.videoUploadDelayMs = 0;
-    await page.waitForSelector("video.v-video", { timeout: 90000 });
+    const videoOverlay = page.getByTestId("branch-workspace-overlay");
+    await videoOverlay.locator("video.v-video").waitFor({ timeout: 90000 });
     check(
       "上傳完成後狀態列自己收掉",
       (await page.getByTestId("project-upload-status").count()) === 0,
     );
-    check("影片分支沿用既有播放器並能載入", await page.locator("video.v-video").count() === 1);
-    check("影片分支沒有把文宣版本串進來", await page.locator(".m-vchip:not(.m-vchip-add)").count() === 1);
+    // A collaboration snapshot can remount the overlay after first paint.
+    // Wait until THIS overlay is stable: one player, one version chip —
+    // not a page-wide count that also sees the poster workspace leftovers.
+    await page.waitForFunction(
+      () => {
+        const root = document.querySelector('[data-testid="branch-workspace-overlay"]');
+        if (!root) return false;
+        const videos = root.querySelectorAll("video.v-video").length;
+        const chips = root.querySelectorAll(".m-vchip:not(.m-vchip-add)").length;
+        return videos === 1 && chips === 1;
+      },
+      null,
+      { timeout: 20000 },
+    );
+    check("影片分支沿用既有播放器並能載入", await videoOverlay.locator("video.v-video").count() === 1);
+    check("影片分支沒有把文宣版本串進來", await videoOverlay.locator(".m-vchip:not(.m-vchip-add)").count() === 1);
     await page.locator("button.m-home").click();
     await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
     // 影片是從內容面板建立的：返回後面板仍開著（狀態保留），先數卡再收合。

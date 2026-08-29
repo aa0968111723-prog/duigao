@@ -34,7 +34,7 @@ import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type 
 import { boardProposals, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
-import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
+import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, retainLocalVersions, roomForBranch } from "./lib/roomBranches";
 import { roomCode, uid, uuid } from "./lib/id";
 import { deleteRoom, listRooms, listUploadSessions, loadDiscussionReadLocal, loadFlag, loadGuest, loadRoom, saveDiscussionRead, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
 import { useDiscussionDraft } from "./hooks/useDiscussionDraft";
@@ -483,6 +483,7 @@ export function App() {
   isMobileRef.current = isMobile;
   const collabRef = useRef<Collab | null>(null);
   const roomRef = useRef<Room | null>(null);
+  const activeBranchIdRef = useRef<string | null>(null);
   const lastAckedNodeVersion = useRef(new Map<string, number>());
   const nodePersistChain = useRef(new Map<string, Promise<void>>());
   const appliedAiProposalIds = useRef(new Set<string>());
@@ -493,6 +494,7 @@ export function App() {
   const undoStack = useRef<Room[]>([]);
   roomRef.current = room;
   viewRef.current = view;
+  activeBranchIdRef.current = activeBranchId;
 
   /**
    * How this tab was opened. Read once: `main.tsx` has already upgraded a
@@ -627,6 +629,12 @@ export function App() {
         plans,
         whiteboardNodes,
         whiteboardEdges,
+        // Summary / stale branch snapshots can arrive with `versions: []` or
+        // without the cut we just adopted locally. Same rule as discussion:
+        // a snapshot must not wipe media the person already sees.
+        versions: current && current.id === normalized.id
+          ? retainLocalVersions(current.versions, normalized.versions)
+          : normalized.versions,
         // 讀取失敗造成的空討論不覆蓋畫面上已有的對話（見上方註解）。
         // 只在「同一間房」時保留 —— 換房時 current 是上一間房，
         // 沿用它會把別間房的訊息畫進這間房。
@@ -653,7 +661,18 @@ export function App() {
       if (!wantsBranch || branchReady) roomLinkAppliedRef.current = true;
     }
     setView((v) => {
-      const ids = normalized.versions.map((x) => x.id);
+      // Scope to the open branch. A room-wide snapshot still lists the poster
+      // cut; keeping that id selected on a video overlay makes the player
+      // resolve the image version (or remount) and the chip strip mix branches.
+      const currentRoom = roomRef.current;
+      const versions = currentRoom && currentRoom.id === normalized.id
+        ? retainLocalVersions(currentRoom.versions, normalized.versions)
+        : normalized.versions;
+      const openBranchId = activeBranchIdRef.current;
+      const scoped = openBranchId
+        ? versions.filter((item) => item.branchId === openBranchId)
+        : versions;
+      const ids = (scoped.length ? scoped : versions).map((x) => x.id);
       const requestedVersionId = applyLink && roomLink.kind === "cloud" ? roomLink.versionId : undefined;
       const versionId = requestedVersionId && ids.includes(requestedVersionId)
         ? requestedVersionId
@@ -1175,6 +1194,11 @@ export function App() {
         setView((v) => {
           const viewRoom = targetBranchId ? roomForBranch(next, targetBranchId) : next;
           if (created || !v.versionId) return initialView(viewRoom);
+          const added = newVersions[newVersions.length - 1];
+          const onThisBranch = viewRoom.versions.some((item) => item.id === v.versionId);
+          if (!onThisBranch && added) {
+            return { ...v, versionId: added.id, compareId: added.id, compareMode: "single" };
+          }
           if (v.compareId === v.versionId && viewRoom.versions.length >= 2) {
             const other = viewRoom.versions.find((x) => x.id !== v.versionId);
             if (other) return { ...v, compareId: other.id };
@@ -1362,7 +1386,17 @@ export function App() {
           updatedAt: Date.now(),
         };
         setRoom(next);
-        setView((v) => (isNewRoom || !v.versionId ? initialView(next) : v));
+        setView((v) => {
+          const viewRoom = targetBranchId ? roomForBranch(next, targetBranchId) : next;
+          if (isNewRoom || !v.versionId) return initialView(viewRoom);
+          // Stay on this branch's new cut. Keeping the previous poster's
+          // versionId lets a later snapshot resolve the image row inside the
+          // video overlay (0 players / mixed chips).
+          if (viewRoom.versions.some((item) => item.id === version.id)) {
+            return { ...v, versionId: version.id, compareId: version.id, compareMode: "single" };
+          }
+          return initialView(viewRoom);
+        });
         trackSave(next);
         showToast(isNewRoom ? "影片好了，開始留意見吧" : `已新增${label}`, { tone: "success" });
       } catch (err) {
