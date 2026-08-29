@@ -31,7 +31,8 @@
 | 2026-08-29 23:28 +08 | `105b89b` | `PR-RESOLVE-04` files/outbox (#108) |
 | 2026-08-29 23:34 +08 | `85755ff` | `PR-RESOLVE-05` mobile first-layer (#110) |
 | 2026-08-29 16:00Z | `6da2af79739084c8af9680803b1d48b55a33c1c1` | `PR-RESOLVE-06` 白板 (#113) |
-| 2026-08-29 16:06Z | `3c0bf0c6d88bd85cf829dbe6e95068369d9d3678` | `PR-RESOLVE-07` Design Intelligence (#114) — **目前 origin/main** |
+| 2026-08-29 16:06Z | `3c0bf0c6d88bd85cf829dbe6e95068369d9d3678` | `PR-RESOLVE-07` Design Intelligence (#114) |
+| 2026-08-29 16:25Z | `de4064b9f76ff7243f82d03a59b630189df0f665` | origin JSON 404 handler (#122) — **目前 origin/main** |
 
 本地在稽核前曾停在 `9b8d388`（遠古 main）。已 fast-forward 到含 #97 的 tip，並合併 #99。
 
@@ -192,25 +193,31 @@ Replacement PRs（原始 #78/#88/#95/#96/#98 **仍 open、未刪**。#100/#101 G
 | PR-RESOLVE-06 | **#113 merged** | `resolve/pr-06-whiteboard` | main `6da2af7`。browser 全綠：pane 跨 overlay、更多 sheet e2e、visual 基準更新 |
 | PR-RESOLVE-07 | **#114 merged** | `resolve/pr-07-design-intelligence` | main `3c0bf0c`。required `build`/`migrations`/`browser`/`agent-read-layer` success |
 
-### 正式站 HTTP（#114 合入後，2026-08-29 16:07Z）
+### 正式站 HTTP（#122 部署後，2026-08-29 16:30Z，main `de4064b`）
 
-| URL | status | Content-Type | Last-Modified | 判定 |
+證據：`{SCRATCH}/prod-http/after-122-de4064b.json`
+
+| URL | method | status | Content-Type | 判定 |
 |---|---|---|---|---|
-| `/` | 200 | text/html; charset=utf-8 | Sat, 29 Aug 2026 16:03:06 GMT | 文件載入 OK（ETag `dl1jz2azwyyo14l-gzip`） |
-| `/functions/v1/voice-token` | **200** | **text/html; charset=utf-8** | 同上同一 ETag | **失敗**：SPA catch-all，不是 API |
-| `/api/health` | **200** | **text/html; charset=utf-8** | 同上同一 ETag | 同上 |
+| `/` | GET | 200 | text/html; charset=utf-8 | SPA 文件 OK |
+| `/functions/v1/voice-token` | GET | **404** | **application/json; charset=utf-8** | JSON `NOT_FOUND`，不是 HTML |
+| `/functions/v1/voice-token` | POST | **404** | **application/json; charset=utf-8** | 同上 |
+| `/api/health` | GET | **404** | **application/json; charset=utf-8** | 同上 |
+| `/rest/v1/rooms` | GET | **404** | **application/json; charset=utf-8** | 同上 |
 
-Zeabur MCP `list-projects`：`ERROR_INVALID_TOKEN`。無法比對 deploy SHA。in-repo Caddyfile/vercel.json 已排除 `/api` `/functions` `/rest`（#107），**平台仍把這些路徑指到 SPA**。GitHub merge ≠ 正式站 API 修好。
+根因：zbpack `output_dir: dist` 讓 Zeabur 用靜態 Caddy SPA catch-all，忽略 repo `Caddyfile`。#122 改 `start_command` 跑 `scripts/serve-origin.mjs`。
+
+Zeabur MCP 仍 `ERROR_INVALID_TOKEN`。voice-token 在 **這個 origin** 回 404 JSON 是正確的（真正 Edge Function 在 Supabase，不在 app origin）。
 
 ### 環境阻擋（不是程式沒寫）
 
-- Canva OAuth / AI vendor keys / LiveKit env / **Zeabur 路由把 `/functions/v1/*` 指到真正 Edge Function**（Caddyfile 在平台上未被採用）
+- Canva OAuth / AI vendor keys / LiveKit env / 真正的 `/functions/v1/*` 要在 **Supabase Edge**，不是這個 SPA origin
 
 ## 下一步（剩餘）
 
-1. **平台**：Zeabur 必須讓 `/functions` `/api` `/rest` 回 JSON/404 而不是 `index.html`。這是環境阻擋，不是再改 SPA。
-2. 原始 PR **#78 / #88 / #95 / #96 / #98 保持 open、不刪**（replacement 已在 main；刪除要等人確認）。
-3. 其他 GAP restack PR（#102–#104、#109、#111–#112、#115–#120）不在本任務範圍。
+1. 原始 PR **#78 / #88 / #95 / #96 / #98 保持 open、不刪**。
+2. 其他 GAP restack PR（#102–#104、#109、#111–#112、#115–#120）不在本任務範圍。
+3. 語音連線仍需 LiveKit + Supabase function 設定；app origin 不再假裝那些路徑是 API。
 
 ## 本輪已完成
 
@@ -219,4 +226,5 @@ Zeabur MCP `list-projects`：`ERROR_INVALID_TOKEN`。無法比對 deploy SHA。i
 - [x] #99 browser success → squash 合併到 main (`444ae9d`)
 - [x] PR-RESOLVE-01 … 07 全部 squash 進 main（#105–#108、#110、#113、#114）
 - [x] #113/#114 GitHub `mergeable_state=CLEAN` 且 required checks success 才合
-- [x] 正式站 HTTP 在新 main SHA `3c0bf0c` 之後再探針（API 路徑仍 200 HTML）
+- [x] 正式站 HTTP 在新 main SHA `3c0bf0c` 之後再探針（當時 API 路徑仍 200 HTML）
+- [x] #122：Zeabur 改跑 Node origin；正式站 `/functions` `/api` `/rest` 為 JSON 404（main `de4064b`）
