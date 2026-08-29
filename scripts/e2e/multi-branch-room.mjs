@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { faults, requestLog, rows, start as startMock } from "./mock-supabase.mjs";
+import { openRoomCreate, openRoomPane } from "./room-more.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 // 共用機器上別的專案可能已經佔著這些 port（planform-iso 的 vite preview
@@ -138,7 +139,9 @@ function serveStatic(root, port) {
 
 async function chooseCreate(page, name, type, file) {
   const sheet = page.getByTestId("create-content-sheet");
-  if (!await sheet.count()) await page.locator(".project-fab").click();
+  if (!await sheet.count()) {
+    await openRoomCreate(page);
+  }
   const current = page.getByTestId("create-content-sheet");
   if (await current.getByRole("button", { name: type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片", exact: true }).count()) {
     await current.getByRole("button", { name: type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片", exact: true }).click();
@@ -193,18 +196,17 @@ try {
     await page.getByRole("button", { name: /建立活動房/ }).click();
     await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 10000 });
 
-    // 討論就是房間殼：進房第一屏是討論 feed + composer + 三個入口 chips，
-    // 不再有互相競爭的四分頁（PR-01a）。
+    // 討論就是房間殼：第一層只有對話／白板／更多，總覽不常駐。
     check(
       "Android 手機第一屏就是討論殼",
       await page.getByTestId("discussion-feed").count() === 1
         && await page.getByLabel("房間討論").count() === 1
-        && await page.locator(".project-entry-chips button").count() === 3
+        && await page.getByTestId("open-overview-pane").count() === 0
         && await page.locator(".project-tabs, .project-bottom-nav").count() === 0,
     );
     check("活動房首頁沒有 desktop sidebar", await page.locator(".sidebar, .desktop-sidebar").count() === 0);
     check("390×844 沒有水平溢出", await noHorizontalOverflow(page));
-    await page.getByTestId("open-overview-pane").click();
+    await openRoomPane(page, "open-overview-pane");
     check("新活動房顯示清楚空狀態", (await page.locator(".project-welcome").innerText()).includes("這間房還沒有內容"));
     await closePushedPane(page);
     check("總覽面板返回後回到討論殼", await page.getByTestId("discussion-feed").count() === 1);
@@ -224,7 +226,7 @@ try {
     check("手機企劃可快速編輯段落與 checkbox", await page.locator('input[aria-label="段落內容"]').first().inputValue() === "目標：招募新生" && await page.locator('input[aria-label="完成項目"]').isChecked());
 
     await page.locator(".project-back-button").click();
-    await page.getByTestId("open-content-pane").click();
+    await openRoomPane(page, "open-content-pane");
     const poster = { name: "演講文宣", mimeType: "image/png", buffer: TINY_PNG };
     await page.getByRole("button", { name: /新增文宣/ }).click();
     const posterSheet = page.getByTestId("create-content-sheet");
@@ -244,7 +246,7 @@ try {
     check("內容面板狀態跨對稿 overlay 保留", await page.getByTestId("content-pane").count() === 1);
     await closePushedPane(page);
 
-    await page.getByTestId("open-overview-pane").click();
+    await openRoomPane(page, "open-overview-pane");
     const decisions = page.getByTestId("decisions");
     await decisions.getByRole("button", { name: "＋ 新增" }).click();
     const pollSheet = page.getByRole("dialog", { name: "新增待決策" });
@@ -258,7 +260,7 @@ try {
     check("總覽可直接建立與投票待決策", (await decisions.innerText()).includes("茶會文宣 A / B 哪版？") && (await decisions.innerText()).includes("1 人已投") && await decisions.locator(".project-poll-option.is-chosen").count() === 1);
     await closePushedPane(page);
 
-    await page.getByTestId("open-plan-pane").click();
+    await openRoomPane(page, "open-plan-pane");
     await page.locator('[data-testid="plan-branches"] .project-branch-card').filter({ hasText: "擺攤計畫" }).click();
     await page.locator('select[aria-label="選擇相關內容"]').selectOption({ label: "演講文宣" });
     await page.getByRole("button", { name: "加入" }).click();
@@ -270,7 +272,7 @@ try {
     await page.locator(".project-back-button").click();
 
     const videoBytes = await recordWebm(page);
-    await page.getByTestId("open-content-pane").click();
+    await openRoomPane(page, "open-content-pane");
     await page.getByRole("button", { name: /新增影片/ }).click();
     const videoSheet = page.getByTestId("create-content-sheet");
     await videoSheet.locator('input:not([type="file"])').first().fill("招生影片");
@@ -333,7 +335,7 @@ try {
     // 影片是從內容面板建立的：返回後面板仍開著（狀態保留），先數卡再收合。
     await page.waitForFunction(() => document.querySelectorAll('.project-branch-card').length >= 2, null, { timeout: 15000 });
     await closePushedPane(page);
-    await page.getByTestId("open-overview-pane").click();
+    await openRoomPane(page, "open-overview-pane");
     await page.waitForFunction(() => document.querySelectorAll('.project-branch-card').length >= 1, null, { timeout: 15000 });
     {
       const overviewTexts = await page.locator(".project-update-row, .project-branch-card").allTextContents();
@@ -346,7 +348,7 @@ try {
     // 之後每一次點擊都被靜靜擋掉 — 按鈕從此完全沒有反應。
     {
       faults.videoUpload = true;
-      await page.getByTestId("open-content-pane").click();
+      await openRoomPane(page, "open-content-pane");
       await page.getByRole("button", { name: /新增影片/ }).click();
       const failSheet = page.getByTestId("create-content-sheet");
       await failSheet.locator('input:not([type="file"])').first().fill("擺攤影片");
@@ -398,7 +400,7 @@ try {
 
     // A branch share is intentionally checked from a real workspace. The
     // preview path may change, but its fragment must remain the app target.
-    await page.getByTestId("open-content-pane").click();
+    await openRoomPane(page, "open-content-pane");
     await page.locator('[data-testid="poster-branches"] .project-branch-card').filter({ hasText: "演講文宣" }).click();
     await page.locator("button.m-share").click();
     await page.waitForSelector("input.m-share-url", { timeout: 30000 });
@@ -460,8 +462,7 @@ try {
       await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 20000 });
       await closePushedPane(page);
       // health gate 是 5 分鐘快取；本流程房間早已 bound，入口應已出現。
-      await page.locator(".project-fab").click();
-      await page.waitForSelector('[data-testid="create-content-sheet"]', { timeout: 15000 });
+      await openRoomCreate(page);
       const optionVisible = await page.getByTestId("cutos-import-option").count();
       check("CUTOS 匯入入口在健檢通過後出現", optionVisible === 1);
       await page.getByTestId("cutos-import-option").click();
@@ -477,8 +478,7 @@ try {
 
       // NO_EXPORT：還沒渲染過的專案 → 誠實文案、sheet 留著可改
       faults.cutosOutputProjectId = null;
-      await page.locator(".project-fab").click();
-      await page.waitForSelector('[data-testid="create-content-sheet"]', { timeout: 15000 });
+      await openRoomCreate(page);
       await page.getByTestId("cutos-import-option").click();
       await page.getByLabel("名稱").fill("沒有成品的專案");
       await page.getByTestId("cutos-project-id").fill("cutos-demo");
@@ -503,8 +503,7 @@ try {
     // ---- PR-05：Canva 文宣匯入（OAuth bridge，真實 edge 源碼） --------
     {
       // (0) 未連結：health 過 → 入口出現；面板顯示官方授權引導
-      await page.locator(".project-fab").click();
-      await page.waitForSelector('[data-testid="create-content-sheet"]', { timeout: 15000 });
+      await openRoomCreate(page);
       check("Canva 匯入入口在健檢通過後出現", (await page.getByTestId("canva-import-option").count()) === 1);
       await page.getByTestId("canva-import-option").click();
       await page.waitForSelector('[data-testid="canva-connect"]', { timeout: 15000 });
