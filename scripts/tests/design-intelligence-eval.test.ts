@@ -492,7 +492,7 @@ test("七個案例走完，沒有任何一個提案自己走到 applied", async 
     assert.equal(result.proposal.appliedAt, null);
 
     // UI 的套用閘門也一樣：沒選方案就不能按
-    const gate = applyGate(result.proposal, null);
+    const gate = applyGate(result.proposal, null, true);
     assert.equal(gate.enabled, false);
   }
 });

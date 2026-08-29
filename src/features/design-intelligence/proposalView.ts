@@ -242,13 +242,15 @@ export function applyGate(
   proposal: DesignProposal,
   selectedAlternativeId: string | null,
   /**
-   * 這個人有沒有權限改這件作品。
+   * 這個人有沒有權限改這件作品（對應 `can_manage_media`）。
    *
-   * 預設 `true` 只是為了不強迫每個呼叫端都傳；**UI 一定要傳**。
-   * 房間裡的 reviewer 看得到提案，但不該能把它套到別人的作品上 ——
-   * 那是 `can_manage_media` 的範圍（對抗審查指出這裡原本完全沒有角色檢查）。
+   * **沒有預設值，而且刻意如此。** 權限檢查的預設值是 `true` 等於「忘了傳
+   * 就全部放行」—— 那正是這個參數要防的事。房間裡的 reviewer 看得到提案，
+   * 但不該能把它套到別人的作品上。
+   *
+   * 對抗審查兩次指出這裡：第一次是完全沒有角色檢查，第二次是預設值太寬鬆。
    */
-  canApply = true,
+  canApply: boolean,
 ): ApplyGate {
   if (!canApply) return { enabled: false, reason: "你在這個房間沒有修改作品的權限" };
   if (proposal.status === "applied") return { enabled: false, reason: "這個提案已經套用過了" };

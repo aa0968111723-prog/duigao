@@ -249,7 +249,7 @@ test("套用按鈕的預設是不能按，而且每一種都說得出理由", ()
     ["選到不存在的方案", proposal(), "不存在", /重新整理/],
   ];
   for (const [label, target, selected, expected] of cases) {
-    const gate = applyGate(target, selected);
+    const gate = applyGate(target, selected, true);
     assert.equal(gate.enabled, false, `${label} 不該可以套用`);
     if (!gate.enabled) {
       assert.match(gate.reason, expected, `${label} 的理由不夠具體：${gate.reason}`);
@@ -259,8 +259,8 @@ test("套用按鈕的預設是不能按，而且每一種都說得出理由", ()
 });
 
 test("只有選了存在的方案、而且分析完成時才能套用", () => {
-  assert.deepEqual(applyGate(proposal(), "a-1"), { enabled: true });
-  assert.deepEqual(applyGate(proposal({ status: "approved" }), "a-1"), { enabled: true });
+  assert.deepEqual(applyGate(proposal(), "a-1", true), { enabled: true });
+  assert.deepEqual(applyGate(proposal({ status: "approved" }), "a-1", true), { enabled: true });
 });
 
 test("按下去之前就要說會改什麼、怎麼還原", () => {
@@ -369,4 +369,13 @@ test("沒有修改權限的人不能套用，而且說得出原因", () => {
 
   // 有權限就照常
   assert.deepEqual(applyGate(proposal(), "a-1", true), { enabled: true });
+
+  // 權限參數**沒有預設值**：忘了傳是型別錯誤，不是靜默放行。
+  // 「預設 true」等於「忘了傳就全部放行」，那正是這個參數要防的事。
+  //
+  // 下面這行就是那條保證：如果哪天有人替它加回預設值，`@ts-expect-error`
+  // 會變成「沒有錯誤可以期待」而讓 tsc 紅 —— 而 tsc 是 test:design-intelligence
+  // 的第一段，所以這條紅線是 CI 擋得住的。
+  // @ts-expect-error 第三個參數是必填的
+  void applyGate(proposal(), "a-1");
 });
