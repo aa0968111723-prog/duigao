@@ -12,6 +12,7 @@ import type {
 } from "../features/collaboration/types";
 import { FRAME_KINDS } from "../features/collaboration/types";
 import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaboration/types";
+import { acceptBoardVersionInsertAck } from "./boardVersionAck";
 import { acceptDiscussionInsert } from "./discussionWrite";
 import { CloudError } from "./errors";
 
@@ -585,15 +586,20 @@ export async function createBoardVersion(
     snapshot: { nodes: unknown[]; edges: unknown[]; frames?: unknown[] };
   },
 ): Promise<void> {
-  const { error } = await supabase.from("whiteboard_versions").insert({
-    id: input.id,
-    whiteboard_id: input.whiteboardId,
-    room_id: input.roomId,
-    label: input.label,
-    snapshot: input.snapshot,
-    created_by: input.createdBy,
-  });
+  const { data, error } = await supabase
+    .from("whiteboard_versions")
+    .insert({
+      id: input.id,
+      whiteboard_id: input.whiteboardId,
+      room_id: input.roomId,
+      label: input.label,
+      snapshot: input.snapshot,
+      created_by: input.createdBy,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "whiteboard-version");
+  acceptBoardVersionInsertAck(data);
 }
 
 /**
