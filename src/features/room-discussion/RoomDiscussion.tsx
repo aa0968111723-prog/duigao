@@ -26,7 +26,7 @@ import {
 import type { Guest, Room, RoomPoll } from "../../lib/types";
 import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
-import { shouldFollowLatest } from "./feed";
+import { feedEndShouldMarkRead, shouldFollowLatest } from "./feed";
 import { voiceDockShowsLeave } from "./voiceDockLeave";
 import "./discussion.css";
 
@@ -252,13 +252,15 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const jumpToMessage = (sourceId: string) => {
     const el = typeof document !== "undefined" ? document.getElementById(`rd-msg-${sourceId}`) : null;
     pinnedToLatest.current = false;
+    // Stay suppressed until the person scrolls the feed or taps 最新訊息.
+    // A highlight timeout must not lift this — smooth-scroll can still
+    // expose feed-end after 1600ms and would fake "caught up".
     suppressReadFromJump.current = true;
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    el?.scrollIntoView({ block: "center", behavior: "auto" });
     setHighlightId(sourceId);
     if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current);
     highlightTimer.current = window.setTimeout(() => {
       setHighlightId(null);
-      suppressReadFromJump.current = false;
     }, 1600);
   };
   useEffect(() => () => { if (highlightTimer.current !== null) window.clearTimeout(highlightTimer.current); }, []);
@@ -325,15 +327,34 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     if (!el || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(([entry]) => {
       pinnedToLatest.current = Boolean(entry?.isIntersecting);
-      if (entry?.isIntersecting) {
-        setShowJumpLatest(false);
-        if (suppressReadFromJump.current) return;
-        const latest = lastMessageRef.current;
-        if (latest) api.onMarkRead?.(latest.id);
-      }
+      if (entry?.isIntersecting) setShowJumpLatest(false);
+      if (!feedEndShouldMarkRead({
+        intersecting: Boolean(entry?.isIntersecting),
+        suppressReadFromJump: suppressReadFromJump.current,
+      })) return;
+      const latest = lastMessageRef.current;
+      if (latest) api.onMarkRead?.(latest.id);
     }, { threshold: 0.01 });
     observer.observe(el);
-    return () => observer.disconnect();
+    const feed = el.parentElement;
+    const releaseJumpSuppress = () => {
+      if (!suppressReadFromJump.current) return;
+      suppressReadFromJump.current = false;
+      const end = feedEndRef.current;
+      if (!end) return;
+      const rect = end.getBoundingClientRect();
+      const visible = rect.top < (typeof window === "undefined" ? 0 : window.innerHeight) && rect.bottom > 0;
+      if (visible && lastMessageRef.current) api.onMarkRead?.(lastMessageRef.current.id);
+    };
+    feed?.addEventListener("wheel", releaseJumpSuppress, { passive: true });
+    feed?.addEventListener("touchstart", releaseJumpSuppress, { passive: true });
+    feed?.addEventListener("pointerdown", releaseJumpSuppress);
+    return () => {
+      observer.disconnect();
+      feed?.removeEventListener("wheel", releaseJumpSuppress);
+      feed?.removeEventListener("touchstart", releaseJumpSuppress);
+      feed?.removeEventListener("pointerdown", releaseJumpSuppress);
+    };
   }, [api.room.id, activePane]);
 
   useEffect(() => {

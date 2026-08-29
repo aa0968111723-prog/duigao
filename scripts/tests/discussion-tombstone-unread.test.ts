@@ -19,6 +19,7 @@ import {
 } from "../../src/features/collaboration/discussionHonesty";
 import { discussionFromRow, type DiscussionRow } from "../../src/cloud/collaborationRepository";
 import { applyDiscussionRealtime } from "../../src/cloud/realtimeApply";
+import { feedEndShouldMarkRead } from "../../src/features/room-discussion/feed";
 import type { DiscussionMessage } from "../../src/features/collaboration/types";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -154,6 +155,18 @@ test("T-07 unread: 水位之後的第一則；沒有已讀回條", () => {
   assert.match(ui, /firstUnreadMessageId/);
   assert.match(ui, /suppressReadFromJump/);
   assert.doesNotMatch(ui, /雙藍勾|(?<!未)已讀/);
+});
+
+test("T-07b: 跳到第一則未讀不可在 highlight 逾時後把水位推到最新", () => {
+  assert.equal(feedEndShouldMarkRead({ intersecting: true, suppressReadFromJump: true }), false);
+  assert.equal(feedEndShouldMarkRead({ intersecting: true, suppressReadFromJump: false }), true);
+  assert.equal(feedEndShouldMarkRead({ intersecting: false, suppressReadFromJump: false }), false);
+  const ui = src("src/features/room-discussion/RoomDiscussion.tsx");
+  assert.match(ui, /feedEndShouldMarkRead/);
+  assert.match(ui, /Stay suppressed until the person scrolls the feed or taps/);
+  const highlightTimer = ui.match(/highlightTimer\.current = window\.setTimeout\(\(\) => \{[\s\S]*?\}, 1600\)/);
+  assert.ok(highlightTimer, "highlight timer");
+  assert.doesNotMatch(highlightTimer[0], /suppressReadFromJump\.current = false/);
 });
 
 test("T-10: 墓碑 attribution 只能寫成呼叫者，不能把 deleted_by 偽造成別人", () => {

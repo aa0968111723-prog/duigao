@@ -280,13 +280,14 @@ try {
     const unreadJump = page.getByTestId("jump-first-unread");
     check("第一則未讀可跳", await unreadJump.count() === 1);
     if (await unreadJump.count()) {
-      const unreadId = await page.locator('[data-first-unread="true"]').first().getAttribute("id");
+      const unreadId = await page.locator('[data-testid="discussion-feed"] [data-first-unread="true"]').first().getAttribute("id");
       await unreadJump.click({ force: true });
-      await page.waitForFunction((id) => {
+      const stayed = await page.waitForFunction((id) => {
         const el = id ? document.getElementById(id) : null;
-        return Boolean(el && el.getAttribute("data-first-unread") === "true");
-      }, unreadId, { timeout: 4000 }).catch(() => undefined);
-      check("未讀跳到水位之後", await page.locator('[data-first-unread="true"]').count() === 1);
+        if (!el || el.getAttribute("data-first-unread") !== "true") return false;
+        return document.querySelectorAll('[data-testid="discussion-feed"] [data-first-unread="true"]').length === 1;
+      }, unreadId, { timeout: 4000 }).then(() => true).catch(() => false);
+      check("未讀跳到水位之後", stayed && await page.locator('[data-testid="discussion-feed"] [data-first-unread="true"]').count() === 1);
     }
     await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_unread_390.png"), fullPage: true });
     await page.setViewportSize({ width: 768, height: 1024 });
