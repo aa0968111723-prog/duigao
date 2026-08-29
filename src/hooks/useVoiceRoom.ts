@@ -246,13 +246,13 @@ export function useVoiceRoom({ supabase, boundRoomId, userId, displayName, canMa
         if (seq !== joinSeqRef.current) return;
         if (!fresh.ok) {
           applyTokenFailure(fresh);
-          await teardown(false);
+          await teardown(true);
           return;
         }
         const parsed = parseVoiceTokenPayload(fresh);
         if (!parsed.ok) {
           applyTokenFailure(parsed);
-          await teardown(false);
+          await teardown(true);
           return;
         }
         const previous = connectionRef.current;

@@ -39,6 +39,19 @@ RoomDiscussion (`#95`) still reads `state === "live"` / `state === "connecting"`
 
 There is no `npm test` script. Real scripts used by this batch are listed in the commit / PR body.
 
+## Read-only review (this branch)
+
+| ID | Finding | Class |
+|---|---|---|
+| V-01 | `{ok:true}` with `https://` / non-ws URL could be treated as connectable | **accepted** — parser now requires `ws:` / `wss:` |
+| V-02 | non-finite `ttlSeconds` would schedule `setTimeout(NaN)` | **accepted** — reject; `MISSING_KEYS` |
+| V-03 | token refresh failure left DB participant `left_at` null while UI said failed | **accepted** — refresh failure now `teardown(true)` |
+| V-04 | RoomDiscussion still only shows `live` roster chrome | **deferred-with-owner** — `#95` owns the file; dock `state` mapping kept |
+| V-05 | health `{ok:true}` does not prove TURN / LiveKit is up | **accepted-as-designed** — join still parses token; missing provider cannot become `connected` |
+| V-06 | production Zeabur `/functions/v1/voice-token` is SPA HTML 200 | **deferred-with-owner** — platform routing; client now refuses that body |
+
+Rejected-with-evidence: none. No secrets, invite fragments, or `room-assets` ACL changes.
+
 ## Next unowned P0 (after this branch is open)
 
 Do not start files/outbox, whiteboard, or Design Intelligence. If still unblocked, the next unowned surface is whatever the gap matrix lists that is not owned by #78 / #88 / #95 — not a collision rewrite of those PRs.

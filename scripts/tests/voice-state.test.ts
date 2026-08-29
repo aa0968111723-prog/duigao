@@ -110,6 +110,29 @@ test("negative: { ok: true } without url/token is not connected", () => {
   assert.equal(isVoiceConnected(parsed.phase), false);
 });
 
+test("negative: non-websocket url or non-finite ttl is not a live session", () => {
+  const http = parseVoiceTokenPayload({
+    ok: true,
+    url: "https://example.invalid/livekit",
+    token: "header.payload.sig",
+    liveKitRoom: "room-a",
+    ttlSeconds: 600,
+  });
+  const badTtl = parseVoiceTokenPayload({
+    ok: true,
+    url: "wss://livekit.example",
+    token: "header.payload.sig",
+    liveKitRoom: "room-a",
+    ttlSeconds: "nope",
+  });
+  assert.equal(http.ok, false);
+  assert.equal(badTtl.ok, false);
+  if (http.ok || badTtl.ok) return;
+  assert.equal(http.code, "INVALID_REQUEST");
+  assert.equal(badTtl.code, "MISSING_KEYS");
+  assert.equal(isVoiceConnected(http.phase), false);
+});
+
 test("negative-control: status-only helper WOULD treat production SPA 200 as live", () => {
   assert.equal(naiveHttp200IsLive(200, SPA), true);
   assert.equal(looksLikeSpaHtml(SPA, "text/html"), true);

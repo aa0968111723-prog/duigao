@@ -129,15 +129,20 @@ export function parseVoiceTokenPayload(
   }
   const value = data as Record<string, unknown>;
   if (value.ok === true) {
-    if (blank(value.url) || blank(value.token) || blank(value.liveKitRoom) || value.ttlSeconds == null) {
+    const ttl = Number(value.ttlSeconds);
+    const url = String(value.url ?? "");
+    if (blank(value.url) || blank(value.token) || blank(value.liveKitRoom) || !Number.isFinite(ttl) || ttl <= 0) {
       return { ok: false, code: "MISSING_KEYS", phase: "connection-failed" };
+    }
+    if (!/^wss?:\/\//i.test(url)) {
+      return { ok: false, code: "INVALID_REQUEST", phase: "connection-failed" };
     }
     return {
       ok: true,
-      url: String(value.url),
+      url,
       token: String(value.token),
       liveKitRoom: String(value.liveKitRoom),
-      ttlSeconds: Number(value.ttlSeconds),
+      ttlSeconds: ttl,
     };
   }
   if (value.code === "VOICE_NOT_CONFIGURED") {
