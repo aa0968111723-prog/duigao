@@ -1,6 +1,7 @@
 # Checkpoint: Git 衝突整合與正式上線修復
 
-- **稽核時間**：2026-08-29 22:36 +08:00（本地 `git fetch --all --prune` 之後；#99 於 22:40 合併，本檔隨即更新）
+- **稽核時間**：2026-08-29 22:36 +08:00
+- **本檔更新**：2026-08-29 16:08Z（#113+#114 已 squash 進 main）
 - **工作代理**：Grok Build TUI conflict-integration agent
 - **倉庫**：https://github.com/aa0968111723-prog/duigao
 - **正式站**：https://duigao-k7q2.zeabur.app/
@@ -27,6 +28,10 @@
 | 2026-08-29 23:06 +08 | `196b3a3672ca240e123ba530b5d7cb2eed8048a5` | `PR-RESOLVE-01: Home offline and cloud-unset truthful state (#105)` |
 | 2026-08-29 23:12 +08 | `698595bb5c100decd4c0489e48b1d4feb50addd7` | `PR-RESOLVE-02` 語音九態 (#106) |
 | 2026-08-29 23:21 +08 | `097a6afe47cfff27e88e074cdfa390cbe9406126` | `PR-RESOLVE-03` 影片 TUS + SPA API routing (#107) |
+| 2026-08-29 23:28 +08 | `105b89b` | `PR-RESOLVE-04` files/outbox (#108) |
+| 2026-08-29 23:34 +08 | `85755ff` | `PR-RESOLVE-05` mobile first-layer (#110) |
+| 2026-08-29 16:00Z | `6da2af79739084c8af9680803b1d48b55a33c1c1` | `PR-RESOLVE-06` 白板 (#113) |
+| 2026-08-29 16:06Z | `3c0bf0c6d88bd85cf829dbe6e95068369d9d3678` | `PR-RESOLVE-07` Design Intelligence (#114) — **目前 origin/main** |
 
 本地在稽核前曾停在 `9b8d388`（遠古 main）。已 fast-forward 到含 #97 的 tip，並合併 #99。
 
@@ -41,6 +46,10 @@
 | **#105** | PR-RESOLVE-01: Home 離線／雲端未設定誠實狀態（替代 #96） | `main` | squash 成 `196b3a3` |
 | **#106** | PR-RESOLVE-02: 語音九態（替代 #98） | `main` | squash 成 `698595b`；browser 全綠後合 |
 | **#107** | PR-RESOLVE-03: 影片 TUS + SPA routing（替代 #95） | `main` | squash 成 `097a6af`；in-repo `vercel.json`/`Caddyfile` 不再 rewrite `/functions` `/api` `/rest` |
+| **#108** | PR-RESOLVE-04: honest files/outbox（替代 #100） | `main` | squash 成 `105b89b` |
+| **#110** | PR-RESOLVE-05: mobile first-layer（替代 #101） | `main` | squash 成 `85755ff` |
+| **#113** | PR-RESOLVE-06: canonical whiteboard（替代 #78） | `main` | squash 成 `6da2af7`。migrations 0024–0028 additive。overlay `historyLayers` 不得洗推進面板。 |
+| **#114** | PR-RESOLVE-07: Design Intelligence（替代 #88） | `main` | squash 成 `3c0bf0c`。migrations 0029–0030。proposal 不可跳過採用。 |
 
 ## 未進 main（即使 GitHub 顯示 merged）
 
@@ -169,56 +178,45 @@ GitHub required jobs：`build` / `migrations` / `browser` / `agent-read-layer`�
 
 先前 #97 已記錄：`https://duigao-k7q2.zeabur.app/functions/v1/voice-token` 等路徑 HTTP 200 `text/html`（SPA catch-all）。#97 只修 client parser，**平台路由仍會回 HTML**。本任務第十階段必須再探針，並對照 Zeabur deploy SHA 與 `origin/main`。
 
-## 本輪進度（2026-08-29 23:10 +08）
+## 本輪進度（2026-08-29 16:08Z）
 
-Replacement PRs（原始 #78/#88/#95/#96/#98/#100/#101 **未刪**）：
+Replacement PRs（原始 #78/#88/#95/#96/#98 **仍 open、未刪**。#100/#101 GitHub 已 merged 到舊 feature 分支，不是 main）：
 
 | 代號 | GitHub | 分支 | 狀態 |
 |---|---|---|---|
-| PR-RESOLVE-01 | **#105 merged** | `resolve/pr-01-home-entry` | 已進 main `196b3a3` |
-| PR-RESOLVE-02 | **#106** | `resolve/pr-02-voice-state` @ `2eb2b07` | rebase 到含 #105 的 main；draft→ready；等 CI。先前 browser 敗在 `:::54418` EADDRINUSE，已改 bind `127.0.0.1` |
-| PR-RESOLVE-03 | **#107** | `resolve/pr-03-video-library` | draft；0006 未改；0023_video_optimize additive。#105 之後 package.json 可能 dirty，需 rebase |
-| PR-RESOLVE-04 | **#108** | `resolve/pr-04-files-outbox` | draft；疊 03 |
-| PR-RESOLVE-05 | **#110** | `resolve/pr-05-mobile-tablet` | draft；疊 04 |
-| PR-RESOLVE-06 | **#113** | `resolve/pr-06-whiteboard` | draft；白板 migration 重編號 0024–0028 |
-| PR-RESOLVE-07 | **#114** | `resolve/pr-07-design-intelligence` | draft；DI migration 0029–0030；agent-gate 已因 fixture 合成密鑰而 PASS |
+| PR-RESOLVE-01 | **#105 merged** | `resolve/pr-01-home-entry` | main `196b3a3` |
+| PR-RESOLVE-02 | **#106 merged** | `resolve/pr-02-voice-state` | main `698595b` |
+| PR-RESOLVE-03 | **#107 merged** | `resolve/pr-03-video-library` | main `097a6af` |
+| PR-RESOLVE-04 | **#108 merged** | `resolve/pr-04-files-outbox` | main `105b89b` |
+| PR-RESOLVE-05 | **#110 merged** | `resolve/pr-05-mobile-tablet` | main `85755ff` |
+| PR-RESOLVE-06 | **#113 merged** | `resolve/pr-06-whiteboard` | main `6da2af7`。browser 全綠：pane 跨 overlay、更多 sheet e2e、visual 基準更新 |
+| PR-RESOLVE-07 | **#114 merged** | `resolve/pr-07-design-intelligence` | main `3c0bf0c`。required `build`/`migrations`/`browser`/`agent-read-layer` success |
 
-### 正式站 HTTP（兩次，2026-08-29 15:06Z）
+### 正式站 HTTP（#114 合入後，2026-08-29 16:07Z）
 
-證據：`{SCRATCH}/prod-http/*.txt`
+| URL | status | Content-Type | Last-Modified | 判定 |
+|---|---|---|---|---|
+| `/` | 200 | text/html; charset=utf-8 | Sat, 29 Aug 2026 16:03:06 GMT | 文件載入 OK（ETag `dl1jz2azwyyo14l-gzip`） |
+| `/functions/v1/voice-token` | **200** | **text/html; charset=utf-8** | 同上同一 ETag | **失敗**：SPA catch-all，不是 API |
+| `/api/health` | **200** | **text/html; charset=utf-8** | 同上同一 ETag | 同上 |
 
-| URL | status | Content-Type | 判定 |
-|---|---|---|---|
-| `/` | 200 | text/html | 文件載入 OK。Last-Modified 15:03:57 GMT（#105 合入後 Caddy 有新物件） |
-| `/functions/v1/voice-token` | **200** | **text/html** | **失敗**：SPA catch-all，不是 API |
-| `/api/voice-token` | **200** | **text/html** | 同上 |
-| `/api/health` | **200** | **text/html** | 同上 |
-| `/rest/v1/rooms` | **200** | **text/html** | 同上 |
-
-Zeabur MCP `list-projects`：`ERROR_INVALID_TOKEN`。無法比對 deploy SHA。GitHub merge ≠ 正式站 API 修好。
+Zeabur MCP `list-projects`：`ERROR_INVALID_TOKEN`。無法比對 deploy SHA。in-repo Caddyfile/vercel.json 已排除 `/api` `/functions` `/rest`（#107），**平台仍把這些路徑指到 SPA**。GitHub merge ≠ 正式站 API 修好。
 
 ### 環境阻擋（不是程式沒寫）
 
-- Canva OAuth / AI vendor keys / LiveKit env / Zeabur 路由把 `/functions/v1/*` 指到真正 Edge Function
+- Canva OAuth / AI vendor keys / LiveKit env / **Zeabur 路由把 `/functions/v1/*` 指到真正 Edge Function**（Caddyfile 在平台上未被採用）
 
-## 下一步（執行序）
+## 下一步（剩餘）
 
-1. **本分支 `resolve/pr-01-home-entry`**：從 `origin/main`（含 #97+#99）重放 #96；語意合併 `package.json`；跑 `test:home-entry` / `build:local` / `agent:gate`；draft `PR-RESOLVE-01`。
-2. **`resolve/pr-02-voice-state`**：重放 #98；合併 voiceToken（#97 parser + #98 九態）；draft `PR-RESOLVE-02`。
-3. **`resolve/pr-03-video-library`**：重放 #95 影片 commits（不含 #100）；0023 對帳；0006 改 additive；draft `PR-RESOLVE-03`。
-4. **`resolve/pr-04-files-outbox`**：從 03（或已合入 03 的 main）抽出 #100；draft `PR-RESOLVE-04`。
-5. **`resolve/pr-05-mobile-tablet`**：抽出 #101；draft `PR-RESOLVE-05`。
-6. **`resolve/pr-06-whiteboard`**：#78 重編號 migration + MultiBranchRoom 語意合併；draft `PR-RESOLVE-06`。
-7. **`resolve/pr-07-design-intelligence`**：#88 重編號 + schema/docs 合併；draft `PR-RESOLVE-07`。
-8. 各 PR 測試通過後轉 ready；GitHub `mergeable_state != dirty` 且 required checks success 才合。合入後探針正式站。
-
-原始 PR #78/#88/#95/#96/#98/#100/#101 **保持不刪**。
+1. **平台**：Zeabur 必須讓 `/functions` `/api` `/rest` 回 JSON/404 而不是 `index.html`。這是環境阻擋，不是再改 SPA。
+2. 原始 PR **#78 / #88 / #95 / #96 / #98 保持 open、不刪**（replacement 已在 main；刪除要等人確認）。
+3. 其他 GAP restack PR（#102–#104、#109、#111–#112、#115–#120）不在本任務範圍。
 
 ## 本輪已完成
 
 - [x] fetch / merge-tree / PR 讀取
 - [x] 確認 #100 base=`cursor/complete-missing-features-0897`、#101 base=`cursor/p0-files-and-outbox-70d9`
-- [x] #99 browser success → 已 squash 合併到 main (`444ae9d`)
-- [x] PR-RESOLVE-01 重放、測試、GitHub checks、合併 `#105`
-- [x] PR-RESOLVE-02 … 07 已建立 replacement PR（02 等 CI；03–07 仍 draft 待 GitHub required checks）
-- [x] 正式站 HTTP 雙次探針（API 路徑仍 200 HTML）
+- [x] #99 browser success → squash 合併到 main (`444ae9d`)
+- [x] PR-RESOLVE-01 … 07 全部 squash 進 main（#105–#108、#110、#113、#114）
+- [x] #113/#114 GitHub `mergeable_state=CLEAN` 且 required checks success 才合
+- [x] 正式站 HTTP 在新 main SHA `3c0bf0c` 之後再探針（API 路徑仍 200 HTML）
