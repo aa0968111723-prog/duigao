@@ -11,6 +11,7 @@ import { mkdtempSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { rows, start as startMock } from "./mock-supabase.mjs";
+import { ensureRoomMore } from "./room-more.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54428;
@@ -106,11 +107,25 @@ try {
   await pageA.getByRole("button", { name: /建立活動房/ }).click();
   await pageA.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
 
-  const roomUrl = pageA.url();
-  await pageB.goto(roomUrl, { waitUntil: "domcontentloaded" });
+  // B must join via fragment invite (page URL without #invite is permission-denied).
+  await ensureRoomMore(pageA);
+  await pageA.locator(".project-share-button").click();
+  await pageA.waitForSelector("input.m-share-url", { timeout: 30000 });
+  const shareUrl = await pageA.locator("input.m-share-url").inputValue();
+  await pageA.locator(".m-modal").getByRole("button", { name: "關閉", exact: true }).click().catch(() => undefined);
+  if (!(await pageA.locator('[data-testid="discussion-feed"]').count())) {
+    await pageA.getByRole("button", { name: "對話", exact: true }).click().catch(() => undefined);
+  }
+  await pageA.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
+
+  await pageB.goto(`${APP}${new URL(shareUrl).hash}`, { waitUntil: "domcontentloaded" });
   if (await pageB.locator("input.text-input").count()) {
     await pageB.fill("input.text-input", "B 檢視");
     await pageB.click("button.btn-primary");
+  }
+  await pageB.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
+  if (!(await pageB.locator('[data-testid="discussion-feed"]').count())) {
+    await pageB.getByRole("button", { name: "對話", exact: true }).click();
   }
   await pageB.waitForSelector('[data-testid="discussion-feed"]', { timeout: 20000 });
 
@@ -162,7 +177,7 @@ try {
 } finally {
   await browser?.close().catch(() => undefined);
   await new Promise((resolve, reject) => app?.close((err) => (err ? reject(err) : resolve())) ?? resolve());
-  await mock?.close?.().catch(() => undefined);
+  mock?.close();
 }
 
 const failed = results.filter((item) => !item.pass).length;
