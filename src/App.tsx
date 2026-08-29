@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isEdgeNotSaved } from "./cloud/edgeAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -2086,9 +2087,16 @@ export function App() {
   const createEdge = useCallback(
     (edge: WhiteboardEdge) => {
       updateRoom((r) => ({ ...r, whiteboardEdges: [...(r.whiteboardEdges ?? []), edge] }));
-      cloudRef.current.writes.createEdge?.(edge);
+      void cloudRef.current.writes.createEdge?.(edge)?.catch((err) => {
+        if (!isEdgeNotSaved(err)) return;
+        updateRoom((r) => ({
+          ...r,
+          whiteboardEdges: (r.whiteboardEdges ?? []).filter((item) => item.id !== edge.id),
+        }));
+        showToast("連線沒有建立，請再試一次。", { tone: "error" });
+      });
     },
-    [updateRoom],
+    [showToast, updateRoom],
   );
 
   const shareNodeToDiscussion = useCallback(

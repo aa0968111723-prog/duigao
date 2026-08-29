@@ -13,6 +13,7 @@ import type {
 import { FRAME_KINDS } from "../features/collaboration/types";
 import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaboration/types";
 import { acceptDiscussionInsert } from "./discussionWrite";
+import { acceptEdgeInsertAck } from "./edgeAck";
 import { CloudError } from "./errors";
 
 type WhiteboardRow = {
@@ -400,19 +401,24 @@ export async function softDeleteNode(
 }
 
 export async function insertEdge(supabase: SupabaseClient, edge: WhiteboardEdge): Promise<void> {
-  const { error } = await supabase.from("whiteboard_edges").insert({
-    id: edge.id,
-    whiteboard_id: edge.whiteboardId,
-    room_id: edge.roomId,
-    source_node_id: edge.sourceNodeId,
-    target_node_id: edge.targetNodeId,
-    edge_type: edge.edgeType,
-    label: edge.label,
-    source_handle: edge.sourceHandle ?? null,
-    target_handle: edge.targetHandle ?? null,
-    created_by: isUuid(edge.createdBy ?? "") ? edge.createdBy : null,
-  });
+  const { data, error } = await supabase
+    .from("whiteboard_edges")
+    .insert({
+      id: edge.id,
+      whiteboard_id: edge.whiteboardId,
+      room_id: edge.roomId,
+      source_node_id: edge.sourceNodeId,
+      target_node_id: edge.targetNodeId,
+      edge_type: edge.edgeType,
+      label: edge.label,
+      source_handle: edge.sourceHandle ?? null,
+      target_handle: edge.targetHandle ?? null,
+      created_by: isUuid(edge.createdBy ?? "") ? edge.createdBy : null,
+    })
+    .select("id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "whiteboard-edge");
+  acceptEdgeInsertAck(data);
 }
 
 // ---- frames / operations / versions（0022–0024，WB01 資料層） --------------

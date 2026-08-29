@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isEdgeNotSaved } from "./edgeAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -92,7 +93,7 @@ import {
   insertDecision,
   insertAiApplyAudit,
   insertDiscussion,
-  insertEdge,
+  insertEdge as repoInsertEdge,
   nodeFromRow,
   insertWhiteboard,
   loadWhiteboardGraph,
@@ -156,7 +157,7 @@ export type CloudWrites = {
   /** 版本還原專用：復活被軟刪的節點（F1）。 */
   restoreNode?: (node: import("../features/collaboration/types").WhiteboardNode) => void;
   insertOperation?: (op: import("../features/collaboration/types").WhiteboardOperation) => void;
-  createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
+  createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => Promise<void>;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   setAllowBoardEdit?: (allow: boolean) => void;
@@ -1130,7 +1131,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       await repoSoftDeleteNode(supabase!, boundRef.current!, id, version);
       return true;
     }),
-    createEdge: (edge) => run(`edge:${edge.id}`, () => insertEdge(supabase!, edge)),
+    createEdge: async (edge) => {
+      const rid = boundRef.current;
+      const key = `edge-insert:${edge.id}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await repoInsertEdge(supabase, edge);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isEdgeNotSaved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => repoInsertEdge(supabase, edge),
+        });
+        setStatus("offline-pending");
+      }
+    },
     // frame 寫入的版本簿記（S6）：0023 的 touch trigger 會 bump version，
     // 但舊寫法丟棄回傳、App 端版本永遠停在 1 → 同一板的第二次寫入必被
     // stale-write 拒絕，且 run() 的重試 closure 捕捉的是同一份過期
