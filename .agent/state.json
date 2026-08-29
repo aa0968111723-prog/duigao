@@ -980,7 +980,7 @@
     }
   },
   "database": {
-    "repoMigrationHead": "0028",
+    "repoMigrationHead": "0030",
     "migrationFiles": [
       "supabase/migrations/0001_cloud_rooms.sql",
       "supabase/migrations/0002_feedback.sql",
@@ -1003,11 +1003,11 @@
       "supabase/migrations/0019_ai_apply_audit.sql",
       "supabase/migrations/0020_canva_bridge.sql",
       "supabase/migrations/0021_canva_design_pages.sql",
-      "supabase/migrations/0027_design_knowledge.sql",
-      "supabase/migrations/0028_design_research_usage.sql"
+      "supabase/migrations/0029_design_knowledge.sql",
+      "supabase/migrations/0030_design_research_usage.sql"
     ],
     "productionMigrationHead": "unknown",
-    "productionMigrationExpectation": "0028",
+    "productionMigrationExpectation": "0030",
     "requiresLiveCheck": true
   },
   "tests": {
