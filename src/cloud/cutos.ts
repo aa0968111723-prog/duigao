@@ -6,6 +6,7 @@
  * 快取 — 它 gate 的是「入口要不要出現」，不是即時狀態面板。
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { invokeErrorContentType, looksLikeSpaHtml, parseFunctionPayload, rejectAsUnreachable } from "./apiResponse";
 import type { CutosBridgeHealth, CutosBridgeImportResult } from "../lib/cutosContract";
 
 let healthCache: { at: number; value: CutosBridgeHealth } | null = null;
@@ -21,8 +22,28 @@ export async function cutosHealth(supabase: SupabaseClient): Promise<CutosBridge
   }
   try {
     const { data, error } = await supabase.functions.invoke("cutos-bridge", { body: { action: "health" } });
-    if (error) throw error;
-    const value = (data ?? { ok: false, code: "CUTOS_UNREACHABLE" }) as CutosBridgeHealth;
+    if (error) {
+      if (looksLikeSpaHtml(null, invokeErrorContentType(error))) {
+        throw Object.assign(new Error("SPA_HTML"), { code: "SPA_HTML" });
+      }
+      throw error;
+    }
+    const parsed = parseFunctionPayload(data);
+    if (parsed.kind === "reject") {
+      const value = rejectAsUnreachable(parsed, "CUTOS_UNREACHABLE");
+      healthCache = { at: Date.now(), value };
+      return value;
+    }
+    const value: CutosBridgeHealth =
+      parsed.value.ok === true
+        ? { ok: true, negotiated: typeof parsed.value.negotiated === "string" ? parsed.value.negotiated : undefined }
+        : {
+            ok: false,
+            code:
+              parsed.value.code === "CUTOS_NOT_CONFIGURED" || parsed.value.code === "PROTOCOL_VERSION_MISMATCH"
+                ? parsed.value.code
+                : "CUTOS_UNREACHABLE",
+          };
     healthCache = { at: Date.now(), value };
     return value;
   } catch {
@@ -47,16 +68,30 @@ export async function importCutosOutput(
       body: { action: "import-output", ...input },
     });
     if (error) {
+      if (looksLikeSpaHtml(null, invokeErrorContentType(error))) {
+        return { ok: false, code: "CUTOS_UNREACHABLE" };
+      }
       // 非 2xx（FORBIDDEN 403 / ROOM_NOT_FOUND 404）的 body 帶著誠實
       // 錯誤碼 — 讀回來，別折成「連不上」（Grok 07 F3）。
       const ctx = (error as { context?: Response }).context;
       if (ctx && typeof ctx.json === "function") {
         const body = (await ctx.json().catch(() => null)) as CutosBridgeImportResult | null;
-        if (body && body.ok === false && body.code) return body;
+        const parsedBody = parseFunctionPayload(body);
+        if (parsedBody.kind === "payload" && parsedBody.value.ok === false && parsedBody.value.code) {
+          return parsedBody.value as CutosBridgeImportResult;
+        }
       }
       throw error;
     }
-    return (data ?? { ok: false, code: "IMPORT_FAILED" }) as CutosBridgeImportResult;
+    const parsed = parseFunctionPayload(data, { successKeys: ["versionId"] });
+    if (parsed.kind === "reject") return { ok: false, code: "IMPORT_FAILED" };
+    if (parsed.value.ok === true) {
+      return parsed.value as Extract<CutosBridgeImportResult, { ok: true }>;
+    }
+    if (parsed.value.ok === false && parsed.value.code) {
+      return parsed.value as Extract<CutosBridgeImportResult, { ok: false }>;
+    }
+    return { ok: false, code: "IMPORT_FAILED" };
   } catch {
     return { ok: false, code: "CUTOS_UNREACHABLE" };
   }
