@@ -405,6 +405,10 @@ export type Room = {
   discussionSupports?: import("../features/collaboration/types").DiscussionSupport[];
   decisions?: import("../features/collaboration/types").DecisionRecord[];
   allowBoardEdit?: boolean;
+  /** 0032：房內成員（RLS）。本機房可從訪客／作者推導。 */
+  members?: import("../features/collaboration/types").RoomMember[];
+  /** 0032：人建立的待辦草稿。 */
+  todos?: import("../features/collaboration/types").RoomTodo[];
 };
 
 export type Guest = {

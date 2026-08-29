@@ -141,7 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
+import { boardPollWrite, canCompleteTodo, canEditDiscussion, canTombstoneDiscussion, canWriteTodo, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, todoDraftTitle, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -353,13 +353,16 @@ export function App() {
     for (const message of room?.discussion ?? []) {
       if (message.authorId && message.authorName) map.set(message.authorId, message.authorName);
     }
+    for (const member of room?.members ?? []) {
+      if (member.userId && member.name) map.set(member.userId, member.name);
+    }
     for (const node of room?.whiteboardNodes ?? []) {
       const id = node.content.lastWriterId;
       const name = node.content.lastWriterName;
       if (id && name) map.set(id, name);
     }
     return map;
-  }, [room?.discussion, room?.whiteboardNodes]);
+  }, [room?.discussion, room?.whiteboardNodes, room?.members]);
 
   // frame stale-write：這次寫入已被丟棄（不重試），重讀該板 frames 並誠實
   // 告知 — 與節點衝突路徑同一紀律（F2）。
@@ -1765,7 +1768,7 @@ export function App() {
   );
 
   const sendDiscussion = useCallback(
-    (input?: { id?: string; body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => {
+    (input?: { id?: string; body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string; mentionedUserIds?: string[] }) => {
       if (!guest) return;
       const body = (input?.body ?? chatInput).trim();
       if (!body && !input?.kind) return;
@@ -1780,6 +1783,7 @@ export function App() {
         body: body || (input?.payload?.title ?? ""),
         payload: input?.payload ?? {},
         replyToId: input?.replyToId,
+        mentionedUserIds: input?.mentionedUserIds,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -1987,6 +1991,42 @@ export function App() {
       }
     },
     [cloud.boundRoomId, cloud.userId, guest],
+  );
+
+  const createTodo = useCallback(
+    (raw: string) => {
+      const title = todoDraftTitle(raw);
+      const userId = cloud.userId ?? guest?.id;
+      const roomId = roomRef.current?.id;
+      if (!title || !userId || !roomId || !canWriteTodo(userId)) return;
+      const todo = {
+        id: uuid(),
+        roomId,
+        title,
+        createdBy: userId,
+        status: "open" as const,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      updateRoom((r) => ({ ...r, todos: [...(r.todos ?? []), todo] }));
+      cloudRef.current.writes.insertTodo?.(todo);
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
+  const completeTodo = useCallback(
+    (todoId: string) => {
+      const userId = cloud.userId ?? guest?.id;
+      const current = (roomRef.current?.todos ?? []).find((item) => item.id === todoId);
+      if (!userId || !current || !canCompleteTodo(userId)) return;
+      const next = { ...current, status: "done" as const, updatedAt: Date.now() };
+      updateRoom((r) => ({
+        ...r,
+        todos: (r.todos ?? []).map((item) => (item.id === todoId ? next : item)),
+      }));
+      cloudRef.current.writes.updateTodo?.(next);
+    },
+    [cloud.userId, guest, updateRoom],
   );
 
   const createWhiteboard = useCallback(
@@ -3151,6 +3191,16 @@ export function App() {
           onTombstoneMessage={tombstoneDiscussion}
           readWatermark={discussionRead}
           onMarkRead={markDiscussionRead}
+          onCreateTodo={createTodo}
+          onCompleteTodo={completeTodo}
+          typingLabel={(cloud.presencePeople ?? [])
+            .filter((person) => person.typing && person.userId !== cloud.userId)
+            .map((person) => nameByUserId.get(person.userId))
+            .filter((name): name is string => Boolean(name))
+            .slice(0, 2)
+            .map((name) => `${name}正在輸入`)
+            .join("、") || ((cloud.presencePeople ?? []).some((person) => person.typing && person.userId !== cloud.userId) ? "有人正在輸入" : undefined)}
+          onTyping={cloud.setTyping}
           onAttach={(files) => void sendAttachment(files)}
           attachBusy={attachmentUploading}
           attachUpload={attachUpload}
@@ -3349,6 +3399,16 @@ export function App() {
         onTombstoneDiscussion: tombstoneDiscussion,
         discussionRead,
         onMarkDiscussionRead: markDiscussionRead,
+        onCreateTodo: createTodo,
+        onCompleteTodo: completeTodo,
+        typingLabel: (cloud.presencePeople ?? [])
+          .filter((person) => person.typing && person.userId !== cloud.userId)
+          .map((person) => nameByUserId.get(person.userId))
+          .filter((name): name is string => Boolean(name))
+          .slice(0, 2)
+          .map((name) => `${name}正在輸入`)
+          .join("、") || ((cloud.presencePeople ?? []).some((person) => person.typing && person.userId !== cloud.userId) ? "有人正在輸入" : undefined),
+        onDiscussionTyping: cloud.setTyping,
         onCreateWhiteboard: createWhiteboard,
         onArchiveWhiteboard: archiveWhiteboard,
         onOpenWhiteboard: (id) => {

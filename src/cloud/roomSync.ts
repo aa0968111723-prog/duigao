@@ -29,7 +29,7 @@ export type SyncHandlers = {
    * null，重訂閱後即使人還在板上也顯示「不在板上」，要等下一次開關板才
    * 修正（Grok F3）。**刻意不含姓名**：presence payload 沒有 RLS（P1）。
    */
-  getPresenceIdentity?: () => { boardId: string | null };
+  getPresenceIdentity?: () => { boardId: string | null; typing?: boolean };
   onStatus?: (connected: boolean) => void;
   /** 討論列增量：不走整房 reload。SPA HTML / 無 id 的 payload 在此丟棄。 */
   onDiscussionUpsert?: (row: Record<string, unknown>) => void;
@@ -54,6 +54,8 @@ export type PresencePerson = {
   /** 這個人此刻開著的白板 id（null＝不在白板上）。 */
   boardId: string | null;
   at: number;
+  /** 0032：短暫輸入中。只送 boolean，不送姓名。 */
+  typing?: boolean;
 };
 
 export type RoomSubscription = Unsubscribe & {
@@ -84,7 +86,7 @@ export async function subscribeRoom(
   // 姓名在客戶端用房內成員清單（走 RLS）對照出來。
   const trackPayload = () => {
     const live = handlers.getPresenceIdentity?.() ?? { boardId: null };
-    return { at: Date.now(), boardId: live.boardId };
+    return { at: Date.now(), boardId: live.boardId, typing: Boolean(live.typing) };
   };
 
   channel
@@ -195,6 +197,8 @@ export async function subscribeRoom(
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "room_discussion_supports", filter }, () => handlers.onProjectChange?.())
     .on("postgres_changes", { event: "*", schema: "public", table: "decision_records", filter }, () => handlers.onProjectChange?.())
+    .on("postgres_changes", { event: "*", schema: "public", table: "room_discussion_mentions", filter }, () => handlers.onProjectChange?.())
+    .on("postgres_changes", { event: "*", schema: "public", table: "room_todos", filter }, () => handlers.onProjectChange?.())
     .on("presence", { event: "sync" }, () => {
       const state = channel.presenceState() as Record<string, Array<Record<string, unknown>>>;
       handlers.onPresence?.(Object.keys(state).length);
@@ -215,6 +219,7 @@ export async function subscribeRoom(
           userId: key,
           boardId: typeof meta.boardId === "string" ? meta.boardId : null,
           at: newest < 0 ? 0 : newest,
+          typing: meta.typing === true,
         });
       }
       handlers.onPresenceList?.(people);
