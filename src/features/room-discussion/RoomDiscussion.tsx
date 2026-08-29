@@ -270,7 +270,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       {(api.showVoiceNote ?? true) && (
         api.voice?.available ? (
           <div className="rd-voice-dock" data-testid="voice-dock">
-            {voiceDockShowsLeave(api.voice.state) ? (
+            {voiceDockShowsLeave(api.voice.phase ?? api.voice.state) ? (
               <>
                 <span className="rd-voice-live" aria-hidden>●</span>
                 <span className="rd-voice-roster" data-testid="voice-roster">

@@ -1,10 +1,12 @@
 /**
  * V-04: Leave stays available while the session is still ours.
  *
- * GAP-03 mutes + disconnects before `reconnecting`, so the mic is already
- * down. This stack may still be four-state (`live` only) until #98 lands;
- * `reconnecting` is accepted so the dock does not lose Leave on that merge.
+ * Accepts dock state (`live`) or truthful phase (`connected` | `reconnecting`).
+ * Nine-state maps `reconnecting` → dock `connecting`, so the dock must read
+ * `phase` — not `state` — or Leave disappears during token refresh.
+ *
+ * V-07 still mutes + disconnects before entering `reconnecting`.
  */
 export function voiceDockShowsLeave(state: string): boolean {
-  return state === "live" || state === "reconnecting";
+  return state === "live" || state === "connected" || state === "reconnecting";
 }
