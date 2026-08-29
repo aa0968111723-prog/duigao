@@ -5,11 +5,18 @@
  * 單房、音訊限定的 access token。health 正向快取 5 分鐘、負向 30 秒
  * （與 cutos 同一套語意：env 後補不用整頁重載）。
  *
- * SPA HTML / `{ ok: true }` 缺欄不得被當成已連線（PR-GAP-03）。
+ * SPA HTML / `{ ok: true }` 缺欄不得被當成已連線（PR-GAP-00 + PR-GAP-03）。
+ * 共用 parseFunctionPayload（#97）再加上 parseVoiceTokenPayload 的
+ * wss + 有限 TTL（#98）。
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   invokeErrorContentType,
+  looksLikeSpaHtml,
+  parseFunctionPayload,
+  rejectAsUnreachable,
+} from "./apiResponse";
+import {
   parseVoiceHealthPayload,
   parseVoiceTokenPayload,
   type VoiceTokenReject,
@@ -37,10 +44,6 @@ function publicTokenReject(parsed: VoiceTokenReject): Extract<VoiceTokenResult, 
   return { ok: false, code: "VOICE_UNREACHABLE" };
 }
 
-function responseContentType(error: unknown): string | null {
-  return invokeErrorContentType(error);
-}
-
 export async function voiceHealth(supabase: SupabaseClient): Promise<VoiceHealth> {
   if (healthCache) {
     const ttl = healthCache.value.ok ? HEALTH_TTL_MS : HEALTH_NEGATIVE_TTL_MS;
@@ -49,13 +52,18 @@ export async function voiceHealth(supabase: SupabaseClient): Promise<VoiceHealth
   try {
     const { data, error } = await supabase.functions.invoke("voice-token", { body: { action: "health" } });
     if (error) {
-      const parsed = parseVoiceHealthPayload(null, responseContentType(error));
-      if (!parsed.ok && parsed.code === "VOICE_UNREACHABLE" && /text\/html/i.test(responseContentType(error) || "")) {
+      if (looksLikeSpaHtml(null, invokeErrorContentType(error))) {
         const value: VoiceHealth = { ok: false, code: "VOICE_UNREACHABLE" };
         healthCache = { at: Date.now(), value };
         return value;
       }
       throw error;
+    }
+    const shared = parseFunctionPayload(data);
+    if (shared.kind === "reject") {
+      const value = rejectAsUnreachable(shared, "VOICE_UNREACHABLE");
+      healthCache = { at: Date.now(), value };
+      return value;
     }
     const parsed = parseVoiceHealthPayload(data);
     const value: VoiceHealth = parsed.ok ? { ok: true } : { ok: false, code: parsed.code };
@@ -83,18 +91,27 @@ export async function fetchVoiceToken(
       body: { action: "token", roomId, displayName },
     });
     if (error) {
+      if (looksLikeSpaHtml(null, invokeErrorContentType(error))) {
+        return { ok: false, code: "VOICE_UNREACHABLE" };
+      }
       const ctx = (error as { context?: Response }).context;
       if (ctx && typeof ctx.json === "function") {
         const body = (await ctx.json().catch(() => null)) as unknown;
+        const shared = parseFunctionPayload(body, {
+          contentType: ctx.headers?.get?.("content-type"),
+          successKeys: ["url", "token", "liveKitRoom", "ttlSeconds"],
+        });
+        if (shared.kind === "reject") return rejectAsUnreachable(shared, "VOICE_UNREACHABLE");
         const parsed = parseVoiceTokenPayload(body, ctx.headers?.get?.("content-type"));
         if (!parsed.ok) return publicTokenReject(parsed);
-      }
-      const contentType = responseContentType(error);
-      if (contentType && /text\/html/i.test(contentType)) {
-        return { ok: false, code: "VOICE_UNREACHABLE" };
+        return parsed;
       }
       throw error;
     }
+    const shared = parseFunctionPayload(data, {
+      successKeys: ["url", "token", "liveKitRoom", "ttlSeconds"],
+    });
+    if (shared.kind === "reject") return rejectAsUnreachable(shared, "VOICE_UNREACHABLE");
     const parsed = parseVoiceTokenPayload(data);
     if (!parsed.ok) return publicTokenReject(parsed);
     return parsed;
