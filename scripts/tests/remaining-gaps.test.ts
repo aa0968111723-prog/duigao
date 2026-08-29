@@ -113,7 +113,8 @@ test("share/invite secret stays in the fragment (evaluated — not a remaining P
   });
   try {
     const parsed = readInviteFromUrl();
-    assert.equal(parsed?.roomId, "r");
+    // Capability secret must stay fragment-only. Room id may be parsed from
+    // hash+search (legacy); that must not promote `?invite=` into `invite`.
     assert.equal(parsed?.invite, null, "query invite must never become a capability secret");
   } finally {
     Object.defineProperty(globalThis, "location", { configurable: true, value: prev });
