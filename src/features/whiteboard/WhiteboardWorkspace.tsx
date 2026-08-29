@@ -325,6 +325,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const setSheet = useCallback((next: Sheet) => { sheetRef.current = next; setSheetState(next); }, []);
   const [search, setSearch] = useState("");
   const [viewport, setViewport] = useState({ width: 360, height: 520 });
+  // Compact toolbar follows the window, not the canvas wrap. Split View
+  // shrinks wrap below 768 even on a 1024 tablet — labels must still show.
+  const [chromeWidth, setChromeWidth] = useState(() => (typeof window === "undefined" ? 390 : window.innerWidth));
   const [marquee, setMarquee] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
   const [lassoPath, setLassoPath] = useState<{ x: number; y: number }[] | null>(null);
   const [multiSelect, setMultiSelect] = useState(false);
@@ -458,6 +461,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [board?.id]);
+
+  useEffect(() => {
+    const onResize = () => setChromeWidth(window.innerWidth);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   /**
    * 側欄開合的 camera 補償（F5）：畫布寬度變了，把**畫面中心**的內容留在
@@ -1914,7 +1924,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
         </nav>
       ) : (
-        <nav className="wb-focus-bottom" aria-label="白板工具" data-compact={viewport.width < 768 ? "true" : "false"} data-testid="wb-compact-toolbar">
+        <nav className="wb-focus-bottom" aria-label="白板工具" data-compact={chromeWidth < 768 ? "true" : "false"} data-testid="wb-compact-toolbar">
           <button
             type="button"
             className={selectTool !== "off" ? "is-active" : ""}

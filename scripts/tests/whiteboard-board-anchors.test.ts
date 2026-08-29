@@ -93,6 +93,7 @@ test("workspace wires poster-region and plan-section sheets; compact toolbar und
   assert.match(ws, /poster-region/);
   assert.match(ws, /plan-section/);
   assert.match(ws, /data-compact/);
+  assert.match(ws, /chromeWidth < 768/);
   assert.match(ws, /posterRegionMarks|nodeFromImageRegion/);
   assert.match(ws, /planParagraphs|nodeFromPlanSection/);
   const css = src("src/features/whiteboard/whiteboard.css");

@@ -315,13 +315,14 @@ try {
     await page.getByTestId("wb-video-0040").click();
     check("可把文宣／企劃／影片時間卡放上白板", await page.locator("[data-node-type='room_content']").count() >= 3);
     check("影片卡帶 00:40 時間點", (await page.locator("[data-node-type='room_content']").allTextContents()).some((text) => text.includes("00:40")));
+    await dismissSelection(page);
     await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_compact_toolbar_390.png"), fullPage: true });
     await page.setViewportSize({ width: 768, height: 1024 });
-    await page.waitForTimeout(200);
-    check("768 工具列不是 compact", (await compactToolbar.getAttribute("data-compact")) === "false");
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    check("768 工具列不是 compact", (await page.getByTestId("wb-compact-toolbar").getAttribute("data-compact")) === "false");
     await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_toolbar_768.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-create-poll").click();
