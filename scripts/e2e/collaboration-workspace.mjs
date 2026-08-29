@@ -310,6 +310,9 @@ try {
     check("可引用投票節點", await page.locator("[data-node-type='poll']").count() >= 1);
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-write-decision").click();
+    await page.waitForSelector('[data-testid="wb-decision-draft"]', { timeout: 8000 });
+    await page.getByTestId("wb-decision-title").fill("採用 B 版");
+    await page.getByTestId("wb-write-decision-save").click();
     check("可寫決策節點", await page.locator("[data-node-type='decision']").count() >= 1);
     mkdirSync("/opt/cursor/artifacts", { recursive: true });
     await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_board.png"), fullPage: true });

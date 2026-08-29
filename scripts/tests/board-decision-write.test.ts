@@ -40,3 +40,10 @@ test("App does not keep an empty-title decision", () => {
   const app = src("src/App.tsx");
   assert.match(app, /boardDecisionWrite|decisionDraftTitle/);
 });
+
+test("collaboration e2e fills the decision draft instead of one-clicking a canned title", () => {
+  const e2e = src("scripts/e2e/collaboration-workspace.mjs");
+  assert.match(e2e, /wb-decision-title/);
+  assert.match(e2e, /wb-write-decision-save/);
+  assert.doesNotMatch(e2e, /getByTestId\("wb-write-decision"\)\.click\(\);\s*check\("可寫決策節點"/);
+});
