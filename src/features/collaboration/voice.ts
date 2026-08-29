@@ -8,6 +8,7 @@ import type { VoiceParticipant, VoiceSession } from "./types";
  * voice-token 真實源碼的簽名驗證）。實際可用性仍由 runtime health 決定
  * — LIVEKIT_* env 未設定的部署顯示誠實的「語音服務尚未設定」，
  * voiceUnavailableReason 因此保留。永不假裝已連線或已有參與者。
+ * 九態 phase 在 useVoiceRoom；此檔只提供未設定時的誠實文案。
  */
 export const VOICE_ROOM_MVP = true;
 
