@@ -6,6 +6,12 @@
  * （與 cutos 同一套語意：env 後補不用整頁重載）。
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  invokeErrorContentType,
+  looksLikeSpaHtml,
+  parseFunctionPayload,
+  rejectAsUnreachable,
+} from "./apiResponse";
 
 export type VoiceHealth = { ok: boolean; code?: "VOICE_NOT_CONFIGURED" | "VOICE_UNREACHABLE" };
 
@@ -24,8 +30,22 @@ export async function voiceHealth(supabase: SupabaseClient): Promise<VoiceHealth
   }
   try {
     const { data, error } = await supabase.functions.invoke("voice-token", { body: { action: "health" } });
-    if (error) throw error;
-    const value = (data ?? { ok: false, code: "VOICE_UNREACHABLE" }) as VoiceHealth;
+    if (error) {
+      if (looksLikeSpaHtml(null, invokeErrorContentType(error))) {
+        throw Object.assign(new Error("SPA_HTML"), { code: "SPA_HTML" });
+      }
+      throw error;
+    }
+    const parsed = parseFunctionPayload(data);
+    if (parsed.kind === "reject") {
+      const value = rejectAsUnreachable(parsed, "VOICE_UNREACHABLE");
+      healthCache = { at: Date.now(), value };
+      return value;
+    }
+    const value: VoiceHealth =
+      parsed.value.ok === true
+        ? { ok: true }
+        : { ok: false, code: parsed.value.code === "VOICE_NOT_CONFIGURED" ? "VOICE_NOT_CONFIGURED" : "VOICE_UNREACHABLE" };
     healthCache = { at: Date.now(), value };
     return value;
   } catch {
@@ -50,15 +70,42 @@ export async function fetchVoiceToken(
       body: { action: "token", roomId, displayName },
     });
     if (error) {
+      if (looksLikeSpaHtml(null, invokeErrorContentType(error))) {
+        return { ok: false, code: "VOICE_UNREACHABLE" };
+      }
       // 非 2xx 的 body 帶誠實碼（404 ROOM_NOT_FOUND）— 讀回來。
       const ctx = (error as { context?: Response }).context;
       if (ctx && typeof ctx.json === "function") {
         const body = (await ctx.json().catch(() => null)) as VoiceTokenResult | null;
-        if (body && body.ok === false && body.code) return body;
+        const parsedBody = parseFunctionPayload(body);
+        if (parsedBody.kind === "payload" && parsedBody.value.ok === false && parsedBody.value.code) {
+          return parsedBody.value as VoiceTokenResult;
+        }
       }
       throw error;
     }
-    return (data ?? { ok: false, code: "VOICE_UNREACHABLE" }) as VoiceTokenResult;
+    const parsed = parseFunctionPayload(data, {
+      successKeys: ["url", "token", "liveKitRoom", "ttlSeconds"],
+    });
+    if (parsed.kind === "reject") return rejectAsUnreachable(parsed, "VOICE_UNREACHABLE");
+    if (parsed.value.ok === true) {
+      return {
+        ok: true,
+        url: String(parsed.value.url),
+        token: String(parsed.value.token),
+        liveKitRoom: String(parsed.value.liveKitRoom),
+        ttlSeconds: Number(parsed.value.ttlSeconds),
+      };
+    }
+    const code = parsed.value.code;
+    if (
+      code === "VOICE_NOT_CONFIGURED" ||
+      code === "ROOM_NOT_FOUND" ||
+      code === "INVALID_REQUEST"
+    ) {
+      return { ok: false, code };
+    }
+    return { ok: false, code: "VOICE_UNREACHABLE" };
   } catch {
     return { ok: false, code: "VOICE_UNREACHABLE" };
   }
