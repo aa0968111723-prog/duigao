@@ -395,3 +395,46 @@ test("後端說成員身分查不到時，不會被誤報成「不是成員」",
   // 503 是「沒設定」的碼，但 error 欄位不同 —— 至少不能說成 not-a-member
   assert.notEqual(failureOf(result), "not-a-member", "資料庫故障不是權限問題");
 });
+
+test("三種 503 是三件事，不能一律說成「尚未設定」", async () => {
+  // 設定了 Perplexity 但缺 service role key、或資料庫掛了，
+  // 使用者看到的都是「沒裝」—— 他會去改一個沒有問題的設定。
+  const cases: Array<[string, string, boolean]> = [
+    ["RESEARCH_NOT_CONFIGURED", "not-configured", false],
+    ["QUOTA_UNAVAILABLE", "upstream-error", true],
+    ["MEMBERSHIP_CHECK_FAILED", "upstream-error", true],
+  ];
+  for (const [code, expected, retryable] of cases) {
+    const rec = recorder(() => ({ status: 503, body: { error: code, detail: `後端說：${code}` } }));
+    const research = provider(rec);
+    const result = await research.search(`問題 ${code}`);
+    assert.equal(failureOf(result), expected, `${code} 應該對應 ${expected}`);
+    assert.equal((result as { retryable?: boolean }).retryable ?? false, retryable);
+    assert.match(
+      (result as { failureDetail?: string }).failureDetail ?? "",
+      new RegExp(code),
+      "後端給的原因不該被丟掉",
+    );
+  }
+});
+
+test("status() 記得後端真的說過什麼，不會一直宣稱就緒", async () => {
+  const rec = recorder(() => ({ status: 503, body: { error: "RESEARCH_NOT_CONFIGURED" } }));
+  const research = provider(rec);
+
+  // 還沒問過任何一次時，前端確實不知道 —— 回 ready 的意思是「可以試試看」
+  assert.equal((await research.status()).state, "ready");
+
+  await research.search("問題");
+  const after = await research.status();
+  assert.equal(after.state, "unconfigured", "後端說過沒設定，就不該再說一切正常");
+  if (after.state === "unconfigured") {
+    assert.deepEqual(after.missing, ["PERPLEXITY_API_KEY"]);
+  }
+
+  // 設定好之後再問一次，狀態要跟著回到 ready
+  rec.respond(() => ({ status: 200, body: OK_BODY }));
+  research.clearCache();
+  await research.search("另一個問題");
+  assert.equal((await research.status()).state, "ready");
+});

@@ -172,16 +172,40 @@ try {
         await page.click('[data-testid="di-panel-handle"]');
         await settle(page);
       }
-      const expandedOccupied = await page.evaluate(() => {
+      const expandedMetrics = await page.evaluate(() => {
         const panel = document.querySelector('[data-testid="di-panel"]');
         const box = panel.getBoundingClientRect();
-        return (box.width * box.height) / (window.innerWidth * window.innerHeight);
+        return {
+          occupied: (box.width * box.height) / (window.innerWidth * window.innerHeight),
+          height: box.height,
+          inlineHeight: parseFloat(panel.style.height) || null,
+          viewportHeight: window.innerHeight,
+        };
       });
       check(
         `${size.label}：展開後仍 ≤ 80%`,
-        expandedOccupied <= 0.8,
-        `${(expandedOccupied * 100).toFixed(1)}%`,
+        expandedMetrics.occupied <= 0.8,
+        `${(expandedMetrics.occupied * 100).toFixed(1)}%`,
       );
+
+      // 這一條是為了讓「只改單邊」也會紅。
+      //
+      // 上面那條 ≤80% 由 CSS 的 max-height 與 JS 算出來的 inline height
+      // **共同**撐著 —— 只把其中一邊改壞，另一邊還擋著，測試照樣綠
+      //（對抗審查實測到的）。所以直接斷言兩邊一致：
+      // 真正畫出來的高度必須等於 JS 算出來的那個值。
+      if (size.expect === "sheet" && expandedMetrics.inlineHeight !== null) {
+        check(
+          `${size.label}：畫出來的高度與 JS 算的一致（CSS 沒有偷偷夾住）`,
+          Math.abs(expandedMetrics.height - expandedMetrics.inlineHeight) < 1.5,
+          `畫出來 ${expandedMetrics.height.toFixed(0)}px，JS 算 ${expandedMetrics.inlineHeight}px`,
+        );
+        check(
+          `${size.label}：JS 算出來的高度本身就在上限內`,
+          expandedMetrics.inlineHeight / expandedMetrics.viewportHeight <= 0.8,
+          `${((expandedMetrics.inlineHeight / expandedMetrics.viewportHeight) * 100).toFixed(1)}%`,
+        );
+      }
 
       // 展開後，作品**沒有被面板蓋住的那一段**必須還有可以互動的內容。
       // 量的是面板上方那條空間的中點。
@@ -438,10 +462,13 @@ try {
             const box = el.getBoundingClientRect();
             return { label: el.getAttribute("aria-label") ?? el.textContent.trim().slice(0, 12), w: Math.round(box.width), h: Math.round(box.height) };
           })
-          .filter((item) => item.w > 0 && (item.w < 24 || item.h < 24)),
+          .filter((item) => item.w > 0 && (item.w < 44 || item.h < 44)),
       );
       check(
-        "面板自己的按鈕都 ≥ 24×24（自己的分析器就在查這件事）",
+        // 門檻是 44 不是 24：CSS 實際就是 44px，而評估報告也是這樣寫的。
+        // 用 24 當斷言的話，把 CSS 改成 24px 測試照樣綠 —— 文件與測試脫節
+        //（對抗審查指出的）。
+        "面板自己的按鈕都 ≥ 44×44（WCAG 下限是 24，這裡自我要求更嚴）",
         tooSmall.length === 0,
         tooSmall.map((item) => `${item.label} ${item.w}×${item.h}`).join("、"),
       );

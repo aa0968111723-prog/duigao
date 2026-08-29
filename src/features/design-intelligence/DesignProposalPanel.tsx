@@ -266,14 +266,16 @@ export function DesignProposalPanel({ proposal, viewport, canApply, onApply, onD
                   className="di-apply__button"
                   disabled={!gate.enabled}
                   onClick={() => {
-                    // **再查一次閘門**，不只靠 `disabled`。
+                    // 判斷用的是 `gate`，**不是** `disabled`。
                     //
                     // `disabled` 是畫面上的提示，不是安全機制：它可以被
-                    // devtools 拿掉、被自動化工具 force click、或在 React
-                    // 重繪的空檔被繞過。真正的判斷必須跟按鈕的外觀分開
-                    //（對抗審查實測到的）。
-                    const now = applyGate(proposal, active?.id ?? null, canApply);
-                    if (!now.enabled || !active) return;
+                    // devtools 拿掉、被自動化工具 force click。處理器自己看
+                    // 一個不是從 DOM 讀來的值，那一招就沒用了。
+                    //
+                    // 這裡刻意**不**重算一次 `applyGate` —— 重算拿到的是同一幀
+                    // 的 props，結果必然相同（對抗審查指出那行是裝飾）。
+                    // 要防的是 DOM 被改，不是狀態過期，而 `gate` 已經夠。
+                    if (!gate.enabled || !active) return;
                     onApply(active.id);
                   }}
                   data-testid="di-apply"

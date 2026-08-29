@@ -99,28 +99,69 @@ function input(over: Partial<AnalysisInput>): AnalysisInput {
  * 答案品質的共同標準（任務書第十三節）。
  *
  * 每一條診斷都要說出：問題在哪、是什麼、影響誰、憑什麼這樣說、怎麼改。
- * 而且「憑什麼」與「怎麼改」裡必須有數字 —— 沒有數字的建議就是形容詞。
+ *
+ * 「有數字」是不夠的閘門 —— 對抗審查用「建議調整為 1 種風格」打穿了它：
+ * 那句話有數字，但沒有任何可以照著做的東西。所以改成要求**可量測的單位**：
+ * 色碼、px、對比比值、百分比、比例、倍數、或明確的大小關係。
+ *
+ * 這仍然是一個近似的閘門（它擋不住「把字級改成 16 種」這種胡說），
+ * 但它擋得住最常見的那類空話，而且是可以執行的。
  */
+const MEASURABLE = [
+  /#[0-9a-f]{3,8}/i,          // 色碼
+  /[0-9.]+\s*px/i,            // 像素
+  /[0-9.]+\s*:\s*[0-9.]+/,    // 對比比值 4.5:1
+  /[0-9.]+\s*%/,              // 百分比
+  /[0-9.]+\s*(?:pt|em|rem|ch|dvh|vh|vw)/i,
+  /(?:≥|≤|>=|<=|至少|不超過|最多|不得低於)\s*[0-9.]+/,
+  /[0-9.]+\s*(?:倍|字元|個字)/,
+  /[0-9]+\s*[×x]\s*[0-9]+/i, // 尺寸 24×24
+  /line-height[^0-9]{0,8}[0-9.]+/i,
+  /[0-9.]+\s*→\s*[0-9.#a-f]+/i, // 從 A 改成 B
+];
+
 function assertAnswerQuality(diagnostics: readonly Diagnostic[], label: string): void {
   assert.ok(diagnostics.length > 0, `${label}：沒有任何診斷`);
   for (const diagnostic of diagnostics) {
     assert.ok(diagnostic.location.trim().length > 0, `${label}：沒說問題在哪`);
     assert.ok(diagnostic.issue.trim().length > 0, `${label}：沒說問題是什麼`);
     assert.ok(diagnostic.impact.trim().length > 0, `${label}：沒說影響誰`);
-    assert.match(diagnostic.evidence, /\d/, `${label}：證據沒有數字 —— ${diagnostic.evidence}`);
-    assert.match(
-      diagnostic.recommendation,
-      /\d/,
-      `${label}：建議沒有具體數值 —— ${diagnostic.recommendation}`,
+    assert.ok(
+      MEASURABLE.some((pattern) => pattern.test(diagnostic.evidence)),
+      `${label}：證據沒有可量測的值 —— ${diagnostic.evidence}`,
     );
-    // 任務書點名禁止的空答案句型
-    assert.doesNotMatch(
-      diagnostic.recommendation,
-      /^(可以|建議)?(調整|優化|改善|美化)(一下)?(配色|排版|設計)?[。！]?$/,
-      `${label}：這是空答案 —— ${diagnostic.recommendation}`,
+    assert.ok(
+      MEASURABLE.some((pattern) => pattern.test(diagnostic.recommendation)),
+      `${label}：建議沒有可量測的值 —— ${diagnostic.recommendation}`,
     );
   }
 }
+
+test("品質閘門擋得住「有數字但沒有內容」的假具體建議", () => {
+  // 對抗審查打穿舊閘門的那一句：「建議調整為 1 種風格」有數字，
+  // 但沒有任何可以照著做的東西。
+  const fake: Diagnostic = {
+    id: "ai-1",
+    location: "整體",
+    issue: "風格不夠統一",
+    impact: "看起來不專業",
+    evidence: "目前有 1 種以上風格混用",
+    recommendation: "建議調整為 1 種風格",
+    severity: "minor",
+    confidence: 0.7,
+    measured: false,
+  };
+  assert.throws(() => assertAnswerQuality([fake], "假具體"), /沒有可量測的值/);
+
+  // 真的具體的建議要過
+  const real: Diagnostic = {
+    ...fake,
+    id: "ai-2",
+    evidence: "量測：#aaaaaa 疊在 #ffffff 上 = 2.32:1",
+    recommendation: "把 text-primary 從 #aaaaaa 改為 #767676",
+  };
+  assert.doesNotThrow(() => assertAnswerQuality([real], "真具體"));
+});
 
 // ===========================================================================
 // 案例 A：海報，使用者只說「感覺不夠專業」
@@ -304,10 +345,27 @@ test("案例 D：網站的樣式修改只走結構化色票，而且可以還原
     "--app-surface": "#ffffff",
     "--app-text": "#767676",
   });
-  assert.equal(built.patch.reversible, true);
+  // **目前沒有任何 adapter 產得出可逆的網站 patch** —— 沒有寫入端，
+  // 也沒有地方記錄原本的變數值。所以 lifecycle 會拒絕自動套用它。
+  assert.equal(built.patch.reversible, false);
+  const refused = transitionProposal(
+    { ...result.proposal, patch: built.patch, status: "approved", approvedBy: "u", approvedAt: 1 },
+    "applying",
+    { now: () => NOW, baseRevision: "v1" },
+  );
+  assert.equal(refused.ok, false);
+  assert.match(refused.ok ? "" : refused.reason, /不可逆/);
 
-  // 完整的核准 → 套用 → 復原路徑
-  const ready: DesignProposal = { ...result.proposal, patch: built.patch };
+  // 完整的核准 → 套用 → 復原路徑仍然要驗，但用的是一個**假設未來的寫入端
+  // 會產生**的可逆 patch（它會先讀現值再寫新值）。這裡驗的是狀態機，
+  // 不是假裝網站 adapter 已經做得到。
+  const futurePatch = {
+    ...built.patch,
+    reversible: true,
+    revertHint: "把變數改回 payload.previousVariables 記錄的值",
+    payload: { ...built.patch.payload, previousVariables: { "--app-text": "#aaaaaa" } },
+  };
+  const ready: DesignProposal = { ...result.proposal, patch: futurePatch };
   const approved = transitionProposal(ready, "approved", { now: () => NOW, actor: "user-2" });
   assert.equal(approved.ok, true);
   if (!approved.ok) return;

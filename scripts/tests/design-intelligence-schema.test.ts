@@ -248,15 +248,41 @@ test("知識排序：專案規範 > 已核准 > 已審 > 機器 > 未驗證；de
   assert.deepEqual(ranked.map((entry) => entry.id), ["project", "approved", "machine"]);
 });
 
-test("衝突不自行消除，只標示出來", () => {
+test("衝突只在判定得出來時回報，而且不自行消除", () => {
+  // 真的矛盾：同一個對象，一個固定值違反另一個下限。
   const conflicts = findKnowledgeConflicts([
-    knowledge({ id: "a", contentHash: "aaa", applicableContexts: ["mobile"] }),
-    knowledge({ id: "b", contentHash: "bbb", applicableContexts: ["mobile"] }),
-    knowledge({ id: "c", contentHash: "aaa", applicableContexts: ["print"] }),
+    knowledge({ id: "a", rules: ["內文行高 ≥ 1.5"], contentHash: "aaa", applicableContexts: ["mobile"] }),
+    knowledge({ id: "b", rules: ["內文行高 = 1.2"], contentHash: "bbb", applicableContexts: ["mobile"] }),
   ]);
   assert.equal(conflicts.length, 1);
-  assert.equal(conflicts[0].context, "mobile");
+  assert.equal(conflicts[0].context, "內文行高");
   assert.deepEqual(conflicts[0].entryIds.sort(), ["a", "b"]);
+});
+
+test("同類別但無關的規則不算矛盾", () => {
+  // 舊版把「同一個 category＋context 桶裡任兩條內容不同的知識」都當成矛盾，
+  // 於是「行高 ≥ 1.5」與「行長 ≤ 75」被報成衝突 —— 它們都是 typography，
+  // 但完全無關。使用者每次都看到一堆假衝突，久了就不看了，
+  // 而真的衝突就藏在那堆噪音裡。
+  assert.deepEqual(
+    findKnowledgeConflicts([
+      knowledge({ id: "a", category: "typography", rules: ["內文行高 ≥ 1.5"], contentHash: "aaa", applicableContexts: ["web"] }),
+      knowledge({ id: "b", category: "typography", rules: ["每行字元數 ≤ 75"], contentHash: "bbb", applicableContexts: ["web"] }),
+    ]),
+    [],
+  );
+});
+
+test("判定不出來的矛盾不硬猜（誠實的漏報）", () => {
+  // 非數值的規則判定不出來。這是漏報，不是誤報 —— 在兩種錯誤之間，
+  // 讓使用者自己看那兩條並存的規則，比替他們宣告一個不存在的矛盾好。
+  assert.deepEqual(
+    findKnowledgeConflicts([
+      knowledge({ id: "a", rules: ["一律使用無襯線字體"], contentHash: "aaa" }),
+      knowledge({ id: "b", rules: ["一律使用襯線字體"], contentHash: "bbb" }),
+    ]),
+    [],
+  );
 });
 
 test("內容雜湊：同內容同雜湊、改一個字就不同", () => {
@@ -527,7 +553,7 @@ test("contentHash 一律重算，輸入給的雜湊沒有可信度", () => {
   // 也就是說攻擊者可以在 summary 裡塞一個分隔字元，讓自己的條目跟另一條
   // 已審查知識算出相同雜湊，藉此讓 findKnowledgeConflicts 認為「內容相同」
   // 而不回報衝突。長度前綴沒有這個面。
-  const SEP = " ";
+  const SEP = "\u0000";
   const collideA = parseKnowledgeEntry(
     { category: "color", title: "a", summary: `b${SEP}c`, rules: ["d"] },
     "human-review",

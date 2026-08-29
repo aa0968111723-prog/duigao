@@ -28,6 +28,7 @@
     "test:edge-cors": "node --test scripts/tests/edge-cors.test.mjs",
     "test:design-research-fn": "node --test scripts/tests/design-research-function.test.mjs",
     "build:harness": "vite build --config vite.harness.config.ts",
+    "mutation:design-intelligence": "node scripts/mutation/design-intelligence.mjs",
     "test:proposal-ui": "npm run build:harness && node scripts/e2e/proposal-ui.mjs",
     "agent:context": "node scripts/agent-context.mjs",
     "agent:state": "node scripts/agent-context.mjs --json",

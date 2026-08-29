@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1.0.0",
   "generated": "GENERATED FILE. Run npm run agent:context; do not edit by hand.",
-  "generatedAt": "2026-08-29T04:01:42.000Z",
+  "generatedAt": "2026-08-29T04:05:41.000Z",
   "git": {
     "branch": "agent/di06-evaluation",
-    "sha": "71a3abf7913f9e35ecf6c8e74c1f0429f9202660",
-    "mainSha": "b0f7a1bf3f7422977f41c855c62a4d6a8478cf04",
-    "dirty": false
+    "sha": "4d4506eda21cc1bd2e2fd27a592b3ad02fd0c0a4",
+    "mainSha": "2a9d7a018836e7ec913f009f2f7a5d5b8b25fbff",
+    "dirty": true
   },
   "project": {
     "name": "duigao",
@@ -33,9 +33,8 @@
       "Deployment config"
     ],
     "openPrs": {
-      "status": "unknown",
-      "items": [],
-      "reason": "gh returned invalid JSON"
+      "status": "available",
+      "items": []
     },
     "environment": {
       "VITE_SUPABASE_URL": "missing",
@@ -1153,10 +1152,6 @@
       "code": "FEATURE_CLAIM_MISMATCH",
       "feature": "video-transcode",
       "message": "Docs exist, but executable evidence is absent; status is SPEC_ONLY."
-    },
-    {
-      "code": "OPEN_PRS_UNKNOWN",
-      "message": "gh returned invalid JSON"
     }
   ],
   "releaseReadiness": {

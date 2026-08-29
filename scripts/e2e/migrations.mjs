@@ -27,7 +27,10 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const MIGRATIONS = join(ROOT, "supabase", "migrations");
 const SHIM = join(dirname(fileURLToPath(import.meta.url)), "supabase-shim.sql");
-const PORT = 55432;
+// port 可覆寫：同一台機器上有多個代理在跑時，寫死的 port 會互相踩到
+// （實際發生過：另一個工作線的 migration 測試佔著 55432，這邊起不來，
+// 而那個進程不能殺）。`DUIGAO_PG_PORT=55433 npm run test:migrations`。
+const PORT = Number(process.env.DUIGAO_PG_PORT ?? 55432);
 
 const IS_WINDOWS = process.platform === "win32";
 const EXE = IS_WINDOWS ? ".exe" : "";

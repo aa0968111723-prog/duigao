@@ -330,3 +330,74 @@ test("跨類別的同一個量測對象也算衝突（品牌規範 vs 通用規�
   );
   assert.equal(unrelated.conflicts.length, 0, "行高與觸控目標無關，不該被當成矛盾");
 });
+
+test("相容的約束不算矛盾（較嚴的下限滿足較寬的）", () => {
+  // 把「觸控目標至少 24」與「至少 44」當成矛盾去逼使用者選一邊，
+  // 最糟的結果是品牌那條較嚴的規則被丟掉 —— 對抗審查點名的正是這件事。
+  const loose = entry({
+    id: "loose",
+    category: "accessibility",
+    title: "觸控目標下限",
+    summary: "WCAG",
+    rules: ["觸控目標至少 24"],
+    trustLevel: "approved",
+    status: "approved",
+    contentHash: "h-loose",
+  });
+  const strict = entry({
+    id: "strict",
+    category: "brand-rules",
+    title: "品牌觸控目標",
+    summary: "本專案更嚴",
+    rules: ["觸控目標至少 44"],
+    trustLevel: "project",
+    status: "approved",
+    projectSpecific: "room-1",
+    contentHash: "h-strict",
+  });
+  const compatible = retrieveKnowledge([loose, strict], { goal: "觸控目標", projectId: "room-1" });
+  assert.deepEqual(compatible.conflicts, [], "兩個下限相容，不該被回報成矛盾");
+
+  // 區間也相容
+  const lower = entry({ id: "lo", category: "typography", title: "行高下限", summary: "s", rules: ["內文行高不得低於 1.2"], trustLevel: "approved", status: "approved", contentHash: "h-lo" });
+  const upper = entry({ id: "hi", category: "typography", title: "行高上限", summary: "s", rules: ["內文行高不得超過 1.8"], trustLevel: "approved", status: "approved", contentHash: "h-hi" });
+  assert.deepEqual(
+    retrieveKnowledge([lower, upper], { goal: "內文行高" }).conflicts,
+    [],
+    "1.2 ≤ x ≤ 1.8 是一個合理的區間，不是矛盾",
+  );
+
+  // 但等值落在下限之外就是真的矛盾
+  const fixed = entry({ id: "fixed", category: "brand-rules", title: "行高固定", summary: "s", rules: ["內文行高 = 1.0"], trustLevel: "project", status: "approved", projectSpecific: "room-1", contentHash: "h-fixed" });
+  const real = retrieveKnowledge([lower, fixed], { goal: "內文行高", projectId: "room-1" });
+  assert.equal(real.conflicts.length, 1, "1.0 違反「不得低於 1.2」，這是真的矛盾");
+});
+
+test("一條規則裡的第二組數值也會被比對", () => {
+  // 舊版的正則只取第一個數字，於是「標題字級 ≥ 24，內文 ≥ 16」裡的
+  // 「內文 ≥ 16」完全看不到（對抗審查實測到的）。
+  const combined = entry({
+    id: "combined",
+    category: "typography",
+    title: "字級規範",
+    summary: "s",
+    rules: ["標題字級 ≥ 24，內文 ≥ 16"],
+    trustLevel: "approved",
+    status: "approved",
+    contentHash: "h-combined",
+  });
+  const bodyOnly = entry({
+    id: "body",
+    category: "brand-rules",
+    title: "內文字級固定",
+    summary: "s",
+    rules: ["內文 = 12"],
+    trustLevel: "project",
+    status: "approved",
+    projectSpecific: "room-1",
+    contentHash: "h-body",
+  });
+  const result = retrieveKnowledge([combined, bodyOnly], { goal: "內文 字級", projectId: "room-1" });
+  assert.equal(result.conflicts.length, 1, "內文 12 違反「≥ 16」，要被抓到");
+  assert.deepEqual(result.conflicts[0].entryIds.sort(), ["body", "combined"]);
+});

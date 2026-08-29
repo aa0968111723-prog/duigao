@@ -85,6 +85,7 @@
     "check:cloud-env",
     "dev",
     "make:og-cover",
+    "mutation:design-intelligence",
     "preview",
     "test:agent",
     "test:asset-intelligence",

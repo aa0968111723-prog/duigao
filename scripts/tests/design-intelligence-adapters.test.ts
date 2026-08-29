@@ -167,9 +167,18 @@ test("沒有實作自動套用的 adapter，patch 一律標成不可逆 —— �
     [createCanvaAdapter({ isConnected: async () => true }), "poster"],
     [cutosAdapter, "video"],
     [planformIsoAdapter, "plan"],
+    // 網站也在這一組：它產得出 CSS 變數差異，但沒有寫入端，
+    // 也沒有記錄原值 —— 「改回原值」沒有原值可改。
+    [websitePatchAdapter, "website"],
   ];
+  const withTokens = alternative({
+    designTokens: [token("text-primary", "#767676", "--di-text")],
+  });
   for (const [adapter, targetType] of cases) {
-    const built = adapter.buildPatch(proposal({ targetType }), "alt-1");
+    const built = adapter.buildPatch(
+      proposal({ targetType, alternatives: [withTokens] }),
+      "alt-1",
+    );
     assert.equal(built.ok, true, `${adapter.label} 應該產得出 payload`);
     if (!built.ok) continue;
     assert.equal(built.patch.reversible, false, `${adapter.label} 沒有還原機制卻標成可逆`);
@@ -248,7 +257,9 @@ test("網站樣式只接受結構化的色票，不從自由文字解析 CSS", (
     "--di-text-primary": "#767676",
     "--di-surface": "#ffffff",
   });
-  assert.equal(built.patch.reversible, true);
+  // **不可逆**：payload 沒有記錄原本的變數值，所以「改回原值」是一句空話。
+  assert.equal(built.patch.reversible, false);
+  assert.ok(built.warnings.some((warning) => warning.includes("無法自動還原")));
 
   // 自由文字裡的 CSS 完全不會出現在 payload 裡
   const serialized = JSON.stringify(built.patch.payload);
@@ -274,7 +285,7 @@ test("不合法的 CSS 變數名稱與色值被擋下", () => {
     ["--di-accent"],
     "只有合法的那一個該留下",
   );
-  assert.equal(built.warnings.length, 2, "被丟掉的要說出來");
+  assert.equal(built.warnings.length, 3, "兩個被丟掉的色票，加上不可逆的警告");
   const serialized = JSON.stringify(built.patch.payload);
   assert.ok(!serialized.includes("javascript:"));
   assert.ok(!serialized.includes("display: none"));
@@ -346,4 +357,37 @@ test("找不到方案或方案沒有改動時，每個 adapter 都誠實失敗",
     const noChanges = adapter.buildPatch(proposal({ alternatives: [empty] }), "alt-1");
     assert.equal(noChanges.ok, false, `${adapter.label} 對沒有改動的方案應該失敗`);
   }
+});
+
+test("色值用 hex 的規則驗，不是寬鬆的字元類", () => {
+  // 自己探測時發現的：舊的字元類讓 var()、expression()、calc() 全部通過。
+  // 這些在正常流程裡進不來（值來自 parseColorTokens），但這一層不能假設
+  // 呼叫端一定走過那條路 —— 「上游驗過了」是最常見的破口說法。
+  const sneaky = alternative({
+    designTokens: [
+      // 對抗審查列出的那一整組：它們全都通過舊的寬鬆字元類。
+      // `url(javascript:...)` 之前被擋只是因為冒號剛好不在字元表裡 ——
+      // 測試打在一個碰巧會失敗的例子上，那不算守住。
+      token("text-primary", "var(--evil)", "--a"),
+      token("surface", "expression(alert(1))", "--b"),
+      token("accent", "calc(100% - 1px)", "--c"),
+      token("text-secondary", "url(//evil.com)", "--f"),
+      token("primary-action", "attr(href)", "--g"),
+      token("success", "red", "--h"),
+      token("border", "#767676", "--d"),
+      token("background", "#fff", "--e"),
+    ],
+  });
+  const built = websitePatchAdapter.buildPatch(
+    proposal({ targetType: "website", alternatives: [sneaky] }),
+    "alt-1",
+  );
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  assert.deepEqual(
+    built.patch.payload.variables,
+    { "--d": "#767676", "--e": "#fff" },
+    "只有真的 hex 該留下",
+  );
+  assert.equal(built.warnings.length, 7, "六個被丟掉的色票，加上不可逆的警告");
 });

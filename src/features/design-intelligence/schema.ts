@@ -362,10 +362,23 @@ const BLOCKED_HOSTS = new Set([
  */
 const LOOPBACK_ALIAS_DOMAINS = ["lvh.me", "vcap.me", "localtest.me", "nip.io", "sslip.io", "traefik.me"];
 
-/** 主機名是不是 IP 字面值（IPv4 點分四段或方括號 IPv6）。 */
-function isIpLiteral(host: string): boolean {
-  if (host.startsWith("[")) return true; // URL parser 只有 IPv6 會加方括號
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+/**
+ * 主機名裡有沒有 IP。
+ *
+ * 一條規則、一個地方。涵蓋三種寫法：
+ *   - IPv4 點分四段：`8.8.8.8`
+ *   - 方括號 IPv6：`[::1]`、`[fe80::1]`（URL parser 只有 IPv6 會加方括號）
+ *   - **把 IP 編進主機名**的萬用 DNS：`169.254.169.254.nip.io`、
+ *     `192-168-1-1.sslip.io` —— 字串上完全不是 IP 字面值，卻解析回內網。
+ *
+ * 合在一起而不是分成兩個檢查，是因為變異測試指出分開時其中一個永遠殺不死：
+ * 移掉字面值檢查，嵌入式檢查會接住所有測試案例。兩個都在時，
+ * 沒有任何測試分得出誰在守門 —— 那就等於其中一個沒有被測到。
+ */
+function hostContainsIp(host: string): boolean {
+  if (host.startsWith("[")) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
+  return /(^|[.-])\d{1,3}[.-]\d{1,3}[.-]\d{1,3}[.-]\d{1,3}([.-]|$)/.test(host);
 }
 
 export function isSafePublicUrl(raw: string): boolean {
@@ -379,12 +392,7 @@ export function isSafePublicUrl(raw: string): boolean {
   // 尾端的點在 DNS 上無意義，但會讓字串比對失效 → 先正規化
   const host = url.hostname.toLowerCase().replace(/\.+$/, "");
   if (!host) return false;
-  if (isIpLiteral(host)) return false;
-  // 把 IP 編進主機名的萬用 DNS 服務：`169.254.169.254.nip.io` 會解析回
-  // 169.254.169.254，但字串上完全不是 IP 字面值。對抗審查實測到的。
-  // 不列舉服務名（nip.io / sslip.io / localtest.me / lvh.me 列不完），
-  // 直接看主機名裡有沒有嵌著一個點分四段的位址。
-  if (/(^|[.-])\d{1,3}[.-]\d{1,3}[.-]\d{1,3}[.-]\d{1,3}([.-]|$)/.test(host)) return false;
+  if (hostContainsIp(host)) return false;
   if (BLOCKED_HOSTS.has(host)) return false;
   if (BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return false;
   if (LOOPBACK_ALIAS_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) return false;
@@ -585,99 +593,154 @@ export function rankKnowledge(entries: KnowledgeEntry[]): KnowledgeEntry[] {
  * **不自行消除衝突**（任務書第八節）：只標示出來，交給規則或人決定。
  */
 /**
- * 把規則拆成「對象」與「數值」。
+ * 把規則拆成「對象」「運算子」「數值」。
  *
- * 「內文行高 ≥ 1.5」→ 對象「內文行高」、數值 1.5
- * 「內文行高 = 1.2」→ 對象「內文行高」、數值 1.2
+ * 「內文行高 ≥ 1.5」→ 對象「內文行高」、`>=`、1.5
+ * 「內文行高 = 1.2」→ 對象「內文行高」、`=`、1.2
  *
- * 對象取的是第一個比較運算子或數字之前的那一段，去掉空白與全形符號。
- * 這是字面比對，不是語意理解 —— 見 findKnowledgeConflicts 裡的已知極限說明。
+ * 一條規則裡可能有多組（「標題字級 ≥ 24，內文 ≥ 16」），所以是全域掃描
+ * 而不是只取第一個 —— 對抗審查實測到舊版會漏掉第二組。
+ *
+ * 這是字面比對，不是語意理解：「一般內文與背景對比」與「內文對比」
+ * 會被當成兩個不同的對象。已知極限，寫在這裡而不是假裝沒有。
  */
+type Constraint = { subject: string; op: ">=" | "<=" | "="; value: number };
+
+const OP_WORDS: Array<[RegExp, Constraint["op"]]> = [
+  [/^(?:≥|>=|至少|不得低於|不小於)$/, ">="],
+  [/^(?:≤|<=|不超過|最多|不得超過|不大於)$/, "<="],
+  [/^(?:=|==|等於|固定為|固定)$/, "="],
+];
+
+function constraintsOf(rule: string): Constraint[] {
+  const out: Constraint[] = [];
+  const pattern = /([^，,。；;]*?)[\s]*(≥|≤|>=|<=|==|=|>|<|至少|不得低於|不小於|不超過|最多|不得超過|不大於|等於|固定為|固定)[\s]*([0-9]+(?:[.][0-9]+)?)/g;
+  for (const match of rule.matchAll(pattern)) {
+    const subject = match[1].replace(/[\s。，、：:]+/g, "");
+    if (!subject) continue;
+    const raw = match[2];
+    const op = OP_WORDS.find(([test]) => test.test(raw))?.[1] ?? (raw === ">" ? ">=" : raw === "<" ? "<=" : "=");
+    const value = Number(match[3]);
+    if (Number.isFinite(value)) out.push({ subject, op, value });
+  }
+  if (out.length) return out;
+
+  // 沒有運算子的寫法：「行高 1.5」「內文對比 4.5:1」。
+  // 這在真實的規則裡很常見，當成等值處理。
+  //
+  // 只在**整條規則都沒有運算子**時才走這條 —— 否則「標題字級 ≥ 24，內文 16」
+  // 的後半段會被重複解讀。
+  const bare = /^([^0-9，,。；;]+?)[\s]*([0-9]+(?:[.][0-9]+)?)/.exec(rule.trim());
+  if (bare) {
+    const subject = bare[1].replace(/[\s。，、：:]+/g, "");
+    const value = Number(bare[2]);
+    if (subject && Number.isFinite(value)) out.push({ subject, op: "=", value });
+  }
+  return out;
+}
+
+/**
+ * 這一組對同一個對象的約束**互相衝突**嗎。
+ *
+ * 相容的情況（不該回報）：
+ *   - 兩個下限：「至少 24」與「至少 44」—— 較嚴的滿足較寬的。
+ *   - 兩個上限：同理。
+ *   - 一個下限一個上限且區間不為空：「≥ 1.2」與「≤ 1.8」。
+ *
+ * 衝突的情況：
+ *   - 兩個不同的等值：「= 1.2」與「= 1.5」。
+ *   - 等值落在另一個約束之外：「= 1.2」與「≥ 1.5」。
+ *   - 下限大於上限：「≥ 1.5」與「≤ 1.2」。
+ *
+ * 把「至少 24」與「至少 44」當成矛盾去逼使用者選一邊，最糟的結果是
+ * 品牌那條較嚴的規則被丟掉 —— 對抗審查點名的正是這件事。
+ */
+function incompatible(constraints: readonly Constraint[]): boolean {
+  const equals = constraints.filter((item) => item.op === "=").map((item) => item.value);
+  const lower = constraints.filter((item) => item.op === ">=").map((item) => item.value);
+  const upper = constraints.filter((item) => item.op === "<=").map((item) => item.value);
+
+  if (new Set(equals).size > 1) return true;
+  const maxLower = lower.length ? Math.max(...lower) : null;
+  const minUpper = upper.length ? Math.min(...upper) : null;
+  if (maxLower !== null && minUpper !== null && maxLower > minUpper) return true;
+  for (const value of equals) {
+    if (maxLower !== null && value < maxLower) return true;
+    if (minUpper !== null && value > minUpper) return true;
+  }
+  return false;
+}
+
 function bySubject(
   entries: readonly KnowledgeEntry[],
-): Map<string, Array<{ entry: KnowledgeEntry; value: number }>> {
-  const buckets = new Map<string, Array<{ entry: KnowledgeEntry; value: number }>>();
+): Map<string, Array<{ entry: KnowledgeEntry; constraint: Constraint }>> {
+  const buckets = new Map<string, Array<{ entry: KnowledgeEntry; constraint: Constraint }>>();
   for (const entry of entries) {
     for (const rule of entry.rules) {
-      const match = /^(.*?)[\s]*(?:[≥≤<>=]+|至少|不超過|最多|不得低於|不得超過)[\s]*([0-9]+(?:[.][0-9]+)?)/.exec(rule);
-      if (!match) continue;
-      const subject = match[1].replace(/[\s。，、：:]+/g, "");
-      const value = Number(match[2]);
-      if (!subject || !Number.isFinite(value)) continue;
-      const list = buckets.get(subject) ?? [];
-      list.push({ entry, value });
-      buckets.set(subject, list);
+      for (const constraint of constraintsOf(rule)) {
+        const list = buckets.get(constraint.subject) ?? [];
+        list.push({ entry, constraint });
+        buckets.set(constraint.subject, list);
+      }
     }
   }
   return buckets;
 }
 
+/**
+ * 找出互相矛盾的知識。
+ *
+ * **只回報判定得出來的矛盾**，靠的是規則裡的數值約束（`constraintsOf` +
+ * `incompatible`）。同一個對象上，「= 1.2」與「≥ 1.5」是矛盾；
+ * 「≥ 24」與「≥ 44」不是（較嚴的滿足較寬的）。
+ *
+ * ## 為什麼不再用「同類別 + 內容不同」當判準
+ *
+ * 舊版把同一個 category＋context 桶裡任兩條內容不同的知識都當成矛盾。
+ * 那會讓「行高 ≥ 1.5」與「行長 ≤ 75」被報成衝突 —— 它們都是 typography，
+ * 但完全無關。使用者每次都看到一堆假衝突，久了就不看了，
+ * 而真的衝突就藏在那堆噪音裡。**一個訓練使用者忽略它的警告，比沒有警告更糟。**
+ *
+ * ## 誠實的極限
+ *
+ * 非數值的規則（「一律使用無襯線字體」vs「一律使用襯線字體」）**判定不出來**，
+ * 所以這裡不回報。這是漏報，不是誤報 —— 在兩種錯誤之間，
+ * 讓使用者自己看那兩條並存的規則，比替他們宣告一個不存在的矛盾好。
+ *
+ * 對象的比對也是字面的：「一般內文與背景對比」與「內文對比」是兩個對象。
+ */
 export function findKnowledgeConflicts(entries: KnowledgeEntry[]): Array<{
   category: string;
   context: string;
   entryIds: string[];
 }> {
-  // 沒有標 applicableContexts 的條目是**通用於該類別**的，不是「屬於一個叫
-  // * 的脈絡」。舊版把它放進 `*` 桶，於是「行高 1.5（不限脈絡）」與
-  // 「行高 1.2（web）」落在不同桶，明顯互斥卻不回報 —— 對抗審查實測到的。
   const live = entries.filter((entry) => entry.status !== "deprecated");
-  const contextsByCategory = new Map<string, Set<string>>();
-  for (const entry of live) {
-    const set = contextsByCategory.get(entry.category) ?? new Set<string>();
-    for (const context of entry.applicableContexts) set.add(context);
-    contextsByCategory.set(entry.category, set);
-  }
-
-  const buckets = new Map<string, KnowledgeEntry[]>();
-  for (const entry of live) {
-    const known = contextsByCategory.get(entry.category) ?? new Set<string>();
-    // 通用條目進入該類別的每一個脈絡桶；沒有任何脈絡時退回單一的「不限」桶。
-    const contexts = entry.applicableContexts.length
-      ? entry.applicableContexts
-      : known.size
-        ? [...known]
-        : ["不限"];
-    for (const context of contexts) {
-      const key = `${entry.category}|${context}`;
-      buckets.set(key, [...(buckets.get(key) ?? []), entry]);
-    }
-  }
   const conflicts: Array<{ category: string; context: string; entryIds: string[] }> = [];
-  for (const [key, list] of buckets) {
-    if (list.length < 2) continue;
-    const hashes = new Set(list.map((entry) => entry.contentHash));
-    if (hashes.size < 2) continue; // 內容相同不算衝突
-    const [category, context] = key.split("|");
-    conflicts.push({ category, context, entryIds: list.map((entry) => entry.id) });
-  }
-  // 第二種衝突：**跨類別、同一個量測對象、不同的值**。
-  //
-  // 上面那一輪只在同類別內比對，於是品牌規範（brand-rules）的
-  // 「內文行高 = 1.2」與無障礙知識（typography）的「內文行高 ≥ 1.5」
-  // 落在不同桶，明明直接矛盾卻不回報 —— 這是驗收案例 E 實測到的，
-  // 而且是最容易真實發生的一種衝突（品牌規範與通用規範打架）。
-  //
-  // 做法：從規則文字裡抽出「對象」與「數值」。對象相同、數值不同就是衝突。
-  // **已知極限**：抽取靠的是字面，所以「一般內文與背景對比」與「內文對比」
-  // 會被當成兩個不同的對象。這條路擋得住直接的矛盾，擋不住換句話說的。
+
   for (const [subject, list] of bySubject(live)) {
     if (list.length < 2) continue;
-    const values = new Set(list.map((item) => item.value));
-    if (values.size < 2) continue;
+    // 同一條知識自己的規則不算跟自己衝突
+    const entryIds = [...new Set(list.map((item) => item.entry.id))];
+    if (entryIds.length < 2) continue;
+    if (!incompatible(list.map((item) => item.constraint))) continue;
+
+    // 類別欄位：同類別就用它，跨類別就標明。UI 要能顯示「這是品牌規範與
+    // 通用規範打架」還是「同一類別內部不一致」。
+    const categories = [...new Set(list.map((item) => item.entry.category))];
     conflicts.push({
-      category: "跨類別",
+      category: categories.length === 1 ? categories[0] : "跨類別",
       context: subject,
-      entryIds: [...new Set(list.map((item) => item.entry.id))],
+      entryIds,
     });
   }
 
-  // 同一組衝突可能被回報多次（通用條目會落進多個脈絡桶，跨類別那一輪也可能
-  // 重複）—— 去重，否則 UI 會顯示「有 5 組矛盾」而其實只有一組。
-  const seenPairs = new Set<string>();
+  // 同一組條目可能因為多個對象而被回報多次 —— 去重，
+  // 否則 UI 會顯示「有 5 組矛盾」而其實只有一組。
+  const seen = new Set<string>();
   return conflicts.filter((conflict) => {
     const key = [...conflict.entryIds].sort().join(",");
-    if (seenPairs.has(key)) return false;
-    seenPairs.add(key);
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }

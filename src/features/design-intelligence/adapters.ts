@@ -294,15 +294,30 @@ export const planformIsoAdapter: DesignTargetAdapter = {
 // 網站：CSS 變數的差異
 // ---------------------------------------------------------------------------
 
-/** 只允許改 CSS custom property，不允許任意 CSS。 */
+/**
+ * 只允許改 CSS custom property，不允許任意 CSS。
+ *
+ * 值用 **hex 的規則**驗，不是一個寬鬆的字元類。欄位叫 `hex`，就該是 hex ——
+ * 自己探測時發現舊的字元類讓 `var(--evil)`、`expression(alert(1))`、
+ * `calc(100% - 1px)` 全部通過。這些在正常流程裡進不來（值來自
+ * `parseColorTokens`，那裡有 HEX_RE），但這一層不能假設呼叫端一定走過那條路
+ * —— 「上游驗過了」是最常見的破口說法。
+ */
 const CSS_VAR_RE = /^--[a-z0-9-]+$/i;
-const CSS_VALUE_RE = /^[#a-z0-9 ,.()%/-]+$/i;
+const CSS_HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 export const websitePatchAdapter: DesignTargetAdapter = {
   id: "website",
   label: "網站樣式",
   async status() {
-    return { state: "ready" };
+    // **不宣稱 ready。** 這一層產得出 CSS 變數的差異，但沒有任何東西會去
+    // 套用它 —— 沒有寫入端，也沒有地方記錄「原本的值是什麼」。
+    // 對抗審查指出舊版回 ready 且 reversible: true，那等於宣稱一個
+    // 不存在的還原能力。
+    return {
+      state: "contract-only",
+      note: "產得出 CSS 變數差異，但沒有寫入端；套用與還原需要能讀寫目標樣式的一方",
+    };
   },
   accepts: (proposal) => proposal.targetType === "website",
   buildPatch(proposal, alternativeId) {
@@ -322,7 +337,7 @@ export const websitePatchAdapter: DesignTargetAdapter = {
         rejected.push(`不合法的 CSS 變數名稱：${token.cssToken.slice(0, 40)}`);
         continue;
       }
-      if (!CSS_VALUE_RE.test(token.hex)) {
+      if (!CSS_HEX_RE.test(token.hex)) {
         rejected.push(`不合法的色值：${token.hex.slice(0, 20)}`);
         continue;
       }
@@ -340,12 +355,18 @@ export const websitePatchAdapter: DesignTargetAdapter = {
 
     return {
       ok: true,
-      warnings: rejected,
+      warnings: [
+        ...rejected,
+        "沒有記錄原本的變數值，因此無法自動還原 —— 套用端要先把現值存下來才算可逆",
+      ],
       patch: {
         adapter: "website",
         payload: { variables, alternativeId, sourceProposalId: proposal.id },
-        reversible: true,
-        revertHint: `把這 ${Object.keys(variables).length} 個 CSS 變數改回原值即可`,
+        // **不可逆**。「把變數改回原值」聽起來像還原，但這裡根本沒有原值 ——
+        // 那句話是空的。標成不可逆，lifecycle 就會拒絕自動套用，
+        // 直到有人實作「先讀現值再寫新值」的那一端。
+        reversible: false,
+        revertHint: "尚未記錄原本的變數值，因此沒有自動還原",
       },
     };
   },

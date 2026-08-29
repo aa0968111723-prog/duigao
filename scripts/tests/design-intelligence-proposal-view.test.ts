@@ -319,6 +319,16 @@ test("極矮的視窗下，收起的抽屜也不會蓋滿畫面", () => {
     const layout = layoutFor({ width: 360, height, coarsePointer: true });
     if (layout.kind === "sheet") assert.ok(layout.peekPx <= 56);
   }
+
+  // 極端情況的**實際佔比**要被寫下來，不是只寫在註解裡：
+  // 32px 高的視窗上，32px 的把手就是 100%。這個取捨的代價要看得見。
+  const degenerate = { width: 360, height: 32, coarsePointer: true };
+  const degenerateLayout = layoutFor(degenerate);
+  assert.equal(
+    occupiedRatio(degenerateLayout, degenerate, false),
+    1,
+    "32px 高的視窗上抽屜就是整個畫面 —— 這是已知且刻意的，寫成斷言讓它不會被忘記",
+  );
 });
 
 test("橫放手機收起的抽屜也在上限內", () => {

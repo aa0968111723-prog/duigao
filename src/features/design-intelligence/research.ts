@@ -149,6 +149,8 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
   const requestTimes: number[] = [];
   let consecutiveFailures = 0;
   let circuitOpenedAt = 0;
+  /** 上一次從後端問到的真實狀態。沒問過就是 null。 */
+  let lastKnown: ProviderStatus | null = null;
 
   const enabled = () => options.enabled !== false;
 
@@ -267,11 +269,32 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
       }
 
       if (response.status === 503) {
-        // 沒設定不算失敗 —— 斷路器不該因為「沒裝」而累積
-        return withMeta(disabledResearchResult(query, "研究服務尚未設定"), {
-          failure: "not-configured",
-          failureDetail: "外部研究服務尚未設定。其餘設計分析功能不受影響。",
-          retryable: false,
+        // 503 有好幾種，意義完全不同 —— 舊版一律說成「尚未設定」，
+        // 於是資料庫故障與缺 service role key 都被顯示成「你還沒設定」，
+        // 使用者會去改一個沒有問題的設定（對抗審查實測到的）。
+        const code = typeof response.body.error === "string" ? response.body.error : "";
+        const detail = typeof response.body.detail === "string" ? response.body.detail : undefined;
+        if (code === "RESEARCH_NOT_CONFIGURED" || code === "") {
+          // 沒設定不算失敗 —— 斷路器不該因為「沒裝」而累積
+          lastKnown = { state: "unconfigured", missing: ["PERPLEXITY_API_KEY"] };
+          return withMeta(disabledResearchResult(query, "研究服務尚未設定"), {
+            failure: "not-configured",
+            failureDetail: detail ?? "外部研究服務尚未設定。其餘設計分析功能不受影響。",
+            retryable: false,
+          });
+        }
+        // 其餘的 503（成員身分查不到、配額表讀不到）是**服務端的問題**，
+        // 可以重試，而且要照實顯示後端給的原因。
+        lastKnown = {
+          state: "unavailable",
+          reason: detail ?? `外部研究服務暫時無法使用（${code}）`,
+          retryable: true,
+        };
+        recordFailure(now);
+        return withMeta(emptyResult(query, now, {}), {
+          failure: "upstream-error",
+          failureDetail: detail ?? `外部研究服務暫時無法使用（${code}）`,
+          retryable: true,
         });
       }
       if (response.status === 403) {
@@ -312,6 +335,7 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
       }
 
       consecutiveFailures = 0;
+      lastKnown = { state: "ready" };
       const answer = quoteUntrusted(response.body.answer, 4000);
       const sources = parseResearchSources(response.body.sources);
       const usage = (response.body.usage ?? {}) as Record<string, unknown>;
@@ -345,9 +369,22 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
       return result;
     })();
 
-    inFlight.set(cacheKey, task);
-    task.finally(() => inFlight.delete(cacheKey));
-    return raceSignal(task, filters?.signal, () =>
+    // **task 永遠不 reject。** 兩個理由：
+    //   1. 這一層的契約是「回可辨識的結果，不丟例外」——
+    //      呼叫端不該需要為了看一個研究結果而寫 try/catch。
+    //   2. 共用的 promise 被去重的呼叫端接手時，一個沒有人 catch 的 rejection
+    //      會變成 process 層級的 unhandled rejection（對抗審查實測到的）。
+    const safe = task.catch((error) => {
+      recordFailure(now);
+      return withMeta(emptyResult(query, now, {}), {
+        failure: "upstream-error" as const,
+        failureDetail: error instanceof Error ? error.message : "研究請求失敗",
+        retryable: true,
+      });
+    });
+    inFlight.set(cacheKey, safe);
+    void safe.finally(() => inFlight.delete(cacheKey));
+    return raceSignal(safe, filters?.signal, () =>
       withMeta(emptyResult(query, now, {}), { failure: "timeout", retryable: true }),
     );
   }
@@ -360,9 +397,15 @@ export function createResearchProvider(options: ResearchProviderOptions): Resear
       if (circuitIsOpen(options.now())) {
         return { state: "unavailable", reason: "連續失敗，暫停呼叫中", retryable: true };
       }
-      // 前端不知道後端有沒有金鑰 —— 那是後端的事，而且**故意**不提供一個
+      // **記住上一次真的問到的狀態。**
+      //
+      // 舊版一律回 `ready`，於是後端明明回過「尚未設定」，UI 再問一次
+      // 又被告知一切正常 —— 那是「假裝已連線」的研究層版本。
+      if (lastKnown) return lastKnown;
+
+      // 還沒問過任何一次時，前端**確實不知道**。這裡回 ready 的意思是
+      // 「可以試試看」，不是「已經確認可用」—— 而且故意不提供一個
       // 「有沒有金鑰」的查詢端點：那種端點本身就是在對外宣告設定狀態。
-      // 第一次真的呼叫時會拿到 503，那時才知道。
       return { state: "ready" };
     },
 
