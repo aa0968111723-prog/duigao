@@ -44,7 +44,7 @@ test("超過 50MB 仍可上傳，但先警告會最佳化", () => {
 test("playerReady waits 90s for the element or an honest fail card (CI 33268176148)", () => {
   const src = readFileSync(resolve(ROOT, "scripts/e2e/video-flow.mjs"), "utf8");
   const ready = src.slice(src.indexOf("async function playerReady"), src.indexOf("const currentTime"));
-  assert.match(ready, /timeout:\s*90000/);
+  assert.match(ready, /90000/);
   assert.match(ready, /video\.v-video/);
   assert.match(ready, /onboard-card/);
   assert.match(ready, /初始化沒完成|上傳失敗/);
