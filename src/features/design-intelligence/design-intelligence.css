@@ -1,0 +1,304 @@
+/*
+ * Design Intelligence 面板（PR-DI-04）
+ *
+ * 任務書第十四節：「AI 不能佔據主畫面。」所以這裡的每一條尺寸規則都有上限，
+ * 而且上限寫在 CSS 裡而不是只靠 inline style —— inline style 是元件算出來的，
+ * CSS 是最後一道；兩邊都限制住，改壞其中一邊還有另一邊擋著。
+ *
+ * 顏色全部走 CSS 變數。`main` 合併進來的亮色系統換掉的就是這些變數，
+ * 這裡不寫死任何色碼（白板那條線的深色硬編碼正是合併時的痛點）。
+ */
+
+.di-panel {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface, #ffffff);
+  color: var(--text-primary, #16181d);
+  box-shadow: 0 -8px 32px rgb(0 0 0 / 18%);
+  overscroll-behavior: contain;
+  transition: height 180ms ease, transform 180ms ease;
+}
+
+/* 手機：底部抽屜。**永遠留 24% 給主畫面**，收起來時只剩一條。 */
+.di-panel--sheet {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: 76dvh;
+  border-radius: 16px 16px 0 0;
+  /* 安全區：iPhone 的home indicator 會蓋住最後一排按鈕 */
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* 平板：側邊分割欄。寬度有上下限，不隨螢幕無限變寬。 */
+.di-panel--split {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: clamp(320px, 38vw, 420px);
+  max-width: 40vw;
+  border-radius: 0;
+  border-left: 1px solid var(--border, #e3e5ea);
+  box-shadow: -8px 0 32px rgb(0 0 0 / 12%);
+}
+
+.di-panel__bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #e3e5ea);
+}
+
+.di-panel__handle {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  /* 抽屜把手是主要的觸控目標：短邊必須 ≥ 24px（WCAG 2.2 AA），
+     而這個功能自己的分析器就在檢查這件事 —— 不能自己違反。 */
+  min-height: 44px;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.di-panel__grip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong, #c6c9d1);
+}
+
+.di-panel__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.di-panel__close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  /* 同樣是 ≥ 24×24 的觸控目標 */
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.di-panel__body {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 16px 20px;
+  overflow-y: auto;
+  /* 抽屜裡的捲動不該把整個頁面帶著捲 */
+  overscroll-behavior: contain;
+}
+
+.di-panel__note {
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+.di-panel__note h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.di-panel__note--failed {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--danger-surface, #fdeceb);
+}
+
+.di-panel__risks {
+  margin: 0 0 12px;
+  padding: 10px 12px 10px 28px;
+  border-radius: 10px;
+  background: var(--warning-surface, #fff6e5);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.di-panel__diagnostics {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.di-panel__diagnostics > li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border, #e3e5ea);
+}
+
+.di-diagnostic__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.di-diagnostic__severity {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--chip, #eef0f4);
+  font-weight: 600;
+}
+
+.di-panel__diagnostics > li[data-severity="blocker"] .di-diagnostic__severity {
+  background: var(--danger-surface, #fdeceb);
+  color: var(--danger, #b3261e);
+}
+
+.di-diagnostic__where {
+  font-weight: 600;
+}
+
+/* 「量測」標記：讓使用者分得出這條是算出來的還是模型說的。 */
+.di-diagnostic__measured {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong, #c6c9d1);
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.di-diagnostic__issue,
+.di-diagnostic__impact,
+.di-diagnostic__evidence,
+.di-diagnostic__fix {
+  margin: 2px 0;
+  /* 行高 1.5：同樣是自己的分析器在檢查的東西 */
+  line-height: 1.5;
+}
+
+.di-diagnostic__evidence {
+  font-size: 12px;
+  opacity: 0.78;
+}
+
+.di-diagnostic__fix {
+  font-weight: 600;
+}
+
+.di-panel__alternatives {
+  margin-top: 12px;
+  /* 滑動切換方案：讓瀏覽器把水平手勢交給我們，垂直仍然捲動 */
+  touch-action: pan-y;
+}
+
+.di-alternative h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.di-alternative__changes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.di-alternative__changes > li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border, #e3e5ea);
+  line-height: 1.5;
+}
+
+.di-alternative__changes em {
+  font-size: 12px;
+  font-style: normal;
+  opacity: 0.78;
+}
+
+.di-alternative__pros,
+.di-alternative__cons {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.di-alternative__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.di-alternative__nav button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border, #e3e5ea);
+  border-radius: 12px;
+  background: var(--surface, #ffffff);
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.di-alternative__nav button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.di-panel__apply {
+  position: sticky;
+  bottom: 0;
+  padding-top: 12px;
+  background: var(--surface, #ffffff);
+}
+
+.di-apply__preview {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+.di-apply__button {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent, #6157ef);
+  color: var(--accent-contrast, #ffffff);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.di-apply__button:disabled {
+  background: var(--chip, #eef0f4);
+  color: var(--text-muted, #6b7280);
+  cursor: default;
+}
+
+.di-apply__reason {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .di-panel {
+    transition: none;
+  }
+}

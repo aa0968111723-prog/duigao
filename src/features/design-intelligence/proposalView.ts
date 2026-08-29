@@ -1,0 +1,235 @@
+/**
+ * Design Intelligence — 提案呈現的純邏輯（PR-DI-04）
+ *
+ * 這個檔案裡沒有 React。理由是這一層的每一個決定都**應該可以被斷言**：
+ * 手機上現在顯示第幾個方案、這一下滑動算不算換頁、套用按鈕為什麼是灰的。
+ * 把它們留在元件裡，就只能靠「畫面上有沒有那個元素」來測，而那正是我在
+ * 白板那幾輪反覆踩到的假綠。
+ *
+ * 任務書第十四、十五節的三條要求，在這裡各有一個對應的函式：
+ *   - AI 不得佔據主畫面 → `layoutFor` 回的是「疊在上面的一層」的尺寸上限
+ *   - 手機一次看一個方案，用滑動切換 → `swipeIntent` + `nextAlternativeIndex`
+ *   - 套用前必須人類確認 → `applyGate`
+ */
+import type { DesignProposal, Diagnostic, Severity } from "./types";
+
+// ---------------------------------------------------------------------------
+// 版面
+// ---------------------------------------------------------------------------
+
+export type PanelLayout =
+  /** 手機：底部抽屜，蓋住畫面的一部分，隨時可以收起來。 */
+  | { kind: "sheet"; maxHeightRatio: number; peekPx: number }
+  /** 平板以上：側邊分割，主畫面仍然看得到。 */
+  | { kind: "split"; widthPx: number };
+
+export type ViewportInfo = {
+  width: number;
+  height: number;
+  /** 觸控裝置。橫放的手機很寬，光看寬度會誤判成平板。 */
+  coarsePointer: boolean;
+};
+
+/**
+ * 決定 AI 面板怎麼出現。
+ *
+ * **AI 不得佔據主畫面**（任務書第十四節），所以兩種版面都刻意留白：
+ *   - 手機的抽屜最高只到 76%，永遠看得到上面的作品。
+ *   - 平板的分割欄有寬度上限，而且不超過視窗的 40%。
+ *
+ * 判斷用的是 `useIsMobile` 的同一套條件（寬度 + 橫放的矮螢幕 + 粗指標），
+ * 不是只看寬度 —— 很多手機橫放時有 800–900px 寬。
+ */
+export function layoutFor(viewport: ViewportInfo): PanelLayout {
+  const phoneByWidth = viewport.width <= 720;
+  const phoneLandscape =
+    viewport.coarsePointer && viewport.height <= 520 && viewport.width <= 920;
+  if (phoneByWidth || phoneLandscape) {
+    return { kind: "sheet", maxHeightRatio: 0.76, peekPx: 56 };
+  }
+  // 平板：分割欄佔 38%，但夾在 320–420px 之間 —— 太窄讀不了診斷，
+  // 太寬就變成 AI 佔據主畫面。
+  const width = Math.round(viewport.width * 0.38);
+  return { kind: "split", widthPx: Math.max(320, Math.min(420, width)) };
+}
+
+/** 面板實際會蓋住主畫面的比例。用來斷言「沒有佔據主畫面」。 */
+export function occupiedRatio(layout: PanelLayout, viewport: ViewportInfo): number {
+  if (layout.kind === "sheet") return layout.maxHeightRatio;
+  return layout.widthPx / viewport.width;
+}
+
+// ---------------------------------------------------------------------------
+// 手機：一次一個方案
+// ---------------------------------------------------------------------------
+
+export type SwipeSample = {
+  dx: number;
+  dy: number;
+  /** 毫秒。快速的短滑動也算換頁。 */
+  elapsedMs: number;
+};
+
+/**
+ * 這一下滑動要不要換頁。
+ *
+ * 三個條件，缺一不可：
+ *   1. 水平位移夠大（或速度夠快）。
+ *   2. 水平位移明顯大於垂直位移 —— 否則使用者只是想捲動診斷清單。
+ *   3. 不是幾乎沒動（誤觸）。
+ *
+ * 第 2 條是重點：抽屜裡是可捲動的內容，把斜向的手勢當成換頁會讓人捲不動。
+ */
+export function swipeIntent(sample: SwipeSample): "prev" | "next" | null {
+  const absX = Math.abs(sample.dx);
+  const absY = Math.abs(sample.dy);
+  if (absX < 12) return null;                    // 誤觸
+  if (absX < absY * 1.4) return null;            // 主要是垂直，讓它捲動
+  const fast = sample.elapsedMs > 0 && absX / sample.elapsedMs > 0.5; // px/ms
+  if (absX < 56 && !fast) return null;           // 慢速的短滑動不算
+  return sample.dx < 0 ? "next" : "prev";
+}
+
+/**
+ * 換頁後的索引。**不繞回**：滑到最後一個再往左不會跳回第一個。
+ *
+ * 繞回在只有三個項目時特別容易讓人以為自己滑錯方向 —— 手機上沒有其他線索
+ * 可以判斷現在在哪裡，除了頁面指示點。
+ */
+export function nextAlternativeIndex(
+  current: number,
+  count: number,
+  direction: "prev" | "next",
+): number {
+  if (count <= 0) return 0;
+  const target = direction === "next" ? current + 1 : current - 1;
+  return Math.max(0, Math.min(count - 1, target));
+}
+
+// ---------------------------------------------------------------------------
+// 顯示什麼
+// ---------------------------------------------------------------------------
+
+export type PanelState =
+  | { kind: "analyzing"; note: string }
+  /** 有結果可以看。 */
+  | { kind: "result"; diagnostics: Diagnostic[]; alternativeCount: number }
+  /** 有結論但不是「找到問題」—— 例如作品沒問題，或資料不足。 */
+  | { kind: "notice"; title: string; detail: string; actionable: boolean }
+  | { kind: "failed"; title: string; detail: string; retryable: boolean };
+
+const SEVERITY_RANK: Record<Severity, number> = {
+  blocker: 0,
+  major: 1,
+  minor: 2,
+  nit: 3,
+};
+
+/** 診斷排序：嚴重的在前；同樣嚴重時，量出來的排在模型說的前面。 */
+export function sortDiagnostics(diagnostics: readonly Diagnostic[]): Diagnostic[] {
+  return [...diagnostics].sort((a, b) => {
+    const bySeverity = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
+    if (bySeverity !== 0) return bySeverity;
+    if (a.measured !== b.measured) return a.measured ? -1 : 1;
+    return b.confidence - a.confidence;
+  });
+}
+
+/**
+ * 面板現在該顯示什麼。
+ *
+ * 「沒有找到問題」與「分析失敗」與「資料不足」是三件完全不同的事，
+ * 使用者的下一步也完全不同 —— 混成一句「沒有結果」就等於什麼都沒說。
+ */
+export function panelStateFor(proposal: DesignProposal): PanelState {
+  if (proposal.status === "analyzing" || proposal.status === "draft") {
+    return { kind: "analyzing", note: "正在分析這件作品…" };
+  }
+  if (proposal.status === "failed") {
+    return {
+      kind: "failed",
+      title: "這次分析沒有完成",
+      detail: proposal.risks[0] ?? "沒有取得失敗原因",
+      retryable: true,
+    };
+  }
+  if (proposal.status === "needs-context") {
+    return {
+      kind: "notice",
+      title: "還不能分析",
+      detail: proposal.risks[0] ?? "需要更多資料才能判斷",
+      actionable: true,
+    };
+  }
+  if (!proposal.diagnostics.length && !proposal.alternatives.length) {
+    return {
+      kind: "notice",
+      title: "沒有找到可以量測的問題",
+      detail: "對比、字級、觸控目標尺寸都在建議範圍內。這不代表設計無法再進步，只代表沒有量得出來的問題。",
+      actionable: false,
+    };
+  }
+  return {
+    kind: "result",
+    diagnostics: sortDiagnostics(proposal.diagnostics),
+    alternativeCount: proposal.alternatives.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 套用閘門
+// ---------------------------------------------------------------------------
+
+export type ApplyGate =
+  | { enabled: true }
+  | { enabled: false; reason: string };
+
+/**
+ * 套用按鈕能不能按。
+ *
+ * 任務書：「不得直接：使用者一句話 → AI 覆蓋原稿」。所以這個函式的預設是
+ * **不能按**，而且每一種不能按都要說得出理由 —— 一個沒有說明的灰色按鈕
+ * 只會讓人以為系統壞了。
+ */
+export function applyGate(
+  proposal: DesignProposal,
+  selectedAlternativeId: string | null,
+): ApplyGate {
+  if (proposal.status === "applied") return { enabled: false, reason: "這個提案已經套用過了" };
+  if (proposal.status === "applying") return { enabled: false, reason: "正在套用…" };
+  if (proposal.status === "rejected") return { enabled: false, reason: "這個提案已經被否決" };
+  if (proposal.status !== "ready" && proposal.status !== "approved") {
+    return { enabled: false, reason: "分析還沒完成" };
+  }
+  if (!proposal.alternatives.length) {
+    return { enabled: false, reason: "這次只有診斷，沒有可以套用的方案" };
+  }
+  if (!selectedAlternativeId) {
+    return { enabled: false, reason: "請先選一個方案" };
+  }
+  if (!proposal.alternatives.some((alternative) => alternative.id === selectedAlternativeId)) {
+    return { enabled: false, reason: "選到的方案已經不在這份提案裡，請重新整理" };
+  }
+  return { enabled: true };
+}
+
+/**
+ * 套用之後會發生什麼、怎麼還原 —— 在按下去之前就要說。
+ *
+ * 「按下去才知道會發生什麼」是這個功能最容易造成傷害的地方：
+ * 使用者的原稿是他們花時間做的。
+ */
+export function applyPreviewText(
+  proposal: DesignProposal,
+  selectedAlternativeId: string | null,
+): { changeCount: number; summary: string[]; revertNote: string } {
+  const alternative = proposal.alternatives.find((item) => item.id === selectedAlternativeId);
+  if (!alternative) {
+    return { changeCount: 0, summary: [], revertNote: "沒有選擇方案" };
+  }
+  return {
+    changeCount: alternative.changes.length,
+    summary: alternative.changes.map((change) => `${change.target}：${change.change}`),
+    revertNote: proposal.patch?.revertHint ?? "套用前會先存一個版本，隨時可以回到原稿",
+  };
+}
