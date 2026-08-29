@@ -67,6 +67,16 @@ export type Diagnostic = {
   severity: Severity;
   /** 0–1。低於 0.5 的診斷 UI 要標示「需要人確認」。 */
   confidence: number;
+  /**
+   * 這條診斷是**量出來的**（本地分析器算的）還是模型說的。
+   *
+   * 由來源決定，不由 payload 宣稱 —— `parseDiagnostics` 一律設成 false，
+   * 模型自己填 `measured: true` 沒有用。這跟知識庫的 provenance 是同一個
+   * 道理：讓不可信輸入自我認證，等於沒有認證。
+   */
+  measured: boolean;
+  /** 這條診斷屬於哪個改動維度（保守方案要靠它分類，不能靠猜 id 前綴）。 */
+  dimension?: ChangeDimension;
   /** 這條診斷引用了哪些知識條目（knowledge.id）。 */
   knowledgeRefs?: string[];
   /** 這條診斷引用了哪些外部來源（research source id）。 */
@@ -112,7 +122,28 @@ export type ColorToken = {
 export const ALTERNATIVE_STRATEGIES = ["conservative", "balanced", "bold"] as const;
 export type AlternativeStrategy = (typeof ALTERNATIVE_STRATEGIES)[number];
 
+/**
+ * 改動的維度。
+ *
+ * 存在的理由只有一個：任務書要求三個方案「必須真的不同，不能只是三組不同
+ * 顏色」。「真的不同」如果只靠人眼判斷就無法驗證，所以把它變成可檢查的
+ * 結構 —— 三個方案碰的維度集合不能完全一樣（見 `analysis.ts` 的
+ * `validateAlternativeDiversity`）。
+ */
+export const CHANGE_DIMENSIONS = [
+  "color",
+  "typography",
+  "layout",
+  "imagery",
+  "copy",
+  "motion",
+  "structure",
+  "interaction",
+] as const;
+export type ChangeDimension = (typeof CHANGE_DIMENSIONS)[number];
+
 export type DesignChange = {
+  dimension: ChangeDimension;
   /** 改哪裡。 */
   target: string;
   /** 改成什麼（具體值）。 */
