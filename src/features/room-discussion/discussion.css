@@ -96,7 +96,7 @@
 .rd-jump-unread {
   position: sticky;
   bottom: calc(104px + var(--kb, 0px));
-  z-index: 20;
+  z-index: 35;
   align-self: center;
   min-height: 36px;
   padding: 0 14px;
@@ -110,7 +110,7 @@
 .rd-jump-latest {
   position: sticky;
   bottom: calc(64px + var(--kb, 0px));
-  z-index: 20;
+  z-index: 35;
   align-self: center;
   min-height: 36px;
   padding: 0 14px;
