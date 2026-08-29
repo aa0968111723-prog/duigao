@@ -105,7 +105,7 @@ Agent-review（本分支，self）：
 | 項 | Head | Base | 備註 |
 |---|---|---|---|
 | **main** | `196b3a3672ca` | — | #105 已合 |
-| **#96** | `10fcb903a256`（本檔再推一次） | main（GitHub 仍顯示 `444ae9d`） | 證據檔；不要當 #105 的替代去合 |
+| **#96** | 本證據 commit（前一個 head `10fcb90`） | main（GitHub 仍顯示 `444ae9d`；實際 tip `196b3a3`） | 證據檔；不要當 #105 的替代去合 |
 | **#98** | `54a6bd167582` | main `444ae9d` | **未 reset**。九態只在這條 main 線 |
 | **#95** | `26ad4a65ea6b` | main `444ae9d` | TUS／library；未吃 #105 |
 | **#109** | `5df06eb3c57d` | #95 `26ad4a6` | Parent 已開。空房／auth-loading／permission-denied |
