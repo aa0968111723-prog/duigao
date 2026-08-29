@@ -68,7 +68,7 @@ Did **not** copy #88 schema. Did **not** add 0031+.
 | `agent-release-gate` | `33262145327` | **success** |
 | `build` (migrations + build + browser) | `33262145267` | **success** (browser included `test:collaboration`  after regex fix) |
 
-Post-#114 merge + honesty head is later; CI for that SHA is a new run.
+Post-#114+#121 merge + honesty head is later; CI for that SHA is a new run. `agent-release-gate` @ `b3c5b9d` already **success** (`33262459877`); `build` `33262459900` was still in progress when last checked.
 
 ## Review classifications
 
