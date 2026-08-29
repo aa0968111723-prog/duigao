@@ -1,4 +1,4 @@
-# 全站目標未完成 — 完成度審計（`2192774` + 本 harness 修補）
+# 全站目標未完成 — 完成度審計（`1e40efe` 四職綠）
 
 本檔是對 **原始全站目標** 的完成度審計，不是「這條 stack 已做完」的證明。
 可信度：程式碼 → migrations → tests → Git / CI → production curl → 本檔。
@@ -7,15 +7,17 @@
 
 | 鍵 | 值 |
 |---|---|
-| 審計時間（UTC） | 2026-08-29 18:35 |
-| 本 tip SHA | 本檔落地後的 HEAD（harness 修補）。產品討論碼與 `2192774` 相同。 |
-| 已核對 SHA | `21927746ba7c5157961fca8b3ab4cdb05cff4c79` |
+| 審計時間（UTC） | 2026-08-29 18:55 |
+| 本 tip SHA | `1e40efe5b3b06780a8a3dbf6e5b09fe6b8f8c3e3`（本檔 commit 會再前進一次） |
+| 已核對 SHA | `1e40efe5b3b06780a8a3dbf6e5b09fe6b8f8c3e3` |
 | 本 PR | [#125](https://github.com/aa0968111723-prog/duigao/pull/125) `cursor/p0-discussion-mentions-todos-70d9` |
-| 底層 stack | [#124](https://github.com/aa0968111723-prog/duigao/pull/124) `10c9109` → [#120](https://github.com/aa0968111723-prog/duigao/pull/120) `c5a61f1` → `main` `cd7eb5f` |
+| 底層 stack | [#124](https://github.com/aa0968111723-prog/duigao/pull/124) `10c9109` 四職綠 → [#120](https://github.com/aa0968111723-prog/duigao/pull/120) `c5a61f1` 四職綠 → `main` `cd7eb5f` |
 | `origin/main` | `cd7eb5fcff13451b31447d64dc72dd58d534e18f`（本回合未前進） |
-| #113 / #114 | **已合進 main**：`6da2af7`（#113）、`3c0bf0c`（#114）。`git merge-base --is-ancestor` 皆 YES。 |
+| #113 / #114 | **已合進 main**：`6da2af7`（#113 whiteboard 0024–0028）、`3c0bf0c`（#114 DI 0029–0030）。`git merge-base --is-ancestor` 皆 YES。合進 main ≠ 已部署。 |
 | 最新公開 migration | stack tree：`0032_discussion_mentions_todos.sql`。main：`0030`。**禁止 0033。** |
+| GitHub 四職 @ `1e40efe` | run [`33269261957`](https://github.com/aa0968111723-prog/duigao/actions/runs/33269261957)：build / migrations / browser / agent-read-layer **皆 success**。Preview skipped。 |
 | `agent:gate` | 本機於 `2192774` **PASS**（`PASS: AUTOMERGE REQUIRES AGENT_GATE_PASS`）。不是 GitHub `agent-read-layer` job。 |
+| 平行 main 枝 | [#126](https://github.com/aa0968111723-prog/duigao/pull/126) `e7ae7d4` browser **failure**（`test:review-viewer` 送出 disabled）。[#127](https://github.com/aa0968111723-prog/duigao/pull/127) `57df751` 四職綠。 |
 | 生產 | `https://duigao-k7q2.zeabur.app/` — 見下方 curl。**404 JSON ≠ API 成功。** |
 
 狀態只能是 **evidenced** / **incomplete** / **unmodeled** / **deploy-blocked**。
@@ -115,7 +117,8 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | Canva / CUTOS client 走 `parseFunctionPayload` | evidenced | `src/cloud/canva.ts`、`src/cloud/cutos.ts` |
 | G7-07 契約（標題聲明未完成、禁止完成旗標） | evidenced | `scripts/tests/ai-external-handoff.test.ts` G7-07；本檔標題為「全站目標未完成」 |
 | #114 已 merge 進 `main` | evidenced | `origin/main` 祖先 `3c0bf0c` = `PR-RESOLVE-07 … (#114)`。**合進 main ≠ 生產 functions／secrets。** |
-| `asset-analysis` / `room-ai-context` client 走 `parseFunctionPayload` | incomplete | `src/cloud/assetIntelligence.ts` `enqueueAssetAnalysis` / `retryAssetAnalysis` / `askRoomContext` 只看 `error`，HTML／空物件可當成功。#125 修 video harness 時不混這條。另開分支。 |
+| `asset-analysis` / `room-ai-context` client 走 `parseFunctionPayload` | incomplete | 本 tip（討論 stack）未帶。平行 [#126](https://github.com/aa0968111723-prog/duigao/pull/126) 從 main 修；`e7ae7d4` browser 紅，不是本 tip 證據。 |
+| `design-research` 真實 `functions.invoke` client | incomplete | 本 tip 與 `origin/main` 皆無 `functions.invoke("design-research")`。測試注入 transport。另開 `cursor/p2-design-research-payload-70d9`。 |
 | 生產 Perplexity / Canva / CUTOS secrets 與 functions | deploy-blocked | 本回合未驗證任何 provider secret。origin `/functions/v1/*` 為 JSON 404。 |
 
 ---
@@ -144,7 +147,8 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | CI browser @ `bad534b` | evidenced | run `33267190274` **success**（含 `test:video`）。 |
 | CI browser @ `2192774` | incomplete | run [`33268176148`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268176148) **failure**。`test:collaboration-e2e` **success**。`test:video` 45s `video.v-video`。 |
 | CI browser @ `30f5e5a` | incomplete | run [`33268530465`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268530465) **failure**。`test:visual` 15s `wb-canvas`。 |
-| CI browser @ `f8a7fc1` | incomplete | run [`33268679981`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268679981) **failure**。`phone-390` 三張過；`phone-412-list` diff=3372；接著 `.wb-card` timeout。本機 click-create 後 `test:visual` **15/15**、`test:video` **171/171**。**本 tip CI 尚未重跑。不得寫綠。** |
+| CI browser @ `f8a7fc1` | incomplete | run [`33268679981`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268679981) **failure**。歷史紅。 |
+| CI browser @ `1e40efe` | evidenced | run [`33269261957`](https://github.com/aa0968111723-prog/duigao/actions/runs/33269261957) job `browser` **success**（2026-08-29 18:52:42Z）。含 `test:video` / `test:visual` / `test:review-viewer`。 |
 | CodeRabbit 1-check success | unmodeled | 「Review skipped: draft」不是產品 CI。 |
 | 已讀回條 UI | unmodeled | 禁止。 |
 
@@ -160,20 +164,23 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 
 ---
 
-## 本回合生產 curl（2026-08-29 18:27 UTC）
+## 本回合生產 curl（2026-08-29 18:54 UTC）
 
 ```
+GET https://duigao-k7q2.zeabur.app/
+  HTTP 200  text/html  SPA
 GET https://duigao-k7q2.zeabur.app/functions/v1/voice-token
   HTTP 404  application/json  {"ok":false,"code":"NOT_FOUND","message":"this origin has no API"}
 GET https://duigao-k7q2.zeabur.app/rest/v1/
   HTTP 404  application/json  （同上）
 GET https://duigao-k7q2.zeabur.app/api/health
   HTTP 404  application/json  （同上）
-GET https://duigao-k7q2.zeabur.app/
-  HTTP 200  text/html  SPA
+GET https://duigao-k7q2.zeabur.app/functions/v1/design-research
+  HTTP 404  application/json  （同上）
 ```
 
 **404 JSON 不是 API 成功。** 比先前「HTML 200 catch-all」更誠實，仍不是 LiveKit / functions / 已部署。
+Artifact：`/opt/cursor/artifacts/production-curl-2026-08-29-1855.txt`
 
 ---
 
@@ -181,6 +188,6 @@ GET https://duigao-k7q2.zeabur.app/
 
 - 不 merge、不 deploy、不改生產 DB、不 force-push。
 - 不發明 0033。不發明已讀／雙藍勾。
-- `2192774` browser 已 terminal **紅**（`test:video`）。不把尚未重跑的 harness 修補寫成綠。
 - 不把 #113/#114「未合 main」寫進本檔；它們已在 `cd7eb5f` 祖先上。
-- `asset-analysis` invoke 誠實閘另開分支，不推進 in-flight／剛紅的 #125 產品討論碼。
+- 不把 #125 四職綠寫成全站目標完成。
+- `asset-analysis` / `design-research` 誠實閘不推進本討論 stack。
