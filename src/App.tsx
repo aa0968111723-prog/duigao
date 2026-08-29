@@ -55,6 +55,8 @@ import {
   type AssetIntelligenceSnapshot,
 } from "./cloud/assetIntelligence";
 import { addRoomTarget, readRoomLink } from "./cloud/invite";
+import { sessionEntryStatus } from "./cloud/sessionEntryStatus";
+import { applyDiscussionRealtime } from "./cloud/realtimeApply";
 import { type SyncStatus } from "./cloud/types";
 import { useCloudRoom } from "./cloud/useCloudRoom";
 import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
@@ -139,6 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
+import { boardPollWrite, canEditDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -434,6 +437,7 @@ export function App() {
   }, [activeBranchId]);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
+  const [boardFocus, setBoardFocus] = useState<RoomContextFocus | null>(null);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(() => initialView(null));
   const [tool, setTool] = useState<Tool>("pan");
@@ -714,7 +718,16 @@ export function App() {
     });
   }, []);
 
-  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onBoardReplace, showToast });
+  const onDiscussionPatch = useCallback((patch: { op: "upsert"; message: DiscussionMessage } | { op: "delete"; id: string }) => {
+    setRoom((current) => {
+      if (!current) return current;
+      const result = applyDiscussionRealtime(current.discussion ?? [], patch);
+      if (!result.applied) return current;
+      return { ...current, discussion: result.messages };
+    });
+  }, []);
+
+  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
 
@@ -1661,11 +1674,21 @@ export function App() {
 
   const createProjectPoll = useCallback(
     (poll: RoomPoll) => {
+      const actor = cloud.userId ?? poll.createdBy;
+      if (!isMemberActor(actor)) {
+        showToast("AI 不能代替成員建立投票。", { tone: "error" });
+        return;
+      }
+      const write = boardPollWrite(poll.question, poll.options);
+      if (!write) {
+        showToast("投票要有題目和至少兩個選項。", { tone: "error" });
+        return;
+      }
       if (!cloud.canManageMedia && cloud.boundRoomId) {
         showToast("檢視者可以投票，但不能建立待決策。", { tone: "error" });
         return;
       }
-      const nextPoll = { ...poll, createdBy: cloud.userId ?? poll.createdBy };
+      const nextPoll = { ...poll, question: write.question, options: write.options, createdBy: actor };
       updateRoom((r) => ({ ...r, polls: [...(r.polls ?? []), nextPoll] }));
       cloudRef.current.writes.createPoll(nextPoll);
     },
@@ -1853,6 +1876,22 @@ export function App() {
           : (r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)),
       }));
       cloudRef.current.writes.setDiscussionSupport?.(messageId, add);
+    },
+    [cloud.userId, guest, updateRoom],
+  );
+
+  const editDiscussion = useCallback(
+    (messageId: string, body: string) => {
+      const userId = cloud.userId ?? guest?.id;
+      const patch = discussionEditPatch(body);
+      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
+      if (!userId || !patch || !current || !canEditDiscussion(current, userId)) return;
+      const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
+      updateRoom((r) => ({
+        ...r,
+        discussion: (r.discussion ?? []).map((item) => item.id === messageId ? next : item),
+      }));
+      void cloudRef.current.writes.updateDiscussion?.(next);
     },
     [cloud.userId, guest, updateRoom],
   );
@@ -2118,6 +2157,16 @@ export function App() {
 
   const createDecision = useCallback(
     (title: string, source?: { type: "poll"; id: string }, status: "pending" | "decided" = "pending") => {
+      const actor = cloud.userId ?? guest?.id ?? "local";
+      const clean = decisionDraftTitle(title);
+      if (!clean) {
+        showToast("決策要有標題。", { tone: "error" });
+        return;
+      }
+      if (!isMemberActor(actor)) {
+        showToast("AI 不能代替成員建立決策。", { tone: "error" });
+        return;
+      }
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者不能建立決策紀錄。", { tone: "error" });
         return;
@@ -2125,14 +2174,14 @@ export function App() {
       const decision = {
         id: uuid(),
         roomId: roomRef.current?.id ?? "",
-        title,
+        title: clean,
         body: "",
         status,
         sourceType: source ? "poll" as const : "manual" as const,
         sourceId: source?.id,
         createdBy: cloud.userId ?? guest?.id ?? "local",
         finalizedAt: status === "decided" ? Date.now() : undefined,
-        finalizedBy: status === "decided" ? cloud.userId ?? guest?.id : undefined,
+        finalizedBy: status === "decided" ? actor : undefined,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         version: 1,
@@ -2145,6 +2194,11 @@ export function App() {
 
   const finalizeDecision = useCallback(
     (id: string) => {
+      const actor = cloud.userId ?? guest?.id ?? "local";
+      if (!isMemberActor(actor)) {
+        showToast("AI 不能代替成員確認決策。", { tone: "error" });
+        return;
+      }
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者不能標示決策。", { tone: "error" });
         return;
@@ -3059,7 +3113,7 @@ export function App() {
         ai: {
           assets: assetIntelligence?.assets ?? [],
           open: openAi,
-          focusTarget: aiFocus,
+          focusTarget: boardFocus ?? aiFocus,
         },
         openAtSeconds,
         ...(video ? { video } : {}),
@@ -3140,6 +3194,27 @@ export function App() {
           if (!target) return;
           setActiveBranchId(branchId);
           setOpenAtSeconds(opts?.startTime);
+          setBoardFocus(
+            opts?.region
+              ? {
+                  assetId: "board-anchor",
+                  branchId,
+                  versionId: opts.versionId,
+                  locator: {
+                    kind: "image-region",
+                    versionId: opts.versionId,
+                    region: {
+                      type: "box",
+                      label: "白板圈選",
+                      x: opts.region.x,
+                      y: opts.region.y,
+                      width: opts.region.width,
+                      height: opts.region.height,
+                    },
+                  },
+                }
+              : null,
+          );
           if (target.branchType === "poster" || target.branchType === "video") {
             setView(initialView(roomForBranch(roomRef.current!, branchId)));
           }
@@ -3154,6 +3229,7 @@ export function App() {
           setActiveBranchId(null);
           setLoadingBranchId(null);
           setOpenAtSeconds(undefined);
+          setBoardFocus(null);
           if (roomRef.current) setView(initialView(roomRef.current));
         },
         onCreateContent: createProjectContent,
@@ -3172,6 +3248,7 @@ export function App() {
         sendChat: () => sendDiscussion(),
         onSendDiscussion: sendDiscussion,
         onSupportDiscussion: supportDiscussion,
+        onEditDiscussion: editDiscussion,
         onCreateWhiteboard: createWhiteboard,
         onArchiveWhiteboard: archiveWhiteboard,
         onOpenWhiteboard: (id) => {
@@ -3688,17 +3765,17 @@ export function App() {
   if (!hasVersions) {
     if (isGuestSession) {
       // Cloud serves invite links; legacy #room=<6碼> links ride the peer channel.
-      const cloudGuest = cloudSession && roomLink.kind === "cloud";
-      const stalled = cloudGuest
-        ? cloud.status === "error"
-        : collabStatus === "waiting" || collabStatus === "error";
-      const badLink = cloudGuest && cloud.inviteInvalid;
-      /**
-       * A legacy link with the host offline can never load: there is no cloud
-       * room behind it and no local mapping to upgrade it with. Say that once
-       * instead of looping a generic retry the partner cannot win.
-       */
-      const legacyStalled = isLegacyLink && stalled;
+      const cloudGuest = Boolean(cloudSession && roomLink.kind === "cloud");
+      const entry = sessionEntryStatus({
+        isCloudGuest: cloudGuest,
+        isLegacyLink,
+        cloudStatus: cloud.status,
+        collabStatus,
+        inviteInvalid: cloud.inviteInvalid,
+        permissionDenied: cloud.permissionDenied,
+        hasVersions,
+        projectMode: Boolean(room?.projectMode),
+      });
       return (
         <div className="onboard">
           <div className="onboard-card">
@@ -3706,42 +3783,36 @@ export function App() {
             {/* The link does not say what is behind it, so the title stays the
                 neutral one rather than promising a poster. */}
             <h1 className="onboard-title">對稿討論區</h1>
-            <p className="onboard-hint">
-              {!stalled
-                ? "正在載入…"
-                : legacyStalled
-                  ? "這是舊版分享連結"
-                  : badLink
-                    ? "分享連結無效或已失效"
-                    : "目前暫時無法載入這個討論，請稍後再試。"}
+            <p className="onboard-hint" data-testid="session-entry-status" data-kind={entry.kind}>
+              {entry.headline}
             </p>
-            {stalled && (
-              <>
-                <p className="onboard-note">
-                  {legacyStalled
-                    ? "舊版連結需要主辦方保持頁面開著才打得開。請向主辦方取得新版分享連結，新版連結在主辦方關掉頁面後也能打開。"
-                    : badLink
-                      ? "請向分享的人要一個新的連結。"
-                      : "可能是網路不太穩，會自動重試；稍後再打開這個連結也可以。"}
-                </p>
-                {legacyStalled ? (
-                  <button className="btn btn-block" onClick={() => collabRef.current?.retryNow()}>
-                    主辦方在線的話，再試一次
-                  </button>
-                ) : (
-                  !badLink && (
-                    <button
-                      className="btn btn-primary btn-block"
-                      onClick={() => {
-                        if (cloudGuest) cloudRef.current.retry();
-                        else collabRef.current?.retryNow();
-                      }}
-                    >
-                      再試一次
-                    </button>
-                  )
-                )}
-              </>
+            {entry.note && <p className="onboard-note">{entry.note}</p>}
+            {entry.kind === "empty-room" && (
+              <button
+                className="btn btn-block"
+                onClick={() => {
+                  setRoom(null);
+                  location.hash = "";
+                }}
+              >
+                回首頁
+              </button>
+            )}
+            {entry.retry === "legacy" && (
+              <button className="btn btn-block" onClick={() => collabRef.current?.retryNow()}>
+                主辦方在線的話，再試一次
+              </button>
+            )}
+            {entry.retry === "cloud" && (
+              <button
+                className="btn btn-primary btn-block"
+                onClick={() => {
+                  if (cloudGuest) cloudRef.current.retry();
+                  else collabRef.current?.retryNow();
+                }}
+              >
+                再試一次
+              </button>
             )}
           </div>
           <ToastStack toasts={toasts} onDismiss={dismiss} />

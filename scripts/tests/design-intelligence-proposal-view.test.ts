@@ -319,6 +319,18 @@ test("只有選了存在的方案、而且分析完成時才能套用", () => {
   assert.deepEqual(applyGate(proposal({ status: "approved" }), "a-1", true), { enabled: true });
 });
 
+test("Canva／CUTOS／planform 沒有 ready adapter 就不能套用，不假裝成功", () => {
+  const canva = proposal({
+    patch: { adapter: "canva", payload: {}, reversible: false, revertHint: "無" },
+  });
+  const blocked = applyGate(canva, "a-1", true);
+  assert.equal(blocked.enabled, false);
+  if (!blocked.enabled) assert.match(blocked.reason, /整合尚未設定/);
+  assert.equal(applyGate(canva, "a-1", true, { state: "unconfigured", missing: ["Canva 授權"] }).enabled, false);
+  assert.equal(applyGate(canva, "a-1", true, { state: "contract-only", note: "無寫入端" }).enabled, false);
+  assert.equal(applyGate(canva, "a-1", true, { state: "ready" }).enabled, true);
+});
+
 test("按下去之前就要說會改什麼、怎麼還原", () => {
   const target = proposal({ alternatives: [alternative("a-1", 3)] });
   const preview = applyPreviewText(target, "a-1");

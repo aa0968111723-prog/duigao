@@ -213,6 +213,43 @@ try {
     await page.getByRole("button", { name: "送出" }).click();
     check("房間討論可送出文字", (await page.getByTestId("discussion-feed").innerText()).includes("先把招生流程攤在白板上"));
     check("送出後看得到最新一則", await page.locator('[data-testid="discussion-feed"] [data-latest="true"]').innerText().then((text) => text.includes("先把招生流程攤在白板上")));
+    await page.getByTestId("discussion-edit").click();
+    await page.getByTestId("discussion-edit-input").fill("先把招生流程攤在白板上（改過）");
+    await page.getByTestId("discussion-edit-save").click();
+    check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
+    check("改過的訊息標已編輯", await page.getByTestId("discussion-edited").count() === 1);
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_edit_390.png"), fullPage: true });
+    await page.getByTestId("decision-draft-open").click();
+    await page.getByTestId("decision-draft-input").fill("主視覺採 B");
+    await page.getByTestId("decision-draft-add").click();
+    check("待決定草稿要人填標題", (await page.getByTestId("decision-area").innerText()).includes("主視覺採 B"));
+    await page.getByTestId("discussion-create-poll").first().click();
+    await page.waitForSelector('[data-testid="discussion-poll-draft"]', { timeout: 8000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_poll_390.png"), fullPage: true });
+    await page.getByTestId("discussion-poll-question").fill("這週先主推哪一份？");
+    await page.getByTestId("discussion-poll-option-0").fill("文宣");
+    await page.getByTestId("discussion-poll-option-1").fill("影片");
+    await page.getByTestId("discussion-create-poll-save").click();
+    check("討論投票題目是人填的，不是罐頭", (await page.getByTestId("decision-area").innerText()).includes("這週先主推哪一份？"));
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.getByTestId("discussion-create-poll").first().click();
+    await page.waitForSelector('[data-testid="discussion-poll-draft"]', { timeout: 8000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_poll_768.png"), fullPage: true });
+    await page.locator(".project-sheet-close").click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+    await page.getByTestId("composer-cite-work").click();
+    await page.waitForSelector('[data-testid="cite-work"]', { timeout: 8000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_cite_work_390.png"), fullPage: true });
+    await page.getByTestId("cite-work").getByRole("button", { name: "擺攤文宣" }).click();
+    check("引用文宣卡進討論", (await page.getByTestId("discussion-feed").innerText()).includes("擺攤文宣"));
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_cite_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
     await page.getByRole("button", { name: "白板", exact: true }).click();
     await page.getByLabel("白板名稱").fill("招生規劃");
@@ -290,13 +327,24 @@ try {
     check("流程邊線會一起建立", edgeCount >= 5, `edges=${edgeCount}`);
 
     await dismissSelection(page);
+    const compactToolbar = page.getByTestId("wb-compact-toolbar");
+    check("390 工具列走 compact（圖示、不佔整排字）", (await compactToolbar.getAttribute("data-compact")) === "true");
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤文宣/ }).click();
+    await page.waitForSelector('[data-testid="wb-poster-region"]', { timeout: 8000 });
+    check("文宣卡先問範圍，不假裝已有圈選", (await page.getByTestId("wb-poster-region").innerText()).includes("還沒有圈選範圍"));
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_poster_region_390.png"), fullPage: true });
+    await page.getByTestId("wb-poster-whole").click();
     await dismissSelection(page);
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /擺攤計畫/ }).click();
+    await page.waitForSelector('[data-testid="wb-plan-section"]', { timeout: 8000 });
+    check("企劃卡先問段落或整份", await page.getByTestId("wb-plan-whole").count() === 1);
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_plan_section_390.png"), fullPage: true });
+    await page.getByTestId("wb-plan-whole").click();
     await dismissSelection(page);
     await page.getByTestId("whiteboard-add").click();
     await page.getByRole("button", { name: "放入房間內容" }).click();
@@ -304,15 +352,58 @@ try {
     await page.getByTestId("wb-video-0040").click();
     check("可把文宣／企劃／影片時間卡放上白板", await page.locator("[data-node-type='room_content']").count() >= 3);
     check("影片卡帶 00:40 時間點", (await page.locator("[data-node-type='room_content']").allTextContents()).some((text) => text.includes("00:40")));
+    await dismissSelection(page);
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_compact_toolbar_390.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="wb-compact-toolbar"]')?.getAttribute("data-compact") === "false",
+      null,
+      { timeout: 8000 },
+    );
+    check("768 工具列不是 compact", (await page.getByTestId("wb-compact-toolbar").getAttribute("data-compact")) === "false");
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_toolbar_768.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-create-poll").click();
+    await page.waitForSelector('[data-testid="wb-poll-draft"]', { timeout: 8000 });
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_poll_question_390.png"), fullPage: true });
+    await page.getByTestId("wb-poll-question").fill("主視覺要不要換？");
+    await page.getByTestId("wb-poll-option-0").fill("要，換成 B 版");
+    await page.getByTestId("wb-poll-option-1").fill("先維持 A 版");
+    await page.getByTestId("wb-create-poll-save").click();
     check("可引用投票節點", await page.locator("[data-node-type='poll']").count() >= 1);
+    check("投票題目是人填的，不是罐頭", (await page.locator("[data-node-type='poll']").first().innerText()).includes("主視覺要不要換？"));
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.getByTestId("whiteboard-more").click();
+    await page.getByTestId("wb-create-poll").click();
+    await page.waitForSelector('[data-testid="wb-poll-draft"]', { timeout: 8000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_poll_question_768.png"), fullPage: true });
+    await page.locator(".project-sheet-close").click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("wb-write-decision").click();
-    check("可寫決策節點", await page.locator("[data-node-type='decision']").count() >= 1);
+    await page.waitForSelector('[data-testid="wb-decision-draft"]', { timeout: 8000 });
     mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_decision_title_390.png"), fullPage: true });
+    await page.getByTestId("wb-decision-title").fill("採用 B 版");
+    await page.getByTestId("wb-write-decision-save").click();
+    check("可寫決策節點", await page.locator("[data-node-type='decision']").count() >= 1);
+    check("決策標題是人填的，不是罐頭", (await page.locator("[data-node-type='decision']").first().innerText()).includes("採用 B 版"));
     await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_board.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => window.innerWidth >= 768, null, { timeout: 5000 });
+    await page.getByTestId("whiteboard-more").click();
+    await page.getByTestId("wb-write-decision").click();
+    await page.waitForSelector('[data-testid="wb-decision-draft"]', { timeout: 8000 });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_decision_title_768.png"), fullPage: true });
+    await page.locator(".project-sheet-close").click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
     const canvas = page.getByTestId("wb-canvas");
     const box = await canvas.boundingBox();
@@ -679,7 +770,7 @@ try {
       // 內容側反向 chip：開 擺攤文宣 對稿 → 白板引用 chip → 跳回引用節點
       // 第一層沒有常駐內容入口（#110 更多 sheet）；不可直接點 open-content-pane。
       await openRoomPane(page, "open-content-pane");
-      await page.getByRole("button", { name: /擺攤文宣/ }).first().click();
+      await page.getByTestId("content-pane").getByRole("button", { name: /擺攤文宣/ }).click();
       await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
       await page.waitForSelector('[data-testid="board-refs-chip"]', { timeout: 10000 });
       check("對稿頂列出現「白板 N」引用 chip", (await page.getByTestId("board-refs-chip").first().innerText()).includes("白板"));
@@ -1144,6 +1235,7 @@ try {
         return { vertical: box.height > box.width, right: Math.round(window.innerWidth - box.right) };
       });
       check("平板：工具列轉右側直欄", toolbar.vertical && toolbar.right < 40, JSON.stringify(toolbar));
+      check("平板 ≥768 不是 compact 橫列", (await page.getByTestId("wb-compact-toolbar").getAttribute("data-compact")) === "false");
 
       // 收合側欄 → 畫布佔滿
       await page.getByTestId("wb-rail-toggle").click();

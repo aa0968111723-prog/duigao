@@ -21,9 +21,9 @@
 import { runLocalAnalyzers, type DesignFacts } from "./analyzers";
 import { retrieveKnowledge } from "./retrieval";
 import { parseAlternatives, parseDiagnostics } from "./schema";
+import { gapRiskLines, needsForAnalysis } from "./honesty";
 import {
   selectProvider,
-  type Capability,
   type CapabilityGap,
   type DesignAnalysisProvider,
 } from "./providers";
@@ -110,18 +110,9 @@ function checkCancelled(signal?: AbortSignal): void {
   if (signal?.aborted) throw new AnalysisCancelledError();
 }
 
-/** 各模式需要的能力。diagnose 完全不需要 AI —— 本地分析器就夠。 */
-function capabilitiesFor(mode: DesignMode): Capability[] {
-  switch (mode) {
-    case "diagnose":
-      return [];
-    case "extract":
-      return ["structured-output"];
-    case "improve":
-      return ["structured-output", "layout-analysis"];
-    case "redesign":
-      return ["structured-output", "layout-analysis", "color-analysis"];
-  }
+/** 各模式需要的能力。海報／影片 improve 必須含 vision（見 honesty.ts）。 */
+function capabilitiesFor(mode: DesignMode, targetType: DesignTargetType) {
+  return needsForAnalysis(mode, targetType);
 }
 
 /**
@@ -274,7 +265,7 @@ export async function analyzeDesign(
   checkCancelled(signal);
 
   // 3. 需要 AI 的部分
-  const needs = capabilitiesFor(input.mode);
+  const needs = capabilitiesFor(input.mode, input.targetType);
   let gaps: CapabilityGap[] = [];
   let modelDiagnostics: Diagnostic[] = [];
   let alternatives: DesignAlternative[] = [];
@@ -345,6 +336,7 @@ export async function analyzeDesign(
         );
       }
     }
+    risks.push(...gapRiskLines(gaps));
   }
 
   checkCancelled(signal);
