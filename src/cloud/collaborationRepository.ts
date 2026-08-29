@@ -72,7 +72,7 @@ export type EdgeRow = {
   created_at: string;
 };
 
-type DiscussionRow = {
+export type DiscussionRow = {
   id: string;
   room_id: string;
   author_user_id: string | null;

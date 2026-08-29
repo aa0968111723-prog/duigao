@@ -52,6 +52,27 @@ export function isolateOutboxForOwner(
   return next;
 }
 
+/**
+ * 回網只重放「這個帳號」的 failed。別人的列留在 IndexedDB，不得 dispatch。
+ */
+export function flushOutboxOnOnline(
+  entries: Record<string, OutboxEntry>,
+  ownerId: string | null,
+): { entries: Record<string, OutboxEntry>; toFlush: DiscussionMessage[] } {
+  const toFlush: DiscussionMessage[] = [];
+  if (!ownerId) return { entries, toFlush };
+  let next = entries;
+  const ensureCopy = () => { if (next === entries) next = { ...entries }; };
+  for (const [id, entry] of Object.entries(entries)) {
+    if (entry.state !== "failed") continue;
+    if (!outboxRowVisibleToOwner(entry, ownerId)) continue;
+    ensureCopy();
+    next[id] = { ...entry, state: "sending", autoRetried: true };
+    toFlush.push(entry.message);
+  }
+  return { entries: next, toFlush };
+}
+
 export function belongsToCurrentRoom(
   message: DiscussionMessage,
   ctx: Pick<OutboxRoomContext, "localRoomId" | "boundRoomId">,

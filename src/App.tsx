@@ -56,6 +56,7 @@ import {
 } from "./cloud/assetIntelligence";
 import { addRoomTarget, readRoomLink } from "./cloud/invite";
 import { type SyncStatus } from "./cloud/types";
+import { applyDiscussionRealtime } from "./cloud/realtimeApply";
 import { useCloudRoom } from "./cloud/useCloudRoom";
 import { buildPreviewShareUrl, previewThumbnailUrl, type SharePreview } from "./cloud/sharePreview";
 import { ToastStack, useToasts } from "./toast";
@@ -714,7 +715,16 @@ export function App() {
     });
   }, []);
 
-  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onBoardReplace, showToast });
+  const onDiscussionPatch = useCallback((patch: { op: "upsert"; message: DiscussionMessage } | { op: "delete"; id: string }) => {
+    setRoom((current) => {
+      if (!current) return current;
+      const result = applyDiscussionRealtime(current.discussion ?? [], patch);
+      if (!result.applied) return current;
+      return { ...current, discussion: result.messages };
+    });
+  }, []);
+
+  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
 
