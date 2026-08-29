@@ -1,6 +1,6 @@
 .rd-shell { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .rd-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 4px; margin: 8px 0 12px; border-radius: 14px; background: var(--panel); }
-.rd-tabs button { min-height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-faint); }
+.rd-tabs button { min-height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-faint); }
 .rd-tabs button.is-active { background: var(--raise); color: var(--ink); font-weight: 600; }
 .rd-feed { display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(88px + var(--kb, 0px)); }
 .rd-msg { border: 1px solid var(--line-soft); background: var(--panel); border-radius: 16px; padding: 12px 14px; -webkit-touch-callout: none; }
@@ -43,7 +43,7 @@
 .rd-attachment-audio { width: 100%; }
 .rd-attachment-broken { color: var(--warning); font-size: 12px; }
 .rd-link { display: inline-block; text-decoration: none; word-break: break-all; }
-.rd-attach-button { min-width: 40px; min-height: 40px; border: 0; border-radius: 10px; background: var(--raise); color: var(--ink-dim); font-size: 17px; }
+.rd-attach-button { min-width: 44px; min-height: 44px; border: 0; border-radius: 10px; background: var(--raise); color: var(--ink-dim); font-size: 17px; }
 .rd-attach-button:disabled { opacity: .5; }
 .rd-attach-progress { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; border-radius: 10px; background: var(--raise); font-size: 12px; color: var(--ink-dim); }
 .rd-attach-progress.is-failed { color: #d6594c; }

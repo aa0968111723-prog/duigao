@@ -22,7 +22,6 @@ import { WhiteboardWorkspace } from "../whiteboard/WhiteboardWorkspace";
 import { uuid } from "../../lib/id";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useViewport } from "../../hooks/useViewport";
-import { firstLayerChrome } from "./roomChrome";
 import {
   BRANCH_STATUSES,
   BRANCH_TYPES,
@@ -39,6 +38,7 @@ import type { RoomRole } from "../../cloud/roomRepository";
 import type { VideoUploadState } from "../../components/api";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { BrandMark } from "../../components/BrandMark";
+import { firstLayerChrome } from "./roomChrome";
 
 export type MultiBranchRoomApi = {
   room: Room;
@@ -1027,6 +1027,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onAttach: api.onAttachDiscussion,
                     attachBusy: api.attachBusy,
                     attachUpload: api.attachUpload,
+                    onComposerActive: setComposerActive,
                     onReject: api.onIntakeReject,
                     onSendLink: api.onSendDiscussionLink,
                     resolveAssetUrl: api.resolveAssetUrl,
@@ -1049,7 +1050,6 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onCreateDecision: api.onCreateDecision,
                     onFinalizeDecision: api.onFinalizeDecision,
                     onOpenContent: openBranch,
-                    onComposerActive: setComposerActive,
                   }} />
                 )}
               </section>

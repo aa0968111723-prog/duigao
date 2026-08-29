@@ -1156,7 +1156,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .project-room-title-input:focus { border-bottom-color: var(--accent); }
 .project-kicker, .project-section-eyebrow { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
 .project-head-actions { display: flex; align-items: center; gap: 7px; }
-.project-share-button, .project-ai-button { min-height: 40px; padding: 0 15px; border: 0; border-radius: 999px; background: var(--raise); color: var(--ink); cursor: pointer; }
+.project-share-button, .project-ai-button { min-height: 44px; padding: 0 15px; border: 0; border-radius: 999px; background: var(--raise); color: var(--ink); cursor: pointer; }
 .project-ai-button { border: 1px solid rgba(97,87,239,.18); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .project-share-button:hover, .project-ai-button:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); }
 .project-search-wrap { width: min(680px, calc(100% - 32px)); margin: 12px auto 0; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); color: var(--ink-faint); }
@@ -1275,7 +1275,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* ---- PR-01a：討論即房間殼 ---------------------------------------- */
 /* 入口列（總覽/內容/企劃）：水平 chips，不是與討論競爭的分頁 */
 .project-entry-chips { width: min(680px, calc(100% - 32px)); margin: 12px auto 0; display: flex; gap: 8px; }
-.project-entry-chips button { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 14px; border: 1px solid var(--line-soft); border-radius: 999px; background: var(--panel); color: var(--ink-dim); font-size: 13px; cursor: pointer; }
+.project-entry-chips button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 1px solid var(--line-soft); border-radius: 999px; background: var(--panel); color: var(--ink-dim); font-size: 13px; cursor: pointer; }
 .project-entry-chips button small { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: 10px; }
 
 /* 討論根畫面：composer 是 fixed dock，殼設定保留高度 */

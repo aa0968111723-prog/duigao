@@ -4,8 +4,8 @@
 
 ## Main tip (VERIFY)
 
-- `origin/main` @ `105b89b` — PR-RESOLVE-04 files/outbox (#108)
-- Previous: `097a6af` #107, `698595b` #106, `196b3a3` #105, `444ae9d` #99, `3d8b2cf` #97
+- `origin/main` @ `85755ff` — PR-RESOLVE-05 mobile first-layer / tablet split (#110)
+- Previous: `105b89b` #108, `097a6af` #107, `698595b` #106, `196b3a3` #105, `444ae9d` #99, `3d8b2cf` #97
 - Migrations `0022+` on main: `0022_discussion_author_integrity.sql`, `0023_video_optimize.sql`
 
 ## Present / missing on that tip (before this branch)
@@ -19,7 +19,7 @@
 | Files/outbox isolation (#108) | Present | scoped `loadOutboxEntries(ownerId)`, `discussionWrite.ts` |
 | V-04 Leave on reconnecting | Missing | `RoomDiscussion` was `voice.state === "live"` only |
 | session-entry empty/auth-loading/permission-denied | Missing | guest card still「正在載入…」 |
-| hideRoomChrome + more-sheet + tablet split | Partial / missing | #108 hid some chrome; chips still first-layer `hidden={hideRoomChrome}` |
+| hideRoomChrome + more-sheet + tablet split | more-sheet/split on #110; hideRoomChrome still missing | `roomChrome.ts` on #110 has no hideRoomChrome |
 | applyDiscussionRealtime + acceptRealtimePayload | Missing | `room_discussion_messages` still `*` → `onProjectChange` |
 | flushOutboxOnOnline owner filter | Missing | #108 online flush replayed every failed row |
 

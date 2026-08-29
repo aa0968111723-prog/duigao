@@ -27,8 +27,7 @@ export function firstLayerChrome(input: {
   width: number;
   composerActive?: boolean;
 }): FirstLayerChrome {
-  // Phone composer focus (GAP-02 hideRoomChrome) wins over 更多.
-  // Tablet (>=768) keeps the more-sheet / split so 768 evidence stays true.
+  // Phone composer focus wins over 更多. Tablet (>=768) keeps split.
   const hideRoomChrome = Boolean(input.composerActive) && input.width < 768;
   const moreOpen = hideRoomChrome ? false : input.moreOpen;
   const tabletSplit = input.width >= 768 && moreOpen;
