@@ -17,6 +17,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { faults, requestLog, rows, start as startMock } from "./mock-supabase.mjs";
+import { openRoomCreate } from "./room-more.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const MOCK_PORT = 54418;
@@ -68,7 +69,9 @@ function serveStatic(root, port) {
 
 async function chooseCreate(page, name, type, file) {
   const sheet = page.getByTestId("create-content-sheet");
-  if (!await sheet.count()) await page.locator(".project-fab").click();
+  if (!await sheet.count()) {
+    await openRoomCreate(page);
+  }
   const current = page.getByTestId("create-content-sheet");
   const label = type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片";
   if (await current.getByRole("button", { name: label, exact: true }).count()) {
@@ -176,13 +179,14 @@ try {
     // 總覽/內容/企劃是入口 chips，不再是互相競爭的四分頁。
     check("第一屏就是討論殼", await page.getByTestId("discussion-feed").count() === 1 && await page.getByLabel("房間討論").count() === 1);
     check("討論輸入列在第一屏", await page.getByTestId("discussion-composer").count() === 1);
-    check("入口 chips 取代四分頁", await page.locator(".project-entry-chips button").count() === 3 && await page.locator(".project-tabs").count() === 0);
+    check("第一層沒有常駐總覽／AI／檔案", await page.getByTestId("open-overview-pane").count() === 0 && await page.getByTestId("room-ai-launcher").count() === 0 && await page.locator(".project-tabs").count() === 0);
+    check("第一層只有對話／白板與更多", await page.getByRole("button", { name: "對話", exact: true }).count() >= 1 && await page.getByRole("button", { name: "白板", exact: true }).count() >= 1 && await page.getByTestId("room-more").count() === 1);
     check("語音是一行邊界說明，不佔 pane", (await page.getByTestId("voice-boundary").innerText()).includes("語音") && await page.getByTestId("voice-boundary").locator("button").count() === 0);
 
     await chooseCreate(page, "擺攤計畫", "plan");
     await page.waitForSelector('[data-testid="plan-editor"]', { timeout: 10000 });
     await page.locator(".project-back-button").click({ force: true });
-    await page.waitForSelector(".project-entry-chips", { timeout: 10000 });
+    await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 10000 });
 
     await chooseCreate(page, "擺攤文宣", "poster", { name: "booth.png", mimeType: "image/png", buffer: TINY_PNG });
     await page.waitForSelector("img.stage-img", { timeout: 20000 });
