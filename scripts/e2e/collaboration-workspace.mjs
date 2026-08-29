@@ -368,7 +368,7 @@ try {
     await page.getByTestId("wb-write-decision").click();
     await page.waitForSelector('[data-testid="wb-decision-draft"]', { timeout: 8000 });
     await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_decision_title_768.png"), fullPage: true });
-    await page.getByRole("button", { name: "取消" }).click();
+    await page.locator(".project-sheet-close").click();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
