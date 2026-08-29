@@ -37,7 +37,38 @@ RoomDiscussion (`#95`) still reads `state === "live"` / `state === "connecting"`
 
 ## Tests
 
-There is no `npm test` script. Real scripts used by this batch are listed in the commit / PR body.
+There is no `npm test` script.
+
+| Script | Result |
+|---|---|
+| `test:voice-state` | **12/12** |
+| `test:collaboration` | pass (includes voice-state) |
+| `test:agent` | **16/16** |
+| `test:edge-cors` | **5/5** |
+| `test:asset-intelligence` | **15/15** |
+| `test:multi-branch` | **25/25** |
+| `test:migrations` `REQUIRE_PG=1` PG16 | **257/257** |
+| `test:multi-branch-e2e` | **54/54** — fake LiveKit → `語音連線失敗，稍後再試一次。`；無離開鈕 |
+| `test:collaboration-e2e` | **43/43** — voice-boundary 仍含「語音」；文字／白板仍可用 |
+| `build:local` | pass |
+| `agent:gate` | **PASS** |
+
+## Evidence (no tokens / PII)
+
+- `/opt/cursor/artifacts/voice-phases-{360,390,412,768,820}.png`
+- `/opt/cursor/artifacts/voice-phases.html`
+- `/opt/cursor/artifacts/voice-phase-browser-log.json`
+- `/opt/cursor/artifacts/voice-production-voice-token-headers.json` — production `/functions/v1/voice-token` is HTTP 200 `text/html`
+- `/opt/cursor/artifacts/e2e-multi-branch-voice-dock.png`
+- `/opt/cursor/artifacts/e2e-collaboration-text-whiteboard.png`
+
+## PR
+
+`create_pull_request` / GitHub MCP **403**. Branch is pushed. Compare:
+
+https://github.com/aa0968111723-prog/duigao/pull/new/cursor/p0-voice-truthful-state-70d9
+
+Head: see `git rev-parse HEAD` on this branch.
 
 ## Read-only review (this branch)
 
