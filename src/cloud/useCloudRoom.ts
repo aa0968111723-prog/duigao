@@ -31,6 +31,7 @@ import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
 import { isDuplicateKey, isInvalidInvite, isRevisionConflict, isStaleWrite } from "./errors";
+import { isDiscSupportNotRemoved, isDiscSupportNotSaved } from "./discussionSupportAck";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -141,7 +142,7 @@ export type CloudWrites = {
   insertDiscussion?: (message: import("../features/collaboration/types").DiscussionMessage) => Promise<boolean>;
   /** AI 套用稽核列（0019）。回傳成敗；失敗不重試 — 討論串訊息是人看的 fallback。 */
   recordAiApplyAudit?: (entry: { proposalId: string; proposalType: string; label: string }) => Promise<boolean>;
-  setDiscussionSupport?: (messageId: string, add: boolean) => void;
+  setDiscussionSupport?: (messageId: string, add: boolean) => Promise<void>;
   createWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   updateWhiteboard?: (board: import("../features/collaboration/types").Whiteboard) => void;
   upsertNode?: (node: import("../features/collaboration/types").WhiteboardNode) => Promise<import("../features/collaboration/types").WhiteboardNode | false | "conflict">;
@@ -1120,7 +1121,32 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
         return false;
       }
     },
-    setDiscussionSupport: (messageId, add) => run(`support:${messageId}`, () => repoSetDiscussionSupport(supabase!, boundRef.current!, messageId, add)),
+    setDiscussionSupport: async (messageId, add) => {
+      const rid = boundRef.current;
+      const key = `disc-support:${messageId}`;
+      if (!supabase || !rid) return;
+      setStatus("syncing");
+      try {
+        await repoSetDiscussionSupport(supabase, rid, messageId, add);
+        pending.current = acknowledgePendingWrite(pending.current, key);
+        setStatus(pending.current.length ? "offline-pending" : "synced");
+      } catch (err) {
+        if (isDuplicateKey(err)) {
+          pending.current = acknowledgePendingWrite(pending.current, key);
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          return;
+        }
+        if (isDiscSupportNotSaved(err) || isDiscSupportNotRemoved(err)) {
+          setStatus(pending.current.length ? "offline-pending" : "synced");
+          throw err;
+        }
+        pending.current = enqueuePendingWrite(pending.current, {
+          key,
+          task: () => repoSetDiscussionSupport(supabase, rid, messageId, add),
+        });
+        setStatus("offline-pending");
+      }
+    },
     createWhiteboard: (board) => run(`whiteboard-insert:${board.id}`, () => insertWhiteboard(supabase!, board)),
     updateWhiteboard: (board) => run(`whiteboard:${board.id}`, () => repoUpdateWhiteboard(supabase!, board)),
     upsertNode: (node) => writeAck(() => repoUpsertNode(supabase!, { ...node, roomId: boundRef.current! })),

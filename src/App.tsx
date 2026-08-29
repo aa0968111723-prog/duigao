@@ -42,6 +42,7 @@ import { insertLibraryAsset } from "./cloud/assetLibrary";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
+import { isDiscSupportNotRemoved, isDiscSupportNotSaved } from "./cloud/discussionSupportAck";
 import { getSupabase } from "./cloud/client";
 import { attachmentExt, attachmentPath, signedUrl, uploadAttachment } from "./cloud/assets";
 import {
@@ -1852,9 +1853,24 @@ export function App() {
           ? [...(r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)), { messageId, roomId: r.id, userId }]
           : (r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)),
       }));
-      cloudRef.current.writes.setDiscussionSupport?.(messageId, add);
+      void cloudRef.current.writes.setDiscussionSupport?.(messageId, add)?.catch((err) => {
+        if (isDiscSupportNotSaved(err)) {
+          updateRoom((r) => ({
+            ...r,
+            discussionSupports: (r.discussionSupports ?? []).filter((item) => !(item.messageId === messageId && item.userId === userId)),
+          }));
+          showToast("支持沒有存成，請再試一次。", { tone: "error" });
+          return;
+        }
+        if (!isDiscSupportNotRemoved(err)) return;
+        updateRoom((r) => {
+          if ((r.discussionSupports ?? []).some((item) => item.messageId === messageId && item.userId === userId)) return r;
+          return { ...r, discussionSupports: [...(r.discussionSupports ?? []), { messageId, roomId: r.id, userId }] };
+        });
+        showToast("支持沒有取消，請再試一次。", { tone: "error" });
+      });
     },
-    [cloud.userId, guest, updateRoom],
+    [cloud.userId, guest, showToast, updateRoom],
   );
 
   const createWhiteboard = useCallback(

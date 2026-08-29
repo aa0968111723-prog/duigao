@@ -13,6 +13,7 @@ import type {
 import { FRAME_KINDS } from "../features/collaboration/types";
 import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaboration/types";
 import { acceptDiscussionInsert } from "./discussionWrite";
+import { acceptDiscSupportDeleteAck, acceptDiscSupportUpsertAck } from "./discussionSupportAck";
 import { CloudError } from "./errors";
 
 type WhiteboardRow = {
@@ -695,12 +696,25 @@ export async function insertAiApplyAudit(
 
 export async function setDiscussionSupport(supabase: SupabaseClient, roomId: string, messageId: string, add: boolean): Promise<void> {
   if (add) {
-    const { error } = await supabase.from("room_discussion_supports").upsert({ message_id: messageId, room_id: roomId });
+    const { data, error } = await supabase
+      .from("room_discussion_supports")
+      .upsert({ message_id: messageId, room_id: roomId }, { onConflict: "message_id,user_id" })
+      .select("message_id")
+      .maybeSingle();
     if (error) throw new CloudError(error.message, "discussion-support");
+    acceptDiscSupportUpsertAck(data);
     return;
   }
-  const { error } = await supabase.from("room_discussion_supports").delete().eq("message_id", messageId).eq("room_id", roomId);
+  // RLS delete policy limits this to the caller's own support row.
+  const { data, error } = await supabase
+    .from("room_discussion_supports")
+    .delete()
+    .eq("message_id", messageId)
+    .eq("room_id", roomId)
+    .select("message_id")
+    .maybeSingle();
   if (error) throw new CloudError(error.message, "discussion-support");
+  acceptDiscSupportDeleteAck(data);
 }
 
 export async function insertDecision(supabase: SupabaseClient, decision: DecisionRecord): Promise<void> {
