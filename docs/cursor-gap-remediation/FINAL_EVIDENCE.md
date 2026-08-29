@@ -142,7 +142,8 @@ evidenced = 本 tip 有 source + 對應 test（可加 artifact）。不是「目
 | 本機 `npm run agent:gate` @ `2192774` | evidenced | 本回合跑過，exit 0，印出 `PASS: AUTOMERGE REQUIRES AGENT_GATE_PASS`。含 `build:local`。 |
 | GitHub `agent-read-layer` @ `2192774` | evidenced | run `33268176132` **success**。 |
 | CI browser @ `bad534b` | evidenced | run `33267190274` **success**（含 `test:video`）。 |
-| CI browser @ `2192774` | incomplete | run [`33268176148`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268176148) **failure**。`build` / `migrations` / `agent-read-layer` success。`test:collaboration-e2e` **success**（未讀跳轉）。`test:video` **failure**：`playerReady` `waitForSelector('video.v-video')` 45s。本 tip 把等待改成 90s + 誠實失敗卡 + dump，**本 tip 的 browser 尚未跑。不得寫綠。** |
+| CI browser @ `2192774` | incomplete | run [`33268176148`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268176148) **failure**。`test:collaboration-e2e` **success**。`test:video` 45s `video.v-video`。 |
+| CI browser @ `30f5e5a` | incomplete | run [`33268530465`](https://github.com/aa0968111723-prog/duigao/actions/runs/33268530465) **failure**。`test:collaboration-e2e` **success**；`test:visual` 15s `wb-canvas` visible。本機 `test:video` **171/171**。本 tip 改 visual 等 45s + 非零 box + dump。**尚未重跑 CI。不得寫綠。** |
 | CodeRabbit 1-check success | unmodeled | 「Review skipped: draft」不是產品 CI。 |
 | 已讀回條 UI | unmodeled | 禁止。 |
 
