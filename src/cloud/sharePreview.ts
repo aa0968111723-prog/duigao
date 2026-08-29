@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ASSET_BUCKET } from "./assets";
 import { CloudError } from "./errors";
 import { SUPABASE_URL } from "./config";
+import { acceptSharePreviewDisableAck } from "./sharePreviewRotateAck";
 import { renderShareThumbnail, type ThumbnailDecoration } from "./shareThumbnail";
 import type { MediaType } from "../lib/types";
 import { isCoverSource, sharePresentation, type CoverSource } from "../lib/sharePresentation";
@@ -422,11 +423,14 @@ export async function rotateRoomPreview(
     // Delete first and refuse to continue if it fails: flipping `enabled`
     // while the object survives would revoke nothing at all.
     await revokeThumbnail(supabase, existing.thumbnailPath);
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("share_previews")
       .update({ enabled: false, thumbnail_path: null })
-      .eq("id", existing.id);
+      .eq("id", existing.id)
+      .select("id")
+      .maybeSingle();
     if (error) throw new CloudError(error.message, "preview");
+    acceptSharePreviewDisableAck(data);
   }
   // A rotated custom cover has no bytes left to point at, so the new card falls
   // back to the room's own frame unless the host re-uploads.
