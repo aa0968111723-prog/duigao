@@ -104,5 +104,27 @@ Intelligence schema、Canva OAuth、CUTOS 編輯器、planform-iso 3D、正式�
 | TC-01 | `scripts/e2e/collaboration-workspace.mjs` 有三條白板手勢檢查寫死 `check("…", true)`，永遠不會失敗 | `scripts/e2e/collaboration-workspace.mjs:261,269,272` | 白板線（#78 正在重寫這塊；本線不進去改，避免衝突） |
 | V1–V13 | 語音的狀態機與假連線／幽靈參與者問題 | `src/hooks/useVoiceRoom.ts` | 本線 **PR-COMM-06**（已排程，不在 PR-COMM-00） |
 
-SEC-01／SEC-05／SEC-10／SEC-12 是**尚未經對抗審查確認**的候選（見
-`BASELINE_AUDIT.md` 的證據等級標示），交接時請先自行複驗。
+### 對抗審查之後的更新
+
+- **已確認為真**（對抗層 CONFIRMED）：`comments` 的冒名與改寫、`messages`
+  的 `for all`、`room_members` 沒有 DELETE、`guard_room_update` 沒涵蓋
+  `room_mode`、重播 insert 重鑄 uuid、`flushPending` 覆寫佇列、並行 reload
+  沒有順序守衛、Realtime 重連不重抓、DELETE 監聽沒有房間 filter、
+  白板節點 id fallback 成非 uuid。
+- **被推翻**：`strokes` 的 `for all`（是刻意出貨的共同標註設計，不是疏漏）。
+- **證據不足以定案**：`0001/0002/0005/0012` 的預設 `GRANT ALL`／TRUNCATE。
+  推翻理由指出測試 shim 重現的預設權限與真專案不必然相同。
+  **請用真專案 probe 確認**：
+  ```sql
+  select table_name, grantee, privilege_type
+  from information_schema.role_table_grants
+  where table_schema = 'public' and grantee in ('anon','authenticated')
+    and privilege_type = 'TRUNCATE';
+  ```
+- **新增**：`supabase/functions/asset-analysis/index.ts:511` 參照未定義的
+  `dedupe_key`（`tsc` 報 TS2552）。對抗層判該分支不可達，但識別字確實
+  未定義 —— 屬於待清理的真問題，交素材智慧線。
+
+完整裁決見 `docs/team-communication/FINDINGS_RULING.md`。
+仍標 **[待複驗]** 的（手機／平板 UI 多數條目、`upsert_visual_proposal`
+跨房寫入、測試盲區多數條目）**沒有被確認也沒有被推翻**，請自行複驗。
