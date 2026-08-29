@@ -43,6 +43,9 @@ export type RoomDiscussionApi = {
   /** 附件（PR-01b）：有提供才渲染迴紋針；上傳中由 attachBusy 鎖住。 */
   onAttach?: (files: File[]) => void;
   attachBusy?: boolean;
+  attachUpload?: import("../../cloud/discussionWrite").DiscussionAttachUpload | null;
+  /** 手機討論輸入聚焦時，殼把搜尋／總覽／AI 收起來。 */
+  onComposerActive?: (active: boolean) => void;
   onReject?: (reason: string) => void;
   /**
    * 貼上／送出偵測為純 URL 時建立連結卡；回 false 則按一般文字送出。
@@ -490,9 +493,27 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               </button>
             </>
           )}
+          {api.attachUpload && (
+            <div
+              className={`rd-attach-progress${api.attachUpload.phase === "failed" ? " is-failed" : ""}`}
+              data-testid="attach-upload"
+              data-phase={api.attachUpload.phase}
+              role="status"
+            >
+              {api.attachUpload.previewUrl ? (
+                <img src={api.attachUpload.previewUrl} alt="" className="rd-attach-preview" />
+              ) : null}
+              <span>{api.attachUpload.message}</span>
+              {api.attachUpload.phase === "uploading" ? (
+                <progress max={100} value={api.attachUpload.percent} />
+              ) : null}
+            </div>
+          )}
           <input
             className="text-input"
             value={api.draft}
+            onFocus={() => api.onComposerActive?.(true)}
+            onBlur={() => api.onComposerActive?.(false)}
             onChange={(event) => api.setDraft(event.target.value)}
             onPaste={(event) => {
               // 只攔檔案貼上；文字貼上不動。

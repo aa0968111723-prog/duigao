@@ -122,6 +122,7 @@ export type MultiBranchRoomApi = {
   /** 討論附件（PR-01b）；App 持有上傳與簽名。 */
   onAttachDiscussion?: (files: File[]) => void;
   attachBusy?: boolean;
+  attachUpload?: import("../../cloud/discussionWrite").DiscussionAttachUpload | null;
   onIntakeReject?: (reason: string) => void;
   onSendDiscussionLink?: (url: string, reply?: { replyToId: string; quotedBody: string }) => boolean;
   resolveAssetUrl?: (path: string) => Promise<string>;
@@ -723,6 +724,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const [pushedPane, setPushedPane] = useState<PushedPane | null>(null);
   const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
   const [search, setSearch] = useState("");
+  const [composerActive, setComposerActive] = useState(false);
+  const hideRoomChrome = isMobile && composerActive && !search.trim();
   const [createOpen, setCreateOpen] = useState(false);
   const [pollOpen, setPollOpen] = useState(false);
   const [sortRecent, setSortRecent] = useState(true);
@@ -810,7 +813,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         {inShellBranch ? <button type="button" className="project-back-button" onClick={api.onBackToRoom}>‹</button> : null}
         <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
         <div className="project-head-actions">
-          <button type="button" className="project-ai-button" data-testid="room-ai-launcher" onClick={() => api.onOpenAi()}>✦ AI</button>
+          {!hideRoomChrome && <button type="button" className="project-ai-button" data-testid="room-ai-launcher" onClick={() => api.onOpenAi()}>✦ AI</button>}
           <button type="button" className="project-share-button" onClick={api.onShare}>分享</button>
         </div>
       </header>
@@ -819,7 +822,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           進度不能因此消失。 */}
       <UploadStatus upload={api.upload} />
 
-      {!inShellBranch && (
+      {!inShellBranch && !hideRoomChrome && (
         <div className="project-search-wrap">
           <span aria-hidden>⌕</span>
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜尋茶會、擺攤、招生…" aria-label="搜尋房間內容" />
@@ -858,7 +861,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         </main>
       ) : (
         <>
-          <nav className="project-entry-chips" aria-label="房間內容">
+          <nav className="project-entry-chips" aria-label="房間內容" hidden={hideRoomChrome}>
             {PANE_META.map((item) => (
               <button type="button" key={item.id} data-testid={`open-${item.id}-pane`} onClick={() => setPushedPane(item.id)}>
                 <span aria-hidden>{item.icon}</span>{item.label}
@@ -944,6 +947,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onRetry: api.onRetryDiscussion,
                     onAttach: api.onAttachDiscussion,
                     attachBusy: api.attachBusy,
+                    attachUpload: api.attachUpload,
+                    onComposerActive: setComposerActive,
                     onReject: api.onIntakeReject,
                     onSendLink: api.onSendDiscussionLink,
                     resolveAssetUrl: api.resolveAssetUrl,
@@ -971,7 +976,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
               </section>
             )}
           </main>
-          {api.canManage && !api.activeWhiteboardId && (
+          {api.canManage && !api.activeWhiteboardId && !hideRoomChrome && (
             <button type="button" className="project-fab" onClick={() => setCreateOpen(true)} aria-label="新增內容">＋</button>
           )}
           {pushedPane && (
