@@ -161,6 +161,20 @@ test("reconnecting / joining / left never publish a fake roster", () => {
   }
 });
 
+test("join failure must clear the live session before publishing 失敗", () => {
+  const hook = readFileSync(resolve(ROOT, "src/hooks/useVoiceRoom.ts"), "utf8");
+  const live = readFileSync(resolve(ROOT, "src/features/voice/liveVoice.ts"), "utf8");
+  assert.match(hook, /abandonFailedJoin/);
+  assert.match(hook, /endSessionIfEmpty/);
+  const tokenReject = hook.slice(hook.indexOf("const tokenResult = await fetchVoiceToken"));
+  const abandonAt = tokenReject.indexOf("abandonFailedJoin(createdSessionId)");
+  const errorAt = tokenReject.indexOf("setError(voicePhaseMessage(parsed.phase))");
+  assert.ok(abandonAt >= 0, "token reject must abandon the session");
+  assert.ok(errorAt > abandonAt, "error must not appear before session cleanup");
+  assert.match(live, /sessionEstablished/);
+  assert.match(live, /sessionEstablished\) input\.onDisconnected/);
+});
+
 test("hook and liveVoice use the truthful machine; RoomDiscussion still reads legacy dock state", () => {
   const hook = readFileSync(resolve(ROOT, "src/hooks/useVoiceRoom.ts"), "utf8");
   const live = readFileSync(resolve(ROOT, "src/features/voice/liveVoice.ts"), "utf8");

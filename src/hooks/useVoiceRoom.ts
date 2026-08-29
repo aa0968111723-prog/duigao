@@ -198,16 +198,40 @@ export function useVoiceRoom({ supabase, boundRoomId, userId, displayName, canMa
     setMuted(false);
   }, [supabase, userId, endSessionIfEmpty]);
 
+  const abandonFailedJoin = useCallback(async (createdSessionId: string | null) => {
+    const sessionId = sessionIdRef.current;
+    if (supabase && sessionId && userId) {
+      await supabase
+        .from("voice_session_participants")
+        .update({ left_at: new Date().toISOString() })
+        .eq("session_id", sessionId)
+        .eq("user_id", userId)
+        .then(() => undefined, () => undefined);
+    }
+    if (createdSessionId && supabase) {
+      await supabase
+        .from("voice_sessions")
+        .update({ status: "ended", ended_at: new Date().toISOString() })
+        .eq("id", createdSessionId)
+        .then(() => undefined, () => undefined);
+    }
+    if (sessionId) await endSessionIfEmpty(sessionId);
+    rosterRef.current = [];
+    setParticipants([]);
+  }, [supabase, userId, endSessionIfEmpty]);
+
   const handleUnexpectedDisconnect = useCallback((seq: number) => {
     if (seq !== joinSeqRef.current) return;
     connectionRef.current = null;
     clearRefreshTimer();
-    phaseRef.current = "connection-failed";
-    setPhase("connection-failed");
-    setError(voicePhaseMessage("connection-failed"));
-    rosterRef.current = [];
-    setParticipants([]);
-  }, []);
+    void (async () => {
+      await abandonFailedJoin(null);
+      if (seq !== joinSeqRef.current) return;
+      phaseRef.current = "connection-failed";
+      setPhase("connection-failed");
+      setError(voicePhaseMessage("connection-failed"));
+    })();
+  }, [abandonFailedJoin]);
 
   const applyTokenFailure = (raw: unknown) => {
     const parsed = parseVoiceTokenPayload(raw);
@@ -359,25 +383,11 @@ export function useVoiceRoom({ supabase, boundRoomId, userId, displayName, canMa
         if (seq !== joinSeqRef.current) return;
         const parsed = parseVoiceTokenPayload(tokenResult);
         if (!parsed.ok) {
+          await abandonFailedJoin(createdSessionId);
+          if (seq !== joinSeqRef.current) return;
           phaseRef.current = parsed.phase;
           setPhase(parsed.phase);
           setError(voicePhaseMessage(parsed.phase));
-          setParticipants([]);
-          if (createdSessionId && supabase) {
-            await supabase
-              .from("voice_sessions")
-              .update({ status: "ended", ended_at: new Date().toISOString() })
-              .eq("id", createdSessionId)
-              .then(() => undefined, () => undefined);
-          }
-          if (sessionIdRef.current) {
-            await supabase
-              .from("voice_session_participants")
-              .update({ left_at: new Date().toISOString() })
-              .eq("session_id", sessionIdRef.current)
-              .eq("user_id", userId)
-              .then(() => undefined, () => undefined);
-          }
           return;
         }
 
@@ -397,34 +407,18 @@ export function useVoiceRoom({ supabase, boundRoomId, userId, displayName, canMa
         markConnected();
         scheduleTokenRefresh(seq, roomId, parsed.ttlSeconds);
       } catch (err) {
-        if (supabase && sessionIdRef.current) {
-          await supabase
-            .from("voice_session_participants")
-            .update({ left_at: new Date().toISOString() })
-            .eq("session_id", sessionIdRef.current)
-            .eq("user_id", userId)
-            .then(() => undefined, () => undefined);
-        }
-        if (createdSessionId && supabase) {
-          await supabase
-            .from("voice_sessions")
-            .update({ status: "ended", ended_at: new Date().toISOString() })
-            .eq("id", createdSessionId)
-            .then(() => undefined, () => undefined);
-        }
+        await abandonFailedJoin(createdSessionId);
         if (seq === joinSeqRef.current) {
           const failed = classifyConnectFailure(err);
           phaseRef.current = failed;
           setPhase(failed);
           setError(voicePhaseMessage(failed));
-          rosterRef.current = [];
-          setParticipants([]);
         }
       } finally {
         joiningRef.current = false;
       }
     })();
-  }, [supabase, userId, displayName, canManage, scheduleTokenRefresh, handleUnexpectedDisconnect]);
+  }, [supabase, userId, displayName, canManage, scheduleTokenRefresh, handleUnexpectedDisconnect, abandonFailedJoin]);
 
   const leave = useCallback(() => {
     joinSeqRef.current += 1;

@@ -35,13 +35,29 @@ Never fake `connected` or a roster. Participants only when `phase === "connected
 
 RoomDiscussion (`#95`) still reads `state === "live"` / `state === "connecting"`. Text / whiteboard / files paths are untouched.
 
+## CI failure (browser job on #98)
+
+- Run: https://github.com/aa0968111723-prog/duigao/actions/runs/33255803346
+- Job: **browser** (`99109170480`)
+- Step that failed: `npm run test:multi-branch-e2e` (workflow `.github/workflows/build.yml`)
+- Earlier steps in that job passed: `test:multi-branch`, `test:edge-cors`, `test:asset-intelligence`, `test:collaboration`
+- Later e2e steps were skipped because this step exited 1
+- Log (do not guess): `FAIL  連線失敗即清場（無 live 殘場、無在場殭屍） — live=1 zombies=0`
+- Adjacent lines: error text `語音連線失敗，稍後再試一次。` at `13:46:09.036`; the live-session assert 2ms later at `13:46:09.038`
+
+Root cause: a failed `room.connect()` still fires LiveKit `Disconnected`. The hook treated that as an established-session drop and published `失敗` **before** `left_at` / `status=ended` finished. CI read the mock DB in that window. Token-reject also called `setError` before abandon.
+
+Fix (truthful, tests kept):
+- `liveVoice.ts`: forward `onDisconnected` only after the session is actually established
+- `useVoiceRoom.ts`: `abandonFailedJoin` (mark left + end created / empty session) **then** publish the error
+
 ## Tests
 
 There is no `npm test` script.
 
 | Script | Result |
 |---|---|
-| `test:voice-state` | **12/12** |
+| `test:voice-state` | **13/13** |
 | `test:collaboration` | **118/118** (includes voice-state) |
 | `test:agent` | **16/16** |
 | `test:edge-cors` | **5/5** |
