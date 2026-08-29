@@ -109,10 +109,15 @@ function conservativeAlternative(
   diagnostics: readonly Diagnostic[],
   newId: (prefix: string) => string,
 ): DesignAlternative | null {
+  // 只收**量出來的**診斷。
+  //
+  // 原本是用 `confidence >= 0.8` 過濾，但 confidence 由模型自己給 ——
+  // 模型回一條信心 0.9 的憑空建議就會混進一個叫「只修可量測的問題」的方案裡，
+  // 那個名字就變成謊言。`measured` 由來源決定，模型填不進來。
   const changes = diagnostics
-    .filter((diagnostic) => diagnostic.confidence >= 0.8)
+    .filter((diagnostic) => diagnostic.measured)
     .map((diagnostic) => ({
-      dimension: dimensionOf(diagnostic),
+      dimension: diagnostic.dimension ?? "structure",
       target: diagnostic.location,
       change: diagnostic.recommendation,
       reason: diagnostic.evidence,
@@ -131,15 +136,6 @@ function conservativeAlternative(
     ],
     tradeoffs: ["只解決合規與可讀性，不會讓作品變得更有記憶點"],
   };
-}
-
-/** 從診斷 id 的前綴推回它屬於哪個維度。 */
-function dimensionOf(diagnostic: Diagnostic): ChangeDimension {
-  if (diagnostic.id.startsWith("contrast")) return "color";
-  if (diagnostic.id.startsWith("tap")) return "interaction";
-  if (diagnostic.id.startsWith("measure") || diagnostic.id.startsWith("leading")) return "layout";
-  if (diagnostic.id.startsWith("mobile-type")) return "typography";
-  return "structure";
 }
 
 /**
@@ -364,7 +360,7 @@ function buildRationale(
   if (!diagnostics.length && !alternatives.length) {
     return "沒有取得足以分析的資料，因此沒有提出任何判斷。";
   }
-  const measured = diagnostics.filter((diagnostic) => diagnostic.confidence >= 0.99).length;
+  const measured = diagnostics.filter((diagnostic) => diagnostic.measured).length;
   const parts = [`共 ${diagnostics.length} 條診斷，其中 ${measured} 條是直接量測出來的數值。`];
   if (provider) parts.push(`AI 分析由 ${provider} 提供。`);
   else parts.push("本次未使用 AI 分析，全部來自本地量測。");

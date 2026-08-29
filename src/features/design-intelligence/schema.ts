@@ -234,13 +234,19 @@ export function parseDiagnostics(raw: unknown, max = 12): ParseResult<Diagnostic
       continue;
     }
     value.push({
-      id: text(record.id, 64) ?? `dx-${value.length + 1}`,
+      // id 一律加 `ai-` 命名空間。模型可以指定 id，而本地診斷的 id 是
+      // 由內容決定的 —— 不隔開的話模型能撞掉本地診斷的 id，或偽造出
+      // 讓下游分類錯誤的前綴。
+      id: `ai-${text(record.id, 48) ?? value.length + 1}`,
       location: location!,
       issue: issue!,
       impact: impact!,
       evidence: evidence!,
       recommendation: recommendation!,
       severity: oneOf(record.severity, SEVERITIES) ?? "minor",
+      // 一律 false：模型自己說「這是量出來的」沒有意義。
+      measured: false,
+      dimension: oneOf(record.dimension, CHANGE_DIMENSIONS) ?? undefined,
       confidence: confidence(record.confidence),
       knowledgeRefs: stringList(record.knowledgeRefs, 8, 64),
       sourceRefs: stringList(record.sourceRefs, 8, 64),

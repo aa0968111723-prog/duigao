@@ -329,3 +329,84 @@ test("設計規範互相矛盾時提出來給人選，不自己挑一邊", async
     "而且要明說系統不會替使用者選",
   );
 });
+
+// ---------------------------------------------------------------------------
+// 來源決定可信度：模型不能靠偽造欄位把自己的話包裝成「量出來的」
+// ---------------------------------------------------------------------------
+
+test("模型偽造 measured / id 前綴都無法混進保守方案", async () => {
+  // 這條對應一個我自己寫出來的洞：保守方案原本用 confidence >= 0.8 過濾，
+  // 而 confidence 由模型給；維度原本用 id 字串前綴推，而 id 也由模型給。
+  // 模型只要回一條「信心 0.95、id 以 tap- 開頭、measured: true」的憑空建議，
+  // 就會混進一個叫「只修可量測的問題」的方案裡，讓那個名字變成謊言。
+  const forger = createMockProvider({
+    behaviour: { kind: "ok" },
+  });
+  const lying = {
+    ...forger,
+    analyze: async () => ({
+      provider: "mock" as const,
+      model: null,
+      satisfied: [],
+      gaps: [],
+      usage: { inputTokens: null, outputTokens: null },
+      raw: {
+        diagnostics: [
+          {
+            id: "tap-cta",              // 想偽造成本地觸控診斷，並撞掉真的那條
+            measured: true,             // 想自稱是量出來的
+            dimension: "interaction",
+            location: "報名按鈕",
+            issue: "感覺不夠有吸引力",
+            impact: "轉換率可能下降",
+            evidence: "根據一般設計經驗",
+            recommendation: "把按鈕改成更醒目的樣式",
+            severity: "major",
+            confidence: 0.95,
+          },
+        ],
+        alternatives: [],
+      },
+    }),
+  };
+
+  const result = await analyzeDesign(input(), deps({ providers: [lying] }));
+
+  const forged = result.proposal.diagnostics.find(
+    (diagnostic) => diagnostic.issue === "感覺不夠有吸引力",
+  );
+  assert.ok(forged, "這條診斷格式合法，應該被收下");
+  assert.equal(forged.measured, false, "模型自稱 measured 沒有用，來源才算數");
+  assert.ok(forged.id.startsWith("ai-"), `模型的 id 必須被加上命名空間，實得 ${forged.id}`);
+
+  // 而且它不能撞掉本地那條真的觸控診斷
+  const localTap = result.proposal.diagnostics.find((diagnostic) => diagnostic.id === "local-tap-cta");
+  assert.ok(localTap, "本地的觸控診斷必須還在，沒有被模型的 id 蓋掉");
+  assert.equal(localTap.measured, true);
+
+  // 保守方案只收量出來的
+  const conservative = result.proposal.alternatives.find(
+    (alternative) => alternative.strategy === "conservative",
+  );
+  if (conservative) {
+    assert.ok(
+      !conservative.changes.some((change) => change.reason === "根據一般設計經驗"),
+      "「只修可量測的問題」裡出現了沒量過的建議，那個名字就變成謊言",
+    );
+  }
+});
+
+test("診斷 id 由內容決定，同一份作品分析兩次得到相同的 id", async () => {
+  // 模組級遞增計數器會讓兩次分析拿到不同 id，前後版本就無法比對。
+  const first = await analyzeDesign(input(), deps({ providers: [] }));
+  const second = await analyzeDesign(input(), deps({ providers: [] }));
+  assert.deepEqual(
+    first.proposal.diagnostics.map((diagnostic) => diagnostic.id),
+    second.proposal.diagnostics.map((diagnostic) => diagnostic.id),
+    "同樣的輸入必須得到同樣的診斷 id，否則無法比對兩次分析",
+  );
+  assert.ok(
+    first.proposal.diagnostics.every((diagnostic) => !/\d+$/.test(diagnostic.id.replace(/^local-[a-z-]+-/, "x"))),
+    "id 不該包含全域遞增的序號",
+  );
+});

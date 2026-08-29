@@ -36,15 +36,15 @@ export type DesignFacts = {
   viewportWidthPx?: number;
 };
 
-let seq = 0;
-function nextId(prefix: string): string {
-  seq += 1;
-  return `${prefix}-${seq}`;
-}
-
-/** 測試用：讓 id 可預期。 */
-export function resetDiagnosticIds(): void {
-  seq = 0;
+/**
+ * 診斷的 id 由**內容**決定，不用模組級遞增計數器。
+ *
+ * 遞增計數器有兩個問題：跨多次分析會累積（同一份作品分析兩次得到不同 id，
+ * 前後版本無法比對），而且需要一個測試專用的 reset 函式 —— 那本身就是
+ * 「這個設計很脆」的訊號。內容決定的 id 天生穩定且可比對。
+ */
+function diagnosticId(kind: string, subjectId: string): string {
+  return `local-${kind}-${subjectId}`;
 }
 
 /**
@@ -131,7 +131,9 @@ export function analyzeContrast(facts: DesignFacts): Diagnostic[] {
 
     if (!surface) {
       diagnostics.push({
-        id: nextId("contrast"),
+        id: diagnosticId("contrast", block.id),
+        dimension: "color",
+        measured: true,
         location: block.label,
         issue: "沒有宣告背景色或表面色，無法計算對比",
         impact: "無法判斷這段文字在實際背景上讀不讀得到",
@@ -153,7 +155,9 @@ export function analyzeContrast(facts: DesignFacts): Diagnostic[] {
     const thresholdNote = target === 3 ? "大字門檻 3:1" : "一般內文門檻 4.5:1";
 
     diagnostics.push({
-      id: nextId("contrast"),
+      id: diagnosticId("contrast", block.id),
+      dimension: "color",
+      measured: true,
       location: block.label,
       issue: `文字與背景的對比只有 ${ratio.toFixed(2)}:1，低於${thresholdNote}`,
       impact: block.isHeading
@@ -184,7 +188,9 @@ export function analyzeTapTargets(facts: DesignFacts): Diagnostic[] {
     .map((target) => {
       const shortSide = Math.min(target.widthPx, target.heightPx);
       return {
-        id: nextId("tap"),
+        id: diagnosticId("tap", target.id),
+        dimension: "interaction",
+        measured: true,
         location: target.label,
         issue: `可點擊區域只有 ${target.widthPx}×${target.heightPx} CSS 像素，短邊低於 24`,
         impact: "手機上手指容易點不到或誤觸旁邊的元素，而行動裝置是主要使用情境",
@@ -207,7 +213,9 @@ export function analyzeTypography(facts: DesignFacts): Diagnostic[] {
 
     if (block.charsPerLine > 75) {
       diagnostics.push({
-        id: nextId("measure"),
+        id: diagnosticId("measure", block.id),
+        dimension: "layout",
+        measured: true,
         location: block.label,
         issue: `每行 ${block.charsPerLine} 個字元，超過建議上限 75`,
         impact: "行太長時視線從行尾回到下一行的行首容易跳行，長段落會讀不下去",
@@ -221,7 +229,9 @@ export function analyzeTypography(facts: DesignFacts): Diagnostic[] {
 
     if (block.lineHeight < 1.5) {
       diagnostics.push({
-        id: nextId("leading"),
+        id: diagnosticId("leading", block.id),
+        dimension: "layout",
+        measured: true,
         location: block.label,
         issue: `行高只有 ${block.lineHeight}，低於建議的 1.5`,
         impact: "行與行擠在一起，閱讀障礙與低視力的人尤其難以逐行掃讀",
@@ -250,7 +260,9 @@ export function analyzeMobileLegibility(facts: DesignFacts): Diagnostic[] {
     .map(
       (block) =>
         ({
-          id: nextId("mobile-type"),
+          id: diagnosticId("mobile-type", block.id),
+          dimension: "typography",
+          measured: true,
           location: block.label,
           issue: `內文字級 ${block.fontSizePx}px，在 ${width}px 寬的螢幕上偏小`,
           impact: "手機上要放大才讀得到；放大之後版面會左右捲動，整個體驗會垮掉",

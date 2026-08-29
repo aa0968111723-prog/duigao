@@ -67,6 +67,16 @@ export type Diagnostic = {
   severity: Severity;
   /** 0–1。低於 0.5 的診斷 UI 要標示「需要人確認」。 */
   confidence: number;
+  /**
+   * 這條診斷是**量出來的**（本地分析器算的）還是模型說的。
+   *
+   * 由來源決定，不由 payload 宣稱 —— `parseDiagnostics` 一律設成 false，
+   * 模型自己填 `measured: true` 沒有用。這跟知識庫的 provenance 是同一個
+   * 道理：讓不可信輸入自我認證，等於沒有認證。
+   */
+  measured: boolean;
+  /** 這條診斷屬於哪個改動維度（保守方案要靠它分類，不能靠猜 id 前綴）。 */
+  dimension?: ChangeDimension;
   /** 這條診斷引用了哪些知識條目（knowledge.id）。 */
   knowledgeRefs?: string[];
   /** 這條診斷引用了哪些外部來源（research source id）。 */
