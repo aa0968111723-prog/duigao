@@ -59,7 +59,19 @@ export function requireDuigaoSignature(input: {
   })();
 }
 
-const ALLOWED_ACTIONS = new Set(["create_comment", "create_poll", "create_plan_draft", "add_whiteboard_node"]);
+const ALLOWED_ACTIONS = new Set([
+  "create_comment",
+  "create_poll",
+  "create_plan_draft",
+  "add_whiteboard_node",
+  "propose_edit_text",
+  "propose_add_shape",
+  "propose_move_item",
+  "propose_add_image",
+  "imagine_image",
+  "imagine_video",
+  "refuse_with_reason",
+]);
 
 export function answerRoomContext(ask: RoomContextAsk, raw: Record<string, unknown> | null): RoomContextAnswer | null {
   if (!ask.query.trim()) return null;
