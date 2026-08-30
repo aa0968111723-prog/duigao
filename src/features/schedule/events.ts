@@ -31,10 +31,30 @@ export function weekStart(ts: number, timeZone = "Asia/Taipei"): number {
   return start - offset * 86400000;
 }
 
-/** Insert vs OCC update. Patch bumps version first; expected is the previous row. */
-export function scheduleWritePlan(event: ScheduleEvent): { kind: "insert" } | { kind: "update"; expectedVersion: number } {
-  if (event.version <= 1) return { kind: "insert" };
-  return { kind: "update", expectedVersion: event.version - 1 };
+export type ScheduleCloudWrite =
+  | { kind: "insert" }
+  | { kind: "update"; expectedVersion: number }
+  | { kind: "ack" }
+  | { kind: "stale-write" };
+
+/**
+ * Decide the cloud write from the row that actually exists, not from local
+ * version alone. A create that was patched before ack is still INSERT
+ * (existing=null) even when local version is 2+.
+ */
+export function scheduleCloudWrite(
+  event: Pick<ScheduleEvent, "version">,
+  existing: { version: number } | null,
+): ScheduleCloudWrite {
+  if (!existing) return { kind: "insert" };
+  if (existing.version === event.version) return { kind: "ack" };
+  if (existing.version < event.version) return { kind: "update", expectedVersion: existing.version };
+  return { kind: "stale-write" };
+}
+
+/** @deprecated Prefer scheduleCloudWrite(event, existing). Kept for call sites that only have the local event. */
+export function scheduleWritePlan(event: ScheduleEvent, existing: { version: number } | null = null): ScheduleCloudWrite {
+  return scheduleCloudWrite(event, existing);
 }
 
 export function isScheduleEventType(value: unknown): value is ScheduleEventType {

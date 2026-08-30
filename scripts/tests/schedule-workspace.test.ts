@@ -14,10 +14,10 @@ import {
   eventsInRange,
   moveEventToDay,
   patchScheduleEvent,
-  scheduleWritePlan,
+  scheduleCloudWrite,
   weekStart,
 } from "../../src/features/schedule/events.ts";
-import { acceptScheduleWrite } from "../../src/features/schedule/honesty.ts";
+import { acceptScheduleWrite, decideScheduleWriteRetry } from "../../src/features/schedule/honesty.ts";
 import { applyDeadlineToNode, eventFromBoardNode, eventFromDiscussion, nodeFromScheduleEvent, sourceOpenTarget } from "../../src/features/schedule/links.ts";
 import { decideScheduleProposalWrite, proposalShowsSources } from "../../src/features/schedule/proposals.ts";
 import type { DiscussionMessage } from "../../src/features/collaboration/types.ts";
@@ -80,14 +80,32 @@ test("weekStart uses Taipei weekday so Monday week starts Monday", () => {
   assert.notEqual(days[0]?.dayStart, Date.parse("2026-08-25T00:00:00+08:00"));
 });
 
-test("scheduleWritePlan inserts v1 and OCC-updates later versions", () => {
+test("never-acked local patch INSERTs; OCC uses the server version not local version-1", () => {
   const created = createScheduleEvent({ roomId: "r", createdBy: "u", title: "交稿", startAt: 1 });
-  assert.deepEqual(scheduleWritePlan(created), { kind: "insert" });
+  assert.deepEqual(scheduleCloudWrite(created, null), { kind: "insert" });
   const edited = patchScheduleEvent(created, { title: "交稿定稿" });
   assert.equal(edited.version, 2);
-  assert.deepEqual(scheduleWritePlan(edited), { kind: "update", expectedVersion: 1 });
+  // Offline create+edit: no row yet. version>1 must still INSERT, not UPDATE eq version=1.
+  assert.deepEqual(scheduleCloudWrite(edited, null), { kind: "insert" });
   const twice = patchScheduleEvent(edited, { status: "doing" });
-  assert.deepEqual(scheduleWritePlan(twice), { kind: "update", expectedVersion: 2 });
+  assert.equal(twice.version, 3);
+  assert.deepEqual(scheduleCloudWrite(twice, null), { kind: "insert" });
+  assert.deepEqual(scheduleCloudWrite(twice, { version: 1 }), { kind: "update", expectedVersion: 1 });
+  assert.deepEqual(scheduleCloudWrite(twice, { version: twice.version }), { kind: "ack" });
+  assert.deepEqual(scheduleCloudWrite(twice, { version: 9 }), { kind: "stale-write" });
+});
+
+test("schedule stale-write is dropped, not requeued like a network failure", () => {
+  assert.equal(decideScheduleWriteRetry("conflict").queueMemory, false);
+  assert.equal(decideScheduleWriteRetry("duplicate").queueMemory, false);
+  assert.equal(decideScheduleWriteRetry("success").queueMemory, false);
+  assert.equal(decideScheduleWriteRetry("failed").queueMemory, true);
+  const cloud = readFileSync(resolve(ROOT, "src/cloud/useCloudRoom.ts"), "utf8");
+  assert.match(cloud, /decideScheduleWriteRetry/);
+  assert.match(cloud, /scheduleLatest/);
+  const upsert = cloud.slice(cloud.indexOf("upsertScheduleEvent:"));
+  assert.match(upsert, /isStaleWrite/);
+  assert.match(upsert, /scheduleReload/);
 });
 
 test("message→task and message→calendar keep source ids", () => {
@@ -224,7 +242,8 @@ test("phone toolbar is five items and calendar tab exists", () => {
   assert.match(app, /decideScheduleProposalWrite/);
   assert.match(app, /action: "reject"/);
   const repo = readFileSync(resolve(ROOT, "src/cloud/collaborationRepository.ts"), "utf8");
-  assert.match(repo, /scheduleWritePlan/);
+  assert.match(repo, /scheduleCloudWrite/);
+  assert.match(repo, /select\("id, version"\)/);
   assert.match(repo, /\.eq\("version", plan\.expectedVersion\)/);
   assert.match(repo, /stale-write/);
   const sheet = readFileSync(resolve(ROOT, "src/features/asset-intelligence/RoomAiSheet.tsx"), "utf8");
