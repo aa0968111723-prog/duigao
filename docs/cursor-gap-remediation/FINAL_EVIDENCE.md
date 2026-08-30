@@ -1,150 +1,136 @@
-# Gap remediation — main remainders evidence
+# 全站目標未完成
 
-**全站目標未完成。** This branch ports leftover product fixes onto latest `origin/main`. It does not merge, deploy, or rebase #78/#88.
+本檔是對全站目標的完成度審計，**不是完成證明**。
+可信度：程式碼 → migrations → tests → Git / CI → production curl → 本檔。
+本檔不可單獨讓任何列變成 IMPLEMENTED。沒有當下證據的列不得寫 IMPLEMENTED。
+禁止把成功重新定義成「#163–#167 已存在」或「四職綠」。
 
-## Main tip (VERIFY)
-
-- `origin/main` @ `cd7eb5f` — docs(checkpoint): production JSON 404 after origin server (#123)
-- Previous: `de4064b` #122 host JSON 404, `39f3221` #121 docs, `3c0bf0c` #114, `6da2af7` #113, `85755ff` #110, `105b89b` #108, `097a6af` #107
-- Migrations `0022+` on main after #114: `0022_discussion_author_integrity.sql`, `0023_video_optimize.sql`, `0024_whiteboard_canonical_columns.sql` … `0028_whiteboard_freehand.sql`, `0029_design_knowledge.sql`, `0030_design_research_usage.sql`
-- #122/#123 record **host origin JSON 404 in repo / checkpoint**. This PR does **not** deploy Zeabur.
-
-## This branch
-
-- Branch: `cursor/p0-main-remainders-70d9`
-- Code head: `19d7c60` discussion 「建立投票」human question (on `afbdd3a` board poll)
-- Evidence commit follows this file; do not treat docs as IMPLEMENTED without the source above
-- No `0031+` this turn. Mentions / unread / receipts / todo / typing / message tombstone stay unmodeled.
-- Base **must stay `main`**
-- PR: https://github.com/aa0968111723-prog/duigao/pull/120
-- Does not copy #88/#104 SQL names. Does not invent typing / mention / unread / receipt / todo tables. Does not restack #95.
-
-## Four remainders kept after #113 + #114 merges
-
-1. **session-entry** — `src/cloud/sessionEntryStatus.ts`, `isPermissionDenied`, guest card `data-testid="session-entry-status"`. Invite-invalid wins over permission-denied. Cloud-guest `local-only` is load-error, not empty-room. Post-join rooms RLS sets `permissionDenied`.
-2. **hideRoomChrome** — phone composer focus hides first-layer chrome; tablet ≥768 keeps split (`roomChrome.ts`, `MultiBranchRoom.tsx`).
-3. **GAP-05 realtime + owner flush** — `acceptRealtimePayload` + discussion row-patch; leftover channel dropped before re-subscribe; bind subscribe failure after a snapshot does not fake load-error; `flushOutboxOnOnline` / `isolateOutboxForOwner`. Store API stays #108-scoped.
-4. **V-04 Leave** — `voiceDockShowsLeave` on `live|connected|reconnecting`. Leave teardown mutes then disconnects.
-
-## Discussion extras vs schema (0014 / 0018 / 0022)
-
-Inspected current tree after #107/#108/#113/#114. Do **not** invent tables. Do **not** show 已讀／雙藍勾.
-
-| Feature | Verdict | Evidence |
-|---|---|---|
-| reply | **present** | `reply_to_id` 0014; `replies.ts` resolve + jump; composer reply bar |
-| mention `@` | **unmodeled** | no mentions table / column |
-| reactions | **present as 支持 only** | `room_discussion_supports` binary; not six-emoji (would need a new table) |
-| composer draft | **present** | `useDiscussionDraft` + IndexedDB `DISCUSSION_DRAFTS` |
-| unread + first unread | **unmodeled** | no read/unread table; `jump-latest` is scroll, not unread |
-| message edit | **wired** | 0022 allows body+payload update; `updateDiscussion`; UI `discussion-edit` + `payload.edited` |
-| message tombstone | **unmodeled** | no `deleted_at` on `room_discussion_messages`; do not hard-delete as a fake tombstone |
-| attachment cite | **wired** | existing `attachment` kind; cite sets `reply_to_id` via `attachmentCiteReply` |
-| work cite | **wired** | existing kinds `poster`/`video`/`plan`/`whiteboard` + payload ids; composer `引` → `cite-work` |
-| decision draft | **wired** | `decision_records` pending/decided; discussion 新增 + board 「寫下決策」both require a human title; AI/`agent`/`system` cannot finalize |
-| board 寫下決策 | **wired** | `boardDecisionWrite`; sheet `wb-decision-draft` / `wb-decision-title`; no canned 「已決定：採用 B 版」 |
-| board ＋投票 | **wired** | `boardPollWrite`; sheet `wb-poll-draft` / `wb-poll-question`; 0013 options 2–6; no canned 「主視覺要不要換？」; AI cannot create |
-| discussion 建立投票 | **wired this turn** | sheet `discussion-poll-draft`; `boardPollWrite`; no `message.body || "要不要這樣做？"` |
-| todo draft | **unmodeled** | no todo/task table |
-| read receipts | **unmodeled** | no receipt table; UI must not show 已讀／雙藍勾 |
-| `kind: quote` | **unmodeled as producer** | CHECK allows it; zero honest producers — do not fake a cite type |
-| polls | **present** | `room_polls` 0013; board and discussion create both require a human question + ≥2 options |
-
-## This turn — discussion 建立投票 + `afbdd3a` CI
-
-Main still `cd7eb5f`; no merge needed. No `0031+`. `afbdd3a` agent-read-layer **success** `33264454473`; browser `33264454105` still in progress at evidence write (build + migrations already green).
-
-Discussion 「建立投票」no longer uses `message.body || "要不要這樣做？"`. D-10 failed first against that fallback. Sheet requires `boardPollWrite` (human question + ≥2 options). Empty body is not a poll. `createProjectPoll` still rejects AI/`agent`/`system`.
-
-## Prior turn — board ＋投票 + `dbe8882` CI
-
-`dbe8882` CI **green**: agent-read-layer success; browser `33264257587` success. Main still `cd7eb5f`; no merge needed. No `0031+`.
-
-Board 「＋投票」no longer inserts canned 「主視覺要不要換？」. D-09 failed first against `onCreatePoll("主視覺要不要換？", ...)`. Sheet requires a human question and ≥2 options (`boardPollWrite`). `createProjectPoll` rejects empty question / <2 options / non-member actors. `pollFromAction` no longer invents 「要不要這樣做？」.
-
-## Prior turn — board 寫下決策 title + `f61cd54` CI
-
-`f61cd54` CI **green**: agent-read-layer `33263983135` success; browser `33263983133` success (migrations + build + visual). Main still `cd7eb5f` (#123); no merge needed.
-
-Board 「寫下決策」no longer inserts canned 「已決定：採用 B 版」. D-08 failed first against the canned `onCreateDecision(...)`, then the sheet required a title. `createDecision` also rejects empty titles and non-member actors.
-
-## Prior turn — CI fix + compact extras
-
-`8f91286` browser **failed** `33263703226` on `test:visual`: tablet-1024-board-20 / desktop-1280-board-20 / desktop-1280-selected (~15k px). Cause: Split View discussion column showed a always-on decision title input + 「引用」 wrapping the composer.
-
-| Change | Why |
+| 鍵 | 值 |
 |---|---|
-| Decision draft behind `decision-draft-open` | First layer stays 「新增」(same as pre-extras). Click reveals title input. No hardcoded 「待決定：主視覺」 |
-| Composer cite label `引` | 44×44 like attach; does not wrap the Split View composer |
-| Visual baselines | Refresh the three Split View shots that now include `引` |
-| Honesty extras kept | edit / work cite / attachment cite / member-only decision |
+| 審計時間（UTC） | 2026-08-30 01:13 |
+| `origin/main` | `ee835f130c11e6409948e5c45862e25fab32c284`（#161 squash）。本回合未前進。 |
+| 本 PR | [#164](https://github.com/aa0968111723-prog/duigao/pull/164) `cursor/p0-discussion-tombstone-honesty-70d9` |
+| 本 tip（寫檔前） | `f7a183698cefa4a54f2fae22884fb37d48d3cf30` |
+| 生產 SPA | `https://duigao-k7q2.zeabur.app/` `200` · bundle `/assets/index-DNDzqryJ.js` · `505972` bytes |
+| 真 API | `https://uanurolzzgshxrqbooix.supabase.co`。SPA origin JSON 404 ≠ API 成功。 |
+| 禁止 | merge / deploy / 套用 0031·0032 到生產 / 發明 0033 / 已讀回條 / typing table / `kind:quote` |
 
-## #120 CI
+狀態只准：
 
-| SHA | agent-read-layer | browser | note |
-|---|---|---|---|
-| `8139879` honesty + #121 | **success** | **success** `33262546722` | requested first check |
-| `43a5b41` compact-width | **success** | **success** `33263240901` | 15/15 visual |
-| `5399833` evidence | **success** | **success** `33263357191` | 15/15 visual |
-| `0570218` extras | **success** | **failed** `33263623652` | visual Split View |
-| `8f91286` edit mark | **success** | **failed** `33263703226` | visual 11/15; fixed on `1416120` |
-| `f61cd54` compact + #123 | **success** `33263983135` | **success** `33263983133` | 15/15 visual |
-| `dbe8882` board decision title | **success** | **success** `33264257587` | 15/15 visual |
-| `afbdd3a` board poll question | **success** `33264454473` | in progress `33264454105` | build + migrations green at evidence write |
-| `19d7c60` discussion poll | (this push) | (pending) | do not claim green until terminal |
+- **IMPLEMENTED** — 本 tip 或已合進 `main` 的 source + 對應 test；若宣稱 live，還要有當下 production 證據。
+- **OPEN** — 開著的產品 PR，四職綠也不算合進 main、不算已部署。
+- **schema-ahead（不是 IMPLEMENTED）** — UI 已在 live bundle，對應欄／表不在生產 DB。
+- **leftover** — 過期 DIRTY 開 PR，不 rebase。
+- **unmodeled** — 無 schema / 無誠實 producer。禁止發明。
 
-## Review classifications
+---
 
-### Fixed on this branch (accepted)
+## 1. 已合進 main（source + test；live 另標）
 
-| Finding | Classification | Evidence |
+First-parent since `cd7eb5f`：`#120` `92e1df3` → `#127` `aa988a5` → `#143` `1575d09` → `#153` `0f3bf5d` → `#159` `a80e73f` → `#160` `2227fe3` → `#161` `ee835f1`。
+
+| 交付 | 狀態 | 證據 |
 |---|---|---|
-| Invite-invalid vs permission-denied leak | Fixed | `sessionEntryStatus` checks inviteInvalid first |
-| Cloud-guest `local-only` as empty-room | Fixed | `local-only` → load-error |
-| Bind flush cross-account outbox | Fixed | `isolateOutboxForOwner` on reconcile flush |
-| Leave/mic still live after Leave | Fixed | `teardown` mutes then disconnects |
-| Post-join rooms RLS swallowed as retry | Fixed | `reload()` sets `permissionDenied` and rethrows |
-| Re-bind leftover realtime channel fakes load-error | Fixed | `subscribeRoom` removes leftovers; subscribe throw after snapshot stays synced |
-| SPA HTML as applied realtime | Accepted / already gated | `looksLikeSpaHtml` in `acceptRealtimePayload` |
-| Poster/video fake vision + research SPA 200 | Fixed on this branch | `honesty.ts` + analysis/research wiring |
-| Discussion edit / work cite / decision title | Wired | `discussionHonesty.ts` + RoomDiscussion |
-| Board canned 「已決定：採用 B 版」 | Fixed | `boardDecisionWrite` + `wb-decision-title` |
-| Board canned 「主視覺要不要換？」 | Fixed | `boardPollWrite` + `wb-poll-question` |
-| Discussion canned 「要不要這樣做？」 | Fixed this turn | `discussion-poll-draft` + `boardPollWrite` |
+| guest `sessionEntryStatus`（空房／權限／邀請無效） | IMPLEMENTED（source+test；live 有 `session-entry-status`） | `src/cloud/sessionEntryStatus.ts`；`scripts/tests/session-entry.test.ts`；live bundle 含 `session-entry-status` |
+| 同頁 `hashchange` 重讀房間連結 | IMPLEMENTED（source+test；live `hashchange`=3） | `#159` squash；`scripts/tests/remaining-gaps.test.ts` / room-link 測試；live bundle |
+| 討論草稿 hydrate 不蓋已打的字 | IMPLEMENTED（source+test；live `data-draft-ready`） | `#160` squash；`scripts/tests/discussion-draft-hydrate.test.ts` |
+| 討論 insert 必須 `select("id")`，零列不是送出 | IMPLEMENTED（source+test；live `select("id")`） | `#143` squash；`src/cloud/collaborationRepository.ts` `insertDiscussion`；`src/cloud/discussionWrite.ts` `acceptDiscussionInsert`；`scripts/tests/discussion-insert-ack.test.ts` |
+| 素材 AI policy 寫入必須有列 | IMPLEMENTED（source+test；合進 main） | `#127` squash；`src/cloud/assetAiPolicyAck.ts` |
+| 邀請 secret 只在 URL fragment | IMPLEMENTED | `src/cloud/invite.ts`；collaboration / remaining-gaps tests；agent gate |
+| reviewer 無上傳／取代／封存／刪除媒體 | IMPLEMENTED | `canManageMedia`；`0007_room_capabilities.sql`；agent gate `REVIEWER_NO_MEDIA` |
+| 原稿不可改 | IMPLEMENTED | 上傳只建 version-addressed 物件；agent gate `ORIGINAL_MEDIA_IMMUTABLE` |
+| 0031 SQL **在 repo** | IMPLEMENTED（檔案+測試；**不是生產 DB**） | `supabase/migrations/0031_discussion_tombstone_unread.sql`；`scripts/tests/discussion-tombstone-unread.test.ts`；`scripts/e2e/migrations.mjs` |
+| SPA origin `/rest` `/functions` `/api` 當成功 | IMPLEMENTED（client 拒 HTML／缺欄） | `src/cloud/apiResponse.ts`；`scripts/tests/api-response.test.ts`。origin 仍 404 JSON `NOT_FOUND`。 |
 
-### Won’t fix / leftover (not this PR)
+手機聚焦收 chrome、realtime outbox、語音離開鈕：source 在 `#120` squash 上。函式名被 minify，不得用 live 字串 `hideRoomChrome` / `voiceDockShowsLeave` 當 production 證據。
 
-- Mentions / unread / first-unread / read receipts / discussion tombstone / todo — **unmodeled**. No `0031+`.
-- Typing / per-member presence **table** unmodeled (channel count + lastWriter stamps only)
-- `kind: quote` has no producer
-- Canva / CUTOS / Perplexity production secrets unverified
-- Stale room stack `#95→#115` vs main
-- #88 / #104 / #119 drafts still CONFLICTING / human rebase
-- Production origin JSON 404 is a **probe**, not LiveKit / functions success
-- This push’s CI browser not yet terminal at evidence write
+---
 
-## E2E (local this turn)
+## 2. schema-ahead（live UI，生產 DB 沒有 — 不是 IMPLEMENTED）
 
-`CHROMIUM_PATH=/usr/bin/google-chrome-stable`
+2026-08-30 01:13 UTC 對生產 PostgREST + live bundle：
 
-| Suite | Result |
-|---|---|
-| `test:visual` | **15/15** after baseline refresh (was 11/15 on `8f91286` CI) |
-| `discussion-honesty` | **10/10** D-01…D-10 |
-| `test:collaboration-e2e` | **129/129** (discussion poll sheet + human question) |
-| `test:collaboration` | **255/255** |
+| Live UI（`index-DNDzqryJ.js`） | 生產 DB | 為什麼不是 IMPLEMENTED |
+|---|---|---|
+| `這則討論已刪除` / tombstone 按鈕 | `PATCH deleted_at` → **400 PGRST204** 欄不存在 | #161 UI 已部署；0031 未套用。失敗路徑仍會先畫墓碑（#164 才修，未部署）。 |
+| `jump-first-unread` / `holdingFirstUnread` / `room_discussion_reads` | `GET room_discussion_reads` → **404 PGRST205** | 未讀跳轉會假裝雲端記住水位（#167 才修，未部署）。 |
+| — | `room_discussion_mentions` / `room_todos` → **404 PGRST205** | 0032 不在 live bundle（`mention-picker`=0、`discussion-todo`=0）。 |
 
-390/768 discussion poll shots: `discussion_poll_390.png`, `discussion_poll_768.png`.
+**禁止本 agent 把 0031/0032 套到生產。**
 
-## Production (re-curl this turn)
+---
 
-Re-curled 2026-08-29 17:02 UTC (`/opt/cursor/artifacts/production-curl-2026-08-29-1705.txt`):
+## 3. 開著的誠實 PR（#163–#167）— OPEN，不是 IMPLEMENTED
 
-| Path | HTTP | Type | Body |
+皆 draft 已關、base `ee835f1`、`mergedAt=null`、head **不是** `origin/main` 祖先。四職（build / migrations / browser / agent-read-layer）= SUCCESS。未部署（live 無其 marker）。
+
+| PR | Head | 修什麼 | 本機 390/768 證據 |
 |---|---|---|---|
-| `/functions/v1/voice-token` | **404** | `application/json` | `{"ok":false,"code":"NOT_FOUND","message":"this origin has no API"}` |
-| `/rest/v1/` | **404** | `application/json` | same |
-| `/api/health` | **404** | `application/json` | same |
-| `/` | **200** | `text/html` | `<!doctype html>` SPA |
+| [#163](https://github.com/aa0968111723-prog/duigao/pull/163) | `fe19c6977ed57a0c61b0a186fa4ab52b53a62702` | 0032-only 提及／待辦（mock DB，不是生產 0032） | `pr163_todo_draft_{390,768}.png`、`pr163_mention_picker_{390,768}.png` |
+| [#164](https://github.com/aa0968111723-prog/duigao/pull/164)（本枝） | `f7a183698cefa4a54f2fae22884fb37d48d3cf30` | 雲端 tombstone 沒 ack 不得畫「已刪除」；UPDATE 必須 `select("id")` | `pr164_tombstone_fail_ack_{390,768}.png`：toast「這則討論沒有刪除」，列仍在 |
+| [#165](https://github.com/aa0968111723-prog/duigao/pull/165) | `4329a84e020e650fbd60ebcc16cd8b3c51b8dcf5` | 未 `SUBSCRIBED` 不可畫「已同步／N 人在線」 | `pr165_join_before_subscribed_{390,768}.png`：presence 空 |
+| [#166](https://github.com/aa0968111723-prog/duigao/pull/166) | `d14772ad6dc7e7ea09e8b27b13bc74ed56af1119` | realtime DELETE 必須 `room_id=eq.` | 單元／e2e 在該 PR；無新 UI 字串 |
+| [#167](https://github.com/aa0968111723-prog/duigao/pull/167) | `f7e10d5b87711de016675f78519b99eedae13e8c` | 未讀水位 upsert 失敗不可假裝雲端已記住 | `pr167_mark_read_fail_ack_{390,768}.png`：「第一則未讀 2」仍在 |
 
-This matches #122 origin JSON 404. **Do not claim production is fixed. Do not claim deploy.** Origin 404 ≠ LiveKit / Canva / CUTOS / research actually running.
+本 tip source（#164 only）：
+
+- `applyTombstoneAfterCloudAck` — `src/features/collaboration/discussionHonesty.ts`
+- 綁定房先 `writes.tombstoneDiscussion`，失敗 toast「這則討論沒有刪除，請稍後再試。」— `src/App.tsx`
+- T-10 / T-11 — `scripts/tests/discussion-tombstone-unread.test.ts`
+
+Artifacts：`/opt/cursor/artifacts/pr164_*.png` 等；`/opt/cursor/artifacts/honesty-viewport-evidence.json`。
+
+---
+
+## 4. leftover DIRTY 開 PR（不 rebase）
+
+`#126`–`#157` 除已 squash 進 main 的對應項與乾淨 replay 外，一律 **leftover**。不要 rebase、不要再開一波 ack。`#125` 不要改 base。
+
+已知 leftover 零列 ack 稿（皆 OPEN，不是 IMPLEMENTED）：`#132`–`#149`（房間名／分支／企劃／投票／關係／聊天／回覆／支持／白板／決策／版本…）。本機 comment／stroke 維持 undo+toast，不再開 ack 枝。
+
+`#162` 是舊 #161 stack 上的 0032 replay，3/4 影片 flake — **不要 empty-rerun**。
+
+---
+
+## 5. unmodeled（禁止發明）
+
+| 項目 | 狀態 | 鎖 |
+|---|---|---|
+| 已讀回條／雙藍勾 | unmodeled | 0031 `room_discussion_reads` 是自己的水位，不是回條 |
+| typing table | unmodeled | 不鑄 0033 |
+| `kind:quote` 獨立氣泡 | unmodeled | CHECK 允許；零誠實 producer。引用走 `reply_to_id` |
+| 六種討論表情 | unmodeled | 只有 `room_discussion_supports` 存在列 |
+| 0033+ | unmodeled | 下一個號是 0032（#163），且 0032 未合 main、未套生產 |
+
+---
+
+## 6. 本回合生產 curl（2026-08-30 01:13 UTC）
+
+```
+GET https://duigao-k7q2.zeabur.app/
+  HTTP 200  text/html  SPA  bundle=/assets/index-DNDzqryJ.js  505972
+GET https://duigao-k7q2.zeabur.app/functions/v1/voice-token
+  HTTP 404  application/json  {"ok":false,"code":"NOT_FOUND","message":"this origin has no API"}
+GET https://duigao-k7q2.zeabur.app/rest/v1/
+  HTTP 404  application/json  （同上）
+GET https://duigao-k7q2.zeabur.app/api/health
+  HTTP 404  application/json  （同上）
+GET  …/rest/v1/room_discussion_reads       404 PGRST205
+GET  …/rest/v1/room_discussion_mentions    404 PGRST205
+GET  …/rest/v1/room_todos                  404 PGRST205
+PATCH room_discussion_messages deleted_at  400 PGRST204
+```
+
+Artifact：`/opt/cursor/artifacts/prod-recurl-final-evidence-164.log`
+
+**404 JSON 不是 API 成功。PGRST205/204 不是「功能已上線」。**
+
+---
+
+## 7. 本回合不做的事
+
+- 不 merge、不 deploy、不改生產 DB、不 force-push、不 empty-rerun。
+- 不發明 0033／已讀回條／typing table／`kind:quote`。
+- 不把 #163–#167 四職綠寫成全站完成。
+- 不把 schema-ahead live UI 寫成 IMPLEMENTED。
+- 本檔是 #164 上的文件提交，掛在已有產品 diff 上；**不是 docs-only PR**。
