@@ -141,7 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
+import { applyTombstoneAfterCloudAck, boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -1957,14 +1957,30 @@ export function App() {
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
       const canManage = cloud.boundRoomId ? cloud.canManageMedia : true;
       if (!userId || !current || !canTombstoneDiscussion(current, userId, canManage)) return;
-      const next = { ...current, deletedAt: Date.now() };
-      updateRoom((r) => ({
-        ...r,
-        discussion: (r.discussion ?? []).map((item) => (item.id === messageId ? next : item)),
-      }));
-      void cloudRef.current.writes.tombstoneDiscussion?.(next);
+      const write = cloudRef.current.writes.tombstoneDiscussion;
+      const paintTombstone = () => {
+        const next = { ...current, deletedAt: Date.now() };
+        updateRoom((r) => ({
+          ...r,
+          discussion: (r.discussion ?? []).map((item) => (item.id === messageId ? next : item)),
+        }));
+      };
+      // Local-only rooms have no cloud write. Bound rooms must ack first —
+      // production without 0031 returns PGRST204 and must not claim「已刪除」.
+      if (!cloud.boundRoomId || !write) {
+        paintTombstone();
+        return;
+      }
+      void write(current).then((ok) => {
+        const next = applyTombstoneAfterCloudAck(current, Boolean(ok));
+        if (!next) {
+          showToast("這則討論沒有刪除，請稍後再試。", { tone: "error" });
+          return;
+        }
+        paintTombstone();
+      });
     },
-    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, updateRoom],
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, showToast, updateRoom],
   );
 
   const markDiscussionRead = useCallback(

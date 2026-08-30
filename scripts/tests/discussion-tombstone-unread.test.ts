@@ -9,6 +9,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  applyTombstoneAfterCloudAck,
   canEditDiscussion,
   canTombstoneDiscussion,
   discussionTombstonePatch,
@@ -18,6 +19,7 @@ import {
   unreadCount,
 } from "../../src/features/collaboration/discussionHonesty";
 import { discussionFromRow, type DiscussionRow } from "../../src/cloud/collaborationRepository";
+import { acceptDiscussionInsert } from "../../src/cloud/discussionWrite";
 import { applyDiscussionRealtime } from "../../src/cloud/realtimeApply";
 import type { DiscussionMessage } from "../../src/features/collaboration/types";
 
@@ -209,4 +211,40 @@ test("T-09 realtime: tombstone 是 upsert，硬刪事件也要變成墓碑而不
   const again = applyDiscussionRealtime(tomb.messages, { op: "delete", id: "m1" });
   assert.equal(again.applied, false);
   assert.equal(again.messages.length, 1);
+});
+
+test("T-11: tombstone UPDATE 必須 select id，204 空身不可當 ack", () => {
+  const repo = src("src/cloud/collaborationRepository.ts");
+  const fn = repo.slice(repo.indexOf("export async function tombstoneDiscussion"));
+  const body = fn.slice(0, fn.indexOf("\nexport "));
+  assert.match(body, /acceptDiscussionInsert/);
+  assert.match(body, /\.select\(["']id["']\)/);
+  assert.match(body, /maybeSingle/);
+  assert.equal(acceptDiscussionInsert({ error: null, data: null }).ok, false, "204 empty body is not an ack");
+  assert.equal(acceptDiscussionInsert({ error: null, data: { id: "m1" } }).ok, true);
+});
+
+test("T-11b: 討論 edit UPDATE 必須 select id，204 空身不可當 ack", () => {
+  const repo = src("src/cloud/collaborationRepository.ts");
+  const fn = repo.slice(repo.indexOf("export async function updateDiscussion"));
+  const body = fn.slice(0, fn.indexOf("\nexport "));
+  assert.match(body, /acceptDiscussionInsert/);
+  assert.match(body, /\.select\(["']id["']\)/);
+  assert.match(body, /maybeSingle/);
+});
+
+test("T-10: 雲端 tombstone 沒 ack 不得先畫「已刪除」", () => {
+  const live = message({ id: "m1" });
+  assert.equal(applyTombstoneAfterCloudAck(live, false), null);
+  const ok = applyTombstoneAfterCloudAck(live, true, 99);
+  assert.ok(ok);
+  assert.equal(ok.deletedAt, 99);
+  assert.equal(messageIsTombstoned(ok), true);
+  const app = src("src/App.tsx");
+  assert.match(app, /applyTombstoneAfterCloudAck/);
+  assert.match(app, /這則討論沒有刪除/);
+  assert.doesNotMatch(
+    app,
+    /deletedAt:\s*Date\.now\(\)[\s\S]{0,180}void cloudRef\.current\.writes\.tombstoneDiscussion/,
+  );
 });
