@@ -123,6 +123,10 @@ export type WorkspaceApi = {
   setChatInput: (v: string) => void;
   sendChat: () => void;
   addFiles: (files: FileList | null) => void;
+  /** Owner/manager only. Reviewer keeps 看稿＋留言. */
+  canManage: boolean;
+  /** Export the working layer as a new poster version. Never overwrites the old one. */
+  saveComposeVersion: () => Promise<void>;
   setTitle: (title: string) => void;
   copySummary: () => void;
   markCoachSeen: () => void;

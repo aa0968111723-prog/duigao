@@ -657,7 +657,7 @@ export function Stage({
       onPointerUp={onUp}
       onPointerCancel={onCancel}
     >
-      <div ref={contentRef} className={`stage-content ${zoomable ? "stage-content-zoomable" : ""}`} style={contentStyle}>
+      <div ref={contentRef} className={`stage-content ${zoomable ? "stage-content-zoomable" : ""}`} style={contentStyle} data-testid="poster-compose-stage">
         <img
           className={`stage-img mode-${view.colorMode}`}
           style={imgStyle}
@@ -678,12 +678,16 @@ export function Stage({
           />
         )}
 
-        {ready && annotationsVisible && (
+        {ready && (
           <div
             className="stage-frame"
             data-density={pins.length > 10 ? "dense" : undefined}
             style={{ left: frame.left, top: frame.top, width: frame.width, height: frame.height }}
           >
+            <VisualProposalOverlay roomId={room.id} versionId={version.id} author={guest} compact={compact} />
+
+            {annotationsVisible && (
+            <>
             <svg className="overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
               {strokes.map((s) => (
                 <polyline
@@ -750,8 +754,6 @@ export function Stage({
               />
             )}
 
-            <VisualProposalOverlay roomId={room.id} versionId={version.id} author={guest} compact={compact} />
-
             {pins.map((pin) => {
               const n = pinNumber(room, pin.id);
               const selected = pin.id === selectedPinId;
@@ -793,6 +795,8 @@ export function Stage({
               >
                 <span className="pin-no">{nextPinNumber(room, version.id)}</span>
               </span>
+            )}
+            </>
             )}
           </div>
         )}

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { uid } from "../../lib/id";
+import { cloneProposalDocsToVersion } from "./saveComposeVersion";
+import { mergeActiveByVersionForHydrate, mergeProposalDocsForHydrate } from "./mergeHydrate";
 
 export type ProposalAlign = "left" | "center" | "right";
 export type TextRole = "title" | "subtitle" | "body" | "date" | "place" | "cta" | "custom";
@@ -157,6 +159,7 @@ const EMPTY_BACKGROUND: ProposalBackground = {
 const states = new Map<string, ProposalRuntimeState>();
 const listeners = new Map<string, Set<() => void>>();
 const hydrating = new Set<string>();
+const hydrateQueued = new Set<string>();
 const checkpoints = new Map<string, { snap: HistorySnapshot; dirty: boolean }>();
 let channel: BroadcastChannel | null = null;
 
@@ -399,31 +402,43 @@ async function savePersisted(state: ProposalRuntimeState): Promise<void> {
 }
 
 async function hydrate(roomId: string, force = false) {
-  if (hydrating.has(roomId)) return;
+  if (hydrating.has(roomId)) {
+    if (force) hydrateQueued.add(roomId);
+    return;
+  }
   const current = snapshot(roomId);
   if (current.hydrated && !force) return;
   hydrating.add(roomId);
   try {
     const saved = await loadPersisted(roomId);
     const latest = snapshot(roomId);
-    const docs = Array.isArray(saved?.docs)
+    const savedDocs = Array.isArray(saved?.docs)
       ? saved!.docs.map(normalizeDoc).filter((d): d is VisualProposal => d != null)
+      : [];
+    const docs = saved
+      ? mergeProposalDocsForHydrate(latest.docs, savedDocs)
       : latest.docs;
+    const savedActive = saved?.activeByVersion && typeof saved.activeByVersion === "object"
+      ? saved.activeByVersion
+      : {};
     states.set(roomId, {
       ...latest,
       roomId,
       docs,
-      activeByVersion: (saved?.activeByVersion && typeof saved.activeByVersion === "object" ? saved.activeByVersion : latest.activeByVersion) ?? {},
+      activeByVersion: saved
+        ? mergeActiveByVersionForHydrate(latest.activeByVersion, savedActive, docs)
+        : latest.activeByVersion,
       hydrated: true,
       error: null,
     });
     emit(roomId);
   } catch {
     // Corrupt or unreadable data must not crash the app; start clean but usable.
-    states.set(roomId, { ...current, hydrated: true, error: "讀取這台裝置的提案時發生問題，已改用空白提案。" });
+    states.set(roomId, { ...snapshot(roomId), hydrated: true, error: "讀取這台裝置的提案時發生問題，已改用目前的工作層。" });
     emit(roomId);
   } finally {
     hydrating.delete(roomId);
+    if (hydrateQueued.delete(roomId)) void hydrate(roomId, true);
   }
 }
 
@@ -1041,6 +1056,7 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
     /** The proposal layer is drawn unless the viewer asked for the clean original. */
     visible: state.viewMode !== "original",
     editing: state.editing && state.viewMode === "proposal",
+    layerEditing: state.editing,
     canUndo: state.undo.length > 0,
     canRedo: state.redo.length > 0,
     error: state.error,
@@ -1083,6 +1099,48 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
 
 function itemPrefix(type: ProposalItem["type"]): string {
   return type === "text" ? "vpt_" : type === "image" ? "vpi_" : "vps_";
+}
+
+/** Enter the compose editor for a version (create a working layer if none). */
+export function startComposeEditing(roomId: string, versionId: string, author: ProposalAuthor): void {
+  const current = snapshot(roomId);
+  let docs = current.docs;
+  let activeId = current.activeByVersion[versionId];
+  let active = docs.find((doc) => doc.id === activeId && doc.versionId === versionId);
+  if (!active) {
+    active = newProposal(versionId, author, docs, { type: "layout", title: "工作層" });
+    activeId = active.id;
+    docs = [...docs, active];
+  }
+  set(roomId, {
+    ...current,
+    docs,
+    activeByVersion: { ...current.activeByVersion, [versionId]: activeId },
+    viewMode: "proposal",
+    editing: true,
+    hydrated: true,
+    selectedItemId: null,
+  });
+  persist(roomId);
+}
+
+/** Copy the working layer onto a newly saved version. Old version docs stay. */
+export function cloneProposalsInStore(roomId: string, fromVersionId: string, toVersionId: string): void {
+  const current = snapshot(roomId);
+  if (fromVersionId === toVersionId) return;
+  const docs = cloneProposalDocsToVersion(current.docs, fromVersionId, toVersionId);
+  const copied = docs.filter((doc) => doc.versionId === toVersionId).at(-1);
+  set(roomId, {
+    ...current,
+    docs,
+    activeByVersion: copied
+      ? { ...current.activeByVersion, [toVersionId]: copied.id }
+      : current.activeByVersion,
+    viewMode: "proposal",
+    editing: true,
+    selectedItemId: null,
+  });
+  persist(roomId);
 }
 
 /** Remove proposals whose poster version no longer exists (called by the room owner). */

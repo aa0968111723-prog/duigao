@@ -146,6 +146,9 @@ async function chooseCreate(page, name, type, file) {
   if (await current.getByRole("button", { name: type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片", exact: true }).count()) {
     await current.getByRole("button", { name: type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片", exact: true }).click();
   }
+  if (type === "poster" && await current.getByTestId("create-poster-upload").count()) {
+    await current.getByTestId("create-poster-upload").click();
+  }
   await current.locator('input:not([type="file"])').first().fill(name);
   if (file) await current.locator('input[type="file"]').setInputFiles(file);
   await current.locator("button.project-submit").click();
@@ -230,6 +233,7 @@ try {
     const poster = { name: "演講文宣", mimeType: "image/png", buffer: TINY_PNG };
     await page.getByRole("button", { name: /新增文宣/ }).click();
     const posterSheet = page.getByTestId("create-content-sheet");
+    await posterSheet.getByTestId("create-poster-upload").click();
     await posterSheet.locator('input:not([type="file"])').first().fill(poster.name);
     await posterSheet.locator('input[type="file"]').setInputFiles(poster);
     await posterSheet.locator("button.project-submit").click();
@@ -244,6 +248,55 @@ try {
     // 推進面板的狀態會跨 overlay 保留（建立文宣前開的內容面板還在）——
     // 這是設計行為；要去總覽先把它收起來。
     check("內容面板狀態跨對稿 overlay 保留", await page.getByTestId("content-pane").count() === 1);
+    await closePushedPane(page);
+
+    // 內容頁 → 用素材拼一張 → 丟圖 → 存成改一 → 切回初稿
+    await openRoomPane(page, "open-content-pane");
+    await page.getByRole("button", { name: /新增文宣/ }).click();
+    const composeSheet = page.getByTestId("create-content-sheet");
+    await composeSheet.getByTestId("create-poster-compose").waitFor({ state: "visible", timeout: 10000 });
+    await composeSheet.getByTestId("create-poster-compose").click();
+    await composeSheet.locator('input:not([type="file"])').first().fill("茶會拼圖");
+    await composeSheet.locator("button.project-submit").click();
+    await page.waitForFunction(() => !document.querySelector('[data-testid="create-content-sheet"]'), null, { timeout: 20000 });
+    await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 20000 });
+    await page.waitForSelector('[data-testid="poster-compose-stage"]', { timeout: 20000 });
+    await page.waitForFunction(() => document.querySelector("img.stage-img")?.naturalWidth > 0, null, { timeout: 20000 });
+    await page.waitForFunction(
+      () => document.querySelectorAll('[data-testid="poster-compose-stage"]').length === 1,
+      null,
+      { timeout: 20000 },
+    );
+    check("用素材拼一張打開對稿 overlay", await page.getByTestId("poster-compose-stage").count() === 1);
+    check("拼圖文宣 390 無水平溢出", await noHorizontalOverflow(page));
+    await page.getByTestId("poster-edit-toggle").click();
+    await page.waitForSelector('[data-testid="poster-save-version"]', { timeout: 15000 });
+    await page.waitForSelector('[data-testid="poster-compose-canvas"]', { timeout: 15000 });
+    const chipsBeforeSave = await page.locator(".m-vchip").filter({ hasText: /初稿|改/ }).count();
+    await page.getByTestId("poster-save-version").click();
+    await page.waitForTimeout(600);
+    const chipsAfterEmpty = await page.locator(".m-vchip").filter({ hasText: /初稿|改/ }).count();
+    check("空畫布存成新版本不會多一版", chipsAfterEmpty === chipsBeforeSave);
+    const plusAsset = page.getByRole("button", { name: "＋素材" });
+    if (await plusAsset.count()) await plusAsset.click();
+    await page.getByTestId("poster-add-asset-input").setInputFiles({ name: "社徽.png", mimeType: "image/png", buffer: TINY_PNG });
+    await page.waitForSelector(".proposal-image", { timeout: 15000 });
+    check("工作層出現自己的圖", await page.locator(".proposal-image").count() > 0);
+    await page.getByTestId("poster-save-version").click();
+    const saved = await page.waitForFunction(
+      () => Array.from(document.querySelectorAll(".m-vchip")).some((el) => (el.textContent || "").includes("改一")),
+      null,
+      { timeout: 20000 },
+    ).then(() => true).catch(async () => {
+      const toasts = await page.locator(".toast, [role=status], [role=alert]").allTextContents();
+      check("存成新版本後有初稿與改一", false, toasts.join(" | "));
+      return false;
+    });
+    if (saved) check("存成新版本後有初稿與改一", await page.getByRole("button", { name: "初稿", exact: true }).count() === 1 && await page.getByRole("button", { name: "改一", exact: true }).count() === 1);
+    await page.getByRole("button", { name: "初稿", exact: true }).click();
+    check("可以切回初稿", await page.locator(".m-vchip.is-on").filter({ hasText: "初稿" }).count() === 1);
+    await page.locator("button.m-home").click();
+    await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 20000 });
     await closePushedPane(page);
 
     await openRoomPane(page, "open-overview-pane");

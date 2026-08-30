@@ -110,7 +110,7 @@ function RoomWorkspaceShell(props: React.ComponentProps<typeof RoomWorkspace>) {
 }
 import { Home } from "./components/Home";
 import { BrandMark } from "./components/BrandMark";
-import { INTAKE_PROFILES, UniversalIntake } from "./components/UniversalIntake";
+import { INTAKE_PROFILES, UniversalIntake, staticFileList } from "./components/UniversalIntake";
 import { ShareSheet, type ShareCard, type ShareCustomization, type ShareState } from "./components/ShareSheet";
 import { sharePresentation } from "./lib/sharePresentation";
 import {
@@ -1170,17 +1170,17 @@ export function App() {
   }, [clearUndo, showToast, trackSave]);
 
   const addImageFiles = useCallback(
-    async (files: FileList | null, forcedBranchId?: string, roomOverride?: Room) => {
-      if (!files || files.length === 0) return;
+    async (files: FileList | null, forcedBranchId?: string, roomOverride?: Room, opts?: { stableId?: string }): Promise<Version[]> => {
+      if (!files || files.length === 0) return [];
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者可以留言與投票，但不能建立文宣版本。", { tone: "error" });
-        return;
+        return [];
       }
       // 同 addVideoFile：正在跑的上傳擋住第二次點擊時要說話，不能讓按鈕
       // 看起來壞掉。
       if (busy.current.has("upload")) {
         showToast("已經有檔案在上傳，等它完成再選下一個。");
-        return;
+        return [];
       }
       busy.current.add("upload");
       try {
@@ -1193,18 +1193,20 @@ export function App() {
           if (!file.type.startsWith("image/")) continue;
           const dataUrl = await fileToDataUrl(file);
           const idx = branchCount + newVersions.length;
-          newVersions.push({ id: uid("v_"), label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl, ...(targetBranchId ? { branchId: targetBranchId } : {}) });
+          const id = opts?.stableId && newVersions.length === 0 ? opts.stableId : uid("v_");
+          newVersions.push({ id, label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl, ...(targetBranchId ? { branchId: targetBranchId } : {}) });
         }
         if (newVersions.length === 0) {
           showToast("這個檔案不是圖片，換一張文宣試試。", { tone: "error" });
-          return;
+          return [];
         }
         if (!created) pushUndo(current);
         const next: Room = normalizeRoomBranches({ ...current, versions: [...current.versions, ...newVersions], updatedAt: Date.now() });
         setRoom(next);
         setView((v) => {
           const viewRoom = targetBranchId ? roomForBranch(next, targetBranchId) : next;
-          if (created || !v.versionId) return initialView(viewRoom);
+          const viewStillOnThisBranch = viewRoom.versions.some((item) => item.id === v.versionId);
+          if (created || !v.versionId || !viewStillOnThisBranch) return initialView(viewRoom);
           if (v.compareId === v.versionId && viewRoom.versions.length >= 2) {
             const other = viewRoom.versions.find((x) => x.id !== v.versionId);
             if (other) return { ...v, compareId: other.id };
@@ -1222,6 +1224,7 @@ export function App() {
             action: { label: "復原", onClick: undoLast },
           });
         }
+        return newVersions;
       } finally {
         busy.current.delete("upload");
       }
@@ -1614,7 +1617,7 @@ export function App() {
   );
 
   const createProjectContent = useCallback(
-    async (type: BranchType, name: string, files: FileList | null) => {
+    async (type: BranchType, name: string, files: FileList | null, opts?: { compose?: boolean }) => {
       const current = roomRef.current;
       if (!current || !guest) return;
       if (isCloudConfigured && !cloudRef.current.boundRoomId) {
@@ -1666,7 +1669,14 @@ export function App() {
       }
       if (plan) cloudRef.current.writes.savePlan(plan);
       if (files?.length) {
-        if (type === "poster") void addImageFiles(files, branch.id, next);
+        if (type === "poster") {
+          const added = await addImageFiles(files, branch.id, next);
+          if (opts?.compose && added[0] && guest) {
+            const { startComposeEditing } = await import("./features/visual-proposal/store");
+            startComposeEditing(next.id, added[0].id, { id: guest.id, name: guest.name, color: guest.color });
+            setView((v) => ({ ...v, versionId: added[0].id, compareMode: "single" }));
+          }
+        }
         if (type === "video") void addVideoFile(files, branch.id, next);
       }
       showToast(`已建立${type === "copy" ? "文案" : type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片"}`, { tone: "success" });
@@ -1683,6 +1693,60 @@ export function App() {
     },
     [addImageFiles, addVideoFile],
   );
+
+  /**
+   * 把工作層匯出成 PNG，走既有 addVersion 當新列。舊 version 的 id / 圖不變。
+   */
+  const savePosterComposeVersion = useCallback(async () => {
+    const current = roomRef.current;
+    if (!current || !guest) return;
+    if (cloud.boundRoomId && !cloud.canManageMedia) {
+      showToast("檢視者可以看稿與留言，但不能存成新版本。", { tone: "error" });
+      return;
+    }
+    const versionId = view.versionId;
+    const oldVersion = current.versions.find((item) => item.id === versionId);
+    if (!oldVersion) {
+      showToast("這一版還不在，沒有存成新版本。", { tone: "error" });
+      return;
+    }
+    const { getProposalDocs, cloneProposalsInStore } = await import("./features/visual-proposal/store");
+    const { canSaveComposeVersion, captureComposeStage, composeSaveOrReject, nextPosterVersionLabel } = await import("./features/visual-proposal/saveComposeVersion");
+    const active = getProposalDocs(current.id).find((doc) => doc.versionId === versionId);
+    const content = canSaveComposeVersion(active);
+    if (!content.ok) {
+      showToast(content.reason, { tone: "error" });
+      return;
+    }
+    const targetBranchId = activeBranchId ?? oldVersion.branchId;
+    const branchCount = targetBranchId ? branchVersions(current, targetBranchId).length : current.versions.length;
+    try {
+      const blob = await captureComposeStage();
+      const file = new File([blob], `${oldVersion.label}-拼圖.png`, { type: "image/png" });
+      const dataUrl = await fileToDataUrl(file);
+      const nextId = uuid();
+      const planned = composeSaveOrReject({
+        doc: active,
+        versions: current.versions.map((item) => ({ id: item.id, label: item.label, imageDataUrl: item.imageDataUrl })),
+        next: { id: nextId, label: nextPosterVersionLabel(branchCount), imageDataUrl: dataUrl },
+      });
+      if (!planned.ok) {
+        showToast(planned.reason, { tone: "error" });
+        return;
+      }
+      const added = await addImageFiles(staticFileList([file]), targetBranchId, undefined, { stableId: nextId });
+      const created = added[0];
+      if (!created || created.id === oldVersion.id) {
+        showToast("新版本沒有寫進去，原稿沒有被覆蓋。請再試一次。", { tone: "error" });
+        return;
+      }
+      cloneProposalsInStore(current.id, oldVersion.id, created.id);
+      setView((v) => ({ ...v, versionId: created.id, compareMode: "single" }));
+      showToast(`已存成${created.label}。${oldVersion.label}還在，討論釘也還在。`, { tone: "success" });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "存成新版本失敗，還在這一版，請再試一次。", { tone: "error" });
+    }
+  }, [activeBranchId, addImageFiles, cloud.boundRoomId, cloud.canManageMedia, guest, showToast, view.versionId]);
 
   const updateProjectBranch = useCallback(
     (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => {
@@ -3326,6 +3390,8 @@ export function App() {
         setChatInput,
         sendChat,
         addFiles,
+        canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
+        saveComposeVersion: savePosterComposeVersion,
         setTitle: (title) => {
           if (activeBranchId) {
             updateProjectBranch(activeBranchId, { name: title });

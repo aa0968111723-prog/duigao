@@ -17,7 +17,7 @@ import { VIDEO_ACCEPT } from "../features/video-review/media";
 export const INTAKE_PROFILES = {
   poster: { accept: "image/*", multiple: true },
   video: { accept: VIDEO_ACCEPT, multiple: false },
-  proposal: { accept: "image/png,image/jpeg,image/webp,image/svg+xml", multiple: false },
+  proposal: { accept: "image/png,image/jpeg,image/webp,image/svg+xml", multiple: true },
   "share-cover": { accept: "image/png,image/jpeg,image/webp", multiple: false },
   attachment: {
     // 檔案卡：pdf／音訊／常見文件／planform 場佈 JSON（PR-06）。

@@ -56,7 +56,7 @@ export type MultiBranchRoomApi = {
   onOpenBranch: (branchId: string, opts?: { startTime?: number; endTime?: number; region?: import("../../lib/types").AnnotationRegion; versionId?: string; planSectionId?: string }) => void;
   loadingBranchId?: string | null;
   onBackToRoom: () => void;
-  onCreateContent: (type: BranchType, name: string, files: FileList | null) => void;
+  onCreateContent: (type: BranchType, name: string, files: FileList | null, opts?: { compose?: boolean }) => void;
   /** 語音房（PR-03）。undefined/available=false → 討論殼顯示誠實文案。 */
   voice?: import("../../hooks/useVoiceRoom").VoiceDockApi;
   /**
@@ -670,12 +670,15 @@ function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType, onR
   const [type, setType] = useState<BranchType | "cutos" | "canva" | null>(initialType ?? null);
   const [name, setName] = useState("");
   const [files, setFiles] = useState<FileList | null>(null);
+  const [posterMode, setPosterMode] = useState<"pick" | "upload" | "compose" | null>(initialType === "poster" ? "pick" : null);
+  const [composeBusy, setComposeBusy] = useState(false);
+  const [composeMessage, setComposeMessage] = useState<string | null>(null);
   const [cutosProjectId, setCutosProjectId] = useState("");
   const [cutosBusy, setCutosBusy] = useState(false);
   const [cutosMessage, setCutosMessage] = useState<string | null>(null);
   // 失敗後重試沿用同一條分支（Grok 07 F4）
   const [cutosBranchId, setCutosBranchId] = useState<string | undefined>(undefined);
-  const needsFile = type === "poster" || type === "video";
+  const needsFile = type === "video" || (type === "poster" && posterMode === "upload");
   return (
     <div className="project-scrim" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
       <section className="project-sheet" role="dialog" aria-modal="true" aria-label="新增內容" data-testid="create-content-sheet">
@@ -685,7 +688,7 @@ function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType, onR
             <h2>你要新增什麼？</h2>
             <div className="project-create-options">
               {(["poster", "video", "plan", "copy"] as BranchType[]).map((item) => (
-                <button type="button" key={item} onClick={() => setType(item)}>
+                <button type="button" key={item} onClick={() => { setType(item); if (item === "poster") setPosterMode("pick"); }}>
                   <span aria-hidden>{item === "poster" ? "▧" : item === "video" ? "▶" : "☷"}</span>
                   {item === "copy" ? "企劃 / 文案" : branchTypeLabel(item)}
                 </button>
@@ -730,17 +733,58 @@ function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType, onR
             {cutosMessage && <p className="project-sheet-error" role="alert">{cutosMessage}</p>}
             <button type="submit" className="project-save-button project-submit" disabled={!name.trim() || !cutosProjectId.trim() || cutosBusy}>{cutosBusy ? "匯入中…" : "匯入"}</button>
           </form>
+          ) : type === "poster" && posterMode === "pick" ? (
+          <>
+            <button type="button" className="project-sheet-back" onClick={() => { if (initialType === "poster") onClose(); else { setType(null); setPosterMode(null); } }}>‹ 返回</button>
+            <h2>這張文宣怎麼進來？</h2>
+            <p className="project-sheet-note">上傳已經做好的圖，或用自己的素材在畫布上拼一張。拼完要按「存成新版本」才會留下，原稿不會被蓋掉。</p>
+            <div className="project-create-options">
+              <button type="button" data-testid="create-poster-upload" onClick={() => setPosterMode("upload")}>
+                <span aria-hidden>↥</span>
+                上傳成品
+              </button>
+              <button type="button" data-testid="create-poster-compose" onClick={() => setPosterMode("compose")}>
+                <span aria-hidden>▣</span>
+                用素材拼一張
+              </button>
+            </div>
+          </>
           ) : (
-          <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && (!needsFile || files?.length)) { onCreate(type, name.trim(), files); onClose(); } }}>
-            <button type="button" className="project-sheet-back" onClick={() => setType(null)}>‹ 返回</button>
-            <h2>新增{type === "copy" ? "文案" : branchTypeLabel(type)}</h2>
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            if (!name.trim()) return;
+            if (type === "poster" && posterMode === "compose") {
+              if (composeBusy) return;
+              setComposeBusy(true);
+              setComposeMessage(null);
+              void import("../visual-proposal/composePaper").then(({ makeComposePaperList }) => makeComposePaperList()).then((paper) => {
+                onCreate("poster", name.trim(), paper, { compose: true });
+                onClose();
+              }).catch(() => {
+                setComposeMessage("紙底沒有生出來，請再試一次。");
+                setComposeBusy(false);
+              });
+              return;
+            }
+            if (!needsFile || files?.length) {
+              onCreate(type, name.trim(), files);
+              onClose();
+            }
+          }}>
+            <button type="button" className="project-sheet-back" onClick={() => {
+              if (type === "poster" && posterMode) setPosterMode("pick");
+              else setType(null);
+            }}>‹ 返回</button>
+            <h2>{type === "poster" && posterMode === "compose" ? "用素材拼一張" : `新增${type === "copy" ? "文案" : branchTypeLabel(type)}`}</h2>
+            {type === "poster" && posterMode === "compose" && <p className="project-sheet-note">先建一張空白紙底當初稿，接著把你的圖丟上去拼。按「存成新版本」才會變成改一，初稿不會被覆蓋。</p>}
             <label className="project-field"><span>名稱</span><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={type === "poster" ? "例如：擺攤文宣" : type === "video" ? "例如：招生影片" : "例如：擺攤計畫"} /></label>
             {needsFile && (
               <UniversalIntake profile={type === "poster" ? "poster" : "video"} mode="zone" className="project-file-picker" onFiles={setFiles} onReject={onReject}>
                 <span>{files?.[0]?.name ?? (type === "poster" ? "選一張圖片" : "選一支影片")}</span>
               </UniversalIntake>
             )}
-            <button type="submit" className="project-save-button project-submit" disabled={!name.trim() || (needsFile && !files?.length)}>建立</button>
+            {composeMessage && <p className="project-sheet-error" role="alert">{composeMessage}</p>}
+            <button type="submit" className="project-save-button project-submit" disabled={!name.trim() || composeBusy || (needsFile && !files?.length)}>{composeBusy ? "建立紙底中…" : "建立"}</button>
           </form>
           )
         )}
@@ -1016,7 +1060,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     setCreateOpen(true);
   };
 
-  const createContent = (type: BranchType, name: string, files: FileList | null) => api.onCreateContent(type, name, files);
+  const createContent: MultiBranchRoomApi["onCreateContent"] = (type, name, files, opts) => api.onCreateContent(type, name, files, opts);
 
   const createPoll = (question: string, options: string[]) => api.onCreatePoll({
     id: uuid(), roomId: api.room.id, question, options, createdBy: api.guest.id, createdAt: Date.now(), updatedAt: Date.now(),

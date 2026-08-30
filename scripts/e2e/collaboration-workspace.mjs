@@ -77,6 +77,9 @@ async function chooseCreate(page, name, type, file) {
   if (await current.getByRole("button", { name: label, exact: true }).count()) {
     await current.getByRole("button", { name: label, exact: true }).click();
   }
+  if (type === "poster" && await current.getByTestId("create-poster-upload").count()) {
+    await current.getByTestId("create-poster-upload").click();
+  }
   await current.locator('input:not([type="file"])').first().fill(name);
   if (file) await current.locator('input[type="file"]').setInputFiles(file);
   await current.locator("button.project-submit").click();
