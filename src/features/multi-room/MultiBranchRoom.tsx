@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { roomPresenceLabel } from "../../cloud/realtimeHonesty";
 import { historyLayers } from "../../lib/historyLayers";
 import { useIsTabletUp } from "../../hooks/useIsTabletUp";
 import { emptyPlan, shouldAdoptRemotePlan } from "./planDraft";
@@ -121,6 +122,8 @@ export type MultiBranchRoomApi = {
   activeWhiteboardId: string | null;
   focusNodeId: string | null;
   online: number;
+  /** Room channel joined. Presence chrome must not claim 在線 before this. */
+  realtimeJoined?: boolean;
   editors: PresenceEditor[];
   /** WB04：開著同一塊板的其他人（具名在場，無游標）。 */
   boardPeople?: { userId: string; name: string }[];
@@ -1054,7 +1057,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
         {!hideRoomChrome && (
           <>
-            <span className="project-presence" data-testid="room-presence">{api.online > 0 ? `${api.online} 人在線` : "在線"}</span>
+            <span className="project-presence" data-testid="room-presence">{roomPresenceLabel(api.online, Boolean(api.realtimeJoined))}</span>
             <button
               type="button"
               className="project-voice-chip"
