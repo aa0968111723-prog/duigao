@@ -41,6 +41,19 @@ export function acceptScheduleWrite(input: {
   return { ok: true, reason: "inserted" };
 }
 
+/**
+ * Node OCC drops stale-write and does not retry the same payload.
+ * Schedule writes must do the same: conflict never enters the memory queue.
+ */
+export function decideScheduleWriteRetry(outcome: "success" | "failed" | "conflict" | "duplicate"): {
+  queueMemory: boolean;
+} {
+  if (outcome === "conflict" || outcome === "duplicate" || outcome === "success") {
+    return { queueMemory: false };
+  }
+  return { queueMemory: true };
+}
+
 export function scheduleWriteMessage(code: ScheduleWriteAccept extends { ok: false; code: infer C } ? C : never): string {
   if (code === "SPA_HTML") return "伺服器回了網頁而不是資料，時程沒有寫上。";
   if (code === "ZERO_ROW") return "權限或資料列沒寫成，時程沒有保存。";

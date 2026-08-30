@@ -13,6 +13,7 @@ import {
   type ApplyProposalResult,
 } from "../../ai/proposals";
 import { AGENT_UNCONFIGURED_COPY, IMAGINE_NOT_VERSION_COPY, estimateImagineVideoUsd } from "../../ai/roomAgentContract";
+import { proposalShowsSources } from "../schedule/proposals";
 import "./asset-ai.css";
 
 type Props = {
@@ -302,6 +303,7 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
                 <p className="asset-ai-proposals-hint">AI 不會自己寫入。預覽後再套用。</p>
                 {proposals.map((proposal) => {
                   const state = proposalState[proposal.id] ?? { status: "preview" as const };
+                  const sources = proposalShowsSources(proposal);
                   const videoSeconds = typeof proposal.payload.seconds === "number" ? proposal.payload.seconds : 6;
                   const videoRes = typeof proposal.payload.resolution === "string" ? proposal.payload.resolution : "720p";
                   const videoUsd = estimateImagineVideoUsd(videoSeconds, videoRes);
@@ -326,6 +328,14 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
                       {typeof proposal.payload.text === "string" && proposal.payload.text ? <p>{proposal.payload.text}</p> : null}
                       {typeof proposal.payload.body === "string" && proposal.payload.body ? <p>{proposal.payload.body}</p> : null}
                       {typeof proposal.payload.title === "string" && proposal.payload.title && proposal.payload.title !== proposal.label ? <p>{proposal.payload.title}</p> : null}
+                      {sources.reason ? <p data-testid="ai-proposal-reason">{sources.reason}</p> : null}
+                      {(sources.messages.length || sources.files.length || sources.nodes.length) ? (
+                        <small data-testid="ai-proposal-sources">
+                          {sources.messages.length ? `訊息 ${sources.messages.length}` : ""}
+                          {sources.files.length ? ` 檔案 ${sources.files.length}` : ""}
+                          {sources.nodes.length ? ` 節點 ${sources.nodes.length}` : ""}
+                        </small>
+                      ) : null}
                       {proposal.type === "imagine_image" ? <small>{IMAGINE_NOT_VERSION_COPY}</small> : null}
                       {proposal.type === "imagine_video" ? <small>預估 {Math.max(1, Math.min(15, Math.floor(videoSeconds)))} 秒 · 約 ${videoUsd.toFixed(2)}</small> : null}
                       {state.status === "applied" ? <small>{proposal.type === "imagine_image" ? IMAGINE_NOT_VERSION_COPY : "已採用。原稿沒有被改寫。"}</small> : null}

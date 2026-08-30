@@ -116,7 +116,7 @@ export type MultiBranchRoomApi = {
   onAddMessageToSchedule?: (message: DiscussionMessage) => void;
   onUpsertScheduleEvent?: (event: import("../schedule/types").ScheduleEvent) => void;
   onDeleteScheduleEvent?: (id: string) => void;
-  onNodeDeadline?: (node: WhiteboardNode) => void;
+  onNodeDeadline?: (node: WhiteboardNode, startAt: number) => void;
   onOpenScheduleSource?: (event: import("../schedule/types").ScheduleEvent) => void;
   onCreateDecision: (title: string, source?: { type: "poll"; id: string }, status?: "pending" | "decided") => void;
   onFocusNode?: (nodeId: string | null) => void;
@@ -828,6 +828,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   /** 側欄此刻是否真的要掛（與 CSS 斷點同源，避免中間影格與手機多掛一份）。 */
   const railVisible = tabletUp && !railCollapsed;
   const [discussPane, setDiscussPane] = useState<"chat" | "board" | "calendar">(api.activeWhiteboardId ? "board" : "chat");
+  const [splitCompanion, setSplitCompanion] = useState<"chat" | "board">("chat");
   // WB03「打開來源訊息」：關板→切對話→捲動到訊息＋1.6s 高亮。訊息元素
   // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
   const openDiscussionMessage = (messageId: string) => {
@@ -1172,30 +1173,78 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                   <button type="button" className={discussPane === "calendar" ? "is-active" : ""} data-testid="schedule-tab" onClick={() => setDiscussPane("calendar")}>時程</button>
                 </div>
                 {discussPane === "calendar" ? (
+                  <div className={tabletUp ? "sched-split-host" : undefined} data-testid={tabletUp ? "schedule-split" : undefined}>
                   <ScheduleAgenda api={{
                     roomId: normalized.id,
                     userId: api.userId ?? api.guest.id,
                     canWrite: api.canManage,
                     events: api.room.scheduleEvents ?? [],
-                    splitWith: tabletUp ? (railVisible ? "chat" : null) : null,
+                    splitWith: tabletUp ? splitCompanion : null,
+                    onSplitWith: tabletUp ? setSplitCompanion : undefined,
                     onUpsert: (event) => api.onUpsertScheduleEvent?.(event),
                     onDelete: (id) => api.onDeleteScheduleEvent?.(id),
                     onOpenSource: (event) => {
-                      if (api.onOpenScheduleSource) {
-                        api.onOpenScheduleSource(event);
-                        return;
-                      }
                       const target = sourceOpenTarget(event);
                       if (target.surface === "discussion") {
-                        setDiscussPane("chat");
+                        if (tabletUp) setSplitCompanion("chat");
+                        else setDiscussPane("chat");
                         openDiscussionMessage(target.messageId);
-                      }
-                      if (target.surface === "board") {
-                        setDiscussPane("board");
+                      } else if (target.surface === "board") {
+                        const node = (api.room.whiteboardNodes ?? []).find((item) => item.id === target.nodeId);
+                        if (node) api.onOpenWhiteboard(node.whiteboardId);
+                        if (tabletUp) setSplitCompanion("board");
+                        else setDiscussPane("board");
                         api.onFocusNode?.(target.nodeId);
                       }
+                      api.onOpenScheduleSource?.(event);
                     },
                   }} />
+                  {tabletUp && splitCompanion === "chat" ? renderDiscussion("chat") : null}
+                  {tabletUp && splitCompanion === "board" ? (
+                    <WhiteboardWorkspace api={{
+                      room: normalized,
+                      boards: api.room.whiteboards ?? [],
+                      nodes: api.room.whiteboardNodes ?? [],
+                      edges: api.room.whiteboardEdges ?? [],
+                      canManageBoards: api.canManage,
+                      canEdit: api.canManage || Boolean(api.room.allowBoardEdit),
+                      roleAllowsEdit: api.canManage,
+                      online: api.online,
+                      editors: api.editors,
+                      isMobile: false,
+                      focusNodeId: api.focusNodeId,
+                      activeBoardId: api.activeWhiteboardId,
+                      onOpenBoard: api.onOpenWhiteboard,
+                      onCreateBoard: api.onCreateWhiteboard,
+                      onArchiveBoard: api.onArchiveWhiteboard,
+                      onRenameBoard: api.onRenameWhiteboard ?? (() => undefined),
+                      onUpsertNode: api.onUpsertNode,
+                      onDeleteNode: api.onDeleteNode,
+                      onUpsertNodes: api.onUpsertNodes,
+                      onCreateEdge: api.onCreateEdge,
+                      onShareNode: api.onShareNodeToDiscussion,
+                      onNodeDeadline: api.onNodeDeadline,
+                      onOpenContent: (branchId, opts) => openBranch(branchId, opts),
+                      onCreatePoll: (question, options) => {
+                        const id = uuid();
+                        api.onCreatePoll({
+                          id,
+                          roomId: api.room.id,
+                          question,
+                          options,
+                          createdBy: api.guest.id,
+                          createdAt: Date.now(),
+                          updatedAt: Date.now(),
+                        });
+                        return id;
+                      },
+                      onCreateDecision: (title, source, status) => api.onCreateDecision(title, source, status),
+                      onToggleAllowEdit: api.onToggleAllowBoardEdit,
+                      allowBoardEdit: Boolean(api.room.allowBoardEdit),
+                      canToggleOpenEdit: api.canManage,
+                    }} />
+                  ) : null}
+                  </div>
                 ) : discussPane === "board" ? (
                   <WhiteboardWorkspace api={{
                     room: normalized,

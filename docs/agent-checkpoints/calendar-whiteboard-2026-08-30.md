@@ -5,7 +5,7 @@
 ```bash
 cd duigao
 git fetch --all --prune
-git checkout feat/collab-02-calendar-whiteboard
+git checkout feat/collab-02-calendar-ux-fix
 ```
 
 未提交工作不要 `reset --hard` / `checkout --`。
@@ -59,11 +59,30 @@ git checkout feat/collab-02-calendar-whiteboard
 
 ## 測試結果
 
-- `tsx --test scripts/tests/schedule-workspace.test.ts` + 白板／協作／offline／AI：82 pass / 0 fail
+第二輪（skeptic 缺口修補後）：
+
+- `tsx --test scripts/tests/schedule-workspace.test.ts`：13 pass / 0 fail（含 weekStart 週一、OCC plan、decideScheduleProposalWrite 採用／拒絕）
+- `test:collaboration`：283 pass / 0 fail
+- `test:realtime-offline`：9 pass / 0 fail
+- `test:mobile-tablet-ux`：8 pass / 0 fail
+- `test:asset-intelligence`：21 pass / 0 fail
 - `tsc --noEmit`：通過
+- `test:api-response`：22 pass / 2 fail — 失敗是既有 Termux `rollup-android-arm64` optional dependency，與本變更無關
 - Playwright Chromium：`Unsupported platform: android`（BLOCKED_BY_EXTERNAL_DEPENDENCY）
 - 正式站未部署本分支，live 驗證不做假通過
 
+## skeptic 修補（2026-08-30 第二輪）
+
+- 時程卡片 tap-through：先切對話／白板 pane（平板走 split companion），再呼叫 App `onOpenScheduleSource`，不再提早 return。
+- `weekStart` 用 Taipei weekday，不再用 `getUTCDay()`（2026-08-31 週一的本週從週一起）。
+- 白板「設定期限」有日期表單；`addNodeDeadline` 會 `applyDeadlineToNode`。
+- Agenda 可選類型／日期、編輯、刪除、拖到日期、長按開編輯（不誤開來源）。
+- 平板 對話＋日曆／白板＋日曆 split；時間軸可折疊。
+- `patchScheduleEvent` 不 bump version（version = 上次 ack 的伺服器版）。ack 後 `stampPersistedScheduleEvent` / `adoptPersistedScheduleEvent`。
+- `scheduleCloudWrite`：沒有列 INSERT；內容相同才 ack（同客戶端重試）；`existing.version !== event.version` 為 stale-write；否則 UPDATE `eq event.version`、payload version+1。兩個客戶端從 v1 改出不同標題，後寫者衝突，不再 ack-on-equal。
+- `useCloudRoom` 時程寫入走 `writeAck`（與節點 OCC 同路徑），不進 `run(schedule:id)` 記憶體重試佇列。stale-write → conflict + reload。
+- AI 拒絕走 `decideScheduleProposalWrite({ action: "reject" })`，不會產事件；採用才 `upsertSchedule`。提案顯示用過的訊息／檔案／節點與理由。
+
 ## 下一次如何恢復
 
-拉此分支，勿重開新 repo。正式站需套 0032 後才有雲端時程列；未套用時 load 回空陣列、本機仍可建。
+拉此分支，勿重開新 repo。正式站需套 0032 後才有雲端時程列；未套用時 load 回空陣列、本機仍可建。未部署時不要用正式站當通過證據。
