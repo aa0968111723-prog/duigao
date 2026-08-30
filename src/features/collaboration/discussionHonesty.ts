@@ -46,6 +46,20 @@ export function discussionTombstonePatch(): { deleted_at: string } {
   return { deleted_at: new Date().toISOString() };
 }
 
+/**
+ * Cloud tombstone must be acked before the feed may claim「已刪除」.
+ * A failed write (missing `deleted_at` column, RLS, network) returns null —
+ * the live row stays live.
+ */
+export function applyTombstoneAfterCloudAck<T extends { deletedAt?: number }>(
+  message: T,
+  ok: boolean,
+  at = Date.now(),
+): T | null {
+  if (!ok) return null;
+  return { ...message, deletedAt: message.deletedAt ?? at };
+}
+
 export type DiscussionReadWatermark = {
   roomId: string;
   lastReadMessageId?: string;
