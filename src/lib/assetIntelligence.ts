@@ -171,6 +171,8 @@ export type RoomContextRequest = {
   selectedBranchIds?: string[];
   selectedVersionIds?: string[];
   timeRange?: { startSeconds: number; endSeconds: number } | null;
+  imagineVideoConfirmed?: boolean;
+  focus?: { branchId?: string; versionId?: string };
 };
 
 export type ImageCitationLocator = {
@@ -231,7 +233,18 @@ export type RoomContextAnswer = {
   text: string;
   citations: ContextCitation[];
   actions: Array<{
-    type: "create_comment" | "create_poll" | "create_plan_draft" | "add_whiteboard_node";
+    type:
+      | "create_comment"
+      | "create_poll"
+      | "create_plan_draft"
+      | "add_whiteboard_node"
+      | "propose_edit_text"
+      | "propose_add_shape"
+      | "propose_move_item"
+      | "propose_add_image"
+      | "imagine_image"
+      | "imagine_video"
+      | "refuse_with_reason";
     label: string;
     payload: Record<string, unknown>;
   }>;
@@ -256,7 +269,7 @@ export type RoomContextResponse = {
   };
   truncated: boolean;
   answer: RoomContextAnswer | null;
-  agent?: { provider: "tku-zen-agent" | "ai_os" | "none"; status: string };
+  agent?: { provider: "tku-zen-agent" | "ai_os" | "grok-room-agent" | "none"; status: string };
   cached?: boolean;
 };
 

@@ -63,7 +63,7 @@ export async function loadEdgeHandler(name, env) {
     const sharedJs = ts.transpileModule(sharedSource, {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
       fileName: shared + ".ts",
-    }).outputText;
+    }).outputText.replace(/from "\.\/([A-Za-z0-9_-]+)\.ts"/g, 'from "./$1.mjs"');
     await writeFile(join(dir, shared + ".mjs"), sharedJs, "utf8");
   }
   source = source.replace(/from "\.\.\/_shared\/([A-Za-z0-9_-]+)\.ts"/g, 'from "./$1.mjs"');

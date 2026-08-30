@@ -13,6 +13,8 @@ export const NODE_TYPES = [
   "ai_result",
   // WB03（0026）：手繪筆畫 — content.points 是相對節點左上的 [x,y][]
   "freehand",
+  "calendar_event",
+  "task",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
@@ -28,6 +30,7 @@ export const LINKED_ENTITY_TYPES = [
   "asset",
   "discussion",
   "whiteboard",
+  "calendar",
 ] as const;
 export type LinkedEntityType = (typeof LINKED_ENTITY_TYPES)[number];
 

@@ -39,6 +39,7 @@ export type RoomDiscussionApi = {
   onSupport: (messageId: string, add: boolean) => void;
   onCreatePoll: (question: string, options: string[]) => void;
   onAddToBoard: (message: DiscussionMessage, whiteboardId: string) => void;
+  onAddToSchedule?: (message: DiscussionMessage) => void;
   onOpenBoardNode: (whiteboardId: string, nodeId?: string) => void;
   onCreateDecision: (title: string) => void;
   onFinalizeDecision: (id: string) => void;
@@ -576,6 +577,9 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   >建立投票</button>
                 )}
                 {showRoomActions && <button type="button" onClick={() => setBoardPick(message)}>加入白板</button>}
+                {showRoomActions && api.onAddToSchedule && (
+                  <button type="button" data-testid="discussion-add-schedule" onClick={() => api.onAddToSchedule?.(message)}>加入時程</button>
+                )}
               </div>
               )}
               {menuId === message.id && showRoomActions && (

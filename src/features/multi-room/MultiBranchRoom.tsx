@@ -23,6 +23,8 @@ import type {
 } from "../collaboration/types";
 import { RoomDiscussion } from "../room-discussion/RoomDiscussion";
 import { WhiteboardWorkspace } from "../whiteboard/WhiteboardWorkspace";
+import { ScheduleAgenda } from "../schedule/ScheduleAgenda";
+import { sourceOpenTarget } from "../schedule/links";
 import { uuid } from "../../lib/id";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useViewport } from "../../hooks/useViewport";
@@ -111,6 +113,11 @@ export type MultiBranchRoomApi = {
   onCreateEdge: (edge: WhiteboardEdge) => void;
   onShareNodeToDiscussion: (node: WhiteboardNode) => void;
   onAddMessageToBoard: (message: DiscussionMessage, whiteboardId: string) => void;
+  onAddMessageToSchedule?: (message: DiscussionMessage) => void;
+  onUpsertScheduleEvent?: (event: import("../schedule/types").ScheduleEvent) => void;
+  onDeleteScheduleEvent?: (id: string) => void;
+  onNodeDeadline?: (node: WhiteboardNode) => void;
+  onOpenScheduleSource?: (event: import("../schedule/types").ScheduleEvent) => void;
   onCreateDecision: (title: string, source?: { type: "poll"; id: string }, status?: "pending" | "decided") => void;
   onFocusNode?: (nodeId: string | null) => void;
   onFinalizeDecision: (id: string) => void;
@@ -820,7 +827,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const tabletUp = useIsTabletUp();
   /** 側欄此刻是否真的要掛（與 CSS 斷點同源，避免中間影格與手機多掛一份）。 */
   const railVisible = tabletUp && !railCollapsed;
-  const [discussPane, setDiscussPane] = useState<"chat" | "board">(api.activeWhiteboardId ? "board" : "chat");
+  const [discussPane, setDiscussPane] = useState<"chat" | "board" | "calendar">(api.activeWhiteboardId ? "board" : "chat");
   // WB03「打開來源訊息」：關板→切對話→捲動到訊息＋1.6s 高亮。訊息元素
   // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
   const openDiscussionMessage = (messageId: string) => {
@@ -1018,7 +1025,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       onSendLink: api.onSendDiscussionLink,
                       resolveAssetUrl: api.resolveAssetUrl,
                       voice: api.voice,
-                      pane: paneOverride ?? discussPane,
+                      pane: paneOverride ?? (discussPane === "calendar" ? "chat" : discussPane),
                       draft: api.chatInput,
                       setDraft: api.setChatInput,
                       onSend: (input) => {
@@ -1032,6 +1039,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       onMarkRead: api.onMarkDiscussionRead,
                       onCreatePoll: createPoll,
                       onAddToBoard: api.onAddMessageToBoard,
+                      onAddToSchedule: api.onAddMessageToSchedule,
                       onOpenBoardNode: (whiteboardId, nodeId) => {
                         setDiscussPane("board");
                         api.onOpenWhiteboard(whiteboardId);
@@ -1161,8 +1169,34 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                 <div className="rd-tabs" role="tablist" aria-label="討論">
                   <button type="button" className={discussPane === "chat" ? "is-active" : ""} onClick={() => { setDiscussPane("chat"); api.onOpenWhiteboard(null); }}>對話</button>
                   <button type="button" className={discussPane === "board" ? "is-active" : ""} onClick={() => setDiscussPane("board")}>白板</button>
+                  <button type="button" className={discussPane === "calendar" ? "is-active" : ""} data-testid="schedule-tab" onClick={() => setDiscussPane("calendar")}>時程</button>
                 </div>
-                {discussPane === "board" ? (
+                {discussPane === "calendar" ? (
+                  <ScheduleAgenda api={{
+                    roomId: normalized.id,
+                    userId: api.userId ?? api.guest.id,
+                    canWrite: api.canManage,
+                    events: api.room.scheduleEvents ?? [],
+                    splitWith: tabletUp ? (railVisible ? "chat" : null) : null,
+                    onUpsert: (event) => api.onUpsertScheduleEvent?.(event),
+                    onDelete: (id) => api.onDeleteScheduleEvent?.(id),
+                    onOpenSource: (event) => {
+                      if (api.onOpenScheduleSource) {
+                        api.onOpenScheduleSource(event);
+                        return;
+                      }
+                      const target = sourceOpenTarget(event);
+                      if (target.surface === "discussion") {
+                        setDiscussPane("chat");
+                        openDiscussionMessage(target.messageId);
+                      }
+                      if (target.surface === "board") {
+                        setDiscussPane("board");
+                        api.onFocusNode?.(target.nodeId);
+                      }
+                    },
+                  }} />
+                ) : discussPane === "board" ? (
                   <WhiteboardWorkspace api={{
                     room: normalized,
                     boards: api.room.whiteboards ?? [],
@@ -1198,6 +1232,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onUpsertNodes: api.onUpsertNodes,
                     onCreateEdge: api.onCreateEdge,
                     onShareNode: api.onShareNodeToDiscussion,
+                    onNodeDeadline: api.onNodeDeadline,
                     onOpenContent: (branchId, opts) => {
                       openBranch(branchId, opts);
                     },

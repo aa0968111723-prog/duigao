@@ -12,6 +12,7 @@ import {
   type AiProposal,
   type ApplyProposalResult,
 } from "../../ai/proposals";
+import { AGENT_UNCONFIGURED_COPY, IMAGINE_NOT_VERSION_COPY, estimateImagineVideoUsd } from "../../ai/roomAgentContract";
 import "./asset-ai.css";
 
 type Props = {
@@ -30,6 +31,7 @@ type Props = {
   onUpdateHumanMetadata?: (assetId: string, input: { title?: string; summary?: string; tags?: string[] }) => Promise<void>;
   onApplyProposal?: (proposal: AiProposal, extraConfirmed?: boolean) => Promise<ApplyProposalResult> | ApplyProposalResult;
   onRejectProposal?: (proposal: AiProposal) => void;
+  onCancel?: () => void;
   canManage?: boolean;
 };
 
@@ -201,9 +203,18 @@ const ACTION_KIND: Record<AiProposal["type"], string> = {
   create_comment: "討論",
   create_poll: "投票",
   create_plan_draft: "企劃",
+  create_schedule_event: "時程",
+  create_task: "任務",
+  propose_edit_text: "文案",
+  propose_add_shape: "形狀",
+  propose_move_item: "位置",
+  propose_add_image: "圖片",
+  imagine_image: "生圖",
+  imagine_video: "生影",
+  refuse_with_reason: "無法",
 };
 
-export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [], response, loading = false, error, onAsk, onClose, onFocus, onRetryAnalysis, onUpdatePolicy, onUpdateHumanMetadata, onApplyProposal, onRejectProposal, canManage = false }: Props) {
+export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [], response, loading = false, error, onAsk, onClose, onFocus, onRetryAnalysis, onUpdatePolicy, onUpdateHumanMetadata, onApplyProposal, onRejectProposal, onCancel, canManage = false }: Props) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>(selectedAssetIds);
   const [showAssets, setShowAssets] = useState(false);
@@ -252,18 +263,29 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
         )}
 
         <form className="asset-ai-form" onSubmit={(event) => { event.preventDefault(); void ask(); }}>
-          <textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder="問這間房的 AI…" rows={2} maxLength={2000} aria-label="詢問房間 AI" />
-          <button type="submit" className="asset-ai-submit" disabled={!query.trim() || loading}>{loading ? "理解中…" : "送出"}</button>
+          <textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder="問這間房的 AI…" rows={2} maxLength={2000} aria-label="詢問房間 AI" disabled={loading} />
+          {loading ? (
+            <button type="button" className="asset-ai-submit" onClick={() => onCancel?.()} data-testid="room-ai-cancel">取消</button>
+          ) : (
+            <button type="submit" className="asset-ai-submit" disabled={!query.trim()}>送出</button>
+          )}
         </form>
         <div className="asset-ai-presets" aria-label="快速提問">
           {PRESETS.map((preset) => <button type="button" key={preset} onClick={() => { setQuery(preset); void ask(preset); }}>{preset}</button>)}
         </div>
 
         {error && <p className="asset-ai-error" role="alert">{error}</p>}
+        {(response?.agent?.status === "unconfigured" || (!response?.answer && response?.agent?.status === "unconfigured")) && (
+          <p className="asset-ai-error" role="status" data-testid="room-ai-unconfigured">{AGENT_UNCONFIGURED_COPY}</p>
+        )}
         {response?.answer ? (
           <article className="asset-ai-answer" data-testid="room-ai-answer">
             <p>{response.answer.text}</p>
-            {response.agent?.status !== "ready" && <small>目前先顯示已找到的房間證據（AI provider 尚未連線）。</small>}
+            {response.agent?.status === "unconfigured" ? (
+              <small data-testid="room-ai-unconfigured">{AGENT_UNCONFIGURED_COPY}</small>
+            ) : response.agent?.status !== "ready" ? (
+              <small>目前先顯示已找到的房間證據（AI provider 尚未連線）。</small>
+            ) : null}
             {response.sources.length > 0 && <div className="asset-ai-citations"><strong>來源</strong>{response.sources.map((source) => {
               const citation = response.answer?.citations.find((item) => item.sourceId === source.sourceId) ?? source;
               return <button type="button" key={source.sourceId} onClick={() => onFocus(citation)}><span>{source.title}</span>{sourceLocator(citation) && <small>{sourceLocator(citation)}</small>}</button>;
@@ -274,38 +296,59 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
                 <p className="asset-ai-proposals-hint">AI 不會自己寫入。預覽後再套用。</p>
                 {proposals.map((proposal) => {
                   const state = proposalState[proposal.id] ?? { status: "preview" as const };
+                  const videoSeconds = typeof proposal.payload.seconds === "number" ? proposal.payload.seconds : 6;
+                  const videoRes = typeof proposal.payload.resolution === "string" ? proposal.payload.resolution : "720p";
+                  const videoUsd = estimateImagineVideoUsd(videoSeconds, videoRes);
+                  const apply = (extraConfirmed: boolean) => {
+                    void Promise.resolve(onApplyProposal(proposal, extraConfirmed)).then((result) => {
+                      if (result.ok) {
+                        setProposalState((current) => ({ ...current, [proposal.id]: { status: "applied", message: result.message } }));
+                        return;
+                      }
+                      if (result.reason === "needs-confirm") {
+                        setProposalState((current) => ({ ...current, [proposal.id]: { status: "preview", confirm: true, message: result.message } }));
+                        return;
+                      }
+                      setProposalState((current) => ({ ...current, [proposal.id]: { status: "preview", message: result.message } }));
+                    });
+                  };
                   return (
-                    <article className={`asset-ai-proposal is-${state.status}`} key={proposal.id} data-testid="ai-proposal" data-proposal-id={proposal.id} data-proposal-type={proposal.type}>
+                    <div data-testid="room-ai-proposal-card" key={proposal.id}>
+                    <article className={`asset-ai-proposal is-${state.status}`} data-testid="ai-proposal" data-proposal-id={proposal.id} data-proposal-type={proposal.type}>
                       <span className="asset-ai-proposal-kind">{ACTION_KIND[proposal.type]}</span>
                       <strong>{proposal.label}</strong>
                       {typeof proposal.payload.text === "string" && proposal.payload.text ? <p>{proposal.payload.text}</p> : null}
                       {typeof proposal.payload.body === "string" && proposal.payload.body ? <p>{proposal.payload.body}</p> : null}
                       {typeof proposal.payload.title === "string" && proposal.payload.title && proposal.payload.title !== proposal.label ? <p>{proposal.payload.title}</p> : null}
-                      {state.status === "applied" ? <small>已套用。原稿沒有被改寫。</small> : null}
+                      {proposal.type === "imagine_image" ? <small>{IMAGINE_NOT_VERSION_COPY}</small> : null}
+                      {proposal.type === "imagine_video" ? <small>預估 {Math.max(1, Math.min(15, Math.floor(videoSeconds)))} 秒 · 約 ${videoUsd.toFixed(2)}</small> : null}
+                      {state.status === "applied" ? <small>{proposal.type === "imagine_image" ? IMAGINE_NOT_VERSION_COPY : "已採用。原稿沒有被改寫。"}</small> : null}
                       {state.status === "rejected" ? <small>已拒絕，沒有寫入。</small> : null}
                       {state.message && state.status === "preview" ? <small className="asset-ai-proposal-msg">{state.message}</small> : null}
-                      {state.status === "preview" && (
+                      {state.status === "preview" && proposal.type !== "refuse_with_reason" && (
                         <div className="asset-ai-proposal-actions">
-                          <button
-                            type="button"
-                            data-testid="apply-proposal"
-                            disabled={!onApplyProposal}
-                            onClick={() => {
-                              void Promise.resolve(onApplyProposal(proposal, Boolean(state.confirm))).then((result) => {
-                                if (result.ok) {
-                                  setProposalState((current) => ({ ...current, [proposal.id]: { status: "applied", message: result.message } }));
-                                  return;
-                                }
-                                if (result.reason === "needs-confirm") {
-                                  setProposalState((current) => ({ ...current, [proposal.id]: { status: "preview", confirm: true, message: result.message } }));
-                                  return;
-                                }
-                                setProposalState((current) => ({ ...current, [proposal.id]: { status: "preview", message: result.message } }));
-                              });
-                            }}
-                          >
-                            {proposal.requiresExtraConfirm && state.confirm ? "確定建立企劃草稿" : "套用"}
-                          </button>
+                          {proposal.type === "imagine_video" && !state.confirm ? (
+                            <button
+                              type="button"
+                              data-testid="room-ai-imagine-confirm"
+                              onClick={() => apply(true)}
+                            >
+                              確認估價後生影
+                            </button>
+                          ) : (
+                            <span data-testid="room-ai-apply">
+                              <button
+                                type="button"
+                                data-testid="apply-proposal"
+                                disabled={!onApplyProposal}
+                                onClick={() => apply(Boolean(state.confirm) || proposal.type === "imagine_video")}
+                              >
+                                {proposal.requiresExtraConfirm && state.confirm
+                                  ? (proposal.type === "imagine_video" ? "確定生影" : "確定建立企劃草稿")
+                                  : "採用"}
+                              </button>
+                            </span>
+                          )}
                           <button
                             type="button"
                             data-testid="reject-proposal"
@@ -319,6 +362,7 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
                         </div>
                       )}
                     </article>
+                    </div>
                   );
                 })}
               </div>

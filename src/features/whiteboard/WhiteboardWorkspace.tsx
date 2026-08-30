@@ -93,6 +93,7 @@ export type WhiteboardApi = {
   onDeleteFrame?: (id: string) => void;
   /** 板節點「打開來源訊息」→ 切討論並捲動高亮。 */
   onOpenDiscussionMessage?: (messageId: string) => void;
+  onNodeDeadline?: (node: WhiteboardNode) => void;
   /** WB04：開著這塊板的其他人（具名在場）。 */
   boardPeople?: { userId: string; name: string }[];
   /** WB05 平板 Split View：側欄此刻是否真的掛著（掛載由上層以 JS 判定，
@@ -136,6 +137,8 @@ const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
   { type: "flow", label: "流程" },
   { type: "mindmap", label: "心智圖" },
+  { type: "task", label: "任務" },
+  { type: "calendar_event", label: "日曆事件" },
   { type: "content", label: "放入房間內容" },
   { type: "image", label: "圖片" },
 ];
@@ -2026,6 +2029,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             }}>打開來源訊息</button>
           )}
           <button type="button" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
+          {api.onNodeDeadline && (
+            <button type="button" data-testid="wb-set-deadline" onClick={() => api.onNodeDeadline?.(selectedNode)}>設定期限</button>
+          )}
           {selected.length > 1 && (
             <>
               <button type="button" onClick={() => {
@@ -2049,7 +2055,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             data-testid="wb-tool-select"
             onClick={() => { setSelectTool((current) => (current === "off" ? "marquee" : current === "marquee" ? "lasso" : "off")); setDrawMode(false); }}
           ><span>▣</span>{selectTool === "lasso" ? "套索" : selectTool === "marquee" ? "框選" : "選取"}</button>
-          <button type="button" data-testid="wb-tool-sticky" disabled={!canEdit} onClick={() => addAtView("text")}><span>📝</span>便利貼</button>
+          <button
+            type="button"
+            className={drawMode ? "is-active" : ""}
+            data-testid="wb-tool-draw"
+            disabled={!canEdit}
+            onClick={() => { setDrawMode((current) => !current); setConnectMode(false); setConnectFrom(null); setSelectTool("off"); }}
+          ><span>✎</span>畫筆</button>
+          <button type="button" data-testid="wb-tool-sticky" disabled={!canEdit} onClick={() => addAtView("text")}><span>📝</span>文字／便利貼</button>
           <button
             type="button"
             className={connectMode ? "is-active" : ""}
@@ -2057,15 +2070,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             disabled={!canEdit}
             onClick={() => { setConnectMode((current) => !current); setConnectFrom(null); setDrawMode(false); }}
           ><span>↦</span>連線</button>
-          <button
-            type="button"
-            className={drawMode ? "is-active" : ""}
-            data-testid="wb-tool-draw"
-            disabled={!canEdit}
-            onClick={() => { setDrawMode((current) => !current); setConnectMode(false); setConnectFrom(null); setSelectTool("off"); }}
-          ><span>✎</span>繪圖</button>
-          <button type="button" data-testid="wb-tool-material" onClick={() => { setContentKind("all"); setSheet("content"); }}><span>▤</span>素材</button>
-          <button type="button" data-testid="whiteboard-add" onClick={() => setSheet("add")} disabled={!canEdit}><span>＋</span>更多</button>
+          <button type="button" data-testid="whiteboard-add" onClick={() => setSheet("add")} disabled={!canEdit}><span>＋</span>加入</button>
         </nav>
       )}
 
