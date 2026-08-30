@@ -37,6 +37,22 @@ test("answer_room_context and asset_analysis payloads stay secret-free", () => {
   assert.doesNotMatch(JSON.stringify({ ask, fromZen, fromOs, asset_analysis: { sourceUrl: null } }), /service_role|invite_token/);
 });
 
+test("grok propose/imagine actions pass the shared adapter without secrets", () => {
+  const ask = { query: "改主標" };
+  const fromGrok = answerRoomContext(ask, {
+    text: "這是提案",
+    citations: [{ sourceId: "b-poster" }],
+    actions: [
+      { type: "propose_edit_text", label: "改主標", payload: { text: "五月茶會", service_role: "nope" } },
+      { type: "overwrite_version", label: "不該過", payload: {} },
+    ],
+  });
+  assert.ok(fromGrok);
+  assert.equal(fromGrok.actions.length, 1);
+  assert.equal(fromGrok.actions[0].type, "propose_edit_text");
+  assert.equal(fromGrok.actions[0].payload && "service_role" in fromGrok.actions[0].payload, false);
+});
+
 test("DocumentUnderstandingProvider + PdfReader emit document chunks", () => {
   const provider = new DocumentUnderstandingProvider(20);
   const pdfish = new TextEncoder().encode("%PDF-1.4\n(茶會手冊內文一段)\n");

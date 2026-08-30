@@ -66,6 +66,14 @@
   `DUIGAO_AGENT_SHARED_SECRET` 已設且與 tku 端
   `DUIGAO_CONTEXT_SHARED_SECRET` 相符（簽章驗證通過即為證明）。
 
+## NOTE_GROK_ROOM_AGENT（2026-08-30）
+
+- 站內代理可設 `DUIGAO_AGENT_PROVIDER=grok-room-agent`（Edge secret）。
+- 必備 Edge secrets（值不入 repo、不入 `VITE_`）：`XAI_API_KEY`；可選
+  `GROK_TEXT_MODEL`（預設 `grok-4-1-fast-non-reasoning`，禁止預設 4.6/4.5）、
+  `GROK_IMAGE_MODEL`、`GROK_VIDEO_MODEL`、`DUIGAO_AGENT_MAX_USD_PER_TURN`。
+- 沒有 key 時 UI 必須顯示「AI 服務尚未設定」。tku-zen-agent 路徑仍可用。
+
 ## NOTE_BROWSER_ONLY_DEFECTS（2026-08-28，紀律）
 
 curl/health 探針全綠不代表使用者可用：edge function 的 CORS 預檢漏放
