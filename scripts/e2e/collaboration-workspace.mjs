@@ -252,7 +252,8 @@ try {
     await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
     await page.getByTestId("discussion-tombstone-btn").first().click();
-    check("tombstone 畫墓碑，不是消失", await page.getByTestId("discussion-tombstone").count() >= 1);
+    const tombstoneLanded = await page.waitForSelector('[data-testid="discussion-tombstone"]', { timeout: 8000 }).then(() => true).catch(() => false);
+    check("tombstone 畫墓碑，不是消失", tombstoneLanded && await page.getByTestId("discussion-tombstone").count() >= 1);
     check("tombstone 之後列還在 feed", await page.locator('[data-testid^="discussion-"]').count() >= 1);
     check("tombstone 畫面沒有已讀回條", !(await page.getByTestId("discussion-feed").innerText()).includes("已讀"));
     await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_tombstone_390.png"), fullPage: true });
