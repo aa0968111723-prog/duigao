@@ -6,6 +6,7 @@ import test from "node:test";
 import { branchOpenCommentCount, normalizeRoomBranches } from "../../src/lib/roomBranches.ts";
 import type { Room, RoomBranch } from "../../src/lib/types.ts";
 import type { VisualProposal } from "../../src/features/visual-proposal/store.ts";
+import { mergeProposalDocsForHydrate } from "../../src/features/visual-proposal/mergeHydrate.ts";
 import {
   appendVersionWithoutOverwrite,
   canSaveComposeVersion,
@@ -52,6 +53,24 @@ function emptyDoc(over: Partial<VisualProposal> = {}): VisualProposal {
     ...over,
   };
 }
+
+test("hydrate 保留記憶體較新的工作層與只存在記憶體的文件", () => {
+  const savedOlder = emptyDoc({ id: "shared", title: "磁碟舊稿", name: "磁碟舊稿", updatedAt: 10 });
+  const memoryNewer = emptyDoc({ id: "shared", title: "剛編輯的稿", name: "剛編輯的稿", updatedAt: 20 });
+  const memoryOnly = emptyDoc({ id: "memory-only", title: "尚未落盤", name: "尚未落盤", updatedAt: 30 });
+  const merged = mergeProposalDocsForHydrate([memoryNewer, memoryOnly], [savedOlder]);
+  assert.equal(merged.find((doc) => doc.id === "shared")?.title, "剛編輯的稿");
+  assert.equal(merged.some((doc) => doc.id === "memory-only"), true);
+});
+
+test("hydrate race 修補接到 store 與 mobile dock", () => {
+  const store = src("src/features/visual-proposal/store.ts");
+  const mobile = src("src/features/image-review/MobileWorkspace.tsx");
+  assert.match(store, /mergeProposalDocsForHydrate/);
+  assert.match(store, /hydrateQueued/);
+  assert.match(store, /layerEditing:\s*state\.editing/);
+  assert.match(mobile, /proposalStore\.layerEditing/);
+});
 
 test("新增文宣 sheet 有上傳成品與用素材拼一張入口", () => {
   const sheet = src("src/features/multi-room/MultiBranchRoom.tsx");

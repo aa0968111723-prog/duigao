@@ -104,6 +104,12 @@ export function MobileWorkspace({ api, presence }: Props) {
     );
   }, [room.id, room.versions]);
 
+  useEffect(() => {
+    if (proposalStore.layerEditing && !proposalSession) {
+      setProposalSession({ intent: null });
+    }
+  }, [proposalStore.layerEditing, proposalSession]);
+
   const gaveFeedback =
     room.comments.some((c) => c.authorId === api.guest.id) ||
     (room.supports ?? []).some((s) => s.userId === api.guest.id) ||

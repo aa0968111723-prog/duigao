@@ -265,8 +265,8 @@ try {
     check("用素材拼一張打開對稿 overlay", await page.getByTestId("poster-compose-stage").count() === 1);
     check("拼圖文宣 390 無水平溢出", await noHorizontalOverflow(page));
     await page.getByTestId("poster-edit-toggle").click();
+    await page.waitForSelector('[data-testid="poster-save-version"]', { timeout: 15000 });
     await page.waitForSelector('[data-testid="poster-compose-canvas"]', { timeout: 15000 });
-    await page.waitForSelector('[data-testid="poster-save-version"]', { timeout: 10000 });
     const chipsBeforeSave = await page.locator(".m-vchip").filter({ hasText: /初稿|改/ }).count();
     await page.getByTestId("poster-save-version").click();
     await page.waitForTimeout(600);
