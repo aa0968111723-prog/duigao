@@ -30,8 +30,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isPermissionDenied, isRevisionConflict, isStaleWrite } from "./errors";
-import { decideScheduleWriteRetry } from "../features/schedule/honesty";
+import { CloudError, isDuplicateKey, isInvalidInvite, isPermissionDenied, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -169,7 +168,7 @@ export type CloudWrites = {
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
-  upsertScheduleEvent?: (event: import("../features/schedule/types").ScheduleEvent) => void;
+  upsertScheduleEvent?: (event: import("../features/schedule/types").ScheduleEvent) => Promise<import("../features/schedule/types").ScheduleEvent | false | "conflict">;
   deleteScheduleEvent?: (id: string) => void;
   setAllowBoardEdit?: (allow: boolean) => void;
   toggleSupport: (commentId: string, add: boolean) => void;
@@ -1251,20 +1250,17 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     updateDecision: (decision) => run(`decision:${decision.id}`, () => repoUpdateDecision(supabase!, decision)),
     upsertScheduleEvent: (event) => {
       scheduleLatest.current.set(event.id, event);
-      run(`schedule:${event.id}`, async () => {
+      return writeAck(async () => {
         const latest = scheduleLatest.current.get(event.id) ?? event;
-        try {
-          await upsertScheduleEvent(supabase!, latest);
-        } catch (error) {
-          // Node OCC drops stale-write and does not retry the same payload.
-          // A 0-row UPDATE against a never-acked create would otherwise loop.
-          if (!decideScheduleWriteRetry(isStaleWrite(error) ? "conflict" : "failed").queueMemory) {
-            scheduleLatest.current.delete(latest.id);
-            scheduleReload();
-            return;
-          }
-          throw error;
+        const persisted = await upsertScheduleEvent(supabase!, latest);
+        if (persisted === "conflict") throw new CloudError("stale-write", "schedule");
+        return persisted;
+      }).then((result) => {
+        if (result === "conflict") {
+          scheduleLatest.current.delete(event.id);
+          scheduleReload();
         }
+        return result;
       });
     },
     deleteScheduleEvent: (id) => run(`schedule-del:${id}`, () => deleteScheduleEventRow(supabase!, boundRef.current!, id)),

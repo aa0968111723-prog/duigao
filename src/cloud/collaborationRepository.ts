@@ -15,7 +15,7 @@ import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaborat
 import { acceptDiscussionInsert } from "./discussionWrite";
 import { CloudError } from "./errors";
 import { acceptScheduleWrite } from "../features/schedule/honesty";
-import { scheduleCloudWrite } from "../features/schedule/events";
+import { scheduleCloudWrite, schedulePersistVersion, stampPersistedScheduleEvent } from "../features/schedule/events";
 import type { ScheduleEvent } from "../features/schedule/types";
 
 type WhiteboardRow = {
@@ -306,6 +306,25 @@ export async function loadScheduleEvents(supabase: SupabaseClient, roomId: strin
 }
 
 export async function upsertScheduleEvent(supabase: SupabaseClient, event: ScheduleEvent): Promise<ScheduleEvent | "conflict"> {
+  const read = await supabase
+    .from("room_schedule_events")
+    .select("*")
+    .eq("id", event.id)
+    .eq("room_id", event.roomId)
+    .maybeSingle();
+  if (read.error && !/does not exist|42P01|schema cache/i.test(read.error.message)) {
+    const acceptedRead = acceptScheduleWrite({ error: read.error, data: read.data });
+    if (!acceptedRead.ok) {
+      throw new CloudError(acceptedRead.code === "SPA_HTML" ? "SPA_HTML" : acceptedRead.code, "schedule");
+    }
+  }
+  const existing = read.data && typeof read.data === "object" && "id" in read.data
+    ? scheduleFromRow(read.data as Record<string, unknown>)
+    : null;
+  const plan = scheduleCloudWrite(event, existing);
+  if (plan.kind === "ack") return stampPersistedScheduleEvent(event, existing?.version ?? event.version);
+  if (plan.kind === "stale-write") throw new CloudError("stale-write", "schedule");
+  const persistVersion = schedulePersistVersion(event, plan);
   const payload = {
     id: event.id,
     room_id: event.roomId,
@@ -323,27 +342,9 @@ export async function upsertScheduleEvent(supabase: SupabaseClient, event: Sched
     source_type: event.sourceType ?? null,
     source_id: event.sourceId ?? null,
     color: event.color,
-    version: event.version,
+    version: persistVersion,
     updated_at: new Date().toISOString(),
   };
-  const read = await supabase
-    .from("room_schedule_events")
-    .select("id, version")
-    .eq("id", event.id)
-    .eq("room_id", event.roomId)
-    .maybeSingle();
-  if (read.error && !/does not exist|42P01|schema cache/i.test(read.error.message)) {
-    const acceptedRead = acceptScheduleWrite({ error: read.error, data: read.data });
-    if (!acceptedRead.ok) {
-      throw new CloudError(acceptedRead.code === "SPA_HTML" ? "SPA_HTML" : acceptedRead.code, "schedule");
-    }
-  }
-  const existing = read.data && typeof read.data === "object" && "id" in read.data
-    ? { version: Number((read.data as { version?: unknown }).version) || 1 }
-    : null;
-  const plan = scheduleCloudWrite(event, existing);
-  if (plan.kind === "ack") return event;
-  if (plan.kind === "stale-write") throw new CloudError("stale-write", "schedule");
   const query = plan.kind === "insert"
     ? supabase.from("room_schedule_events").insert(payload).select("id").maybeSingle()
     : supabase.from("room_schedule_events").update(payload)
@@ -360,7 +361,7 @@ export async function upsertScheduleEvent(supabase: SupabaseClient, event: Sched
   if (!accepted.ok) {
     throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : accepted.code, "schedule");
   }
-  return event;
+  return stampPersistedScheduleEvent(event, persistVersion);
 }
 
 export async function deleteScheduleEventRow(supabase: SupabaseClient, roomId: string, id: string): Promise<void> {

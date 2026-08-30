@@ -144,6 +144,7 @@ import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } fr
 import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { applyDeadlineToNode, eventFromBoardNode, eventFromDiscussion, nodeFromScheduleEvent, sourceOpenTarget } from "./features/schedule/links";
+import { adoptPersistedScheduleEvent } from "./features/schedule/events";
 import { decideScheduleProposalWrite } from "./features/schedule/proposals";
 import type { ScheduleEvent } from "./features/schedule/types";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
@@ -2271,7 +2272,13 @@ export function App() {
         const rest = (r.scheduleEvents ?? []).filter((item) => item.id !== event.id);
         return { ...r, scheduleEvents: [...rest, event].sort((a, b) => a.startAt - b.startAt) };
       });
-      cloudRef.current.writes.upsertScheduleEvent?.(event);
+      void Promise.resolve(cloudRef.current.writes.upsertScheduleEvent?.(event)).then((result) => {
+        if (!result || result === "conflict") return;
+        updateRoom((r) => ({
+          ...r,
+          scheduleEvents: (r.scheduleEvents ?? []).map((item) => item.id === result.id ? adoptPersistedScheduleEvent(item, result) : item),
+        }));
+      });
     },
     [updateRoom],
   );

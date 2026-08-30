@@ -31,30 +31,62 @@ export function weekStart(ts: number, timeZone = "Asia/Taipei"): number {
   return start - offset * 86400000;
 }
 
+export type ScheduleWriteSnapshot = Pick<
+  ScheduleEvent,
+  "version" | "title" | "startAt" | "status" | "eventType"
+> & Partial<Pick<ScheduleEvent, "endAt" | "assigneeId" | "assigneeName" | "sourceType" | "sourceId">>;
+
 export type ScheduleCloudWrite =
   | { kind: "insert" }
   | { kind: "update"; expectedVersion: number }
   | { kind: "ack" }
   | { kind: "stale-write" };
 
-/**
- * Decide the cloud write from the row that actually exists, not from local
- * version alone. A create that was patched before ack is still INSERT
- * (existing=null) even when local version is 2+.
- */
-export function scheduleCloudWrite(
-  event: Pick<ScheduleEvent, "version">,
-  existing: { version: number } | null,
-): ScheduleCloudWrite {
-  if (!existing) return { kind: "insert" };
-  if (existing.version === event.version) return { kind: "ack" };
-  if (existing.version < event.version) return { kind: "update", expectedVersion: existing.version };
-  return { kind: "stale-write" };
+export function scheduleContentEqual(a: ScheduleWriteSnapshot, b: ScheduleWriteSnapshot): boolean {
+  return a.title === b.title
+    && a.startAt === b.startAt
+    && (a.endAt ?? null) === (b.endAt ?? null)
+    && a.status === b.status
+    && a.eventType === b.eventType
+    && (a.assigneeId ?? "") === (b.assigneeId ?? "")
+    && (a.assigneeName ?? "") === (b.assigneeName ?? "")
+    && (a.sourceType ?? "") === (b.sourceType ?? "")
+    && (a.sourceId ?? "") === (b.sourceId ?? "");
 }
 
-/** @deprecated Prefer scheduleCloudWrite(event, existing). Kept for call sites that only have the local event. */
-export function scheduleWritePlan(event: ScheduleEvent, existing: { version: number } | null = null): ScheduleCloudWrite {
-  return scheduleCloudWrite(event, existing);
+/**
+ * Persist table: version is last-acked server version, not a local patch counter.
+ * Insert if no row. Ack only when this client's payload is already on the server.
+ * Otherwise OCC-update if we still hold the acked token; stale-write if the server moved.
+ */
+export function scheduleCloudWrite(
+  event: ScheduleWriteSnapshot,
+  existing: ScheduleWriteSnapshot | null,
+): ScheduleCloudWrite {
+  if (!existing) return { kind: "insert" };
+  if (scheduleContentEqual(event, existing)) return { kind: "ack" };
+  if (existing.version !== event.version) return { kind: "stale-write" };
+  return { kind: "update", expectedVersion: event.version };
+}
+
+export function schedulePersistVersion(event: Pick<ScheduleEvent, "version">, plan: ScheduleCloudWrite): number {
+  if (plan.kind === "update") return event.version + 1;
+  return event.version;
+}
+
+/** Optimistic-lock token is last acked server version, never a client-advanced guess. */
+export function stampPersistedScheduleEvent(event: ScheduleEvent, lastAcked?: ScheduleEvent | number | null): ScheduleEvent {
+  const acked = typeof lastAcked === "number" ? lastAcked : lastAcked?.version;
+  return { ...event, version: acked ?? event.version ?? 1 };
+}
+
+/** Keep local content; only take a newer server version/timestamp after ack. */
+export function adoptPersistedScheduleEvent(local: ScheduleEvent, persisted: ScheduleEvent): ScheduleEvent {
+  return {
+    ...local,
+    version: Math.max(local.version ?? 1, persisted.version ?? 1),
+    updatedAt: Math.max(local.updatedAt ?? 0, persisted.updatedAt ?? 0),
+  };
 }
 
 export function isScheduleEventType(value: unknown): value is ScheduleEventType {
@@ -120,7 +152,7 @@ export function patchScheduleEvent(event: ScheduleEvent, patch: Partial<Pick<Sch
     ...patch,
     title: patch.title != null ? patch.title.trim().slice(0, 240) : event.title,
     updatedAt: Date.now(),
-    version: event.version + 1,
+    version: event.version,
   };
   if (!next.title) throw new Error("EMPTY_TITLE");
   if (next.endAt != null && next.endAt < next.startAt) throw new Error("END_BEFORE_START");

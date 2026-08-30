@@ -78,8 +78,9 @@ git checkout feat/collab-02-calendar-ux-fix
 - 白板「設定期限」有日期表單；`addNodeDeadline` 會 `applyDeadlineToNode`。
 - Agenda 可選類型／日期、編輯、刪除、拖到日期、長按開編輯（不誤開來源）。
 - 平板 對話＋日曆／白板＋日曆 split；時間軸可折疊。
-- `upsertScheduleEvent` 先讀現有列再 `scheduleCloudWrite`：沒有列就 INSERT（本機先改過 version>1 也一樣）；有列才用伺服器 version 做 OCC update；伺服器較新才 `stale-write`。
-- `useCloudRoom` 時程寫入：`stale-write` 走 `decideScheduleWriteRetry("conflict")`，不進 `run()` 重試佇列，改 reload。
+- `patchScheduleEvent` 不 bump version（version = 上次 ack 的伺服器版）。ack 後 `stampPersistedScheduleEvent` / `adoptPersistedScheduleEvent`。
+- `scheduleCloudWrite`：沒有列 INSERT；內容相同才 ack（同客戶端重試）；`existing.version !== event.version` 為 stale-write；否則 UPDATE `eq event.version`、payload version+1。兩個客戶端從 v1 改出不同標題，後寫者衝突，不再 ack-on-equal。
+- `useCloudRoom` 時程寫入走 `writeAck`（與節點 OCC 同路徑），不進 `run(schedule:id)` 記憶體重試佇列。stale-write → conflict + reload。
 - AI 拒絕走 `decideScheduleProposalWrite({ action: "reject" })`，不會產事件；採用才 `upsertSchedule`。提案顯示用過的訊息／檔案／節點與理由。
 
 ## 下一次如何恢復
