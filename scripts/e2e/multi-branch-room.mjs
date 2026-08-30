@@ -262,6 +262,11 @@ try {
     await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 20000 });
     await page.waitForSelector('[data-testid="poster-compose-stage"]', { timeout: 20000 });
     await page.waitForFunction(() => document.querySelector("img.stage-img")?.naturalWidth > 0, null, { timeout: 20000 });
+    await page.waitForFunction(
+      () => document.querySelectorAll('[data-testid="poster-compose-stage"]').length === 1,
+      null,
+      { timeout: 20000 },
+    );
     check("用素材拼一張打開對稿 overlay", await page.getByTestId("poster-compose-stage").count() === 1);
     check("拼圖文宣 390 無水平溢出", await noHorizontalOverflow(page));
     await page.getByTestId("poster-edit-toggle").click();
