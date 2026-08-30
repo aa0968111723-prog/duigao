@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { uid } from "../../lib/id";
+import { cloneProposalDocsToVersion } from "./saveComposeVersion";
 
 export type ProposalAlign = "left" | "center" | "right";
 export type TextRole = "title" | "subtitle" | "body" | "date" | "place" | "cta" | "custom";
@@ -1111,22 +1112,8 @@ export function startComposeEditing(roomId: string, versionId: string, author: P
 export function cloneProposalsInStore(roomId: string, fromVersionId: string, toVersionId: string): void {
   const current = snapshot(roomId);
   if (fromVersionId === toVersionId) return;
-  const now = Date.now();
-  const copies = current.docs
-    .filter((doc) => doc.versionId === fromVersionId)
-    .map((doc) => ({
-      ...doc,
-      id: uid("vp_"),
-      versionId: toVersionId,
-      items: doc.items.map((item) => ({ ...item, id: uid(itemPrefix(item.type)) })),
-      background: { ...doc.background },
-      supports: [...doc.supports],
-      comments: [...doc.comments],
-      createdAt: now,
-      updatedAt: now,
-    }));
-  const docs = [...current.docs, ...copies];
-  const copied = copies[0];
+  const docs = cloneProposalDocsToVersion(current.docs, fromVersionId, toVersionId);
+  const copied = docs.filter((doc) => doc.versionId === toVersionId).at(-1);
   set(roomId, {
     ...current,
     docs,

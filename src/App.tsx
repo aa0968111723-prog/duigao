@@ -1152,7 +1152,7 @@ export function App() {
   }, [clearUndo, showToast, trackSave]);
 
   const addImageFiles = useCallback(
-    async (files: FileList | null, forcedBranchId?: string, roomOverride?: Room): Promise<Version[]> => {
+    async (files: FileList | null, forcedBranchId?: string, roomOverride?: Room, opts?: { stableId?: string }): Promise<Version[]> => {
       if (!files || files.length === 0) return [];
       if (cloud.boundRoomId && !cloud.canManageMedia) {
         showToast("檢視者可以留言與投票，但不能建立文宣版本。", { tone: "error" });
@@ -1175,7 +1175,8 @@ export function App() {
           if (!file.type.startsWith("image/")) continue;
           const dataUrl = await fileToDataUrl(file);
           const idx = branchCount + newVersions.length;
-          newVersions.push({ id: uid("v_"), label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl, ...(targetBranchId ? { branchId: targetBranchId } : {}) });
+          const id = opts?.stableId && newVersions.length === 0 ? opts.stableId : uid("v_");
+          newVersions.push({ id, label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl, ...(targetBranchId ? { branchId: targetBranchId } : {}) });
         }
         if (newVersions.length === 0) {
           showToast("這個檔案不是圖片，換一張文宣試試。", { tone: "error" });
@@ -1186,7 +1187,8 @@ export function App() {
         setRoom(next);
         setView((v) => {
           const viewRoom = targetBranchId ? roomForBranch(next, targetBranchId) : next;
-          if (created || !v.versionId) return initialView(viewRoom);
+          const viewStillOnThisBranch = viewRoom.versions.some((item) => item.id === v.versionId);
+          if (created || !v.versionId || !viewStillOnThisBranch) return initialView(viewRoom);
           if (v.compareId === v.versionId && viewRoom.versions.length >= 2) {
             const other = viewRoom.versions.find((x) => x.id !== v.versionId);
             if (other) return { ...v, compareId: other.id };
@@ -1691,17 +1693,30 @@ export function App() {
       return;
     }
     const { getProposalDocs, cloneProposalsInStore } = await import("./features/visual-proposal/store");
-    const { canSaveComposeVersion, captureComposeStage } = await import("./features/visual-proposal/saveComposeVersion");
+    const { canSaveComposeVersion, captureComposeStage, composeSaveOrReject, nextPosterVersionLabel } = await import("./features/visual-proposal/saveComposeVersion");
     const active = getProposalDocs(current.id).find((doc) => doc.versionId === versionId);
-    const gate = canSaveComposeVersion(active);
-    if (!gate.ok) {
-      showToast(gate.reason, { tone: "error" });
+    const content = canSaveComposeVersion(active);
+    if (!content.ok) {
+      showToast(content.reason, { tone: "error" });
       return;
     }
+    const targetBranchId = activeBranchId ?? oldVersion.branchId;
+    const branchCount = targetBranchId ? branchVersions(current, targetBranchId).length : current.versions.length;
     try {
       const blob = await captureComposeStage();
       const file = new File([blob], `${oldVersion.label}-拼圖.png`, { type: "image/png" });
-      const added = await addImageFiles(staticFileList([file]), activeBranchId ?? oldVersion.branchId);
+      const dataUrl = await fileToDataUrl(file);
+      const nextId = uuid();
+      const planned = composeSaveOrReject({
+        doc: active,
+        versions: current.versions.map((item) => ({ id: item.id, label: item.label, imageDataUrl: item.imageDataUrl })),
+        next: { id: nextId, label: nextPosterVersionLabel(branchCount), imageDataUrl: dataUrl },
+      });
+      if (!planned.ok) {
+        showToast(planned.reason, { tone: "error" });
+        return;
+      }
+      const added = await addImageFiles(staticFileList([file]), targetBranchId, undefined, { stableId: nextId });
       const created = added[0];
       if (!created || created.id === oldVersion.id) {
         showToast("新版本沒有寫進去，原稿沒有被覆蓋。請再試一次。", { tone: "error" });

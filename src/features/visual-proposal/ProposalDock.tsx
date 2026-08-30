@@ -117,9 +117,10 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
   };
 
   const uploadMaterial = async (files: FileList | null) => {
-    if (!canManage || !files?.length) return;
+    const list = files ? Array.from(files) : [];
     if (materialRef.current) materialRef.current.value = "";
-    for (const file of Array.from(files)) {
+    if (!canManage || !list.length) return;
+    for (const file of list) {
       try {
         const prepared = await prepareImageFile(file);
         proposal.addImage(createImageItem(prepared.dataUrl, prepared.name));
@@ -266,6 +267,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
         className="proposal-file"
         type="file"
         multiple
+        data-testid="poster-add-asset-input"
         accept={INTAKE_PROFILES.proposal.accept}
         onChange={(e) => void uploadMaterial(e.target.files)}
       />

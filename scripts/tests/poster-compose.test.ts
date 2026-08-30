@@ -11,6 +11,7 @@ import {
   canSaveComposeVersion,
   cloneProposalDocsToVersion,
   composeHasContent,
+  composeSaveOrReject,
   nextPosterVersionLabel,
   versionIdentitiesUnchanged,
   type VersionIdentity,
@@ -61,6 +62,13 @@ test("新增文宣 sheet 有上傳成品與用素材拼一張入口", () => {
   assert.doesNotMatch(sheet, /FIRST_LAYER_TABS/);
 });
 
+test("丟素材先快照 FileList，不清空 input 再讀（live FileList 會變空）", () => {
+  const dock = src("src/features/visual-proposal/ProposalDock.tsx");
+  const snapAt = dock.indexOf("const list = files ? Array.from(files)");
+  const clearAt = dock.indexOf("materialRef.current.value = \"\"");
+  assert.ok(snapAt >= 0 && clearAt > snapAt);
+});
+
 test("未 canManage 沒有編輯這張或存成新版本", () => {
   const mobile = src("src/features/image-review/MobileWorkspace.tsx");
   const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
@@ -78,19 +86,38 @@ test("未 canManage 沒有編輯這張或存成新版本", () => {
   assert.match(dock, /proposal\.setEditing\(canManage\)/);
 });
 
+test("App 存成新版本走 shipped composeSaveOrReject，不是旁路重寫", () => {
+  const app = src("src/App.tsx");
+  assert.match(app, /composeSaveOrReject/);
+  assert.match(app, /canSaveComposeVersion/);
+  assert.match(app, /stableId: nextId/);
+  assert.match(app, /writes\.addVersion/);
+  assert.doesNotMatch(app, /image_path:.+oldVersion/);
+});
+
 test("saveNewVersion 後舊 version id／圖路徑不變，新 version 存在", () => {
   const old: VersionIdentity = {
     id: "v_old",
     label: "初稿",
-    imageDataUrl: "data:image/png;base64,OLD",
+    imageDataUrl: "data:image/png;base64,OLDOLDOLDOLDOLDOLDOLDOLD",
     imagePath: "rooms/r1/v_old.png",
   };
-  const saved = appendVersionWithoutOverwrite([old], {
+  const withImage = emptyDoc({
+    items: [{
+      id: "vpi_1",
+      type: "image",
+      name: "社徽",
+      imageDataUrl: "data:image/png;base64,ABC",
+      x: 0.5, y: 0.5, width: 32, rotation: 0, opacity: 1, visible: true,
+    }],
+  });
+  const next: VersionIdentity = {
     id: "v_new",
     label: nextPosterVersionLabel(1),
-    imageDataUrl: "data:image/png;base64,NEWCOMPOSE",
+    imageDataUrl: "data:image/png;base64,NEWCOMPOSENEWCOMPOSENEW",
     imagePath: "rooms/r1/v_new.png",
-  });
+  };
+  const saved = composeSaveOrReject({ doc: withImage, versions: [old], next });
   assert.equal(saved.ok, true);
   if (!saved.ok) return;
   assert.equal(saved.versions.length, 2);
@@ -101,8 +128,9 @@ test("saveNewVersion 後舊 version id／圖路徑不變，新 version 存在", 
   assert.notEqual(saved.versions[1].id, old.id);
   assert.notEqual(saved.versions[1].imagePath, old.imagePath);
 
-  const sameId = appendVersionWithoutOverwrite([old], { ...old, label: "改一" });
+  const sameId = composeSaveOrReject({ doc: withImage, versions: [old], next: { ...old, label: "改一" } });
   assert.equal(sameId.ok, false);
+  assert.equal(appendVersionWithoutOverwrite([old], { ...old, label: "改一" }).ok, false);
 });
 
 test("空畫布不能存成新版本、不可寫空檔冒充成功", () => {
@@ -110,6 +138,23 @@ test("空畫布不能存成新版本、不可寫空檔冒充成功", () => {
   const empty = canSaveComposeVersion(emptyDoc());
   assert.equal(empty.ok, false);
   if (!empty.ok) assert.match(empty.reason, /空/);
+
+  const old: VersionIdentity = {
+    id: "v_old",
+    label: "初稿",
+    imageDataUrl: "data:image/png;base64,OLDOLDOLDOLDOLDOLDOLDOLD",
+  };
+  const rejected = composeSaveOrReject({
+    doc: emptyDoc(),
+    versions: [old],
+    next: {
+      id: "v_blank",
+      label: "改一",
+      imageDataUrl: "data:image/png;base64,NEWCOMPOSENEWCOMPOSENEW",
+    },
+  });
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.match(rejected.reason, /空/);
 
   const withImage = emptyDoc({
     items: [{
@@ -122,10 +167,10 @@ test("空畫布不能存成新版本、不可寫空檔冒充成功", () => {
   });
   assert.equal(canSaveComposeVersion(withImage).ok, true);
 
-  const blankFile = appendVersionWithoutOverwrite([], {
-    id: "v_blank",
-    label: "改一",
-    imageDataUrl: "",
+  const blankFile = composeSaveOrReject({
+    doc: withImage,
+    versions: [old],
+    next: { id: "v_blank", label: "改一", imageDataUrl: "" },
   });
   assert.equal(blankFile.ok, false);
 });

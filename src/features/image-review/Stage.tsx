@@ -678,7 +678,7 @@ export function Stage({
           />
         )}
 
-        {ready && annotationsVisible && (
+        {ready && (
           <div
             className="stage-frame"
             data-density={pins.length > 10 ? "dense" : undefined}

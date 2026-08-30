@@ -196,7 +196,11 @@ export type PreparedImage = { dataUrl: string; name: string; note?: string };
  * SVG is passed through untouched (vector, tiny, no raster needed).
  */
 export async function prepareImageFile(file: File): Promise<PreparedImage> {
-  if (!file.type.startsWith("image/")) {
+  const namedImage = /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name);
+  if (file.type && !file.type.startsWith("image/") && !namedImage) {
+    throw new Error("這個檔案不是圖片，請換一張。");
+  }
+  if (!file.type && !namedImage) {
     throw new Error("這個檔案不是圖片，請換一張。");
   }
   if (file.size > MAX_UPLOAD_BYTES) {

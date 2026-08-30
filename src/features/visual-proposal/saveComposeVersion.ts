@@ -90,6 +90,20 @@ export function versionIdentitiesUnchanged(
   return prev.id === next.id && prev.imageDataUrl === next.imageDataUrl && prev.imagePath === next.imagePath;
 }
 
+/**
+ * The save gate App.tsx calls before addVersion. Empty canvas / colliding id /
+ * empty export all fail here so a blank file cannot look like success.
+ */
+export function composeSaveOrReject(input: {
+  doc: VisualProposal | null | undefined;
+  versions: VersionIdentity[];
+  next: VersionIdentity;
+}): { ok: true; versions: VersionIdentity[] } | { ok: false; reason: string } {
+  const content = canSaveComposeVersion(input.doc);
+  if (!content.ok) return content;
+  return appendVersionWithoutOverwrite(input.versions, input.next);
+}
+
 export async function captureComposeStage(): Promise<Blob> {
   const stage = document.querySelector("[data-testid='poster-compose-stage']") as HTMLElement | null;
   if (!stage) throw new Error("找不到畫布，請回到文宣再試一次。");
