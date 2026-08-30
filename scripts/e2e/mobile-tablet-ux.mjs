@@ -97,6 +97,9 @@ try {
   await page.waitForSelector(".home-picks", { timeout: 20000 });
   await page.getByRole("button", { name: /建立活動房/ }).click();
   await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 15000 });
+  await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "room-title-input", null, { timeout: 3000 }).catch(() => undefined);
+  check("未命名房進房直接聚焦房名", await page.getByTestId("room-title-input").evaluate((el) => document.activeElement === el));
+  await page.getByTestId("room-title-input").fill("UX 測試活動房");
 
   for (const { width, height } of VIEWPORTS) {
     await page.setViewportSize({ width, height });
@@ -108,10 +111,11 @@ try {
       more: document.querySelectorAll('[data-testid="room-more"]').length,
       chat: [...document.querySelectorAll("button")].some((el) => el.textContent === "對話"),
       board: [...document.querySelectorAll("button")].some((el) => el.textContent === "白板"),
+      schedule: document.querySelectorAll('[data-testid="schedule-tab"]').length,
       split: document.querySelector('[data-testid="multi-branch-room"]')?.getAttribute("data-tablet-split") === "true",
     }));
     check(`${width}×${height} 第一層沒有常駐總覽／AI`, first.overview === 0 && first.ai === 0);
-    check(`${width}×${height} 第一層有返回／更多／對話／白板`, first.more === 1 && first.chat && first.board);
+    check(`${width}×${height} 第一層有返回／更多／對話／白板且沒有時程 tab`, first.more === 1 && first.chat && first.board && first.schedule === 0);
     check(`${width}×${height} 沒有水平溢出`, first.overflow);
     await page.screenshot({ path: join(ARTIFACTS, `gap04-first-${width}x${height}.png`), fullPage: false });
     await ensureRoomMore(page);
