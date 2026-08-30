@@ -141,7 +141,7 @@ function MultiBranchRoomShell(props: React.ComponentProps<typeof MultiBranchRoom
 import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiSheet";
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
-import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
+import { applyReadWatermarkAfterCloudAck, boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -1975,16 +1975,24 @@ export function App() {
       const prev = discussionReadRef.current?.roomId === current.roomId ? discussionReadRef.current : null;
       const next = nextReadWatermark(prev, current);
       if (prev && prev.lastReadMessageId === next.lastReadMessageId && prev.lastReadAt === next.lastReadAt) return;
-      setDiscussionRead(next);
-      void saveDiscussionRead({
-        roomId: next.roomId,
-        userId,
-        lastReadMessageId: next.lastReadMessageId,
-        lastReadAt: next.lastReadAt,
-      }).catch(() => undefined);
-      if (cloud.boundRoomId && isAuthUserId(userId)) {
-        void cloudRef.current.writes.upsertDiscussionRead?.(next);
+      const persist = () => {
+        setDiscussionRead(next);
+        void saveDiscussionRead({
+          roomId: next.roomId,
+          userId,
+          lastReadMessageId: next.lastReadMessageId,
+          lastReadAt: next.lastReadAt,
+        }).catch(() => undefined);
+      };
+      const write = cloudRef.current.writes.upsertDiscussionRead;
+      if (!cloud.boundRoomId || !isAuthUserId(userId) || !write) {
+        persist();
+        return;
       }
+      void write(next).then((ok) => {
+        if (!applyReadWatermarkAfterCloudAck(next, Boolean(ok))) return;
+        persist();
+      });
     },
     [cloud.boundRoomId, cloud.userId, guest],
   );
