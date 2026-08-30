@@ -100,7 +100,10 @@ export async function subscribeRoom(
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "strokes", filter }, (p) =>
       handlers.onStrokeInsert?.(p.new as StrokeRow),
     )
-    .on("postgres_changes", { event: "DELETE", schema: "public", table: "strokes", filter: undefined }, (p) => {
+    // DELETE without a column filter is rejected live ("Unable to subscribe…
+    // [event: DELETE"). Same room_id filter as INSERT/UPDATE. Replica identity
+    // is already FULL in 0001/0014/0025 — no new migration.
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "strokes", filter }, (p) => {
       const id = (p.old as { id?: string })?.id;
       if (id) handlers.onStrokeDelete?.(id);
     })
@@ -154,7 +157,7 @@ export async function subscribeRoom(
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "whiteboard_nodes", filter }, (p) =>
       handlers.onBoardNodeUpsert?.(p.new as NodeRow),
     )
-    .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_nodes", filter: undefined }, (p) => {
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_nodes", filter }, (p) => {
       const id = (p.old as { id?: string })?.id;
       if (id) handlers.onBoardNodeDelete?.(id);
     })
@@ -165,7 +168,7 @@ export async function subscribeRoom(
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "whiteboard_frames", filter }, (p) =>
       handlers.onBoardFrameUpsert?.(p.new as FrameRow),
     )
-    .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_frames", filter: undefined }, (p) => {
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_frames", filter }, (p) => {
       const id = (p.old as { id?: string })?.id;
       if (id) handlers.onBoardFrameDelete?.(id);
     })
@@ -177,7 +180,7 @@ export async function subscribeRoom(
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "whiteboard_edges", filter }, (p) =>
       handlers.onBoardEdgeInsert?.(p.new as EdgeRow),
     )
-    .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_edges", filter: undefined }, (p) => {
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "whiteboard_edges", filter }, (p) => {
       const id = (p.old as { id?: string })?.id;
       if (id) handlers.onBoardEdgeDelete?.(id);
     })
@@ -189,7 +192,7 @@ export async function subscribeRoom(
       const row = acceptedRow(p.new);
       if (row) handlers.onDiscussionUpsert?.(row);
     })
-    .on("postgres_changes", { event: "DELETE", schema: "public", table: "room_discussion_messages", filter: undefined }, (p) => {
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "room_discussion_messages", filter }, (p) => {
       const id = (p.old as { id?: string })?.id;
       if (id) handlers.onDiscussionDelete?.(id);
     })

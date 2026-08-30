@@ -121,6 +121,24 @@ test("wiring: room sync rejects bad payloads and discussion no longer whole-room
   assert.match(hook, /isolateOutboxForOwner/);
 });
 
+test("DELETE postgres_changes must filter by room_id like INSERT/UPDATE", () => {
+  const sync = readFileSync(resolve(ROOT, "src/cloud/roomSync.ts"), "utf8");
+  assert.doesNotMatch(sync, /filter:\s*undefined/);
+  for (const table of [
+    "strokes",
+    "whiteboard_nodes",
+    "whiteboard_frames",
+    "whiteboard_edges",
+    "room_discussion_messages",
+  ]) {
+    const bind = sync.match(new RegExp(`event:\\s*"DELETE"[\\s\\S]{0,80}table:\\s*"${table}"[\\s\\S]{0,40}filter`));
+    assert.ok(bind, `${table} DELETE must keep a filter`);
+    assert.match(bind[0], /filter(?!\s*:\s*undefined)/);
+    assert.doesNotMatch(bind[0], /filter:\s*undefined/);
+  }
+  assert.match(sync, /const filter = `room_id=eq\.\$\{roomId\}`/);
+});
+
 test("re-bind drops leftover realtime channels so subscribe() does not fake a load-error", () => {
   const sync = readFileSync(resolve(ROOT, "src/cloud/roomSync.ts"), "utf8");
   const cloud = readFileSync(resolve(ROOT, "src/cloud/useCloudRoom.ts"), "utf8");
