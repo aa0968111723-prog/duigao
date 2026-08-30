@@ -26,6 +26,7 @@ import {
   grokUnconfigured,
   GROK_PROVIDER,
 } from "../_shared/roomAgent.ts";
+import { storeImagineAsset } from "../_shared/imagine.ts";
 
 type Row = Record<string, unknown>;
 
@@ -490,7 +491,7 @@ async function handle(request: Request): Promise<Response> {
     comments: openComments,
     truncated: payload.truncated,
     maxUsd: grok?.maxUsd ?? 0.05,
-    allowImagineVideo: input.imagineVideoConfirmed,
+    allowImagineVideo: true,
   });
 
   let answer: AgentAnswer | null = null;
@@ -500,6 +501,21 @@ async function handle(request: Request): Promise<Response> {
       query: input.query,
       card,
       imagineVideoConfirmed: input.imagineVideoConfirmed,
+      storeImagine: async ({ bytes, mime, kind }) => {
+        const stored = await storeImagineAsset({
+          roomId: input.roomId,
+          bytes,
+          mime: mime || (kind === "video" ? "video/mp4" : "image/png"),
+          upload: async (path, fileBytes, fileMime) => {
+            const upload = await supabase.storage.from("room-assets").upload(path, fileBytes, {
+              contentType: fileMime,
+              upsert: false,
+            });
+            return { error: upload.error?.message };
+          },
+        });
+        return stored.ok ? { proposalId: stored.proposalId, path: stored.path } : null;
+      },
     });
     if (grokAnswer) {
       answer = {

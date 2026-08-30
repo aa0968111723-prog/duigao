@@ -161,6 +161,10 @@ import {
   type AiProposal,
   type ApplyProposalResult,
 } from "./ai/proposals";
+import { applyVisualWorkLayer, visualProposalFromCloud } from "./ai/applyVisualWorkLayer";
+import { applyMustNotChangeVersionStorage, isVisualProposeAction } from "./ai/roomAgentContract";
+import { applyCloudProposals } from "./features/visual-proposal/store";
+import { upsertProposal } from "./cloud/roomRepository";
 import { collectBoardEditors, stampWriter } from "./features/collaboration/presence";
 import {
   applyPendingCloudWrites,
@@ -2432,15 +2436,32 @@ export function App() {
           }
           upsertSchedule(decided.wrote);
           audit(`已採用時程建議：${proposal.label}`);
-        } else if (
-          proposal.type === "propose_edit_text"
-          || proposal.type === "propose_add_shape"
-          || proposal.type === "propose_move_item"
-          || proposal.type === "propose_add_image"
-          || proposal.type === "imagine_image"
-          || proposal.type === "imagine_video"
-        ) {
-          // Visual work-layer 採用：只標已採用。不得寫 versions、不得改 Storage。
+        } else if (isVisualProposeAction(proposal.type)) {
+          const version = current.versions.find((item) => item.id === viewRef.current.versionId) ?? current.versions[0];
+          if (!version) return { ok: false, reason: "failed", message: "還沒有可對照的版本。" };
+          const beforeVideo = version.videoPath;
+          const supabase = getSupabase();
+          const boundId = cloudRef.current.boundRoomId;
+          const applied = await applyVisualWorkLayer({
+            proposal,
+            version: { id: version.id, videoPath: version.videoPath },
+            roomId: boundId ?? current.id,
+            authorName: guest?.name ?? "夥伴",
+            upsert: async (roomId, cloudProposal) => {
+              if (boundId && supabase) {
+                const revision = await upsertProposal(supabase, boundId, cloudProposal);
+                const visual = visualProposalFromCloud({ ...cloudProposal, revision });
+                if (visual) applyCloudProposals(boundId, [visual]);
+                return revision;
+              }
+              const visual = visualProposalFromCloud(cloudProposal);
+              if (visual) applyCloudProposals(roomId, [visual]);
+              return cloudProposal.revision + 1;
+            },
+          });
+          if (!applyMustNotChangeVersionStorage(beforeVideo, applied.versionVideoPath)) {
+            return { ok: false, reason: "failed", message: "採用不能改到原稿路徑。" };
+          }
           audit(`已採用 AI 提案：${proposal.label}`);
           appliedAiProposalIds.current.add(proposal.id);
           showToast(proposal.type === "imagine_image" ? "已生成一張圖，尚未成為正式版本" : "已採用 AI 提案（尚未存成新版本）", { tone: "success" });

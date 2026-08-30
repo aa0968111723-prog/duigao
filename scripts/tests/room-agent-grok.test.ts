@@ -24,6 +24,14 @@ import {
   roomAgentHealth,
   type RoomAgentCard,
 } from "../../src/ai/roomAgentContract.ts";
+import { applyVisualWorkLayer } from "../../src/ai/applyVisualWorkLayer.ts";
+import type { AiProposal } from "../../src/ai/proposals.ts";
+import { askGrok } from "../../supabase/functions/_shared/roomAgent.ts";
+import {
+  executeImagineImage,
+  executeImagineVideo,
+  storeImagineAsset,
+} from "../../supabase/functions/_shared/imagine.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -113,11 +121,15 @@ test("overwrite_version and other forbidden tools are refused and recorded", () 
   }
 });
 
-test("imagine_video without confirm is refused; confirmed still respects spend cap", () => {
+test("imagine_video without confirm is refused with a quote; confirmed still respects spend cap", () => {
   const ctx = { card: { ...card(), spendPolicy: { ...card().spendPolicy, allowImagineVideo: true } } };
   const denied = dispatchRoomAgentTool("imagine_video", { prompt: "短影", seconds: 6, resolution: "720p" }, ctx);
   assert.equal(denied.ok, false);
   assert.match(denied.error ?? "", /確認估價/);
+  const quote = denied.data as { needsConfirm?: boolean; estimatedUsd?: number; seconds?: number };
+  assert.equal(quote.needsConfirm, true);
+  assert.equal(quote.seconds, 6);
+  assert.ok((quote.estimatedUsd ?? 0) > 0);
   const over = dispatchRoomAgentTool("imagine_video", { prompt: "短影", seconds: 6, resolution: "720p" }, {
     ...ctx,
     imagineVideoConfirmed: true,
@@ -126,13 +138,10 @@ test("imagine_video without confirm is refused; confirmed still respects spend c
   assert.match(over.error ?? "", /上限/);
 });
 
-test("imagine_image stays a proposal preview and apply does not change version storage path", () => {
+test("imagine_image stays a proposal preview", () => {
   const result = dispatchRoomAgentTool("imagine_image", { prompt: "主視覺", size: "1K" }, { card: card() });
   assert.equal(result.ok, true);
   assert.equal(result.preview, IMAGINE_NOT_VERSION_COPY);
-  const before = "rooms/abc/versions/v1/poster.png";
-  assert.equal(applyMustNotChangeVersionStorage(before, before), true);
-  assert.equal(applyMustNotChangeVersionStorage(before, "rooms/abc/versions/v1/replaced.png"), false);
 });
 
 test("HTML / missing keys from Grok are reject, not success; search tools stay off", () => {
@@ -168,4 +177,201 @@ test("citations stay bound to content / comment / item ids", () => {
   assert.ok(built.contents.every((item) => item.branchId));
   assert.ok(built.comments.every((item) => item.id));
   assert.ok(built.workLayer?.items.every((item) => item.id));
+});
+
+function jsonFetch(body: unknown, urlCheck?: (url: string) => void) {
+  return async (url: string) => {
+    urlCheck?.(url);
+    return {
+      ok: true,
+      headers: { get: () => "application/json" },
+      text: async () => JSON.stringify(body),
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    };
+  };
+}
+
+test("executeImagineImage POSTs grok-imagine-image; unconfirmed executeImagineVideo never fetches", async () => {
+  const urls: string[] = [];
+  const image = await executeImagineImage({
+    prompt: "主視覺",
+    apiKey: "xai-test",
+    model: "grok-imagine-image",
+    fetchFn: jsonFetch({ data: [{ b64_json: Buffer.from("PNG").toString("base64") }] }, (url) => urls.push(url)),
+  });
+  assert.equal(image.ok, true);
+  assert.ok(urls.some((url) => url.includes("/images/generations")));
+  if (image.ok) assert.equal(image.model, "grok-imagine-image");
+
+  let videoCalls = 0;
+  const video = await executeImagineVideo({
+    prompt: "短影",
+    apiKey: "xai-test",
+    confirmed: false,
+    fetchFn: async () => {
+      videoCalls += 1;
+      return { ok: true, headers: { get: () => "application/json" }, text: async () => "{}" };
+    },
+  });
+  assert.equal(video.ok, false);
+  assert.equal(video.refused, true);
+  assert.equal(videoCalls, 0);
+});
+
+test("storeImagineAsset writes proposals path and never versions", async () => {
+  const uploads: Array<{ path: string; mime: string }> = [];
+  const stored = await storeImagineAsset({
+    roomId: "11111111-1111-4111-8111-111111111111",
+    bytes: new Uint8Array([9, 8, 7]),
+    mime: "image/png",
+    idFn: (() => {
+      let n = 0;
+      return () => `aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee${n++}`;
+    })(),
+    upload: async (path, _bytes, mime) => {
+      uploads.push({ path, mime });
+      return {};
+    },
+  });
+  assert.equal(stored.ok, true);
+  if (!stored.ok) return;
+  assert.match(stored.path, /\/proposals\//);
+  assert.doesNotMatch(stored.path, /\/versions\//);
+  assert.equal(uploads[0]?.path, stored.path);
+});
+
+test("採用 upserts visual_proposals and leaves the version storage path unchanged", async () => {
+  const before = "rooms/abc/versions/v1/poster.png";
+  const upserts: Array<{ roomId: string; payload: Record<string, unknown>; versionId: string }> = [];
+  const proposal: AiProposal = {
+    id: "imagine-main",
+    type: "imagine_image",
+    label: "主視覺",
+    requiresExtraConfirm: false,
+    source: "agent",
+    payload: {
+      proposalId: "11111111-2222-4333-8444-555555555555",
+      workLayerRef: "rooms/abc/proposals/11111111-2222-4333-8444-555555555555/a1.png",
+      preview: IMAGINE_NOT_VERSION_COPY,
+    },
+  };
+  const result = await applyVisualWorkLayer({
+    proposal,
+    version: { id: "v1", imagePath: before, videoPath: "rooms/abc/videos/v1/original.mp4" },
+    roomId: "abc",
+    authorName: "主辦",
+    upsert: async (roomId, cloudProposal) => {
+      upserts.push({ roomId, payload: cloudProposal.payload, versionId: cloudProposal.versionId });
+      return 1;
+    },
+  });
+  assert.equal(upserts.length, 1);
+  assert.equal(upserts[0].roomId, "abc");
+  assert.equal(result.versionImagePath, before);
+  assert.equal(result.versionVideoPath, "rooms/abc/videos/v1/original.mp4");
+  assert.equal(applyMustNotChangeVersionStorage(before, result.versionImagePath), true);
+  assert.doesNotMatch(JSON.stringify(upserts[0].payload), /\/versions\//);
+  assert.match(String(upserts[0].payload.workLayerRef), /\/proposals\//);
+  assert.equal(upserts[0].payload.status, "accepted");
+  await assert.rejects(
+    () => applyVisualWorkLayer({
+      proposal: { ...proposal, payload: { workLayerRef: "rooms/abc/versions/v1/replaced.png" } },
+      version: { id: "v1", imagePath: before },
+      roomId: "abc",
+      authorName: "主辦",
+      upsert: async () => 1,
+    }),
+    /cannot write a version original path/,
+  );
+});
+
+test("askGrok calls Imagine for image and only quotes unconfirmed video", async () => {
+  const grokEnv = {
+    provider: "grok-room-agent",
+    xaiKey: "xai-test",
+    textModel: DEFAULT_GROK_TEXT_MODEL,
+    imageModel: "grok-imagine-image",
+    videoModel: "grok-imagine-video",
+    maxUsd: 0.05,
+  };
+  const built = card();
+  const urls: string[] = [];
+  const stored: string[] = [];
+  const imageAnswer = await askGrok({
+    env: grokEnv,
+    query: "做主視覺",
+    card: built,
+    imagineVideoConfirmed: false,
+    fetchFn: async (url) => {
+      urls.push(url);
+      if (url.includes("/chat/completions")) {
+        return {
+          ok: true,
+          headers: { get: () => "application/json" },
+          text: async () => JSON.stringify({
+            choices: [{
+              message: {
+                content: "這是可審核的提案",
+                tool_calls: [{ function: { name: "imagine_image", arguments: JSON.stringify({ prompt: "主視覺" }) } }],
+              },
+            }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ data: [{ b64_json: Buffer.from("PNG").toString("base64") }] }),
+      };
+    },
+    storeImagine: async () => {
+      stored.push("image");
+      return { proposalId: "11111111-1111-4111-8111-111111111111", path: "rooms/r/proposals/11111111-1111-4111-8111-111111111111/a.png" };
+    },
+  });
+  assert.ok(urls.some((url) => url.includes("/images/generations")));
+  assert.equal(stored[0], "image");
+  assert.equal(imageAnswer?.actions[0]?.type, "imagine_image");
+  assert.equal(imageAnswer?.actions[0]?.payload.workLayerRef, "rooms/r/proposals/11111111-1111-4111-8111-111111111111/a.png");
+
+  const videoUrls: string[] = [];
+  const videoAnswer = await askGrok({
+    env: grokEnv,
+    query: "做短影",
+    card: built,
+    imagineVideoConfirmed: false,
+    fetchFn: async (url) => {
+      videoUrls.push(url);
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({
+          choices: [{
+            message: {
+              content: "先確認估價",
+              tool_calls: [{ function: { name: "imagine_video", arguments: JSON.stringify({ prompt: "短影", seconds: 6, resolution: "720p" }) } }],
+            },
+          }],
+        }),
+      };
+    },
+    storeImagine: async () => {
+      throw new Error("unconfirmed video must not store");
+    },
+  });
+  assert.equal(videoUrls.length, 1);
+  assert.ok(videoUrls[0].includes("/chat/completions"));
+  assert.equal(videoAnswer?.actions[0]?.type, "imagine_video");
+  assert.equal(videoAnswer?.actions[0]?.payload.needsConfirm, true);
+  assert.equal(videoAnswer?.actions[0]?.payload.workLayerRef, undefined);
+});
+
+test("RoomAiSheet confirm re-asks with imagineVideoConfirmed instead of applying", () => {
+  const sheet = readFileSync(resolve(ROOT, "src/features/asset-intelligence/RoomAiSheet.tsx"), "utf8");
+  assert.match(sheet, /imagineVideoConfirmed:\s*true/);
+  assert.match(sheet, /data-testid="room-ai-imagine-confirm"/);
+  assert.doesNotMatch(sheet, /room-ai-imagine-confirm[\s\S]{0,200}apply\(true\)/);
+  const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
+  assert.match(app, /applyVisualWorkLayer/);
+  assert.match(app, /upsertProposal/);
 });

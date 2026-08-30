@@ -449,6 +449,8 @@ export function contextCacheKey(roomId: string, request: RoomContextRequest, ana
     selectedBranchIds: [...(request.selectedBranchIds ?? [])].sort(),
     selectedVersionIds: [...(request.selectedVersionIds ?? [])].sort(),
     timeRange: request.timeRange ?? null,
+    // Confirm re-ask must not reuse the unconfirmed quote. undefined/false share.
+    imagineVideoConfirmed: request.imagineVideoConfirmed === true,
     analysisVersions: [...analysisVersions].sort(),
   });
 }

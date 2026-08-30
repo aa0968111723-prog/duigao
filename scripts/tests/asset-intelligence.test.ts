@@ -88,6 +88,18 @@ test("context cache key includes selected items and analysis versions", () => {
   assert.match(left, /缺什麼/);
 });
 
+test("context cache key does not share unconfirmed quote with imagineVideoConfirmed re-ask", () => {
+  const roomId = "room-1";
+  const versions = ["1"];
+  const quote = { query: "做短影", selectedAssetIds: ["a"] };
+  const unconfirmed = contextCacheKey(roomId, quote, versions);
+  const omitted = contextCacheKey(roomId, { ...quote, imagineVideoConfirmed: false }, versions);
+  const confirmed = contextCacheKey(roomId, { ...quote, imagineVideoConfirmed: true }, versions);
+  assert.equal(unconfirmed, omitted);
+  assert.notEqual(unconfirmed, confirmed);
+  assert.notEqual(omitted, confirmed);
+});
+
 test("context asset projection has no storage or invite capability", () => {
   const item = asset("a");
   const context: RoomContextItem = {
