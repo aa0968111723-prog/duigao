@@ -110,6 +110,15 @@ export function MobileWorkspace({ api, presence }: Props) {
     }
   }, [proposalStore.layerEditing, proposalSession]);
 
+  // A cloud room may finish replacing its local id while the compose overlay is
+  // opening. Re-assert the plain「編輯這張」session against the room/version now
+  // on screen; linked proposal intents still own their own create/select flow.
+  useEffect(() => {
+    if (proposalSession?.intent === null && api.canManage && !proposalStore.active) {
+      startComposeEditing(room.id, view.versionId, api.guest);
+    }
+  }, [api.canManage, api.guest, proposalSession, proposalStore.active, room.id, view.versionId]);
+
   const gaveFeedback =
     room.comments.some((c) => c.authorId === api.guest.id) ||
     (room.supports ?? []).some((s) => s.userId === api.guest.id) ||
