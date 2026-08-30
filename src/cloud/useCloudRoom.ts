@@ -30,7 +30,7 @@ import {
 import { isCloudConfigured } from "./config";
 import { getSupabase } from "./client";
 import { ensureSession } from "./auth";
-import { isDuplicateKey, isInvalidInvite, isPermissionDenied, isRevisionConflict, isStaleWrite } from "./errors";
+import { CloudError, isDuplicateKey, isInvalidInvite, isPermissionDenied, isRevisionConflict, isStaleWrite } from "./errors";
 import { buildInviteUrl, generateInviteToken, readRoomLink } from "./invite";
 import { clearCloudMapping, getCloudMapping, saveCloudMapping } from "./mapping";
 import {
@@ -168,7 +168,7 @@ export type CloudWrites = {
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
-  upsertScheduleEvent?: (event: import("../features/schedule/types").ScheduleEvent) => void;
+  upsertScheduleEvent?: (event: import("../features/schedule/types").ScheduleEvent) => Promise<import("../features/schedule/types").ScheduleEvent | false | "conflict">;
   deleteScheduleEvent?: (id: string) => void;
   setAllowBoardEdit?: (allow: boolean) => void;
   toggleSupport: (commentId: string, add: boolean) => void;
@@ -506,6 +506,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   const reviveExtraRef = useRef<(() => void) | null>(null);
   // frame 的「執行時最新值」— 見 writes.upsertFrame（S6 版本簿記）
   const frameLatest = useRef(new Map<string, import("../features/collaboration/types").WhiteboardFrame>());
+  const scheduleLatest = useRef(new Map<string, import("../features/schedule/types").ScheduleEvent>());
   const run = useCallback(
     (key: string, task: () => Promise<void>) => {
       if (!supabase || !boundRef.current) return;
@@ -1247,7 +1248,21 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     insertOperation: (op) => run(`op:${op.opId}`, () => repoInsertOperation(supabase!, { ...op, roomId: boundRef.current! })),
     createDecision: (decision) => run(`decision-insert:${decision.id}`, () => insertDecision(supabase!, decision)),
     updateDecision: (decision) => run(`decision:${decision.id}`, () => repoUpdateDecision(supabase!, decision)),
-    upsertScheduleEvent: (event) => run(`schedule:${event.id}`, () => upsertScheduleEvent(supabase!, event).then(() => undefined)),
+    upsertScheduleEvent: (event) => {
+      scheduleLatest.current.set(event.id, event);
+      return writeAck(async () => {
+        const latest = scheduleLatest.current.get(event.id) ?? event;
+        const persisted = await upsertScheduleEvent(supabase!, latest);
+        if (persisted === "conflict") throw new CloudError("stale-write", "schedule");
+        return persisted;
+      }).then((result) => {
+        if (result === "conflict") {
+          scheduleLatest.current.delete(event.id);
+          scheduleReload();
+        }
+        return result;
+      });
+    },
     deleteScheduleEvent: (id) => run(`schedule-del:${id}`, () => deleteScheduleEventRow(supabase!, boundRef.current!, id)),
     setAllowBoardEdit: (allow) => run("allow-board-edit", () => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),
     toggleSupport: (commentId, add) => run(`comment-support:${commentId}`, () => setSupport(supabase!, boundRef.current!, commentId, add)),
