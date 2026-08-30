@@ -203,6 +203,8 @@ const ACTION_KIND: Record<AiProposal["type"], string> = {
   create_comment: "討論",
   create_poll: "投票",
   create_plan_draft: "企劃",
+  create_schedule_event: "時程",
+  create_task: "任務",
   propose_edit_text: "文案",
   propose_add_shape: "形狀",
   propose_move_item: "位置",
