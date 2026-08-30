@@ -28,8 +28,8 @@ import { deflateSync } from "node:zlib";
 import { start as startMock } from "./mock-supabase.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
-const MOCK_PORT = 54406;
-const APP_PORT = 4178;
+const MOCK_PORT = Number(process.env.DUIGAO_E2E_MOCK_PORT || 54406);
+const APP_PORT = Number(process.env.DUIGAO_E2E_APP_PORT || 4178);
 const APP = `http://127.0.0.1:${APP_PORT}/`;
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 13; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";

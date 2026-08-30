@@ -237,3 +237,14 @@ test("畫布與存檔走既有 testid，不改第一層 IA", () => {
   assert.match(chrome, /FIRST_LAYER_TABS = \["對話", "白板"\]/);
   assert.match(chrome, /FIRST_LAYER_TOP = \["back", "title", "presence", "voice", "more"\]/);
 });
+
+test("純原稿隱藏 pin／svg.overlay／region-rect，工作層 overlay 仍在 ready 時畫", () => {
+  const stage = src("src/features/image-review/Stage.tsx");
+  const overlayAt = stage.indexOf("<VisualProposalOverlay");
+  const gateAt = stage.indexOf("{annotationsVisible && (");
+  const svgAt = stage.indexOf('<svg className="overlay"');
+  const pinAt = stage.indexOf("{pins.map((pin) => {");
+  const regionAt = stage.indexOf('className="region-rect"');
+  assert.ok(overlayAt >= 0 && gateAt > overlayAt, "compose overlay must render before the annotations gate");
+  assert.ok(svgAt > gateAt && pinAt > gateAt && regionAt > gateAt, "pin/svg/region must sit inside annotationsVisible");
+});
