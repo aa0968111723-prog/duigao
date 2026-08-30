@@ -14,10 +14,12 @@ import {
   eventsInRange,
   moveEventToDay,
   patchScheduleEvent,
+  scheduleWritePlan,
+  weekStart,
 } from "../../src/features/schedule/events.ts";
 import { acceptScheduleWrite } from "../../src/features/schedule/honesty.ts";
 import { applyDeadlineToNode, eventFromBoardNode, eventFromDiscussion, nodeFromScheduleEvent, sourceOpenTarget } from "../../src/features/schedule/links.ts";
-import { proposalShowsSources, scheduleEventFromProposal } from "../../src/features/schedule/proposals.ts";
+import { decideScheduleProposalWrite, proposalShowsSources } from "../../src/features/schedule/proposals.ts";
 import type { DiscussionMessage } from "../../src/features/collaboration/types.ts";
 import { enqueuePendingWrite } from "../../src/cloud/pendingWrites.ts";
 
@@ -67,6 +69,27 @@ test("today/week agenda does not require a month grid", () => {
   assert.equal(eventsInRange(events, "week", now).some((item) => item.id === "b"), false);
 });
 
+test("weekStart uses Taipei weekday so Monday week starts Monday", () => {
+  const monday = Date.parse("2026-08-31T10:00:00+08:00");
+  const sunday = Date.parse("2026-09-06T23:00:00+08:00");
+  const expected = Date.parse("2026-08-31T00:00:00+08:00");
+  assert.equal(weekStart(monday), expected);
+  assert.equal(weekStart(sunday), expected);
+  const days = agendaDays([], monday);
+  assert.equal(days[0]?.dayStart, expected);
+  assert.notEqual(days[0]?.dayStart, Date.parse("2026-08-25T00:00:00+08:00"));
+});
+
+test("scheduleWritePlan inserts v1 and OCC-updates later versions", () => {
+  const created = createScheduleEvent({ roomId: "r", createdBy: "u", title: "交稿", startAt: 1 });
+  assert.deepEqual(scheduleWritePlan(created), { kind: "insert" });
+  const edited = patchScheduleEvent(created, { title: "交稿定稿" });
+  assert.equal(edited.version, 2);
+  assert.deepEqual(scheduleWritePlan(edited), { kind: "update", expectedVersion: 1 });
+  const twice = patchScheduleEvent(edited, { status: "doing" });
+  assert.deepEqual(scheduleWritePlan(twice), { kind: "update", expectedVersion: 2 });
+});
+
 test("message→task and message→calendar keep source ids", () => {
   const msg = message();
   const task = eventFromDiscussion(msg, "u1", 1_000, "task");
@@ -109,14 +132,28 @@ test("AI proposal writes only after 採用; reject does not write", () => {
   assert.ok(proposal);
   const gate = applyGate({ proposal, alreadyApplied: false, extraConfirmed: false, canTalk: true, canManage: true, canEditBoard: true });
   assert.deepEqual(gate, { ok: true });
-  const forbidden = applyGate({ proposal, alreadyApplied: false, extraConfirmed: false, canTalk: true, canManage: false, canEditBoard: true });
-  assert.equal(forbidden.ok, false);
-  const live: string[] = [];
-  const reject = true;
-  if (!reject) live.push(scheduleEventFromProposal(proposal, "room-1", "u1").id);
-  assert.equal(live.length, 0);
-  const adopted = scheduleEventFromProposal(proposal, "room-1", "u1");
-  assert.equal(adopted.sourceType, "ai_proposal");
+  const ctx = {
+    proposal,
+    alreadyApplied: false,
+    extraConfirmed: false,
+    canTalk: true,
+    canManage: true,
+    canEditBoard: true,
+    roomId: "room-1",
+    createdBy: "u1",
+  };
+  const rejected = decideScheduleProposalWrite({ ...ctx, action: "reject" });
+  assert.equal(rejected.wrote, null);
+  assert.equal(rejected.reason, "rejected");
+  const forbidden = decideScheduleProposalWrite({ ...ctx, action: "adopt", canManage: false });
+  assert.equal(forbidden.wrote, null);
+  assert.equal(forbidden.reason, "forbidden");
+  const already = decideScheduleProposalWrite({ ...ctx, action: "adopt", alreadyApplied: true });
+  assert.equal(already.wrote, null);
+  const adopted = decideScheduleProposalWrite({ ...ctx, action: "adopt" });
+  assert.ok(adopted.wrote);
+  assert.equal(adopted.wrote?.sourceType, "ai_proposal");
+  assert.equal(adopted.wrote?.title, "交主視覺");
   const sources = proposalShowsSources(proposal);
   assert.deepEqual(sources.messages, ["msg-1"]);
   assert.equal(sources.reason, "討論提到週三");
@@ -161,12 +198,38 @@ test("phone toolbar is five items and calendar tab exists", () => {
   assert.match(wb, /文字／便利貼/);
   assert.match(wb, />加入</);
   assert.match(wb, /wb-set-deadline/);
+  assert.match(wb, /wb-deadline-form/);
   assert.doesNotMatch(wb, /wb-tool-material/);
   const room = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
   assert.match(room, /schedule-tab/);
   assert.match(room, /ScheduleAgenda/);
+  assert.match(room, /schedule-split/);
+  assert.match(room, /setDiscussPane\("chat"\)/);
+  assert.match(room, /setDiscussPane\("board"\)/);
+  assert.match(room, /onOpenScheduleSource/);
+  const openSource = room.slice(room.indexOf("onOpenSource: (event)"));
+  const earlyReturn = /onOpenScheduleSource\?\.?\(event\);\s*return;/.test(openSource);
+  assert.equal(earlyReturn, false);
   const discussion = readFileSync(resolve(ROOT, "src/features/room-discussion/RoomDiscussion.tsx"), "utf8");
   assert.match(discussion, /discussion-add-schedule/);
+  const agenda = readFileSync(resolve(ROOT, "src/features/schedule/ScheduleAgenda.tsx"), "utf8");
+  assert.match(agenda, /schedule-edit-form/);
+  assert.match(agenda, /schedule-delete/);
+  assert.match(agenda, /schedule-type/);
+  assert.match(agenda, /text\/schedule-event/);
+  assert.match(agenda, /對話＋日曆/);
+  assert.match(agenda, /白板＋日曆/);
+  const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
+  assert.match(app, /applyDeadlineToNode/);
+  assert.match(app, /decideScheduleProposalWrite/);
+  assert.match(app, /action: "reject"/);
+  const repo = readFileSync(resolve(ROOT, "src/cloud/collaborationRepository.ts"), "utf8");
+  assert.match(repo, /scheduleWritePlan/);
+  assert.match(repo, /\.eq\("version", plan\.expectedVersion\)/);
+  assert.match(repo, /stale-write/);
+  const sheet = readFileSync(resolve(ROOT, "src/features/asset-intelligence/RoomAiSheet.tsx"), "utf8");
+  assert.match(sheet, /proposalShowsSources/);
+  assert.match(sheet, /ai-proposal-sources/);
 });
 
 test("old whiteboard node types remain readable", () => {

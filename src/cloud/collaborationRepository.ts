@@ -15,6 +15,7 @@ import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaborat
 import { acceptDiscussionInsert } from "./discussionWrite";
 import { CloudError } from "./errors";
 import { acceptScheduleWrite } from "../features/schedule/honesty";
+import { scheduleWritePlan } from "../features/schedule/events";
 import type { ScheduleEvent } from "../features/schedule/types";
 
 type WhiteboardRow = {
@@ -304,8 +305,8 @@ export async function loadScheduleEvents(supabase: SupabaseClient, roomId: strin
   return ((data as Record<string, unknown>[] | null) ?? []).map(scheduleFromRow);
 }
 
-export async function upsertScheduleEvent(supabase: SupabaseClient, event: ScheduleEvent): Promise<ScheduleEvent> {
-  const { data, error } = await supabase.from("room_schedule_events").upsert({
+export async function upsertScheduleEvent(supabase: SupabaseClient, event: ScheduleEvent): Promise<ScheduleEvent | "conflict"> {
+  const payload = {
     id: event.id,
     room_id: event.roomId,
     created_by: isUuid(event.createdBy) ? event.createdBy : null,
@@ -324,7 +325,20 @@ export async function upsertScheduleEvent(supabase: SupabaseClient, event: Sched
     color: event.color,
     version: event.version,
     updated_at: new Date().toISOString(),
-  }).select("id").maybeSingle();
+  };
+  const plan = scheduleWritePlan(event);
+  const query = plan.kind === "insert"
+    ? supabase.from("room_schedule_events").insert(payload).select("id").maybeSingle()
+    : supabase.from("room_schedule_events").update(payload)
+      .eq("id", event.id)
+      .eq("room_id", event.roomId)
+      .eq("version", plan.expectedVersion)
+      .select("id")
+      .maybeSingle();
+  const { data, error } = await query;
+  if (!error && !data && plan.kind === "update") {
+    throw new CloudError("stale-write", "schedule");
+  }
   const accepted = acceptScheduleWrite({ error, data });
   if (!accepted.ok) {
     throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : accepted.code, "schedule");

@@ -18,10 +18,23 @@ function startOfDay(ts: number, timeZone = "Asia/Taipei"): number {
   return new Date(`${parts}T00:00:00+08:00`).getTime();
 }
 
+export { startOfDay };
+
+const WEEKDAY_OFFSET: Record<string, number> = {
+  Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6,
+};
+
 export function weekStart(ts: number, timeZone = "Asia/Taipei"): number {
   const start = startOfDay(ts, timeZone);
-  const day = new Date(start).getUTCDay() || 7;
-  return start - (day - 1) * 86400000;
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(new Date(ts));
+  const offset = WEEKDAY_OFFSET[weekday] ?? 0;
+  return start - offset * 86400000;
+}
+
+/** Insert vs OCC update. Patch bumps version first; expected is the previous row. */
+export function scheduleWritePlan(event: ScheduleEvent): { kind: "insert" } | { kind: "update"; expectedVersion: number } {
+  if (event.version <= 1) return { kind: "insert" };
+  return { kind: "update", expectedVersion: event.version - 1 };
 }
 
 export function isScheduleEventType(value: unknown): value is ScheduleEventType {

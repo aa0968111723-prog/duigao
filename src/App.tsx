@@ -143,8 +143,8 @@ import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContext
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
-import { eventFromBoardNode, eventFromDiscussion, nodeFromScheduleEvent, sourceOpenTarget } from "./features/schedule/links";
-import { scheduleEventFromProposal } from "./features/schedule/proposals";
+import { applyDeadlineToNode, eventFromBoardNode, eventFromDiscussion, nodeFromScheduleEvent, sourceOpenTarget } from "./features/schedule/links";
+import { decideScheduleProposalWrite } from "./features/schedule/proposals";
 import type { ScheduleEvent } from "./features/schedule/types";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
@@ -2282,12 +2282,13 @@ export function App() {
   );
 
   const addNodeDeadline = useCallback(
-    (node: WhiteboardNode, startAt = Date.now()) => {
+    (node: WhiteboardNode, startAt: number) => {
       const actor = cloud.userId ?? guest?.id ?? "local";
       upsertSchedule(eventFromBoardNode(node, actor, startAt));
+      upsertNode(applyDeadlineToNode(node, startAt));
       showToast("已設定期限", { tone: "success" });
     },
-    [cloud.userId, guest, showToast, upsertSchedule],
+    [cloud.userId, guest, showToast, upsertNode, upsertSchedule],
   );
 
   const createDecision = useCallback(
@@ -2408,7 +2409,28 @@ export function App() {
           setStagedBoardAi({ proposals: [proposal], nodes: [node], edges: [] });
           return { ok: true, message: "已開白板並顯示 AI 的建議，確認後才會放上去。" };
         } else if (proposal.type === "create_schedule_event" || proposal.type === "create_task") {
-          upsertSchedule(scheduleEventFromProposal(proposal, current.id, actor));
+          const decided = decideScheduleProposalWrite({
+            action: "adopt",
+            proposal,
+            alreadyApplied: appliedAiProposalIds.current.has(proposal.id),
+            extraConfirmed,
+            canTalk,
+            canManage,
+            canEditBoard,
+            roomId: current.id,
+            createdBy: actor,
+          });
+          if (!decided.wrote) {
+            const reason = decided.reason === "already-applied" || decided.reason === "needs-confirm" || decided.reason === "forbidden"
+              ? decided.reason
+              : "failed";
+            return {
+              ok: false,
+              reason,
+              message: reason === "failed" ? "時程建議沒有寫入。" : applyReasonMessage(reason),
+            };
+          }
+          upsertSchedule(decided.wrote);
           audit(`已採用時程建議：${proposal.label}`);
         } else if (
           proposal.type === "propose_edit_text"
@@ -2451,6 +2473,22 @@ export function App() {
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, createProjectContent, createProjectPoll, createWhiteboard, guest, sendDiscussion, showToast, upsertNode, upsertSchedule],
   );
+
+  const rejectAiProposal = useCallback((proposal: AiProposal) => {
+    const current = roomRef.current;
+    const decided = decideScheduleProposalWrite({
+      action: "reject",
+      proposal,
+      alreadyApplied: appliedAiProposalIds.current.has(proposal.id),
+      extraConfirmed: false,
+      canTalk: Boolean(guest),
+      canManage: !cloud.boundRoomId || cloud.canManageMedia,
+      canEditBoard: true,
+      roomId: current?.id ?? "",
+      createdBy: cloud.userId ?? guest?.id ?? "local",
+    });
+    if (decided.wrote) return;
+  }, [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest]);
 
   useEffect(() => {
     const flushPendingBoardEdits = () => {
@@ -3856,6 +3894,7 @@ export function App() {
           onUpdatePolicy={updateAiPolicy}
           onUpdateHumanMetadata={updateHumanMetadata}
           onApplyProposal={applyAiProposal}
+          onRejectProposal={rejectAiProposal}
           onCancel={() => { aiAskToken.current += 1; setAiLoading(false); }}
           canManage={cloud.canManageMedia}
         />}
@@ -4047,6 +4086,7 @@ export function App() {
         onUpdatePolicy={updateAiPolicy}
         onUpdateHumanMetadata={updateHumanMetadata}
         onApplyProposal={applyAiProposal}
+        onRejectProposal={rejectAiProposal}
         onCancel={() => { aiAskToken.current += 1; setAiLoading(false); }}
         canManage={cloud.canManageMedia}
       />}

@@ -93,7 +93,7 @@ export type WhiteboardApi = {
   onDeleteFrame?: (id: string) => void;
   /** 板節點「打開來源訊息」→ 切討論並捲動高亮。 */
   onOpenDiscussionMessage?: (messageId: string) => void;
-  onNodeDeadline?: (node: WhiteboardNode) => void;
+  onNodeDeadline?: (node: WhiteboardNode, startAt: number) => void;
   /** WB04：開著這塊板的其他人（具名在場）。 */
   boardPeople?: { userId: string; name: string }[];
   /** WB05 平板 Split View：側欄此刻是否真的掛著（掛載由上層以 JS 判定，
@@ -131,7 +131,7 @@ export type WhiteboardApi = {
   onConsumeStagedAiPreview?: () => void;
 };
 
-type Sheet = "add" | "search" | "content" | "more" | "poll" | "poll-create" | "video-range" | "poster-region" | "plan-section" | "versions" | "ai" | "decision" | null;
+type Sheet = "add" | "search" | "content" | "more" | "poll" | "poll-create" | "video-range" | "poster-region" | "plan-section" | "versions" | "ai" | "decision" | "deadline" | null;
 
 const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "text", label: "便利貼" },
@@ -1617,6 +1617,28 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           </section>
         </div>
       )}
+      {sheet === "deadline" && selectedNode && (
+        <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
+          <section className="project-sheet" role="dialog" aria-label="設定期限">
+            <form
+              className="wb-sheet"
+              data-testid="wb-deadline-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const value = String(new FormData(event.currentTarget).get("day") ?? "");
+                const startAt = value ? new Date(`${value}T00:00:00+08:00`).getTime() : Date.now();
+                api.onNodeDeadline?.(selectedNode, startAt);
+                setSheet(null);
+              }}
+            >
+              <h3>設定期限</h3>
+              <label>日期<input type="date" name="day" required /></label>
+              <button type="submit">加入時程</button>
+            </form>
+            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+          </section>
+        </div>
+      )}
       {sheet === "decision" && (
         <div className="project-scrim" onMouseDown={(event) => event.currentTarget === event.target && setSheet(null)}>
           <section className="project-sheet" role="dialog" aria-label="寫下決策">
@@ -2030,7 +2052,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           )}
           <button type="button" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
           {api.onNodeDeadline && (
-            <button type="button" data-testid="wb-set-deadline" onClick={() => api.onNodeDeadline?.(selectedNode)}>設定期限</button>
+            <button type="button" data-testid="wb-set-deadline" onClick={() => setSheet("deadline")}>設定期限</button>
           )}
           {selected.length > 1 && (
             <>
