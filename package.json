@@ -25,7 +25,8 @@
     "test:realtime-offline": "tsx --test scripts/tests/realtime-offline.test.ts",
     "test:voice-dock-leave": "tsx --test scripts/tests/voice-dock-leave.test.ts",
     "test:voice-state": "tsx --test scripts/tests/voice-state.test.ts",
-    "test:multi-branch": "tsx --test scripts/tests/multi-branch.test.ts scripts/tests/video-media.test.ts scripts/tests/cutos-contract.test.ts scripts/tests/canva-contract.test.ts scripts/tests/api-response.test.ts scripts/tests/spa-routing.test.ts scripts/tests/home-entry.test.ts scripts/tests/session-entry.test.ts scripts/tests/mobile-tablet-ux.test.ts scripts/tests/upload-pipeline.test.ts",
+    "test:poster-compose": "tsx --test scripts/tests/poster-compose.test.ts",
+    "test:multi-branch": "tsx --test scripts/tests/multi-branch.test.ts scripts/tests/video-media.test.ts scripts/tests/cutos-contract.test.ts scripts/tests/canva-contract.test.ts scripts/tests/api-response.test.ts scripts/tests/spa-routing.test.ts scripts/tests/home-entry.test.ts scripts/tests/session-entry.test.ts scripts/tests/mobile-tablet-ux.test.ts scripts/tests/upload-pipeline.test.ts scripts/tests/poster-compose.test.ts",
     "test:files-batch": "tsx --test scripts/tests/discussion-files-batch.test.ts",
     "test:mobile-tablet-ux-e2e": "node scripts/e2e/mobile-tablet-ux.mjs",
     "test:ai-external-handoff": "tsx --test scripts/tests/ai-external-handoff.test.ts",
@@ -51,6 +52,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
     "livekit-client": "^2.22.1",
+    "modern-screenshot": "^4.7.0",
     "peerjs": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

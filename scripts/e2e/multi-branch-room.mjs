@@ -146,6 +146,9 @@ async function chooseCreate(page, name, type, file) {
   if (await current.getByRole("button", { name: type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片", exact: true }).count()) {
     await current.getByRole("button", { name: type === "plan" ? "企劃" : type === "poster" ? "文宣" : "影片", exact: true }).click();
   }
+  if (type === "poster" && await current.getByTestId("create-poster-upload").count()) {
+    await current.getByTestId("create-poster-upload").click();
+  }
   await current.locator('input:not([type="file"])').first().fill(name);
   if (file) await current.locator('input[type="file"]').setInputFiles(file);
   await current.locator("button.project-submit").click();
@@ -230,6 +233,7 @@ try {
     const poster = { name: "演講文宣", mimeType: "image/png", buffer: TINY_PNG };
     await page.getByRole("button", { name: /新增文宣/ }).click();
     const posterSheet = page.getByTestId("create-content-sheet");
+    await posterSheet.getByTestId("create-poster-upload").click();
     await posterSheet.locator('input:not([type="file"])').first().fill(poster.name);
     await posterSheet.locator('input[type="file"]').setInputFiles(poster);
     await posterSheet.locator("button.project-submit").click();

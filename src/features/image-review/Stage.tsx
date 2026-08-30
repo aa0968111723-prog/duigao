@@ -657,7 +657,7 @@ export function Stage({
       onPointerUp={onUp}
       onPointerCancel={onCancel}
     >
-      <div ref={contentRef} className={`stage-content ${zoomable ? "stage-content-zoomable" : ""}`} style={contentStyle}>
+      <div ref={contentRef} className={`stage-content ${zoomable ? "stage-content-zoomable" : ""}`} style={contentStyle} data-testid="poster-compose-stage">
         <img
           className={`stage-img mode-${view.colorMode}`}
           style={imgStyle}

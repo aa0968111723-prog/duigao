@@ -53,6 +53,39 @@
 .proposal-background-image { object-fit: cover; }
 .proposal-background-color { display: block; }
 
+.stage-content.is-exporting .pin,
+.stage-content.is-exporting .overlay,
+.stage-content.is-exporting .region-rect,
+.stage-content.is-exporting .proposal-preview-label,
+.stage-content.is-exporting .proposal-finish,
+.stage-content.is-exporting .proposal-guide,
+.stage-content.is-exporting .proposal-resize-handle {
+  display: none !important;
+}
+
+.poster-edit-toggle,
+.poster-save-version {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--raise);
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+.poster-save-version {
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.poster-save-version:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .proposal-item {
   position: absolute;
   margin: 0;
@@ -115,8 +148,9 @@
 }
 .proposal-finish {
   right: 8px;
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: rgba(97, 87, 239, 0.94);
   color: #fff;

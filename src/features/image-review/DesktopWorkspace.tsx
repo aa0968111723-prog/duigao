@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ColorMode, CompareMode, Tool } from "../../lib/types";
 import { ProposalControls } from "../visual-proposal/ProposalControls";
-import { pruneProposalVersions } from "../visual-proposal/store";
+import { pruneProposalVersions, startComposeEditing } from "../visual-proposal/store";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
@@ -56,10 +56,12 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
               {v.label}
             </button>
           ))}
-          <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="upload upload-inline">
-            <span className="upload-icon">＋</span>
-            <span className="upload-text">加一版</span>
-          </UniversalIntake>
+          {api.canManage && (
+            <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="upload upload-inline">
+              <span className="upload-icon">＋</span>
+              <span className="upload-text">加一版</span>
+            </UniversalIntake>
+          )}
         </div>
 
         <div className="tool-group">
@@ -128,6 +130,20 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
           />
         )}
 
+        {api.canManage && (
+          <button
+            type="button"
+            className="poster-edit-toggle"
+            data-testid="poster-edit-toggle"
+            onClick={() => {
+              api.setTool("pan");
+              api.selectPin(null);
+              startComposeEditing(room.id, view.versionId, api.guest);
+            }}
+          >
+            編輯這張
+          </button>
+        )}
         <details className="proposal-desktop-wrap">
           <summary
             className="btn btn-sm"
@@ -144,6 +160,8 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
               versionId={view.versionId}
               author={api.guest}
               showToast={api.showToast}
+              canManage={api.canManage}
+              onSaveVersion={api.saveComposeVersion}
               pref={{
                 prefs: room.proposalPrefs ?? [],
                 userId: api.guest.id,

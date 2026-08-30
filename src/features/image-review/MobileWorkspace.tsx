@@ -4,7 +4,7 @@ import type { CollabStatus } from "../../lib/peer";
 import { useViewport } from "../../hooks/useViewport";
 import { loadFlag, saveFlag } from "../../lib/store";
 import { ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
-import { pruneProposalVersions, useProposalStore, useRoomProposals } from "../visual-proposal/store";
+import { pruneProposalVersions, startComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
@@ -262,9 +262,26 @@ export function MobileWorkspace({ api, presence }: Props) {
             {v.label}
           </button>
         ))}
-        <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="m-vchip m-vchip-add">
-          <span aria-hidden>＋</span>
-        </UniversalIntake>
+        {api.canManage && (
+          <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="m-vchip m-vchip-add">
+            <span aria-hidden>＋</span>
+          </UniversalIntake>
+        )}
+        {api.canManage && (
+          <button
+            type="button"
+            className="m-vchip poster-edit-toggle"
+            data-testid="poster-edit-toggle"
+            onClick={() => {
+              api.setTool("pan");
+              api.selectPin(null);
+              startComposeEditing(room.id, view.versionId, api.guest);
+              setProposalSession({ intent: null });
+            }}
+          >
+            編輯這張
+          </button>
+        )}
         {api.boardRefs && (
           <button type="button" className="m-vchip m-vchip-board" data-testid="board-refs-chip" onClick={api.boardRefs.open}>
             ⊞ 白板 {api.boardRefs.count}
@@ -307,6 +324,8 @@ export function MobileWorkspace({ api, presence }: Props) {
             onHeight={setDockHeight}
             intent={proposalSession.intent}
             pin={proposalPinBinding}
+            canManage={api.canManage}
+            onSaveVersion={api.saveComposeVersion}
             pref={{
               prefs: room.proposalPrefs ?? [],
               userId: api.guest.id,

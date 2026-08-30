@@ -35,6 +35,8 @@ type Props = {
   pref?: ProposalPrefBinding;
   pin?: ProposalPinBinding;
   intent?: ProposalIntent | null;
+  canManage?: boolean;
+  onSaveVersion?: () => Promise<void>;
 };
 
 type Panel = "none" | "element" | "compare" | "list";
@@ -47,12 +49,13 @@ const TEXT_ORDER: TextRole[] = ["title", "subtitle", "body", "custom"];
  * control appears only after an element is selected or a panel is opened, so
  * the first glance never gets busier than the poster itself.
  */
-export function ProposalDock({ roomId, versionId, author, showToast, onExit, onHeight, pref, pin, intent }: Props) {
+export function ProposalDock({ roomId, versionId, author, showToast, onExit, onHeight, pref, pin, intent, canManage = false, onSaveVersion }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   const materialRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const [panel, setPanel] = useState<Panel>("none");
   const [pickMaterial, setPickMaterial] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -67,17 +70,17 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
     };
   }, [onHeight]);
 
-  // Enter edit mode on mount; return to a clean original poster on exit.
+  // Managers enter the working layer. Reviewers only preview / compare.
   useEffect(() => {
     proposal.setViewMode("proposal");
-    proposal.setEditing(true);
+    proposal.setEditing(canManage);
     return () => {
       proposal.setEditing(false);
       proposal.setViewMode("original");
       proposal.selectItem(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canManage]);
 
   // Arriving from a 修改點 card: start (or open) the proposal it points at.
   const seededIntent = useRef(false);
@@ -114,17 +117,28 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
   };
 
   const uploadMaterial = async (files: FileList | null) => {
-    const file = files?.[0];
+    if (!canManage || !files?.length) return;
     if (materialRef.current) materialRef.current.value = "";
-    if (!file) return;
+    for (const file of Array.from(files)) {
+      try {
+        const prepared = await prepareImageFile(file);
+        proposal.addImage(createImageItem(prepared.dataUrl, prepared.name));
+        setPickMaterial(false);
+        setPanel("element");
+        showToast(prepared.note ?? "已加入素材，拖到想要的位置");
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : "素材讀取失敗", { tone: "error" });
+      }
+    }
+  };
+
+  const saveVersion = async () => {
+    if (!canManage || !onSaveVersion || saving) return;
+    setSaving(true);
     try {
-      const prepared = await prepareImageFile(file);
-      proposal.addImage(createImageItem(prepared.dataUrl, prepared.name));
-      setPickMaterial(false);
-      setPanel("element");
-      showToast(prepared.note ?? "已加入素材，拖到想要的位置");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "素材讀取失敗", { tone: "error" });
+      await onSaveVersion();
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -150,10 +164,12 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
           <span className="pdock-current-type">{proposalTypeLabel(active.type)}</span>
           <span className={`pcard-status is-${active.status}`}>{proposalStatusLabel(active.status)}</span>
         </button>
-      ) : (
+      ) : canManage ? (
         <button type="button" className="proposal-primary pdock-create" onClick={() => proposal.create()}>
-          ＋ 建立這一版的視覺提案
+          ＋ 建立這一版的工作層
         </button>
+      ) : (
+        <p className="proposal-muted">這一版還沒有工作層。</p>
       )}
 
       {panel !== "none" && (
@@ -185,9 +201,9 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
         </div>
       )}
 
-      {pickMaterial && (
+      {canManage && pickMaterial && (
         <div className="pdock-pick" role="group" aria-label="選擇素材種類">
-          <button type="button" className="proposal-chip" onClick={() => materialRef.current?.click()}>
+          <button type="button" className="proposal-chip" data-testid="poster-add-asset" onClick={() => materialRef.current?.click()}>
             圖片
           </button>
           <button type="button" className="proposal-chip" onClick={addShape}>
@@ -196,10 +212,25 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
         </div>
       )}
 
+      {canManage && (
+        <button
+          type="button"
+          className="poster-save-version"
+          data-testid="poster-save-version"
+          disabled={saving}
+          onClick={() => void saveVersion()}
+        >
+          {saving ? "存檔中…" : "存成新版本"}
+        </button>
+      )}
+
       <nav className="pdock-bar" aria-label="視覺提案操作">
+        {canManage && (
         <button type="button" className="pdock-act" onClick={addText}>
           ＋文字
         </button>
+        )}
+        {canManage && (
         <button
           type="button"
           className={`pdock-act ${pickMaterial ? "is-on" : ""}`}
@@ -210,6 +241,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
         >
           ＋素材
         </button>
+        )}
         <button
           type="button"
           className={`pdock-act ${panel === "compare" ? "is-on" : ""}`}
@@ -233,6 +265,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
         ref={materialRef}
         className="proposal-file"
         type="file"
+        multiple
         accept={INTAKE_PROFILES.proposal.accept}
         onChange={(e) => void uploadMaterial(e.target.files)}
       />

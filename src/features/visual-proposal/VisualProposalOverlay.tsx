@@ -192,6 +192,7 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
   return (
     <div
       className={`proposal-layer ${editing ? "is-editing" : "is-preview"} ${comparing ? "is-comparing" : ""}`}
+      data-testid="poster-compose-canvas"
       onPointerDown={(event) => {
         if (!editing) return;
         event.stopPropagation();

@@ -1085,6 +1085,61 @@ function itemPrefix(type: ProposalItem["type"]): string {
   return type === "text" ? "vpt_" : type === "image" ? "vpi_" : "vps_";
 }
 
+/** Enter the compose editor for a version (create a working layer if none). */
+export function startComposeEditing(roomId: string, versionId: string, author: ProposalAuthor): void {
+  const current = snapshot(roomId);
+  let docs = current.docs;
+  let activeId = current.activeByVersion[versionId];
+  let active = docs.find((doc) => doc.id === activeId && doc.versionId === versionId);
+  if (!active) {
+    active = newProposal(versionId, author, docs, { type: "layout", title: "工作層" });
+    activeId = active.id;
+    docs = [...docs, active];
+  }
+  set(roomId, {
+    ...current,
+    docs,
+    activeByVersion: { ...current.activeByVersion, [versionId]: activeId },
+    viewMode: "proposal",
+    editing: true,
+    selectedItemId: null,
+  });
+  persist(roomId);
+}
+
+/** Copy the working layer onto a newly saved version. Old version docs stay. */
+export function cloneProposalsInStore(roomId: string, fromVersionId: string, toVersionId: string): void {
+  const current = snapshot(roomId);
+  if (fromVersionId === toVersionId) return;
+  const now = Date.now();
+  const copies = current.docs
+    .filter((doc) => doc.versionId === fromVersionId)
+    .map((doc) => ({
+      ...doc,
+      id: uid("vp_"),
+      versionId: toVersionId,
+      items: doc.items.map((item) => ({ ...item, id: uid(itemPrefix(item.type)) })),
+      background: { ...doc.background },
+      supports: [...doc.supports],
+      comments: [...doc.comments],
+      createdAt: now,
+      updatedAt: now,
+    }));
+  const docs = [...current.docs, ...copies];
+  const copied = copies[0];
+  set(roomId, {
+    ...current,
+    docs,
+    activeByVersion: copied
+      ? { ...current.activeByVersion, [toVersionId]: copied.id }
+      : current.activeByVersion,
+    viewMode: "proposal",
+    editing: true,
+    selectedItemId: null,
+  });
+  persist(roomId);
+}
+
 /** Remove proposals whose poster version no longer exists (called by the room owner). */
 export function pruneProposalVersions(roomId: string, validVersionIds: string[]) {
   const current = states.get(roomId);

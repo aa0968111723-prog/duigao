@@ -1,5 +1,5 @@
-import { INTAKE_PROFILES } from "../../components/UniversalIntake";
-import { useRef, useState } from "react";
+import { UniversalIntake } from "../../components/UniversalIntake";
+import { useState } from "react";
 import { useProposalStore, type ProposalAuthor } from "./store";
 import { ProposalElementControls } from "./ProposalElementControls";
 import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
@@ -24,27 +24,39 @@ type Props = {
   author: ProposalAuthor;
   showToast?: ShowToast;
   pref?: ProposalPrefBinding;
+  canManage?: boolean;
+  onSaveVersion?: () => Promise<void>;
 };
 
-export function ProposalControls({ roomId, versionId, author, showToast, pref }: Props) {
+export function ProposalControls({ roomId, versionId, author, showToast, pref, canManage = false, onSaveVersion }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
-  const materialRef = useRef<HTMLInputElement>(null);
   const [pickText, setPickText] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saving, setSaving] = useState(false);
   const active = proposal.active;
 
   const uploadMaterial = async (files: FileList | null) => {
-    const file = files?.[0];
-    if (materialRef.current) materialRef.current.value = "";
-    if (!file) return;
+    if (!canManage || !files?.length) return;
+    for (const file of Array.from(files)) {
+      try {
+        const prepared = await prepareImageFile(file);
+        proposal.addImage(createImageItem(prepared.dataUrl, prepared.name));
+        if (prepared.note) showToast?.(prepared.note);
+      } catch (err) {
+        showToast?.(err instanceof Error ? err.message : "素材讀取失敗", { tone: "error" });
+      }
+    }
+  };
+
+  const saveVersion = async () => {
+    if (!canManage || !onSaveVersion || saving) return;
+    setSaving(true);
     try {
-      const prepared = await prepareImageFile(file);
-      proposal.addImage(createImageItem(prepared.dataUrl, prepared.name));
-      if (prepared.note) showToast?.(prepared.note);
-    } catch (err) {
-      showToast?.(err instanceof Error ? err.message : "素材讀取失敗", { tone: "error" });
+      await onSaveVersion();
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -61,7 +73,7 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref }:
               原稿
             </button>
             <button type="button" className={proposal.viewMode === "proposal" ? "is-on" : ""} onClick={() => proposal.setViewMode("proposal")}>
-              提案
+              工作層
             </button>
             <button type="button" className={proposal.viewMode === "compare" ? "is-on" : ""} onClick={() => proposal.setViewMode("compare")}>
               對照
@@ -96,9 +108,9 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref }:
 
       {!proposal.hydrated && <p className="proposal-muted">正在載入這台裝置的提案…</p>}
 
-      {proposal.hydrated && !active && (
+      {proposal.hydrated && !active && canManage && (
         <button type="button" className="proposal-primary" onClick={() => proposal.create()}>
-          ＋ 建立這一版的視覺提案
+          ＋ 建立這一版的工作層
         </button>
       )}
 
@@ -177,7 +189,7 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref }:
             />
           )}
 
-          <div className="proposal-manage">
+          {canManage && <div className="proposal-manage">
             {renaming ? (
               <form
                 className="proposal-rename"
@@ -239,33 +251,37 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref }:
                 </button>
               </>
             )}
-          </div>
+          </div>}
 
+          {canManage && (
           <div className="proposal-action-row">
             <button type="button" className={`proposal-action ${pickText ? "is-on" : ""}`} onClick={() => setPickText((v) => !v)}>
               Aa 文字
             </button>
-            <button type="button" className="proposal-action" onClick={() => materialRef.current?.click()}>
-              ＋ 素材
-            </button>
+            <UniversalIntake profile="proposal" mode="zone" className="proposal-action poster-add-asset" onFiles={(picked) => void uploadMaterial(picked)} onReject={(reason) => showToast?.(reason, { tone: "error" })}>
+              <span data-testid="poster-add-asset">＋ 素材</span>
+            </UniversalIntake>
             <button type="button" className="proposal-action" onClick={() => proposal.addShape(createShapeItem())}>
               ＋ 色塊
             </button>
-            <input
-              ref={materialRef}
-              className="proposal-file"
-              type="file"
-              accept={INTAKE_PROFILES.proposal.accept}
-              onChange={(e) => void uploadMaterial(e.target.files)}
-            />
             <button
               type="button"
               className={`proposal-action ${proposal.editing ? "is-on" : ""}`}
               onClick={() => proposal.setEditing(!proposal.editing)}
             >
-              {proposal.editing ? "完成擺放" : "移動元素"}
+              {proposal.editing ? "完成擺放" : "編輯這張"}
+            </button>
+            <button
+              type="button"
+              className="poster-save-version"
+              data-testid="poster-save-version"
+              disabled={saving}
+              onClick={() => void saveVersion()}
+            >
+              {saving ? "存檔中…" : "存成新版本"}
             </button>
           </div>
+          )}
 
           {pickText && (
             <div className="proposal-role-pick" role="group" aria-label="選擇文字類型">
