@@ -3,6 +3,7 @@
  * src/ai/roomAgentContract.ts. Card is bounded 繁中; secrets stay stripped.
  */
 import { asObject, asText, jsonResponse, stripSecrets } from "./roomContext.ts";
+import { executeImagineImage, executeImagineVideo, type ImagineFetch } from "./imagine.ts";
 
 export const GROK_PROVIDER = "grok-room-agent";
 export const DEFAULT_GROK_TEXT_MODEL = "grok-4-1-fast-non-reasoning";
@@ -124,7 +125,18 @@ export function buildCard(input: {
   });
 }
 
-type ToolOut = { name: string; preview: string; refused?: boolean; recorded?: boolean; proposalId?: string };
+type ToolOut = {
+  name: string;
+  preview: string;
+  refused?: boolean;
+  recorded?: boolean;
+  proposalId?: string;
+  needsConfirm?: boolean;
+  seconds?: number;
+  resolution?: string;
+  estimatedUsd?: number;
+  prompt?: string;
+};
 
 export function runTool(
   name: string,
@@ -149,11 +161,26 @@ export function runTool(
     return { result: { name, preview: `未完成修改點 ${card.comments.length} 則` }, spentUsd };
   }
   if (name === "imagine_video") {
+    const seconds = Math.max(1, Math.min(15, Math.floor(typeof args.seconds === "number" ? args.seconds : 6)));
+    const resolution = asText(args.resolution, "720p") === "480p" ? "480p" : "720p";
+    const rate = resolution === "480p" ? 0.05 : 0.07;
+    const cost = Math.round(seconds * rate * 100) / 100;
     if (!confirmedVideo) {
-      return { result: { name, preview: "生影前必須先確認估價。", refused: true, recorded: true }, spentUsd };
+      return {
+        result: {
+          name,
+          preview: "生影前必須先確認估價。",
+          refused: true,
+          recorded: true,
+          needsConfirm: true,
+          seconds,
+          resolution,
+          estimatedUsd: cost,
+          prompt: asText(args.prompt).slice(0, 400),
+        },
+        spentUsd,
+      };
     }
-    const seconds = typeof args.seconds === "number" ? args.seconds : 6;
-    const cost = Math.round(Math.max(1, Math.min(15, seconds)) * 0.07 * 100) / 100;
     if (spentUsd + cost > card.spendPolicy.maxUsdThisTurn) {
       return { result: { name, preview: `這一回合花費上限 $${card.spendPolicy.maxUsdThisTurn.toFixed(2)}，生影約 $${cost.toFixed(2)}，已停止。`, refused: true, recorded: true }, spentUsd };
     }
@@ -178,14 +205,19 @@ export async function askGrok(input: {
   query: string;
   card: AgentCard;
   imagineVideoConfirmed: boolean;
+  fetchFn?: ImagineFetch;
+  storeImagine?: (input: { bytes: Uint8Array; mime: string; kind: "image" | "video" }) => Promise<{ proposalId: string; path: string } | null>;
 }): Promise<{ text: string; actions: Array<{ type: string; label: string; payload: Record<string, unknown> }>; model: string } | null> {
+  const fetchFn = input.fetchFn ?? (fetch as ImagineFetch);
   const body = JSON.stringify({
     model: input.env.textModel,
     stream: false,
     messages: [
       {
         role: "system",
-        content: "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。回覆繁中。禁止 web_search 與 x_search。",
+        content: input.imagineVideoConfirmed
+          ? "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。回覆繁中。禁止 web_search 與 x_search。使用者已確認生影估價，若要生影請呼叫 imagine_video。"
+          : "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。回覆繁中。禁止 web_search 與 x_search。生影必須先估價：呼叫 imagine_video 會得到估價卡，使用者確認後才生成。",
       },
       { role: "user", content: JSON.stringify({ query: input.query.slice(0, 2000), card: input.card }) },
     ],
@@ -197,7 +229,7 @@ export async function askGrok(input: {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
   try {
-    const response = await fetch("https://api.x.ai/v1/chat/completions", {
+    const response = await fetchFn("https://api.x.ai/v1/chat/completions", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -226,7 +258,66 @@ export async function askGrok(input: {
       const ran = runTool(name, args, input.card, input.imagineVideoConfirmed, spent);
       spent = ran.spentUsd;
       logs.push(`${name}:${ran.result.refused ? "refuse" : "ok"}`);
+      if (name === "imagine_video" && ran.result.refused && ran.result.needsConfirm && !input.imagineVideoConfirmed) {
+        actions.push({
+          type: name,
+          label: ran.result.preview,
+          payload: stripSecrets({
+            needsConfirm: true,
+            seconds: ran.result.seconds,
+            resolution: ran.result.resolution,
+            estimatedUsd: ran.result.estimatedUsd,
+            prompt: ran.result.prompt,
+            preview: ran.result.preview,
+          }),
+        });
+        continue;
+      }
       if (ran.result.refused || name === "list_room_contents" || name === "get_version_brief" || name === "list_open_comments") continue;
+      if (name === "imagine_image" || name === "imagine_video") {
+        const generated = name === "imagine_image"
+          ? await executeImagineImage({
+            prompt: asText(args.prompt),
+            size: asText(args.size) || undefined,
+            model: input.env.imageModel,
+            apiKey: input.env.xaiKey,
+            fetchFn,
+          })
+          : await executeImagineVideo({
+            prompt: asText(args.prompt),
+            seconds: typeof args.seconds === "number" ? args.seconds : 6,
+            resolution: asText(args.resolution) || undefined,
+            model: input.env.videoModel,
+            apiKey: input.env.xaiKey,
+            confirmed: input.imagineVideoConfirmed,
+            fetchFn,
+          });
+        if (!generated.ok) {
+          logs.push(`${name}:imagine-fail`);
+          continue;
+        }
+        const stored = input.storeImagine
+          ? await input.storeImagine({
+            bytes: generated.bytes,
+            mime: generated.mime,
+            kind: name === "imagine_video" ? "video" : "image",
+          })
+          : null;
+        if (!stored || /\/versions\//.test(stored.path)) {
+          logs.push(`${name}:store-fail`);
+          continue;
+        }
+        actions.push({
+          type: name,
+          label: ran.result.preview,
+          payload: stripSecrets({
+            proposalId: stored.proposalId,
+            preview: ran.result.preview,
+            workLayerRef: stored.path,
+          }),
+        });
+        continue;
+      }
       actions.push({
         type: name,
         label: ran.result.preview,

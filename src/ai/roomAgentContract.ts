@@ -440,7 +440,24 @@ export function dispatchRoomAgentTool(
   }
   if (tool === "imagine_video") {
     if (!ctx.imagineVideoConfirmed) {
-      return refuse(tool, "生影前必須先確認估價。");
+      const seconds = typeof args.seconds === "number" ? args.seconds : 6;
+      const resolution = text(args.resolution, "720p") || "720p";
+      const cost = estimateImagineVideoUsd(seconds, resolution);
+      return {
+        ok: false,
+        refused: true,
+        recorded: true,
+        tool,
+        error: "生影前必須先確認估價。",
+        preview: "生影前必須先確認估價。",
+        data: {
+          needsConfirm: true,
+          seconds: Math.max(1, Math.min(15, Math.floor(seconds))),
+          resolution,
+          estimatedUsd: cost,
+          prompt: text(args.prompt).slice(0, 400),
+        },
+      };
     }
     if (!ctx.card.spendPolicy.allowImagineVideo) {
       return refuse(tool, "這一回合不允許生影。");
