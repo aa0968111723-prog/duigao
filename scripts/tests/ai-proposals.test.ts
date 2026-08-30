@@ -70,6 +70,9 @@ test("RoomAiSheet and App are the production apply path; the prototype is delete
   const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
   assert.match(sheet, /onApplyProposal/);
   assert.match(sheet, /data-testid="ai-proposal"/);
+  assert.match(sheet, /data-testid="room-ai-proposal-card"/);
+  assert.match(sheet, /data-testid="room-ai-apply"/);
+  assert.match(sheet, /data-testid="room-ai-imagine-confirm"/);
   assert.match(sheet, /套用/);
   assert.match(app, /applyAiProposal/);
   assert.match(app, /onApplyProposal=\{applyAiProposal\}/);

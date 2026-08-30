@@ -470,6 +470,7 @@ export function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiFocus, setAiFocus] = useState<RoomContextFocus | null>(null);
+  const aiAskToken = useRef(0);
   /** Cancels an upload in flight. Held in a ref so leaving the room can call it. */
   const videoCancelRef = useRef<(() => void) | null>(null);
 
@@ -910,6 +911,8 @@ export function App() {
       setAiError(error.message);
       throw error;
     }
+    const token = aiAskToken.current + 1;
+    aiAskToken.current = token;
     setAiLoading(true);
     setAiError(null);
     try {
@@ -922,16 +925,23 @@ export function App() {
         // off, even when the analysis model/version itself did not change.
         (assetIntelligence?.assets ?? []).map((asset) => `${asset.id}:${asset.analysisVersion}:${asset.updatedAt}:${asset.aiReadable}:${asset.externalAiAllowed}`),
       );
+      if (aiAskToken.current !== token) return response;
       setAiResponse(response);
+      if (response.agent?.status === "unconfigured") {
+        setAiError("AI 服務尚未設定");
+      }
       return response;
     } catch (error) {
-      const message = error instanceof Error && /外部|permission|blocked/i.test(error.message)
-        ? "這次提問包含禁止送到外部 AI 的素材。"
-        : "房間 AI 暫時沒有回應，請稍後再試。";
+      if (aiAskToken.current !== token) throw error;
+      const message = error instanceof Error && /尚未設定|unconfigured/i.test(error.message)
+        ? "AI 服務尚未設定"
+        : error instanceof Error && /外部|permission|blocked/i.test(error.message)
+          ? "這次提問包含禁止送到外部 AI 的素材。"
+          : "房間 AI 暫時沒有回應，請稍後再試。";
       setAiError(message);
       throw error;
     } finally {
-      setAiLoading(false);
+      if (aiAskToken.current === token) setAiLoading(false);
     }
   }, [assetIntelligence?.assets]);
 
@@ -2365,6 +2375,26 @@ export function App() {
           setActiveWhiteboardId(board.id);
           setStagedBoardAi({ proposals: [proposal], nodes: [node], edges: [] });
           return { ok: true, message: "已開白板並顯示 AI 的建議，確認後才會放上去。" };
+        } else if (
+          proposal.type === "propose_edit_text"
+          || proposal.type === "propose_add_shape"
+          || proposal.type === "propose_move_item"
+          || proposal.type === "propose_add_image"
+          || proposal.type === "imagine_image"
+          || proposal.type === "imagine_video"
+        ) {
+          // Visual work-layer 採用：只標已採用。不得寫 versions、不得改 Storage。
+          audit(`已採用 AI 提案：${proposal.label}`);
+          appliedAiProposalIds.current.add(proposal.id);
+          showToast(proposal.type === "imagine_image" ? "已生成一張圖，尚未成為正式版本" : "已採用 AI 提案（尚未存成新版本）", { tone: "success" });
+          return {
+            ok: true,
+            message: proposal.type === "imagine_image"
+              ? "已生成一張圖，尚未成為正式版本"
+              : "已採用。沒有寫入 versions 或原稿。",
+          };
+        } else if (proposal.type === "refuse_with_reason") {
+          return { ok: false, reason: "forbidden", message: "這個提案是拒絕說明，不能寫入。" };
         }
         appliedAiProposalIds.current.add(proposal.id);
         // 機器稽核列（0019）：cloud 房才寫；失敗不回滾套用（套用本身已
@@ -3773,6 +3803,7 @@ export function App() {
           onUpdatePolicy={updateAiPolicy}
           onUpdateHumanMetadata={updateHumanMetadata}
           onApplyProposal={applyAiProposal}
+          onCancel={() => { aiAskToken.current += 1; setAiLoading(false); }}
           canManage={cloud.canManageMedia}
         />}
         {/* 分享單以前只掛在對稿樹上；殼的「分享」按鈕 setShareOpen 之後
@@ -3963,6 +3994,7 @@ export function App() {
         onUpdatePolicy={updateAiPolicy}
         onUpdateHumanMetadata={updateHumanMetadata}
         onApplyProposal={applyAiProposal}
+        onCancel={() => { aiAskToken.current += 1; setAiLoading(false); }}
         canManage={cloud.canManageMedia}
       />}
 

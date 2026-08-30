@@ -16,7 +16,7 @@
     "test:video": "node scripts/e2e/video-flow.mjs",
     "test:review-viewer": "node scripts/e2e/review-viewer.mjs",
     "test:viewer-geometry": "tsx --test scripts/tests/review-viewer-geometry.test.ts",
-    "test:asset-intelligence": "tsx --test scripts/tests/asset-intelligence.test.ts scripts/tests/ai-proposals.test.ts scripts/tests/room-context-strip.test.ts scripts/tests/duigao-agent-adapter.test.ts",
+    "test:asset-intelligence": "tsx --test scripts/tests/asset-intelligence.test.ts scripts/tests/ai-proposals.test.ts scripts/tests/room-context-strip.test.ts scripts/tests/duigao-agent-adapter.test.ts scripts/tests/room-agent-grok.test.ts",
     "test:asset-intelligence-e2e": "node scripts/e2e/asset-intelligence.mjs",
     "test:api-response": "tsx --test scripts/tests/api-response.test.ts scripts/tests/spa-routing.test.ts",
     "test:home-entry": "tsx --test scripts/tests/home-entry.test.ts",
