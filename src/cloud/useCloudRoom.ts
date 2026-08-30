@@ -320,6 +320,7 @@ function rememberCloudRoom(localRoomId: string, roomId: string, token: string, p
 export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast }: Params) {
   const [status, setStatus] = useState<SyncStatus>(isCloudConfigured ? "connecting" : "local-only");
   const [online, setOnline] = useState(0);
+  const [realtimeJoined, setRealtimeJoined] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviteInvalid, setInviteInvalid] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -601,6 +602,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       // touch the cloud at all — it stays on the PeerJS compatibility path.
       if (link.kind !== "cloud") {
         setStatus("local-only");
+        setRealtimeJoined(false);
         return;
       }
       targetRoomId = link.roomId;
@@ -611,6 +613,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     }
     if (!targetRoomId) {
       setStatus("local-only");
+      setRealtimeJoined(false);
       return;
     }
     // Bound AND listening is the state worth skipping. Bound-but-unsubscribed
@@ -622,6 +625,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     unsubRef.current?.();
     unsubRef.current = null;
     setStatus("connecting");
+    setRealtimeJoined(false);
+    setOnline(0);
     setInviteInvalid(false);
     setPermissionDenied(false);
     (async () => {
@@ -712,6 +717,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
           // 重訂閱時 track 的初值現查（F3）
           getPresenceIdentity: () => ({ boardId: activeWhiteboardRef.current }),
           onStatus: (connected) => {
+            setRealtimeJoined(connected);
             if (connected) {
               void flushPending();
               // row-patch 拿掉了 nudge 的意外自癒：重連時對開著的板
@@ -723,6 +729,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
               if (connected) return pending.current.length ? "offline-pending" : "synced";
               // A loaded snapshot is not "正在確認身分". Realtime drop stays
               // on the last honest room state until the next successful bind.
+              // Live chrome (已同步 / N 人在線) still requires realtimeJoined.
               if (s === "synced" || s === "offline-pending" || s === "error") return s;
               return "connecting";
             });
@@ -1271,6 +1278,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     },
     status,
     online,
+    realtimeJoined,
     inviteUrl,
     inviteInvalid,
     permissionDenied,

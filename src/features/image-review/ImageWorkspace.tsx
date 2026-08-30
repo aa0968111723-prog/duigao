@@ -1,6 +1,7 @@
 import type { CollabStatus } from "../../lib/peer";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { syncStatusLabel, type SyncStatus } from "../../cloud/types";
+import { roomLiveSyncClaim } from "../../cloud/realtimeHonesty";
+import { type SyncStatus } from "../../cloud/types";
 import type { WorkspaceApi } from "../../components/api";
 import { BrandMark } from "../../components/BrandMark";
 import { MobileWorkspace } from "./MobileWorkspace";
@@ -22,7 +23,7 @@ type Props = {
    * Cloud sync badge for the desktop header. Absent in local-only mode, where
    * the peer-connection badge in `presence` is the only one there has ever been.
    */
-  cloud?: { status: SyncStatus; online: number } | null;
+  cloud?: { status: SyncStatus; online: number; realtimeJoined?: boolean } | null;
 };
 
 export function ImageWorkspace({ api, presence, cloud }: Props) {
@@ -65,9 +66,9 @@ export function ImageWorkspace({ api, presence, cloud }: Props) {
                       : undefined
                   }
                 >
-                  {cloud.online > 1 && cloud.status === "synced"
+                  {cloud.realtimeJoined && cloud.online > 1 && cloud.status === "synced"
                     ? `已同步 · ${cloud.online} 人`
-                    : syncStatusLabel(cloud.status)}
+                    : roomLiveSyncClaim({ snapshotStatus: cloud.status, realtimeJoined: Boolean(cloud.realtimeJoined) })}
                 </span>
               )
             : presence.status && (
