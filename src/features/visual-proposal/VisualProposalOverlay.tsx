@@ -52,10 +52,13 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
   const resize = useRef<{ id: string; cx: number; cy: number; startDist: number; startWidth: number } | null>(null);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
 
-  const { active, editing, visible, viewMode, compareSplit, selectedItem } = proposal;
+  const { active, editing, visible, viewMode, compareSplit, selectedItem, layerEditing } = proposal;
 
-  // 原稿 mode draws nothing at all: the poster underneath is the whole point.
-  if (!visible || !active) return null;
+  // 原稿 mode hides the paint — but keep the layer mounted while composing.
+  // Hook `editing` is gated on viewMode==="proposal"; layerEditing is the raw
+  // session flag so a one-tick 原稿 flicker cannot unmount poster-compose-canvas.
+  if (!active) return null;
+  if (!visible && !layerEditing) return null;
 
   const background = active.background;
   const colorCss = backgroundColorCss(background);
