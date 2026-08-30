@@ -18,6 +18,14 @@ import {
   type SafeRegion,
   type SafeSegment,
 } from "../_shared/roomContext.ts";
+import {
+  AGENT_UNCONFIGURED_COPY,
+  askGrok,
+  buildCard,
+  grokEnv,
+  grokUnconfigured,
+  GROK_PROVIDER,
+} from "../_shared/roomAgent.ts";
 
 type Row = Record<string, unknown>;
 
@@ -129,7 +137,7 @@ function uuidLike(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function requestValue(value: unknown): { roomId: string; query: string; selectedAssetIds: string[]; selectedBranchIds: string[]; selectedVersionIds: string[]; timeRange: { startSeconds: number; endSeconds: number } | null } | null {
+function requestValue(value: unknown): { roomId: string; query: string; selectedAssetIds: string[]; selectedBranchIds: string[]; selectedVersionIds: string[]; timeRange: { startSeconds: number; endSeconds: number } | null; imagineVideoConfirmed: boolean; focusBranchId?: string; focusVersionId?: string } | null {
   const input = asObject(value);
   const roomId = text(input.roomId);
   const query = text(input.query).trim().slice(0, 2000);
@@ -137,6 +145,7 @@ function requestValue(value: unknown): { roomId: string; query: string; selected
   const range = asObject(input.timeRange);
   const start = Math.max(0, num(range.startSeconds));
   const end = Math.max(start, num(range.endSeconds));
+  const focus = asObject(input.focus);
   return {
     roomId,
     query,
@@ -144,6 +153,9 @@ function requestValue(value: unknown): { roomId: string; query: string; selected
     selectedBranchIds: stringList(input.selectedBranchIds, 20).filter(uuidLike),
     selectedVersionIds: stringList(input.selectedVersionIds, 20).filter(uuidLike),
     timeRange: range.startSeconds == null && range.endSeconds == null ? null : { startSeconds: start, endSeconds: end },
+    imagineVideoConfirmed: input.imagineVideoConfirmed === true,
+    focusBranchId: optional(focus.branchId) || optional(input.focusBranchId),
+    focusVersionId: optional(focus.versionId) || optional(input.focusVersionId),
   };
 }
 
@@ -157,8 +169,13 @@ function responseHeaders(): Record<string, string> {
   };
 }
 
-function providerEndpoint(): { provider: "tku-zen-agent" | "ai_os"; url: string; external: boolean } | null {
+function providerEndpoint(): { provider: "tku-zen-agent" | "ai_os" | "grok-room-agent"; url: string; external: boolean } | null {
   const requested = (Deno.env.get("DUIGAO_AGENT_PROVIDER") || "tku-zen-agent").trim().toLowerCase();
+  if (requested === GROK_PROVIDER) {
+    const grok = grokEnv();
+    if (!grok) return null;
+    return { provider: GROK_PROVIDER, url: "https://api.x.ai/v1/chat/completions", external: true };
+  }
   const provider = requested === "ai_os" ? "ai_os" : "tku-zen-agent";
   const base = (provider === "ai_os" ? Deno.env.get("AI_OS_AGENT_URL") : Deno.env.get("TKU_ZEN_AGENT_URL"))?.trim().replace(/\/$/, "");
   if (!base) return null;
@@ -215,14 +232,18 @@ async function askAgent(payload: RoomContextPayload, known: Map<string, ContextC
       5000,
     );
     if (!answer) return null;
-    const allowedActions = new Set(["create_comment", "create_poll", "create_plan_draft", "add_whiteboard_node"]);
+    const allowedActions = new Set([
+      "create_comment", "create_poll", "create_plan_draft", "add_whiteboard_node",
+      "propose_edit_text", "propose_add_shape", "propose_move_item", "propose_add_image",
+      "imagine_image", "imagine_video", "refuse_with_reason",
+    ]);
     const actions = Array.isArray(raw.actions)
       ? raw.actions.slice(0, 6).flatMap((item) => {
           const action = asObject(item);
           const type = text(action.type);
           const label = safeExcerpt(action.label, 120);
           if (!allowedActions.has(type) || !label) return [];
-          return [{ type: type as "create_comment" | "create_poll" | "create_plan_draft" | "add_whiteboard_node", label, payload: stripSecrets(asObject(action.payload)) }];
+          return [{ type, label, payload: stripSecrets(asObject(action.payload)) }];
         })
       : [];
     return {
@@ -433,11 +454,80 @@ async function handle(request: Request): Promise<Response> {
     const original = rawAssets.find((item) => text(item.id) === asset.assetId);
     return original && !bool(original.external_ai_allowed, false);
   })) return jsonResponse({ error: "EXTERNAL_AI_BLOCKED" }, 403);
-  const answer = await askAgent(payload, known);
+
+  const openComments = arrayRows(commentsResult.data).filter((item) => !bool(item.resolved, false)).slice(0, 8).map((item) => ({
+    id: text(item.id),
+    versionId: optional(item.version_id),
+    body: scrubText(text(item.body)).slice(0, 280),
+    regionSummary: optional(asObject(item.region).label) || optional(item.problem_type),
+  }));
+  const contents = branches.slice(0, 24).flatMap((branch) => {
+    const type = text(branch.branch_type);
+    if (type !== "poster" && type !== "video" && type !== "plan") return [];
+    const latestId = currentByBranch.get(text(branch.id));
+    const latest = latestId ? versionById.get(latestId) : undefined;
+    return [{
+      branchId: text(branch.id),
+      type,
+      name: text(branch.name, "未命名"),
+      latestVersionLabel: text(latest?.label, "最新"),
+      openCommentCount: openComments.filter((comment) => comment.versionId && versions.some((version) => text(version.id) === comment.versionId && text(version.branch_id) === text(branch.id))).length,
+    }];
+  });
+  const focusAsset = selected.find((asset) => asset.versionId === input.focusVersionId || asset.branchId === input.focusBranchId) ?? selected[0];
+  const grok = grokEnv();
+  const card = buildCard({
+    roomId: input.roomId,
+    title: text(room.title, "未命名房間"),
+    role,
+    contents,
+    focus: focusAsset ? {
+      branchId: focusAsset.branchId,
+      versionId: focusAsset.versionId,
+      label: `${focusAsset.branchName ?? focusAsset.title}${focusAsset.versionLabel ? ` · ${focusAsset.versionLabel}` : ""}`,
+      thumbnail: focusAsset.summary ? { kind: "description", value: (focusAsset.summary ?? "").slice(0, 200) } : undefined,
+    } : undefined,
+    comments: openComments,
+    truncated: payload.truncated,
+    maxUsd: grok?.maxUsd ?? 0.05,
+    allowImagineVideo: input.imagineVideoConfirmed,
+  });
+
+  let answer: AgentAnswer | null = null;
+  if (grok) {
+    const grokAnswer = await askGrok({
+      env: grok,
+      query: input.query,
+      card,
+      imagineVideoConfirmed: input.imagineVideoConfirmed,
+    });
+    if (grokAnswer) {
+      answer = {
+        text: grokAnswer.text,
+        citations: safeAgentCitations(
+          selected.slice(0, 8).map((asset) => ({ sourceId: asset.sourceId })),
+          known,
+          new Map(payload.context.map((asset) => [asset.sourceId, asset])),
+        ),
+        actions: grokAnswer.actions,
+        provider: GROK_PROVIDER,
+        model: grokAnswer.model,
+      };
+    }
+  } else {
+    answer = await askAgent(payload, known);
+  }
+
+  const unconfigured = grokUnconfigured() || (!endpoint && !grok);
   return new Response(JSON.stringify({
     ...payload,
+    card,
     answer,
-    agent: endpoint ? { provider: endpoint.provider, status: answer ? "ready" : "unavailable" } : { provider: "none", status: "unconfigured" },
+    agent: unconfigured
+      ? { provider: grokUnconfigured() ? GROK_PROVIDER : "none", status: "unconfigured", message: AGENT_UNCONFIGURED_COPY }
+      : endpoint
+        ? { provider: endpoint.provider, status: answer ? "ready" : "unavailable" }
+        : { provider: "none", status: "unconfigured", message: AGENT_UNCONFIGURED_COPY },
   }), { status: 200, headers: responseHeaders() });
 }
 
