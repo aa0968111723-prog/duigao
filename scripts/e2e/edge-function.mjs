@@ -54,18 +54,22 @@ export async function loadEdgeHandler(name, env) {
   // `../_shared/x.ts` 是真實部署會一起打包的檔（deploy 時逐支帶上）。
   // 載入器同樣要把它轉譯出來，否則凡是用共用模組的函式在 harness 裡
   // 根本載不起來 —— 那等於這些函式沒有被任何測試真正執行過。
+  const sharedRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "functions", "_shared");
   const sharedNames = [...source.matchAll(/from "\.\.\/_shared\/([A-Za-z0-9_-]+)\.ts"/g)].map((m) => m[1]);
-  for (const shared of sharedNames) {
-    const sharedSource = await readFile(
-      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "functions", "_shared", shared + ".ts"),
-      "utf8",
-    );
+  const seen = new Set();
+  async function writeShared(name) {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const sharedSource = await readFile(join(sharedRoot, name + ".ts"), "utf8");
+    const nested = [...sharedSource.matchAll(/from "\.\/([A-Za-z0-9_-]+)\.ts"/g)].map((m) => m[1]);
+    for (const child of nested) await writeShared(child);
     const sharedJs = ts.transpileModule(sharedSource, {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-      fileName: shared + ".ts",
+      fileName: name + ".ts",
     }).outputText.replace(/from "\.\/([A-Za-z0-9_-]+)\.ts"/g, 'from "./$1.mjs"');
-    await writeFile(join(dir, shared + ".mjs"), sharedJs, "utf8");
+    await writeFile(join(dir, name + ".mjs"), sharedJs, "utf8");
   }
+  for (const shared of sharedNames) await writeShared(shared);
   source = source.replace(/from "\.\.\/_shared\/([A-Za-z0-9_-]+)\.ts"/g, 'from "./$1.mjs"');
   const js = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
