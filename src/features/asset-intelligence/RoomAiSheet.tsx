@@ -216,6 +216,7 @@ const ACTION_KIND: Record<AiProposal["type"], string> = {
 
 export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [], response, loading = false, error, onAsk, onClose, onFocus, onRetryAnalysis, onUpdatePolicy, onUpdateHumanMetadata, onApplyProposal, onRejectProposal, onCancel, canManage = false }: Props) {
   const [query, setQuery] = useState("");
+  const [lastAsked, setLastAsked] = useState("");
   const [selected, setSelected] = useState<string[]>(selectedAssetIds);
   const [showAssets, setShowAssets] = useState(false);
   const [proposalState, setProposalState] = useState<Record<string, { status: "preview" | "applied" | "rejected"; message?: string; confirm?: boolean }>>({});
@@ -233,11 +234,16 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
   }, [response?.query, response?.answer?.text]);
 
   const selectedAssets = useMemo(() => assets.filter((asset) => selected.includes(asset.id)), [assets, selected]);
-  const ask = async (value = query) => {
+  const ask = async (value = query, extra?: { imagineVideoConfirmed?: boolean }) => {
     const clean = value.trim();
     if (!clean || loading) return;
+    setLastAsked(clean);
     try {
-      await onAsk({ query: clean, selectedAssetIds: selected });
+      await onAsk({
+        query: clean,
+        selectedAssetIds: selected,
+        ...(extra?.imagineVideoConfirmed ? { imagineVideoConfirmed: true } : {}),
+      });
     } catch {
       // App owns the translated error state; the sheet must not create an
       // unhandled rejection when a preset is tapped on a mobile browser.
@@ -327,11 +333,12 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
                       {state.message && state.status === "preview" ? <small className="asset-ai-proposal-msg">{state.message}</small> : null}
                       {state.status === "preview" && proposal.type !== "refuse_with_reason" && (
                         <div className="asset-ai-proposal-actions">
-                          {proposal.type === "imagine_video" && !state.confirm ? (
+                          {proposal.type === "imagine_video" && !proposal.payload.workLayerRef ? (
                             <button
                               type="button"
                               data-testid="room-ai-imagine-confirm"
-                              onClick={() => apply(true)}
+                              disabled={loading}
+                              onClick={() => void ask(query.trim() || lastAsked || response?.query || "", { imagineVideoConfirmed: true })}
                             >
                               確認估價後生影
                             </button>
