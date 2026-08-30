@@ -9,6 +9,11 @@ import {
   acceptRealtimePayload,
   applyDiscussionRealtime,
 } from "../../src/cloud/realtimeApply.ts";
+import {
+  realtimeSubscribeIsJoined,
+  roomLiveSyncClaim,
+  roomPresenceLabel,
+} from "../../src/cloud/realtimeHonesty.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -119,6 +124,28 @@ test("wiring: room sync rejects bad payloads and discussion no longer whole-room
   assert.match(hook, /flushOutboxOnOnline/);
   assert.match(core, /flushOutboxOnOnline/);
   assert.match(hook, /isolateOutboxForOwner/);
+});
+
+test("channel join: only SUBSCRIBED is live; snapshot synced is not 已同步 / 在線", () => {
+  assert.equal(realtimeSubscribeIsJoined("SUBSCRIBED"), true);
+  assert.equal(realtimeSubscribeIsJoined("CHANNEL_ERROR"), false);
+  assert.equal(realtimeSubscribeIsJoined("TIMED_OUT"), false);
+  assert.equal(realtimeSubscribeIsJoined("CLOSED"), false);
+  assert.equal(roomLiveSyncClaim({ snapshotStatus: "synced", realtimeJoined: false }), "正在同步…");
+  assert.doesNotMatch(roomLiveSyncClaim({ snapshotStatus: "synced", realtimeJoined: false }), /已同步/);
+  assert.equal(roomLiveSyncClaim({ snapshotStatus: "synced", realtimeJoined: true }), "已同步");
+  assert.equal(roomPresenceLabel(2, false), "");
+  assert.equal(roomPresenceLabel(0, true), "");
+  assert.equal(roomPresenceLabel(2, true), "2 人在線");
+  const sync = readFileSync(resolve(ROOT, "src/cloud/roomSync.ts"), "utf8");
+  const cloud = readFileSync(resolve(ROOT, "src/cloud/useCloudRoom.ts"), "utf8");
+  const image = readFileSync(resolve(ROOT, "src/features/image-review/ImageWorkspace.tsx"), "utf8");
+  const shell = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
+  assert.match(sync, /realtimeSubscribeIsJoined/);
+  assert.match(cloud, /setRealtimeJoined/);
+  assert.match(image, /roomLiveSyncClaim/);
+  assert.match(shell, /roomPresenceLabel/);
+  assert.doesNotMatch(shell, /api\.online > 0 \? `\$\{api\.online\} 人在線` : "在線"/);
 });
 
 test("re-bind drops leftover realtime channels so subscribe() does not fake a load-error", () => {

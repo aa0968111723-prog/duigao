@@ -245,11 +245,11 @@ function initialView(room: Room | null): ViewState {
 }
 
 /** Map cloud sync state onto the small presence dot the mobile UI already shows. */
-function syncToPresence(status: SyncStatus): CollabStatus | null {
-  if (status === "synced") return "online";
-  if (status === "connecting" || status === "syncing") return "connecting";
+function syncToPresence(status: SyncStatus, realtimeJoined: boolean): CollabStatus | null {
   if (status === "offline-pending" || status === "error") return "error";
-  return null;
+  if (status === "synced" && realtimeJoined) return "online";
+  if (status === "local-only") return null;
+  return "connecting";
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -3668,7 +3668,8 @@ export function App() {
         onToggleAllowBoardEdit: toggleAllowBoardEdit,
         activeWhiteboardId,
         focusNodeId,
-        online: cloud.online || peerCount,
+        online: cloud.realtimeJoined ? (cloud.online || peerCount) : 0,
+        realtimeJoined: cloud.realtimeJoined,
         editors: boardEditors,
         boardPeople: (cloud.presencePeople ?? [])
           .filter((person) => person.boardId && person.boardId === activeWhiteboardId && person.userId !== cloud.userId)
@@ -3745,10 +3746,10 @@ export function App() {
             <RoomWorkspaceShell
               api={{ ...api!, boardRefs: overlayBoardRefs }}
               presence={{
-                status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
-                peers: cloudSession ? cloud.online : peerCount,
+                status: cloudSession ? syncToPresence(cloud.status, cloud.realtimeJoined) : collabStatus,
+                peers: cloudSession && cloud.realtimeJoined ? cloud.online : peerCount,
               }}
-              cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
+              cloud={cloudSession ? { status: cloud.status, online: cloud.online, realtimeJoined: cloud.realtimeJoined } : null}
             />
           ),
         }
@@ -3956,10 +3957,10 @@ export function App() {
       <RoomWorkspaceShell
         api={api!}
         presence={{
-          status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
-          peers: cloudSession ? cloud.online : peerCount,
+          status: cloudSession ? syncToPresence(cloud.status, cloud.realtimeJoined) : collabStatus,
+          peers: cloudSession && cloud.realtimeJoined ? cloud.online : peerCount,
         }}
-        cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
+        cloud={cloudSession ? { status: cloud.status, online: cloud.online, realtimeJoined: cloud.realtimeJoined } : null}
       />
 
       {isCloudConfigured && !boardFocused && <AssetAiFab onClick={() => openAi()} />}
