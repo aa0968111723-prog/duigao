@@ -8,6 +8,15 @@ export const AI_ACTION_TYPES = [
   "create_poll",
   "create_plan_draft",
   "add_whiteboard_node",
+  "create_schedule_event",
+  "create_task",
+  "propose_edit_text",
+  "propose_add_shape",
+  "propose_move_item",
+  "propose_add_image",
+  "imagine_image",
+  "imagine_video",
+  "refuse_with_reason",
 ] as const;
 
 export type AiActionType = (typeof AI_ACTION_TYPES)[number];
@@ -87,7 +96,7 @@ export function normalizeAiActions(
       type,
       label,
       payload,
-      requiresExtraConfirm: type === "create_plan_draft",
+      requiresExtraConfirm: type === "create_plan_draft" || type === "imagine_video",
       source,
     });
   }
@@ -107,7 +116,7 @@ export function applyGate(input: ApplyGateInput): ApplyGateResult {
   const { type } = input.proposal;
   if (type === "create_comment" && !input.canTalk) return { ok: false, reason: "forbidden" };
   if (type === "add_whiteboard_node" && !input.canEditBoard) return { ok: false, reason: "forbidden" };
-  if ((type === "create_poll" || type === "create_plan_draft") && !input.canManage) {
+  if ((type === "create_poll" || type === "create_plan_draft" || type === "create_schedule_event" || type === "create_task") && !input.canManage) {
     return { ok: false, reason: "forbidden" };
   }
   return { ok: true };
@@ -195,6 +204,6 @@ export function planDraftTitle(payload: Record<string, unknown>, fallback: strin
 
 export function applyReasonMessage(reason: "already-applied" | "needs-confirm" | "forbidden"): string {
   if (reason === "already-applied") return "這個提案已經套用過了。";
-  if (reason === "needs-confirm") return "建立企劃草稿需要再確認一次。";
+  if (reason === "needs-confirm") return "建立企劃草稿或生影需要再確認一次。";
   return "目前的身份不能套用這個提案。";
 }

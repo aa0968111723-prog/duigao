@@ -90,6 +90,18 @@ const REGISTRY: Partial<Record<NodeType, NodeRenderer>> = {
       <small>{node.content.sourceLabel ?? "AI 提案"}</small>
     </>
   ),
+  calendar_event: ({ node }) => (
+    <>
+      <strong>{node.content.title ?? node.content.text ?? "時程"}</strong>
+      <small>{node.content.subtitle ?? node.content.sourceLabel ?? "日曆事件"}</small>
+    </>
+  ),
+  task: ({ node }) => (
+    <>
+      <strong>{node.content.title ?? node.content.text ?? "任務"}</strong>
+      <small>{node.content.subtitle ?? "任務"}</small>
+    </>
+  ),
   // freehand（WB03/0026）：content.points 是相對節點左上的筆畫點
   freehand: ({ node }) => {
     const points = readStrokePoints(node.content.points);

@@ -28,6 +28,7 @@ import { acceptAssetAiPolicyAck } from "./assetAiPolicyAck";
 import { ensureSession } from "./auth";
 import { getSupabase } from "./client";
 import { isCloudConfigured } from "./config";
+import { parseFunctionPayload } from "./apiResponse";
 import { loadAiContext, saveAiContext } from "../lib/store";
 
 type Row = Record<string, unknown>;
@@ -479,8 +480,18 @@ export async function askRoomContext(
   const cached = await loadAiContext(key).catch(() => undefined);
   if (cached) return { ...cached, cached: true };
   const { data, error } = await supabase.functions.invoke("room-ai-context", { body: { roomId, ...request } });
-  if (error) throw error;
-  const response = sanitizeRoomAnswer(request.query, assertResponse(data));
+  if (error) {
+    const contentType = (error as { context?: Response }).context?.headers?.get("content-type");
+    const parsed = parseFunctionPayload(typeof (error as { context?: Response }).context === "object" ? null : error, { contentType });
+    if (parsed.kind === "reject") throw new Error("房間 AI 暫時沒有回應，請稍後再試。");
+    throw error;
+  }
+  const parsed = parseFunctionPayload(data);
+  if (parsed.kind === "reject") throw new Error("房間 AI 暫時沒有回應，請稍後再試。");
+  const response = sanitizeRoomAnswer(request.query, assertResponse(parsed.value));
+  if (response.agent?.status === "unconfigured") {
+    response.agent = { ...response.agent, status: "unconfigured" };
+  }
   await saveAiContext(key, response).catch(() => undefined);
   return response;
 }
@@ -498,8 +509,13 @@ function sanitizeRoomAnswer(query: string, response: RoomContextResponse): RoomC
       ...response.answer,
       text: shaped.text,
       actions: shaped.actions.flatMap((action) => {
-        if (action.type !== "create_comment" && action.type !== "create_poll" && action.type !== "create_plan_draft" && action.type !== "add_whiteboard_node") return [];
-        return [{ type: action.type, label: action.label, payload: action.payload ?? {} }];
+        const allowed = new Set([
+          "create_comment", "create_poll", "create_plan_draft", "add_whiteboard_node",
+          "propose_edit_text", "propose_add_shape", "propose_move_item", "propose_add_image",
+          "imagine_image", "imagine_video", "refuse_with_reason",
+        ]);
+        if (!allowed.has(action.type)) return [];
+        return [{ type: action.type as NonNullable<RoomContextResponse["answer"]>["actions"][number]["type"], label: action.label, payload: action.payload ?? {} }];
       }),
     },
   };

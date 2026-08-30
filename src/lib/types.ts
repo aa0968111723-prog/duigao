@@ -404,6 +404,7 @@ export type Room = {
   discussion?: import("../features/collaboration/types").DiscussionMessage[];
   discussionSupports?: import("../features/collaboration/types").DiscussionSupport[];
   decisions?: import("../features/collaboration/types").DecisionRecord[];
+  scheduleEvents?: import("../features/schedule/types").ScheduleEvent[];
   allowBoardEdit?: boolean;
 };
 

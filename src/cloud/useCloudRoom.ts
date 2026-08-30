@@ -90,6 +90,8 @@ import { uuid } from "../lib/id";
 import {
   edgeFromRow,
   insertDecision,
+  upsertScheduleEvent,
+  deleteScheduleEventRow,
   insertAiApplyAudit,
   insertDiscussion,
   updateDiscussion as repoUpdateDiscussion,
@@ -166,6 +168,8 @@ export type CloudWrites = {
   createEdge?: (edge: import("../features/collaboration/types").WhiteboardEdge) => void;
   createDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
   updateDecision?: (decision: import("../features/collaboration/types").DecisionRecord) => void;
+  upsertScheduleEvent?: (event: import("../features/schedule/types").ScheduleEvent) => void;
+  deleteScheduleEvent?: (id: string) => void;
   setAllowBoardEdit?: (allow: boolean) => void;
   toggleSupport: (commentId: string, add: boolean) => void;
   insertReply: (reply: import("../lib/types").CommentReply) => void;
@@ -1243,6 +1247,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
     insertOperation: (op) => run(`op:${op.opId}`, () => repoInsertOperation(supabase!, { ...op, roomId: boundRef.current! })),
     createDecision: (decision) => run(`decision-insert:${decision.id}`, () => insertDecision(supabase!, decision)),
     updateDecision: (decision) => run(`decision:${decision.id}`, () => repoUpdateDecision(supabase!, decision)),
+    upsertScheduleEvent: (event) => run(`schedule:${event.id}`, () => upsertScheduleEvent(supabase!, event).then(() => undefined)),
+    deleteScheduleEvent: (id) => run(`schedule-del:${id}`, () => deleteScheduleEventRow(supabase!, boundRef.current!, id)),
     setAllowBoardEdit: (allow) => run("allow-board-edit", () => repoSetAllowBoardEdit(supabase!, boundRef.current!, allow)),
     toggleSupport: (commentId, add) => run(`comment-support:${commentId}`, () => setSupport(supabase!, boundRef.current!, commentId, add)),
     insertReply: (reply) => run(`reply:${reply.id}`, () => repoInsertReply(supabase!, boundRef.current!, reply)),

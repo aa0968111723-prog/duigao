@@ -14,6 +14,8 @@ import { FRAME_KINDS } from "../features/collaboration/types";
 import { isDiscussionKind, isEdgeType, isNodeType } from "../features/collaboration/types";
 import { acceptDiscussionInsert } from "./discussionWrite";
 import { CloudError } from "./errors";
+import { acceptScheduleWrite } from "../features/schedule/honesty";
+import type { ScheduleEvent } from "../features/schedule/types";
 
 type WhiteboardRow = {
   id: string;
@@ -230,6 +232,7 @@ export type CollaborationSlice = {
   discussion: DiscussionMessage[];
   discussionSupports: DiscussionSupport[];
   decisions: DecisionRecord[];
+  scheduleEvents?: ScheduleEvent[];
   allowBoardEdit: boolean;
 };
 
@@ -251,6 +254,7 @@ export async function loadCollaborationSummary(supabase: SupabaseClient, roomId:
   // 使用者看到的是上一份好的快照，不是被抹掉的對話。
   const failed = [boardsRes, discussionRes, supportsRes, decisionsRes, roomRes].find((res) => res.error);
   if (failed?.error) throw new CloudError(failed.error.message, "collaboration-summary");
+  const scheduleEvents = await loadScheduleEvents(supabase, roomId).catch(() => [] as ScheduleEvent[]);
   return {
     whiteboards: ((boardsRes.data as WhiteboardRow[] | null) ?? []).map(whiteboardFromRow),
     nodes: [],
@@ -262,8 +266,75 @@ export async function loadCollaborationSummary(supabase: SupabaseClient, roomId:
       userId: row.user_id,
     })),
     decisions: ((decisionsRes.data as DecisionRow[] | null) ?? []).map(decisionFromRow).filter((item): item is DecisionRecord => Boolean(item)),
+    scheduleEvents,
     allowBoardEdit: Boolean((roomRes.data as { allow_board_edit?: boolean } | null)?.allow_board_edit),
   };
+}
+
+function scheduleFromRow(row: Record<string, unknown>): ScheduleEvent {
+  return {
+    id: String(row.id),
+    roomId: String(row.room_id),
+    createdBy: String(row.created_by ?? "local"),
+    title: String(row.title ?? ""),
+    description: String(row.description ?? ""),
+    eventType: (row.event_type as ScheduleEvent["eventType"]) || "activity",
+    startAt: Date.parse(String(row.start_at)),
+    endAt: row.end_at ? Date.parse(String(row.end_at)) : undefined,
+    timezone: String(row.timezone ?? "Asia/Taipei"),
+    allDay: Boolean(row.all_day),
+    status: (row.status as ScheduleEvent["status"]) || "open",
+    assigneeId: row.assignee_id ? String(row.assignee_id) : undefined,
+    assigneeName: String(row.assignee_name ?? ""),
+    sourceType: row.source_type ? String(row.source_type) as ScheduleEvent["sourceType"] : undefined,
+    sourceId: row.source_id ? String(row.source_id) : undefined,
+    color: String(row.color ?? "#c45c4a"),
+    version: Number(row.version) || 1,
+    createdAt: Date.parse(String(row.created_at)),
+    updatedAt: Date.parse(String(row.updated_at)),
+  };
+}
+
+export async function loadScheduleEvents(supabase: SupabaseClient, roomId: string): Promise<ScheduleEvent[]> {
+  const { data, error } = await supabase.from("room_schedule_events").select("*").eq("room_id", roomId).order("start_at", { ascending: true });
+  if (error) {
+    if (/does not exist|42P01|schema cache/i.test(error.message)) return [];
+    throw new CloudError(error.message, "schedule");
+  }
+  return ((data as Record<string, unknown>[] | null) ?? []).map(scheduleFromRow);
+}
+
+export async function upsertScheduleEvent(supabase: SupabaseClient, event: ScheduleEvent): Promise<ScheduleEvent> {
+  const { data, error } = await supabase.from("room_schedule_events").upsert({
+    id: event.id,
+    room_id: event.roomId,
+    created_by: isUuid(event.createdBy) ? event.createdBy : null,
+    title: event.title,
+    description: event.description,
+    event_type: event.eventType,
+    start_at: new Date(event.startAt).toISOString(),
+    end_at: event.endAt ? new Date(event.endAt).toISOString() : null,
+    timezone: event.timezone,
+    all_day: event.allDay,
+    status: event.status,
+    assignee_id: event.assigneeId && isUuid(event.assigneeId) ? event.assigneeId : null,
+    assignee_name: event.assigneeName,
+    source_type: event.sourceType ?? null,
+    source_id: event.sourceId ?? null,
+    color: event.color,
+    version: event.version,
+    updated_at: new Date().toISOString(),
+  }).select("id").maybeSingle();
+  const accepted = acceptScheduleWrite({ error, data });
+  if (!accepted.ok) {
+    throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : accepted.code, "schedule");
+  }
+  return event;
+}
+
+export async function deleteScheduleEventRow(supabase: SupabaseClient, roomId: string, id: string): Promise<void> {
+  const { error } = await supabase.from("room_schedule_events").delete().eq("id", id).eq("room_id", roomId);
+  if (error) throw new CloudError(error.message, "schedule");
 }
 
 export async function loadWhiteboardGraph(supabase: SupabaseClient, roomId: string, whiteboardId: string): Promise<{ nodes: WhiteboardNode[]; edges: WhiteboardEdge[] }> {
@@ -809,7 +880,7 @@ export type CollaborationIdMaps = {
   pollIdMap?: Map<string, string>;
 };
 
-export function collaborationSliceFromRoom(room: Pick<Room, "whiteboards" | "whiteboardNodes" | "whiteboardEdges" | "discussion" | "discussionSupports" | "decisions" | "allowBoardEdit">): CollaborationSlice {
+export function collaborationSliceFromRoom(room: Pick<Room, "whiteboards" | "whiteboardNodes" | "whiteboardEdges" | "discussion" | "discussionSupports" | "decisions" | "scheduleEvents" | "allowBoardEdit">): CollaborationSlice {
   return {
     whiteboards: room.whiteboards ?? [],
     nodes: room.whiteboardNodes ?? [],
@@ -817,6 +888,7 @@ export function collaborationSliceFromRoom(room: Pick<Room, "whiteboards" | "whi
     discussion: room.discussion ?? [],
     discussionSupports: room.discussionSupports ?? [],
     decisions: room.decisions ?? [],
+    scheduleEvents: room.scheduleEvents ?? [],
     allowBoardEdit: Boolean(room.allowBoardEdit),
   };
 }
