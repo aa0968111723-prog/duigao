@@ -2,6 +2,7 @@ import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import type { BranchRow, CommentRow, MessageRow, PlanRow, PollRow, PollVoteRow, ProposalRow, RelationRow, RoomRow, StrokeRow, VersionRow } from "./types";
 import type { EdgeRow, NodeRow, FrameRow } from "./collaborationRepository";
 import { acceptRealtimePayload } from "./realtimeApply";
+import { realtimeSubscribeIsJoined } from "./realtimeHonesty";
 
 export type SyncHandlers = {
   onRoom?: (row: RoomRow) => void;
@@ -220,7 +221,7 @@ export async function subscribeRoom(
       handlers.onPresenceList?.(people);
     })
     .subscribe((status) => {
-      const connected = status === "SUBSCRIBED";
+      const connected = realtimeSubscribeIsJoined(status);
       handlers.onStatus?.(connected);
       if (connected) void channel.track(trackPayload());
     });
