@@ -571,6 +571,7 @@ async function loadRoomFull(supabase: SupabaseClient, roomId: string): Promise<C
     room.discussion = collab.discussion;
     room.discussionSupports = collab.discussionSupports;
     room.decisions = collab.decisions;
+    room.scheduleEvents = collab.scheduleEvents ?? [];
     room.allowBoardEdit = collab.allowBoardEdit;
   } catch {
     /* 0014 not applied yet */
@@ -670,6 +671,7 @@ async function loadRoomSummary(supabase: SupabaseClient, roomId: string, force =
     room.discussion = collab.discussion;
     room.discussionSupports = collab.discussionSupports;
     room.decisions = collab.decisions;
+    room.scheduleEvents = collab.scheduleEvents ?? [];
     room.allowBoardEdit = collab.allowBoardEdit;
   } catch {
     /* 0014 not applied yet */
@@ -763,6 +765,7 @@ async function loadRoomBranch(supabase: SupabaseClient, roomId: string, branchId
     room.discussion = collab.discussion;
     room.discussionSupports = collab.discussionSupports;
     room.decisions = collab.decisions;
+    room.scheduleEvents = collab.scheduleEvents ?? [];
     room.allowBoardEdit = collab.allowBoardEdit;
   } catch {
     /* 0014 not applied yet */

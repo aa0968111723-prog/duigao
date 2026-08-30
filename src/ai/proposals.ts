@@ -8,6 +8,8 @@ export const AI_ACTION_TYPES = [
   "create_poll",
   "create_plan_draft",
   "add_whiteboard_node",
+  "create_schedule_event",
+  "create_task",
 ] as const;
 
 export type AiActionType = (typeof AI_ACTION_TYPES)[number];
@@ -107,7 +109,7 @@ export function applyGate(input: ApplyGateInput): ApplyGateResult {
   const { type } = input.proposal;
   if (type === "create_comment" && !input.canTalk) return { ok: false, reason: "forbidden" };
   if (type === "add_whiteboard_node" && !input.canEditBoard) return { ok: false, reason: "forbidden" };
-  if ((type === "create_poll" || type === "create_plan_draft") && !input.canManage) {
+  if ((type === "create_poll" || type === "create_plan_draft" || type === "create_schedule_event" || type === "create_task") && !input.canManage) {
     return { ok: false, reason: "forbidden" };
   }
   return { ok: true };

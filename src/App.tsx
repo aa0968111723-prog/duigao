@@ -143,6 +143,9 @@ import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContext
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
+import { eventFromBoardNode, eventFromDiscussion, nodeFromScheduleEvent, sourceOpenTarget } from "./features/schedule/links";
+import { scheduleEventFromProposal } from "./features/schedule/proposals";
+import type { ScheduleEvent } from "./features/schedule/types";
 import { useDiscussionOutbox } from "./hooks/useDiscussionOutbox";
 import { useVoiceRoom } from "./hooks/useVoiceRoom";
 import { DiscussionDrawer } from "./features/room-discussion/DiscussionDrawer";
@@ -2248,6 +2251,35 @@ export function App() {
     [cloud.userId, guest, upsertNode],
   );
 
+  const upsertSchedule = useCallback(
+    (event: ScheduleEvent) => {
+      updateRoom((r) => {
+        const rest = (r.scheduleEvents ?? []).filter((item) => item.id !== event.id);
+        return { ...r, scheduleEvents: [...rest, event].sort((a, b) => a.startAt - b.startAt) };
+      });
+      cloudRef.current.writes.upsertScheduleEvent?.(event);
+    },
+    [updateRoom],
+  );
+
+  const addMessageToSchedule = useCallback(
+    (message: DiscussionMessage, startAt = Date.now()) => {
+      const actor = cloud.userId ?? guest?.id ?? "local";
+      upsertSchedule(eventFromDiscussion(message, actor, startAt));
+      showToast("已加入時程", { tone: "success" });
+    },
+    [cloud.userId, guest, showToast, upsertSchedule],
+  );
+
+  const addNodeDeadline = useCallback(
+    (node: WhiteboardNode, startAt = Date.now()) => {
+      const actor = cloud.userId ?? guest?.id ?? "local";
+      upsertSchedule(eventFromBoardNode(node, actor, startAt));
+      showToast("已設定期限", { tone: "success" });
+    },
+    [cloud.userId, guest, showToast, upsertSchedule],
+  );
+
   const createDecision = useCallback(
     (title: string, source?: { type: "poll"; id: string }, status: "pending" | "decided" = "pending") => {
       const actor = cloud.userId ?? guest?.id ?? "local";
@@ -2365,6 +2397,9 @@ export function App() {
           setActiveWhiteboardId(board.id);
           setStagedBoardAi({ proposals: [proposal], nodes: [node], edges: [] });
           return { ok: true, message: "已開白板並顯示 AI 的建議，確認後才會放上去。" };
+        } else if (proposal.type === "create_schedule_event" || proposal.type === "create_task") {
+          upsertSchedule(scheduleEventFromProposal(proposal, current.id, actor));
+          audit(`已採用時程建議：${proposal.label}`);
         }
         appliedAiProposalIds.current.add(proposal.id);
         // 機器稽核列（0019）：cloud 房才寫；失敗不回滾套用（套用本身已
@@ -2384,7 +2419,7 @@ export function App() {
         return { ok: false, reason: "failed", message: "套用失敗，請稍後再試。" };
       }
     },
-    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, createProjectContent, createProjectPoll, createWhiteboard, guest, sendDiscussion, showToast, upsertNode],
+    [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, createProjectContent, createProjectPoll, createWhiteboard, guest, sendDiscussion, showToast, upsertNode, upsertSchedule],
   );
 
   useEffect(() => {
@@ -3647,6 +3682,24 @@ export function App() {
         onCreateEdge: createEdge,
         onShareNodeToDiscussion: shareNodeToDiscussion,
         onAddMessageToBoard: addMessageToBoard,
+        onAddMessageToSchedule: addMessageToSchedule,
+        onUpsertScheduleEvent: upsertSchedule,
+        onDeleteScheduleEvent: (id) => {
+          updateRoom((r) => ({ ...r, scheduleEvents: (r.scheduleEvents ?? []).filter((item) => item.id !== id) }));
+          cloudRef.current.writes.deleteScheduleEvent?.(id);
+        },
+        onNodeDeadline: addNodeDeadline,
+        onOpenScheduleSource: (event) => {
+          const target = sourceOpenTarget(event);
+          if (target.surface === "discussion") {
+            setFocusNodeId(null);
+          }
+          if (target.surface === "board") {
+            setFocusNodeId(target.nodeId);
+            const node = roomRef.current?.whiteboardNodes?.find((item) => item.id === target.nodeId);
+            if (node) setActiveWhiteboardId(node.whiteboardId);
+          }
+        },
         onCreateDecision: createDecision,
         onFinalizeDecision: finalizeDecision,
         onToggleAllowBoardEdit: toggleAllowBoardEdit,
