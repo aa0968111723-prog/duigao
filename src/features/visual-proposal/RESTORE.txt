@@ -1,0 +1,13 @@
+DO NOT MERGE #171 while store.ts is PLACEHOLDER_STORE (commit ad24e21).
+
+Immediate:
+  git checkout feat/poster-compose-own-assets
+  git revert --no-edit ad24e21
+
+Then apply the already-written patches:
+1. store.ts import mergeHydrate; hydrateQueued; merge on hydrate; layerEditing: state.editing; startComposeEditing hydrated:true
+2. MobileWorkspace auto-open ProposalDock when proposalStore.layerEditing
+3. e2e wait poster-save-version BEFORE poster-compose-canvas
+4. poster-compose.test.ts cover mergeHydrate + store wiring
+
+Local patched copies: see conversation artifacts.
