@@ -160,3 +160,23 @@ test("伺服器回答時一律採用，不會被同房的舊資料蓋回去", ()
   );
   assert.deepEqual(kept, [{ id: "new" }]);
 });
+
+test("同 id 較新的本地 edit 不被過期快照蓋掉", () => {
+  const local = { id: "m1", body: "先把招生流程攤在白板上（改過）", updatedAt: 200 };
+  const stale = { id: "m1", body: "先把招生流程攤在白板上", updatedAt: 100 };
+  const kept = mergeDiscussionSnapshot(
+    { id: "room-1", discussion: [local] },
+    { id: "room-1", discussion: [stale] },
+  );
+  assert.deepEqual(kept, [local]);
+});
+
+test("同 id 較新的伺服器列仍覆蓋本地", () => {
+  const local = { id: "m1", body: "先打", updatedAt: 100 };
+  const fresh = { id: "m1", body: "雲端已改", updatedAt: 200 };
+  const kept = mergeDiscussionSnapshot(
+    { id: "room-1", discussion: [local] },
+    { id: "room-1", discussion: [fresh] },
+  );
+  assert.deepEqual(kept, [fresh]);
+});

@@ -358,11 +358,39 @@ export function reconcileNodes(local: WhiteboardNode[], remote: WhiteboardNode[]
  *   - 伺服器沒回答（undefined）且是同一間房 → 保留現況，不抹掉。
  *   - 伺服器沒回答且換了房 → 不可沿用上一間房的訊息，回 undefined。
  */
+function snapshotRowId(row: unknown): string {
+  if (!row || typeof row !== "object") return "";
+  const id = (row as { id?: unknown }).id;
+  return typeof id === "string" ? id : "";
+}
+
+function snapshotRowUpdatedAt(row: unknown): number {
+  if (!row || typeof row !== "object") return 0;
+  const n = (row as { updatedAt?: unknown }).updatedAt;
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+}
+
 export function mergeDiscussionSnapshot<T>(
   current: { id: string; discussion?: T[] } | null | undefined,
   incoming: { id: string; discussion?: T[] },
 ): T[] | undefined {
-  if (incoming.discussion !== undefined) return incoming.discussion;
-  if (current && current.id === incoming.id) return current.discussion;
-  return undefined;
+  if (incoming.discussion === undefined) {
+    if (current && current.id === incoming.id) return current.discussion;
+    return undefined;
+  }
+  const local = current && current.id === incoming.id ? current.discussion : undefined;
+  if (!local?.length) return incoming.discussion;
+  const localById = new Map<string, T>();
+  for (const row of local) {
+    const id = snapshotRowId(row);
+    if (id) localById.set(id, row);
+  }
+  // Same-id: a newer local edit / tombstone paint must not lose to an in-flight
+  // snapshot that still has the pre-PATCH body. Server list membership stays
+  // authoritative (ids only on the server win; local-only ghosts stay in outbox).
+  return incoming.discussion.map((row) => {
+    const mine = localById.get(snapshotRowId(row));
+    if (!mine) return row;
+    return snapshotRowUpdatedAt(mine) > snapshotRowUpdatedAt(row) ? mine : row;
+  });
 }

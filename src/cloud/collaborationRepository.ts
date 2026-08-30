@@ -668,7 +668,7 @@ export async function updateDiscussion(supabase: SupabaseClient, message: Pick<D
   const { data, error } = await supabase.from("room_discussion_messages").update({
     body: message.body,
     payload: message.payload ?? {},
-  }).eq("id", message.id).eq("room_id", message.roomId).abortSignal(AbortSignal.timeout(12000));
+  }).eq("id", message.id).eq("room_id", message.roomId).abortSignal(AbortSignal.timeout(12000)).select("id").maybeSingle();
   const accepted = acceptDiscussionInsert({ error, data });
   if (!accepted.ok) {
     throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : (error?.message ?? "discussion update failed"), "discussion");

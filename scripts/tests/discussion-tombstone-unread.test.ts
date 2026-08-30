@@ -224,6 +224,15 @@ test("T-11: tombstone UPDATE 必須 select id，204 空身不可當 ack", () => 
   assert.equal(acceptDiscussionInsert({ error: null, data: { id: "m1" } }).ok, true);
 });
 
+test("T-11b: 討論 edit UPDATE 必須 select id，204 空身不可當 ack", () => {
+  const repo = src("src/cloud/collaborationRepository.ts");
+  const fn = repo.slice(repo.indexOf("export async function updateDiscussion"));
+  const body = fn.slice(0, fn.indexOf("\nexport "));
+  assert.match(body, /acceptDiscussionInsert/);
+  assert.match(body, /\.select\(["']id["']\)/);
+  assert.match(body, /maybeSingle/);
+});
+
 test("T-10: 雲端 tombstone 沒 ack 不得先畫「已刪除」", () => {
   const live = message({ id: "m1" });
   assert.equal(applyTombstoneAfterCloudAck(live, false), null);
