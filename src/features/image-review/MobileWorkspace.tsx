@@ -49,10 +49,22 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [immersiveOpen, setImmersiveOpen] = useState(false);
   const chatRef = useRef<HTMLInputElement>(null);
   const proposalMode = proposalSession != null;
+  const visibleVersionId = room.versions.some((version) => version.id === view.versionId)
+    ? view.versionId
+    : room.versions[0]?.id ?? view.versionId;
 
   // Read-only view of every proposal in the room, so 修改點卡 can show its own.
   const roomProposals = useRoomProposals(room.id);
-  const proposalStore = useProposalStore(room.id, view.versionId, api.guest);
+  const proposalStore = useProposalStore(room.id, visibleVersionId, api.guest);
+
+  // Viewer already falls back to the first real version when a cloud refresh
+  // replaces an optimistic id. Keep every adjacent surface on that same id so
+  // the compose layer cannot be created for an invisible/stale version.
+  useEffect(() => {
+    if (visibleVersionId !== view.versionId) {
+      api.setView({ ...view, versionId: visibleVersionId, compareMode: "single" });
+    }
+  }, [api, view, visibleVersionId]);
 
   /** 修改點 → 提案: open the dock with a proposal already bound to that pin. */
   const proposeFromPin = (commentId: string) => {
@@ -115,16 +127,16 @@ export function MobileWorkspace({ api, presence }: Props) {
   // on screen; linked proposal intents still own their own create/select flow.
   useEffect(() => {
     if (proposalSession?.intent === null && api.canManage && !proposalStore.active) {
-      startComposeEditing(room.id, view.versionId, api.guest);
+      startComposeEditing(room.id, visibleVersionId, api.guest);
     }
-  }, [api.canManage, api.guest, proposalSession, proposalStore.active, room.id, view.versionId]);
+  }, [api.canManage, api.guest, proposalSession, proposalStore.active, room.id, visibleVersionId]);
 
   const gaveFeedback =
     room.comments.some((c) => c.authorId === api.guest.id) ||
     (room.supports ?? []).some((s) => s.userId === api.guest.id) ||
     (room.replies ?? []).some((r) => r.authorId === api.guest.id);
 
-  const versionProposalCount = roomProposals.docs.filter((d) => d.versionId === view.versionId).length;
+  const versionProposalCount = roomProposals.docs.filter((d) => d.versionId === visibleVersionId).length;
 
   // A single, gentle nudge — only if the viewer has been around a while without
   // leaving any feedback, and never more than once per room.
@@ -290,7 +302,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             onClick={() => {
               api.setTool("pan");
               api.selectPin(null);
-              startComposeEditing(room.id, view.versionId, api.guest);
+              startComposeEditing(room.id, visibleVersionId, api.guest);
               setProposalSession({ intent: null });
             }}
           >
@@ -332,7 +344,7 @@ export function MobileWorkspace({ api, presence }: Props) {
         {proposalSession ? (
           <ProposalDock
             roomId={room.id}
-            versionId={view.versionId}
+            versionId={visibleVersionId}
             author={api.guest}
             showToast={api.showToast}
             onExit={() => setProposalSession(null)}
@@ -344,7 +356,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             pref={{
               prefs: room.proposalPrefs ?? [],
               userId: api.guest.id,
-              onChoose: (choice) => api.setProposalPref(view.versionId, choice),
+              onChoose: (choice) => api.setProposalPref(visibleVersionId, choice),
             }}
           />
         ) : (

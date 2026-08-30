@@ -71,6 +71,8 @@ test("hydrate race 修補接到 store 與 mobile dock", () => {
   assert.match(store, /layerEditing:\s*state\.editing/);
   assert.match(mobile, /proposalStore\.layerEditing/);
   assert.match(mobile, /proposalSession\?\.intent === null && api\.canManage && !proposalStore\.active/);
+  assert.match(mobile, /visibleVersionId/);
+  assert.match(mobile, /useProposalStore\(room\.id, visibleVersionId/);
 });
 
 test("新增文宣 sheet 有上傳成品與用素材拼一張入口", () => {

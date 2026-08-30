@@ -266,30 +266,7 @@ try {
     check("拼圖文宣 390 無水平溢出", await noHorizontalOverflow(page));
     await page.getByTestId("poster-edit-toggle").click();
     await page.waitForSelector('[data-testid="poster-save-version"]', { timeout: 15000 });
-    try {
-      await page.waitForSelector('[data-testid="poster-compose-canvas"]', { timeout: 15000 });
-    } catch (error) {
-      const composeDebug = await page.evaluate(() => {
-        const rect = (selector) => {
-          const element = document.querySelector(selector);
-          if (!element) return null;
-          const box = element.getBoundingClientRect();
-          return { width: box.width, height: box.height, display: getComputedStyle(element).display };
-        };
-        const app = document.querySelector(".m-app");
-        return {
-          canvasCount: document.querySelectorAll('[data-testid="poster-compose-canvas"]').length,
-          stage: rect('[data-testid="poster-compose-stage"]'),
-          frame: rect(".stage-frame"),
-          dock: rect(".pdock"),
-          appClass: app?.className,
-          proposalInset: app ? getComputedStyle(app).getPropertyValue("--m-proposal") : "",
-          viewport: { width: innerWidth, height: innerHeight },
-        };
-      });
-      console.error("compose canvas timeout diagnostics", JSON.stringify(composeDebug));
-      throw error;
-    }
+    await page.waitForSelector('[data-testid="poster-compose-canvas"]', { timeout: 15000 });
     const chipsBeforeSave = await page.locator(".m-vchip").filter({ hasText: /初稿|改/ }).count();
     await page.getByTestId("poster-save-version").click();
     await page.waitForTimeout(600);
