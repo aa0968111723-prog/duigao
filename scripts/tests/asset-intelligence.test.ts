@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { acceptAssetAiPolicyAck } from "../../src/cloud/assetAiPolicyAck";
 import {
   contextCacheKey,
   isNormalizedAssetRegion,
@@ -125,4 +128,19 @@ test("Room Context API adapter uses HMAC and bounded evidence", () => {
   assert.equal(signature.length, 64);
   assert.match("tku-zen-agent adapter / ai_os adapter HMAC", /adapter|HMAC/);
   assert.doesNotMatch(body, /storage_path|invite_token|service_role/i);
+});
+
+test("zero-row AI policy UPDATE is not 已開啟素材 AI 理解", () => {
+  assert.throws(() => acceptAssetAiPolicyAck(null), (err: Error & { code?: string }) => err.code === "POLICY_NOT_APPLIED");
+  assert.throws(() => acceptAssetAiPolicyAck({}), (err: Error & { code?: string }) => err.code === "POLICY_NOT_APPLIED");
+  assert.throws(() => acceptAssetAiPolicyAck({ id: "  " }), (err: Error & { code?: string }) => err.code === "POLICY_NOT_APPLIED");
+  assert.deepEqual(acceptAssetAiPolicyAck({ id: "asset-1" }), { id: "asset-1" });
+});
+
+test("setAssetAiPolicy requires a returned id (RLS no-op is not success)", () => {
+  const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const src = readFileSync(resolve(ROOT, "src/cloud/assetIntelligence.ts"), "utf8");
+  assert.match(src, /acceptAssetAiPolicyAck/);
+  assert.match(src, /select\("id"\)\.maybeSingle\(\)/);
+  assert.match(src, /setAssetAiPolicy[\s\S]*acceptAssetAiPolicyAck/);
 });

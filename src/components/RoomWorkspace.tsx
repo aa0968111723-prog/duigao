@@ -24,7 +24,7 @@ export function RoomWorkspace({
   api: WorkspaceApi;
   presence: { status: CollabStatus | null; peers: number };
   /** Desktop sync badge; null in local-only mode. */
-  cloud?: { status: SyncStatus; online: number } | null;
+  cloud?: { status: SyncStatus; online: number; realtimeJoined?: boolean } | null;
 }) {
   return roomMediaType(api.room) === "video" ? (
     <VideoWorkspace api={api} presence={presence} />

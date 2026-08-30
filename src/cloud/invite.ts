@@ -118,6 +118,25 @@ export function readRoomLink(): RoomLink {
 }
 
 /**
+ * Stable identity for a parsed room link. Used to re-apply deep-link targeting
+ * only when the fragment actually changed — not on every snapshot, and not on
+ * the first mount (that first read is already the current tab).
+ */
+export function roomLinkIdentity(link: RoomLink): string {
+  if (link.kind === "none") return "none";
+  if (link.kind === "legacy") return `legacy:${link.roomId}`;
+  return [
+    "cloud",
+    link.roomId,
+    link.invite,
+    link.branchId ?? "",
+    link.versionId ?? "",
+    link.whiteboardId ?? "",
+    link.nodeId ?? "",
+  ].join(":");
+}
+
+/**
  * Swap the address bar over to a cloud invite URL without a reload, so a
  * legacy link the owner still has bookmarked (or in a LINE thread) upgrades
  * itself and every later re-share carries the invite token.

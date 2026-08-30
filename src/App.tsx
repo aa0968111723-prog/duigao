@@ -54,7 +54,7 @@ import {
   subscribeAssetAnalysis,
   type AssetIntelligenceSnapshot,
 } from "./cloud/assetIntelligence";
-import { addRoomTarget, readRoomLink } from "./cloud/invite";
+import { addRoomTarget, readRoomLink, roomLinkIdentity } from "./cloud/invite";
 import { sessionEntryStatus } from "./cloud/sessionEntryStatus";
 import { applyDiscussionRealtime } from "./cloud/realtimeApply";
 import { type SyncStatus } from "./cloud/types";
@@ -245,11 +245,11 @@ function initialView(room: Room | null): ViewState {
 }
 
 /** Map cloud sync state onto the small presence dot the mobile UI already shows. */
-function syncToPresence(status: SyncStatus): CollabStatus | null {
-  if (status === "synced") return "online";
-  if (status === "connecting" || status === "syncing") return "connecting";
+function syncToPresence(status: SyncStatus, realtimeJoined: boolean): CollabStatus | null {
   if (status === "offline-pending" || status === "error") return "error";
-  return null;
+  if (status === "synced" && realtimeJoined) return "online";
+  if (status === "local-only") return null;
+  return "connecting";
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -491,10 +491,18 @@ export function App() {
   viewRef.current = view;
 
   /**
-   * How this tab was opened. Read once: `main.tsx` has already upgraded a
-   * legacy owner link to its cloud invite URL before the first render.
+   * How this tab was opened. Re-read on `hashchange` so a same-tab invite
+   * after Home is not frozen on the first empty `useMemo([], [])` read.
+   * `main.tsx` has already upgraded a legacy owner link before first render.
+   * `replaceUrlWithInvite` uses `history.replaceState` and does not fire
+   * hashchange — the host stays an owner, not a guest.
    */
-  const roomLink = useMemo(() => readRoomLink(), []);
+  const [roomLink, setRoomLink] = useState(readRoomLink);
+  useEffect(() => {
+    const sync = () => setRoomLink(readRoomLink());
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
   const isGuestSession = roomLink.kind !== "none";
   /** An old `#room=<6碼>` link this device cannot upgrade (a partner's phone). */
   const isLegacyLink = roomLink.kind === "legacy";
@@ -572,6 +580,14 @@ export function App() {
   }, [showToast]);
 
   const roomLinkAppliedRef = useRef(false);
+  const appliedLinkIdentityRef = useRef<string | null>(null);
+  const currentLinkIdentity = roomLinkIdentity(roomLink);
+  if (appliedLinkIdentityRef.current === null) {
+    appliedLinkIdentityRef.current = currentLinkIdentity;
+  } else if (appliedLinkIdentityRef.current !== currentLinkIdentity) {
+    appliedLinkIdentityRef.current = currentLinkIdentity;
+    roomLinkAppliedRef.current = false;
+  }
   // outbox 對帳只能看「伺服器快照裡有哪些討論訊息」。room.discussion 混著
   // 樂觀 append 的列，拿它當 serverIds 會在送出瞬間把 entry 誤判為已落地。
   const [serverDiscussionIds, setServerDiscussionIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -3636,7 +3652,8 @@ export function App() {
         onToggleAllowBoardEdit: toggleAllowBoardEdit,
         activeWhiteboardId,
         focusNodeId,
-        online: cloud.online || peerCount,
+        online: cloud.realtimeJoined ? (cloud.online || peerCount) : 0,
+        realtimeJoined: cloud.realtimeJoined,
         editors: boardEditors,
         boardPeople: (cloud.presencePeople ?? [])
           .filter((person) => person.boardId && person.boardId === activeWhiteboardId && person.userId !== cloud.userId)
@@ -3713,10 +3730,10 @@ export function App() {
             <RoomWorkspaceShell
               api={{ ...api!, boardRefs: overlayBoardRefs }}
               presence={{
-                status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
-                peers: cloudSession ? cloud.online : peerCount,
+                status: cloudSession ? syncToPresence(cloud.status, cloud.realtimeJoined) : collabStatus,
+                peers: cloudSession && cloud.realtimeJoined ? cloud.online : peerCount,
               }}
-              cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
+              cloud={cloudSession ? { status: cloud.status, online: cloud.online, realtimeJoined: cloud.realtimeJoined } : null}
             />
           ),
         }
@@ -3924,10 +3941,10 @@ export function App() {
       <RoomWorkspaceShell
         api={api!}
         presence={{
-          status: cloudSession ? syncToPresence(cloud.status) : collabStatus,
-          peers: cloudSession ? cloud.online : peerCount,
+          status: cloudSession ? syncToPresence(cloud.status, cloud.realtimeJoined) : collabStatus,
+          peers: cloudSession && cloud.realtimeJoined ? cloud.online : peerCount,
         }}
-        cloud={cloudSession ? { status: cloud.status, online: cloud.online } : null}
+        cloud={cloudSession ? { status: cloud.status, online: cloud.online, realtimeJoined: cloud.realtimeJoined } : null}
       />
 
       {isCloudConfigured && !boardFocused && <AssetAiFab onClick={() => openAi()} />}

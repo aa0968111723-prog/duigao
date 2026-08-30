@@ -719,20 +719,28 @@ export async function insertDiscussion(supabase: SupabaseClient, message: Discus
   // 死區（與 CDP offline 模擬一致）的 fetch 會「懸掛而非拒絕」— 沒有
   // timeout 的話 outbox 卡在 sending，重試按鈕永遠不出現。12 秒後 abort
   // → 誠實 failed → 使用者可重試；id 不變，重送撞 duplicate-key=成功。
-  const { data, error } = await supabase.from("room_discussion_messages").insert({
-    id: message.id,
-    room_id: message.roomId,
-    author_user_id: isUuid(message.authorId) ? message.authorId : null,
-    author_name: message.authorName,
-    author_color: message.authorColor,
-    kind: message.kind,
-    body: message.body,
-    payload: message.payload,
-    reply_to_id: message.replyToId ?? null,
-  }).abortSignal(AbortSignal.timeout(12000));
+  const { data, error } = await supabase
+    .from("room_discussion_messages")
+    .insert({
+      id: message.id,
+      room_id: message.roomId,
+      author_user_id: isUuid(message.authorId) ? message.authorId : null,
+      author_name: message.authorName,
+      author_color: message.authorColor,
+      kind: message.kind,
+      body: message.body,
+      payload: message.payload,
+      reply_to_id: message.replyToId ?? null,
+    })
+    .abortSignal(AbortSignal.timeout(12000))
+    .select("id")
+    .maybeSingle();
   const accepted = acceptDiscussionInsert({ error, data });
   if (!accepted.ok) {
-    throw new CloudError(accepted.code === "SPA_HTML" ? "SPA_HTML" : (error?.message ?? "discussion insert failed"), "discussion");
+    throw new CloudError(
+      accepted.code === "SPA_HTML" ? "SPA_HTML" : accepted.code === "ZERO_ROW" ? "ZERO_ROW" : (error?.message ?? "discussion insert failed"),
+      "discussion",
+    );
   }
 }
 
