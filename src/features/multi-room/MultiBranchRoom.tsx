@@ -1046,7 +1046,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
    * null（手機是 tab、同時只有一個）。平板的側欄是**同時**顯示，所以要
    * 明確傳 "chat" — 否則側欄是空的（e2e 抓到）。
    */
-  function renderDiscussion(paneOverride?: "chat" | "board") {
+  function renderDiscussion(paneOverride?: "chat" | "board", opts?: { compact?: boolean }) {
     return (
                     <RoomDiscussion api={{
                       room: normalized,
@@ -1054,6 +1054,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       userId: api.userId ?? api.guest.id,
                       canManage: api.canManage,
                       canTalk: true,
+                      showDecisions: opts?.compact ? false : undefined,
+                      showVoiceNote: opts?.compact ? false : undefined,
                       messages: (() => {
                         const base = api.room.discussion ?? [];
                         const ids = new Set(base.map((m) => m.id));
@@ -1322,7 +1324,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       api.onFocusNode?.(id);
                     },
                     onSelectionFocus: setLocalFocusId,
-                    discussionSlot: !railVisible ? renderDiscussion("chat") : undefined,
+                    discussionSlot: !railVisible ? renderDiscussion("chat", { compact: true }) : undefined,
                     onRenameRoom: api.onRenameRoom,
                     onPinFromDiscussion: () => {
                       setDiscussPane("chat");

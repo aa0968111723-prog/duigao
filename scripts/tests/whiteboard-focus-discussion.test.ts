@@ -159,6 +159,10 @@ test("390 選卡：half 第一屏看得到討論與輸入框，動作收進 disc
   assert.match(css, /\.wb-focus-sheet-discussion \{[\s\S]*?flex:\s*1/);
   assert.match(css, /\.wb-focus-sheet-discussion \.rd-composer[\s\S]*?position:\s*static/);
   assert.match(css, /\.wb-focus-sheet \.rd-composer[\s\S]*?bottom:\s*auto/);
+  assert.match(css, /\.wb-focus-sheet-discussion \.rd-decisions \{ display: none/);
+  const room = src("src/features/multi-room/MultiBranchRoom.tsx");
+  assert.match(room, /discussionSlot: !railVisible \? renderDiscussion\("chat", \{ compact: true \}/);
+  assert.match(room, /showDecisions: opts\?\.compact \? false/);
 });
 
 test("鍵盤起來：sheet 用 usableHeight，half／full 都 cap，composer 不再疊 --kb", () => {

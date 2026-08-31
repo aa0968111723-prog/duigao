@@ -414,6 +414,9 @@ video.wb-media-frame { pointer-events: auto; }
   overflow: hidden;
 }
 .wb-focus-sheet-discussion .rd-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wb-focus-sheet-discussion .rd-voice-note,
+.wb-focus-sheet-discussion .rd-voice-dock,
+.wb-focus-sheet-discussion .rd-decisions { display: none; }
 .wb-focus-sheet-discussion .rd-feed { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
 .wb-focus-sheet-discussion .rd-composer,
 .wb-focus-sheet-discussion .is-discussion-root .rd-composer,
