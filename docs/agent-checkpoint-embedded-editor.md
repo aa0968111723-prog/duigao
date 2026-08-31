@@ -1,14 +1,13 @@
 # embedded-editor checkpoint
 branch: feat/embedded-editor-phased
-nextPhase: P2
-done: [P0, P1]
+nextPhase: P3
+done: [P0, P1, P2]
 blocked: []
 notes: |
-  P1 evidence: scripts/tests/poster-compose.test.ts 「compose 單一皮：Dock 五鍵、完成出口、無 pin 鍵」23 pass; tsc --noEmit 0.
+  P2 evidence: mobile-tablet-ux.test.ts 「compose 390／768／1024：五鍵一列、split 文宣欄 Dock、第一層仍是對話白板」+ poster-compose 23 pass.
 
-  DesktopWorkspace: composing=layerEditing → ProposalDock in toolbar row; TOOLS／EditScopeBar／視覺提案 popover 卸下; 完成 data-testid=compose-exit → setEditing(false).
-  ProposalDock 五鍵：＋文字 ＋素材 比較 存成新版本 完成（存檔進 bar，不再第六顆獨立鈕）。
-  Mobile：proposalMode 仍掛 Dock；編輯這張 在 compose 時隱藏。
-  CSS: .workspace.is-compose .pdock grid-area toolbar.
+  .pdock-bar: repeat(5, minmax(0,1fr)) + flex-wrap nowrap. padding 含 safe-area-inset-bottom.
+  768+ 字 12px min-height 44. 1024 is-tablet-split：workspace.is-compose 單欄 stage/toolbar，.panel display:none。
+  FIRST_LAYER_TABS 仍 ["對話","白板"].
 
-  下一刀 P2：768 五鍵 nowrap 不疊 safe-area；1024 is-tablet-split 藏 .panel、舞台欄圖最大、Dock 貼該欄底。mobile-tablet-ux.test.ts 加 compose 斷言。
+  下一刀 P3：ProposalImageItem.crop JSON；圖上快捷 移動／裁剪／換圖／轉／刪；方向鍵微移；換圖保留框。poster-compose 加 crop round-trip + undo。

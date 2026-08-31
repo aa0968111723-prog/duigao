@@ -81,6 +81,30 @@ test("safe area, keyboard, 44px touch, overflow, reduced motion, orientation", (
   assert.match(css, /-webkit-touch-callout:\s*none/);
 });
 
+test("compose 390／768／1024：五鍵一列、split 文宣欄 Dock、第一層仍是對話白板", () => {
+  const css = src("src/features/visual-proposal/proposal.css");
+  const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
+  const dock = src("src/features/visual-proposal/ProposalDock.tsx");
+  assert.deepEqual([...FIRST_LAYER_TABS], ["對話", "白板"]);
+  assert.equal(isTabletSplitWidth(768), true);
+  assert.equal(isTabletSplitWidth(1024), true);
+  assert.match(css, /workspace\.is-compose \.pdock-bar/);
+  assert.match(css, /repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(css, /flex-wrap:\s*nowrap/);
+  assert.match(css, /safe-area-inset-bottom/);
+  assert.match(css, /is-tablet-split \.workspace\.is-compose/);
+  assert.match(css, /is-compose \.panel[\s\S]{0,40}display:\s*none/);
+  assert.match(css, /grid-template-areas:\s*"stage"\s*"toolbar"/);
+  assert.match(desktop, /ProposalDock/);
+  assert.match(desktop, /is-compose/);
+  assert.match(dock, /＋文字/);
+  assert.match(dock, /＋素材/);
+  assert.match(dock, /比較/);
+  assert.match(dock, /存成新版本/);
+  assert.match(dock, /data-testid="compose-exit"/);
+  assert.doesNotMatch(dock, /pdock-bar[\s\S]{0,400}提案/);
+});
+
 test("focused composer hides phone chrome and cannot keep 更多 open", () => {
   const composing = firstLayerChrome({ moreOpen: true, width: 360, composerActive: true });
   assert.equal(composing.hideRoomChrome, true);
