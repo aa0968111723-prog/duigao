@@ -29,6 +29,7 @@ import {
 } from "./lib/types";
 import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
+import { CANVA_ENTRY_COPY, CANVA_EXPORT_PENDING_COPY } from "./lib/canvaContract";
 import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, loadBoardVersion, createBoardVersion, loadDiscussionRead as loadCloudDiscussionRead } from "./cloud/collaborationRepository";
 import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type BoardVersionSummary } from "./features/whiteboard/versions";
 import { boardProposals, layoutOriginFromFocus, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
@@ -1721,16 +1722,18 @@ export function App() {
         // 分支留著（重試沿用同一條）。訊息按碼分流，不轉述上游原文。
         const message =
           result.code === "NOT_CONNECTED"
-            ? "Canva 連結已失效 — 回上一步重新連結後再匯入（會沿用剛建立的分支）。"
+            ? `${CANVA_ENTRY_COPY.connect} — 回上一步重新連結後再匯入。`
             : result.code === "EXPORT_PENDING"
-              ? "Canva 還在轉檔，稍等幾秒再按一次匯入（會沿用剛建立的分支）。"
+              ? CANVA_EXPORT_PENDING_COPY
               : result.code === "TOO_LARGE"
                 ? "匯出的圖片超過 25MB 上限 — 在 Canva 端縮小尺寸，或下載後走一般圖片上傳。"
                 : result.code === "FORBIDDEN"
                   ? "檢視者不能新增內容。"
                   : result.code === "CANVA_NOT_CONFIGURED"
-                    ? "Canva 整合尚未設定。"
-                    : "匯入沒有成功。分支已建立，重試會沿用它。";
+                    ? CANVA_ENTRY_COPY["not-configured"]
+                    : result.code === "CANVA_UNREACHABLE"
+                      ? CANVA_ENTRY_COPY.unreachable
+                      : "匯入沒有成功。分支已建立，重試會沿用它。";
         return { ok: false, message, branchId };
       }
       // 匯入已落地（版本列在雲端）。快照拉失敗要說真話，不假裝畫面上

@@ -1261,6 +1261,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .project-create-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .project-create-options button { min-height: 70px; display: flex; align-items: center; gap: 10px; padding: 0 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); color: var(--ink); font-size: 15px; text-align: left; cursor: pointer; }
 .project-create-options button span { color: var(--accent); font-size: 22px; }
+/* Canva 入口：未設定／連不到仍佔位，文案跨兩欄，390 也讀得完 */
+.project-canva-gated { grid-column: 1 / -1; display: grid; gap: 6px; }
+.project-canva-gated > button { width: 100%; }
+.project-canva-gated .project-sheet-note { margin: 0; line-height: 1.45; }
+.project-create-options > .project-canva-gated button:disabled { opacity: .55; cursor: default; }
 /* Canva 匯入（PR-05）：設計清單直排、縮圖靠左、選中有邊框 */
 .canva-design-list { grid-template-columns: 1fr; max-height: 240px; overflow-y: auto; }
 .canva-design-list button { min-height: 52px; }

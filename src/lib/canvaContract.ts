@@ -37,6 +37,22 @@ export type CanvaBridgeHealth = {
 
 export type CanvaEntryState = "loading" | "not-configured" | "unreachable" | "connect" | "picker";
 
+/** 內容面板四態文案。未設定／連不到仍畫入口，只是不能連。 */
+export const CANVA_ENTRY_COPY = {
+  "not-configured": "Canva 整合尚未設定。金鑰在 Supabase 函式 secrets，不在這份程式裡。",
+  unreachable: "現在連不到 Canva 橋，稍後再試。",
+  connect: "還沒連結這個 Canva 帳號",
+} as const;
+
+export const CANVA_ENTRY_TESTID = {
+  "not-configured": "canva-entry-not-configured",
+  unreachable: "canva-entry-unreachable",
+  connect: "canva-entry-connect",
+  picker: "canva-entry-picker",
+} as const;
+
+export const CANVA_EXPORT_PENDING_COPY = "Canva 還在轉檔，請再試一次";
+
 /** 內容面板 Canva 三態。health 沒過不准假裝已連。 */
 export function canvaEntryState(
   health: CanvaBridgeHealth | null | undefined,

@@ -7,7 +7,7 @@
  * 「連了沒」的布林與匯入結果。
  *
  * 第一階段動作（刻意最小，與 cutos-bridge 同紀律）：
- *  - health：env 齊備才 ok — client 以此決定入口存不存在。
+ *  - health：env 齊備才 ok — client 以此分三態；入口仍可見，未設定不能連。
  *  - status / connect-url / disconnect：OAuth 連結生命週期。
  *    connect-url 走 authorization code + PKCE（S256）；state＋verifier
  *    存 canva_oauth_states，callback 一次性消費。
