@@ -335,19 +335,7 @@ export function ProposalDock({
         />
       )}
 
-      {canManage && (
-        <button
-          type="button"
-          className="poster-save-version"
-          data-testid="poster-save-version"
-          disabled={saving}
-          onClick={() => void saveVersion()}
-        >
-          {saving ? "存檔中…" : "存成新版本"}
-        </button>
-      )}
-
-      <nav className="pdock-bar" aria-label="視覺提案操作">
+      <nav className="pdock-bar" aria-label="改稿操作">
         {canManage && (
         <button type="button" className="pdock-act" onClick={addText}>
           ＋文字
@@ -375,14 +363,18 @@ export function ProposalDock({
         >
           比較
         </button>
+        {canManage && (
         <button
           type="button"
-          className={`pdock-act ${panel === "list" ? "is-on" : ""}`}
-          onClick={() => togglePanel("list")}
+          className="pdock-act poster-save-version"
+          data-testid="poster-save-version"
+          disabled={saving}
+          onClick={() => void saveVersion()}
         >
-          提案{proposal.docs.length > 1 ? ` ${proposal.docs.length}` : ""}
+          {saving ? "存檔中…" : "存成新版本"}
         </button>
-        <button type="button" className="pdock-done" onClick={onExit}>
+        )}
+        <button type="button" className="pdock-done" data-testid="compose-exit" onClick={onExit}>
           完成
         </button>
       </nav>

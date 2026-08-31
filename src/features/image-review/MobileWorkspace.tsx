@@ -308,7 +308,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             同步這一版
           </button>
         )}
-        {api.canManage && (
+        {api.canManage && !proposalMode && (
           <button
             type="button"
             className="m-vchip poster-edit-toggle"

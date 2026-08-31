@@ -116,6 +116,31 @@ test("未 canManage 沒有編輯這張或存成新版本", () => {
   assert.match(dock, /proposal\.setEditing\(canManage\)/);
 });
 
+test("compose 單一皮：Dock 五鍵、完成出口、無 pin 鍵", () => {
+  const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
+  const mobile = src("src/features/image-review/MobileWorkspace.tsx");
+  const dock = src("src/features/visual-proposal/ProposalDock.tsx");
+  assert.match(desktop, /composing \? \(/);
+  assert.match(desktop, /ProposalDock/);
+  assert.match(desktop, /layerEditing/);
+  assert.doesNotMatch(desktop, /ProposalControls/);
+  assert.match(desktop, /composing \? \([\s\S]*?<ProposalDock[\s\S]*?: \([\s\S]*className="toolbar"/);
+  assert.doesNotMatch(desktop, /composing \? \([\s\S]*?修改點[\s\S]*?<ProposalDock/);
+  assert.match(mobile, /proposalSession \? \([\s\S]*?<ProposalDock[\s\S]*?: \([\s\S]*sheetVisible/);
+  assert.doesNotMatch(mobile, /proposalSession \? \([\s\S]*?>修改<\/[\s\S]*?<ProposalDock/);
+  assert.match(dock, /＋文字/);
+  assert.match(dock, /＋素材/);
+  assert.match(dock, /比較/);
+  assert.match(dock, /存成新版本/);
+  assert.match(dock, /data-testid="compose-exit"/);
+  assert.match(dock, /data-testid="poster-save-version"/);
+  const barAt = dock.indexOf("className=\"pdock-bar\"");
+  const pinInBar = dock.slice(barAt).indexOf("修改點");
+  assert.equal(pinInBar < 0, true);
+  const saveAbove = dock.indexOf("poster-save-version");
+  assert.ok(saveAbove > barAt);
+});
+
 test("App 存成新版本走 shipped composeSaveOrReject，不是旁路重寫", () => {
   const app = src("src/App.tsx");
   assert.match(app, /composeSaveOrReject/);
