@@ -585,6 +585,7 @@ test("composer 焦點錨帶 versionId／時間／段落；內容卡按鈕不只�
   assert.doesNotMatch(app, /stickyFromDiscussion\(/);
   assert.match(workspace, /incomingFocusAction/);
   assert.match(workspace, /childSourceNode/);
+  assert.match(workspace, /stepSourceNode/);
 });
 
 test("incoming focus：編輯中的另一張卡不被釘文宣搶走", () => {

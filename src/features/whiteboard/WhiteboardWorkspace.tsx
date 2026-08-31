@@ -1499,9 +1499,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const showStarter = canEdit
     && starterDismissedFor !== board?.id
     && (activeNodes.length === 0 || Boolean(starterNode));
+  const stepSourceNode = (
+    selectedNode && (selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap")
+      ? selectedNode
+      : liveNodes.find((item) => item.id === editingId && (item.nodeType === "flow" || item.nodeType === "text" || item.nodeType === "mindmap"))
+  ) ?? null;
   const addNextStepFromSelected = () => {
-    if (!selectedNode || !(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap")) return;
-    const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
+    if (!stepSourceNode) return;
+    const next = addFlowNextStep(stepSourceNode, "下一步", "local", nodes);
     api.onUpsertNode(next.node, "now");
     api.onCreateEdge(next.edge);
     record(nodeCreateDraft(nextOpId(), next.node));
@@ -1651,7 +1656,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 setSelectTool("off");
                 setSheet(null);
               }}>{drawMode ? "結束畫筆" : "使用畫筆"}</button>
-              {chromeWidth < 768 && selectedNode && (selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
+              {chromeWidth < 768 && stepSourceNode && (
                 <button type="button" className="wb-card" data-testid="wb-next-step" onClick={addNextStepFromSelected}>加下一步</button>
               )}
               {chromeWidth < 768 && childSourceNode && (
