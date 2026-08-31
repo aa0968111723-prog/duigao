@@ -2281,6 +2281,17 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     setCamera(focusCamera(next.node, viewport, camera.zoom));
                   }}>+ 子項目</button>
                 )}
+                {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
+                  <button type="button" onClick={() => {
+                    const open = contentOpenFromNode(selectedNode);
+                    const target = openTarget(anchorFromNode(selectedNode));
+                    if (target.surface === "content") {
+                      api.onOpenContent(target.branchId, open);
+                    } else {
+                      api.onOpenContent(selectedNode.linkedEntityId!, open);
+                    }
+                  }}>打開內容</button>
+                )}
                 {discussionIdFromNode(selectedNode) && (
                   <button type="button" data-testid="wb-open-source-message" onClick={() => api.onOpenDiscussionMessage?.(discussionIdFromNode(selectedNode)!)}>打開原訊息</button>
                 )}
