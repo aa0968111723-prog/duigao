@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { addRoomTarget } from "../../src/cloud/invite.ts";
 import {
+  adoptVersionDisplayUrls,
+  boardMediaVersion,
   branchOpenCommentCount,
   branchSummary,
   branchVersions,
@@ -240,4 +242,34 @@ test("staticFileList(): 像 FileList，而且不會被 input 清空", async () =
   assert.equal(held.item(1), b);
 
   assert.equal(staticFileList([]).length, 0);
+});
+
+test("雲端快照簽章失敗時，本機圖／影片網址要留下來給白板用", () => {
+  const local = [
+    { id: "v_local", label: "初稿", kind: "image" as const, imageDataUrl: "data:image/png;base64,abc", branchId: "poster" },
+    { id: "vid-1", label: "初剪", kind: "video" as const, imageDataUrl: "data:image/png;base64,p", videoUrl: "blob:http://local/vid", branchId: "video" },
+  ];
+  const incoming = [
+    { id: "cloud-poster", label: "初稿", kind: "image" as const, imageDataUrl: "", branchId: "poster" },
+    { id: "vid-1", label: "初剪", kind: "video" as const, imageDataUrl: "", videoUrl: "", branchId: "video" },
+  ];
+  const adopted = adoptVersionDisplayUrls(local, incoming);
+  assert.equal(adopted[0].imageDataUrl, "data:image/png;base64,abc");
+  assert.equal(adopted[1].videoUrl, "blob:http://local/vid");
+  const room = normalizeRoomBranches({
+    id: "room-1",
+    title: "招生",
+    projectMode: true,
+    versions: adopted,
+    comments: [],
+    strokes: [],
+    messages: [],
+    updatedAt: 1,
+    branches: [
+      { id: "poster", roomId: "room-1", name: "擺攤文宣", branchType: "poster", sortOrder: 0, status: "in_progress", createdBy: "me", createdAt: 1, updatedAt: 1 },
+      { id: "video", roomId: "room-1", name: "招生影片", branchType: "video", sortOrder: 1, status: "in_progress", createdBy: "me", createdAt: 1, updatedAt: 1 },
+    ],
+  });
+  assert.equal(boardMediaVersion(room, "poster")?.imageDataUrl?.startsWith("data:"), true);
+  assert.equal(boardMediaVersion(room, "video")?.videoUrl?.startsWith("blob:"), true);
 });

@@ -35,7 +35,7 @@ import { boardProposals, layoutOriginFromFocus, layoutPreview, type BoardAiPrevi
 import { boardAskContext, roomFocusFromPresence } from "./features/whiteboard/boardFocus";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
-import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
+import { adoptVersionDisplayUrls, branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
 import { roomCode, uid, uuid } from "./lib/id";
 import { deleteRoom, listRooms, listUploadSessions, loadDiscussionReadLocal, loadFlag, loadGuest, loadRoom, saveDiscussionRead, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
 import { useDiscussionDraft } from "./hooks/useDiscussionDraft";
@@ -662,6 +662,9 @@ export function App() {
       });
       return {
         ...normalized,
+        versions: current && current.id === normalized.id
+          ? adoptVersionDisplayUrls(current.versions ?? [], normalized.versions)
+          : normalized.versions,
         plans,
         whiteboardNodes,
         whiteboardEdges,

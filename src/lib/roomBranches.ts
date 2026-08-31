@@ -185,6 +185,36 @@ export function latestBranchVersion(room: Room, branchId: string): Version | und
   return versions[versions.length - 1];
 }
 
+function versionDisplayUrl(version?: Version): boolean {
+  return Boolean(version?.imageDataUrl?.trim() || version?.videoUrl?.trim());
+}
+
+/** Prefer a version on the branch that still has a display/play URL. */
+export function boardMediaVersion(room: Room, branchId: string): Version | undefined {
+  const versions = branchVersions(room, branchId).filter((version) => !version.archivedAt);
+  for (let i = versions.length - 1; i >= 0; i -= 1) {
+    if (versionDisplayUrl(versions[i])) return versions[i];
+  }
+  return versions[versions.length - 1];
+}
+
+/**
+ * Cloud snapshot signing can come back empty; keep the local display URL
+ * so the board can still show the poster / video. Match by id, then by
+ * branch + label (local upload id and cloud row id are not always the same).
+ */
+export function adoptVersionDisplayUrls(local: Version[], incoming: Version[]): Version[] {
+  return incoming.map((row) => {
+    const prev = local.find((item) => item.id === row.id)
+      ?? local.find((item) => Boolean(item.branchId) && item.branchId === row.branchId && item.label === row.label);
+    if (!prev) return row;
+    const imageDataUrl = row.imageDataUrl?.trim() || prev.imageDataUrl;
+    const videoUrl = row.videoUrl?.trim() || prev.videoUrl;
+    if (imageDataUrl === row.imageDataUrl && videoUrl === row.videoUrl) return row;
+    return { ...row, imageDataUrl, ...(videoUrl ? { videoUrl } : {}) };
+  });
+}
+
 export function branchOpenCommentCount(room: Room, branchId: string): number {
   const ids = new Set(branchVersions(room, branchId).map((version) => version.id));
   return room.comments.filter((comment) => ids.has(comment.versionId) && !comment.resolved).length;

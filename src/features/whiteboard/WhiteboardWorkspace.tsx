@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEv
 import { createPortal } from "react-dom";
 import type { PlanDocument, Room, RoomBranch, RoomPoll } from "../../lib/types";
 import { anchorFromNode, openTarget } from "../../lib/contextAnchor";
-import { branchSummary, latestBranchVersion } from "../../lib/roomBranches";
+import { boardMediaVersion, branchSummary, latestBranchVersion } from "../../lib/roomBranches";
 import { useViewport } from "../../hooks/useViewport";
 import {
   addFlowNextStep,
@@ -174,13 +174,14 @@ function versionForBoardNode(room: Room, node: WhiteboardNode) {
   const versions = room.versions ?? [];
   if (node.sourceVersionId) {
     const found = versions.find((item) => item.id === node.sourceVersionId);
-    if (found) return found;
+    if (found && (found.imageDataUrl?.trim() || found.videoUrl?.trim())) return found;
   }
   if (node.linkedEntityType === "version" && node.linkedEntityId) {
-    return versions.find((item) => item.id === node.linkedEntityId);
+    const found = versions.find((item) => item.id === node.linkedEntityId);
+    if (found) return found;
   }
   if (node.linkedEntityType === "branch" && node.linkedEntityId) {
-    return latestBranchVersion(room, node.linkedEntityId);
+    return boardMediaVersion(room, node.linkedEntityId) ?? latestBranchVersion(room, node.linkedEntityId);
   }
   return undefined;
 }
@@ -1305,6 +1306,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const placeBranch = (branch: RoomBranch, range?: { startTime?: number; endTime?: number }) => {
     if (!board) return;
     const version = latestBranchVersion(api.room, branch.id);
+    const mediaSource = boardMediaVersion(api.room, branch.id) ?? version;
     const summary = branchSummary(api.room, branch.id);
     const plan: PlanDocument | undefined = api.room.plans?.find((item) => item.branchId === branch.id);
     const mediaKind = branch.branchType === "copy" ? "plan" : branch.branchType;
@@ -1313,12 +1315,12 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       mediaKind,
       versionLabel: version?.label ?? summary.latestLabel,
       openCommentCount: summary.openCommentCount,
-      ...boardMediaFromVersion(version),
+      ...boardMediaFromVersion(mediaSource),
       subtitle: plan ? `更新於 ${relative(plan.updatedAt)}` : undefined,
       duration: version?.duration,
       startTime: range?.startTime,
       endTime: range?.endTime,
-    }, { linkedEntityType: "branch", linkedEntityId: branch.id }, boardMediaSize(mediaKind, version));
+    }, { linkedEntityType: "branch", linkedEntityId: branch.id }, boardMediaSize(mediaKind, mediaSource));
     setPendingVideo(null);
     setPendingPoster(null);
     setPendingPlan(null);
@@ -1326,6 +1328,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   const placePosterRegion = (branch: RoomBranch, mark?: { region: AnnotationRegion; versionId: string; label: string }) => {
     const version = latestBranchVersion(api.room, branch.id);
+    const mediaSource = boardMediaVersion(api.room, branch.id) ?? version;
     const extra = mark
       ? nodeFromImageRegion({ versionId: mark.versionId, region: mark.region, label: mark.label })
       : null;
@@ -1334,13 +1337,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       mediaKind: "poster",
       versionLabel: version?.label,
       openCommentCount: branchSummary(api.room, branch.id).openCommentCount,
-      ...boardMediaFromVersion(version),
+      ...boardMediaFromVersion(mediaSource),
       subtitle: extra?.subtitle,
     }, {
       linkedEntityType: extra?.link.linkedEntityType ?? "branch",
       linkedEntityId: extra?.link.linkedEntityId ?? branch.id,
       ...(extra ? { anchor: extra.anchor, sourceVersionId: extra.sourceVersionId } : {}),
-    }, boardMediaSize("poster", version));
+    }, boardMediaSize("poster", mediaSource));
     setPendingPoster(null);
   };
 
