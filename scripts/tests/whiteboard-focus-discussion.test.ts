@@ -164,6 +164,15 @@ test("空板文案不含「新步驟」當唯一 CTA", () => {
   assert.doesNotMatch(workspace, /wb-empty-board[\s\S]{0,400}新步驟/);
 });
 
+test("討論儲存讀 textarea 的值，不依賴可能還沒跟上的 editDraft", () => {
+  const room = src("src/features/room-discussion/RoomDiscussion.tsx");
+  assert.match(room, /querySelector\('\[data-testid="discussion-edit-input"\]'\)/);
+  assert.match(room, /typed instanceof HTMLTextAreaElement \? typed\.value : editDraft/);
+  const e2e = src("scripts/e2e/collaboration-workspace.mjs");
+  assert.match(e2e, /先把招生流程攤在白板上（改過）/);
+  assert.match(e2e, /\.rd-msg".*hasText/);
+});
+
 test("payload.agent === true：isMemberActor false、canEditDiscussion false、渲染走同事氣泡", () => {
   const grok = message({
     authorId: "u-a",

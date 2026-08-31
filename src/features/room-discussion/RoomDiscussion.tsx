@@ -515,7 +515,9 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   data-testid="discussion-edit-form"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    const patch = discussionEditPatch(editDraft);
+                    const typed = event.currentTarget.querySelector('[data-testid="discussion-edit-input"]');
+                    const raw = typed instanceof HTMLTextAreaElement ? typed.value : editDraft;
+                    const patch = discussionEditPatch(raw);
                     if (!patch || !api.onEditMessage) return;
                     api.onEditMessage(message.id, patch.body);
                     setEditingId(null);
@@ -603,14 +605,14 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                 {!colleague && bubble !== "audit" && (
                 <button type="button" onClick={() => api.onSupport(message.id, !supported)}>支持{supportCount ? ` ${supportCount}` : ""}</button>
                 )}
-                {api.onEditMessage && canEditDiscussion(message, api.userId, sendState) && (
+                {api.onEditMessage && (canEditDiscussion(message, api.userId, sendState) || canEditDiscussion(message, api.guest.id, sendState)) && (
                   <button
                     type="button"
                     data-testid="discussion-edit"
                     onClick={() => { setEditingId(message.id); setEditDraft(message.body); }}
                   >編輯</button>
                 )}
-                {api.onTombstoneMessage && canTombstoneDiscussion(message, api.userId, api.canManage, sendState) && (
+                {api.onTombstoneMessage && (canTombstoneDiscussion(message, api.userId, api.canManage, sendState) || canTombstoneDiscussion(message, api.guest.id, api.canManage, sendState)) && (
                   <button
                     type="button"
                     data-testid="discussion-tombstone-btn"
