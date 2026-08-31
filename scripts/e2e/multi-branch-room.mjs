@@ -301,6 +301,19 @@ try {
     }
     const plusAsset = page.getByRole("button", { name: "＋素材" });
     if (await plusAsset.count()) await plusAsset.click();
+    await page.getByTestId("poster-catalog-open").click();
+    await page.getByTestId("poster-catalog-search").fill("茶");
+    await page.getByTestId("poster-catalog-hit-tea").click();
+    await page.waitForSelector(".proposal-image", { timeout: 15000 });
+    check("圖庫搜到結果並落到 raster 圖層", await page.locator(".proposal-image").count() > 0);
+    await page.getByRole("button", { name: "＋文字" }).click();
+    await page.getByRole("button", { name: "明體", exact: true }).click();
+    const serifFamily = await page.locator(".proposal-text").first().evaluate((el) => el.style.fontFamily);
+    check("明體 chip 寫入已載入的繁中家族", /Noto Serif TC/.test(serifFamily), serifFamily);
+    await page.getByRole("button", { name: "手寫感", exact: true }).click();
+    const handFamily = await page.locator(".proposal-text").first().evaluate((el) => el.style.fontFamily);
+    check("手寫感 chip 寫入 Iansui 不是系統楷體", /Iansui/.test(handFamily) && !/DFKai-SB/.test(handFamily), handFamily);
+    if (await plusAsset.count()) await plusAsset.click();
     await page.getByTestId("poster-add-asset-input").setInputFiles({ name: "社徽.png", mimeType: "image/png", buffer: TINY_PNG });
     await page.waitForSelector(".proposal-image", { timeout: 15000 });
     check("工作層出現自己的圖", await page.locator(".proposal-image").count() > 0);
