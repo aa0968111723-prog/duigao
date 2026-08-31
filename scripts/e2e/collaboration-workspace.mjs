@@ -1261,9 +1261,15 @@ try {
       await page.getByLabel("白板名稱").fill("平板板");
       await page.getByRole("button", { name: "建立白板" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.waitForFunction(
+        () => window.matchMedia("(min-width: 900px) and (min-height: 600px)").matches,
+        null,
+        { timeout: 8000 },
+      );
 
       // Split View：討論欄與畫布同時看得見，且不重疊
-      await page.waitForSelector('[data-testid="wb-side-rail"]', { timeout: 8000 });
+      await page.waitForSelector('[data-testid="wb-side-rail"]', { timeout: 15000 });
       const layout = await page.evaluate(() => {
         const rail = document.querySelector('[data-testid="wb-side-rail"]');
         const focus = document.querySelector('[data-testid="whiteboard-workspace"]');
@@ -1475,6 +1481,8 @@ try {
         return { overflowY: getComputedStyle(feed).overflowY, canScroll: feed.clientHeight > 0 };
       });
       check("平板：側欄討論可自己捲動（F2）", Boolean(railScroll && railScroll.overflowY === "auto" && railScroll.canScroll), JSON.stringify(railScroll));
+    } catch (error) {
+      check("協作工作台平板 Split View", false, error instanceof Error ? error.message : String(error));
     } finally {
       await tablet.close();
     }
