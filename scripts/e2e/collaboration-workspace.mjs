@@ -683,7 +683,7 @@ try {
         // 快照後改動一個節點，再還原 → 內容回到快照當時
         await searchNode(page, "招生");
         const beforeText = await page.locator(".wb-node.is-selected .wb-node-static, .wb-node.is-selected textarea").first().inputValue().catch(() => null);
-        await page.getByRole("button", { name: "編輯", exact: true }).click();
+        await page.getByTestId("wb-node-actions").getByRole("button", { name: "編輯", exact: true }).click();
         await fillEditing(page, "快照後改的字");
         await dismissSelection(page);
         await page.getByTestId("whiteboard-more").click();

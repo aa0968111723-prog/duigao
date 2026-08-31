@@ -1504,10 +1504,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 setAiBusy(true);
                 try {
                   const askSeq = (aiAskSeqRef.current += 1);
-                  if (api.onAskColleague) {
-                    api.onAskColleague({ prompt: aiQuestion.trim(), nodeId: focusNodeId ?? undefined });
-                  }
+                  // 板內「看看建議」只走預覽。同事氣泡留給焦點卡／@Grok／空板，
+                  // 預覽階段不准寫討論（create_comment 也要等人採用）。
                   if (!api.onAskBoardAi) {
+                    api.onAskColleague?.({ prompt: aiQuestion.trim(), nodeId: focusNodeId ?? undefined });
                     setSheet(null);
                     return;
                   }

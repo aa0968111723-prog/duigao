@@ -99,6 +99,9 @@ test("手機寬度 rail 不 inline；sheet 開著", () => {
   const sheetBlock = workspace.slice(workspace.indexOf("wb-focus-sheet"));
   assert.match(sheetBlock, /wb-add-child/);
   assert.match(sheetBlock, /wb-next-step/);
+  const askBlock = workspace.slice(workspace.indexOf("data-testid=\"wb-ai-ask\""));
+  assert.match(askBlock, /onAskBoardAi/);
+  assert.doesNotMatch(askBlock.slice(0, 900), /if \(api\.onAskColleague\) \{\s*api\.onAskColleague/);
   const mbr = src("src/features/multi-room/MultiBranchRoom.tsx");
   assert.match(mbr, /discussionSlot: !railVisible/);
 });
