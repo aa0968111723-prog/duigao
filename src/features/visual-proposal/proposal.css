@@ -59,9 +59,115 @@
 .stage-content.is-exporting .proposal-preview-label,
 .stage-content.is-exporting .proposal-finish,
 .stage-content.is-exporting .proposal-guide,
-.stage-content.is-exporting .proposal-resize-handle {
+.stage-content.is-exporting .proposal-resize-handle,
+.stage-content.is-exporting .poster-compose-empty-hint {
   display: none !important;
 }
+
+.poster-compose-empty-hint {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 40%;
+  z-index: 6;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(15, 14, 12, 0.62);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  pointer-events: auto;
+}
+.poster-compose-empty-hint button {
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.pdock-empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+.pdock-empty-hint button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.compose-asset-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 26dvh;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 2px 8px;
+}
+.compose-asset-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.compose-asset-picker h3 { margin: 0; font-size: 15px; }
+.compose-asset-warn {
+  margin: 0;
+  font-size: 12px;
+  color: #ad3049;
+  line-height: 1.4;
+}
+.compose-asset-list { display: grid; gap: 8px; }
+.compose-asset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  text-align: left;
+  border: 1px solid var(--line-soft);
+  background: var(--raise);
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: inherit;
+  cursor: pointer;
+}
+.compose-asset-row:disabled { opacity: 0.6; cursor: wait; }
+.compose-asset-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #eee;
+  flex: none;
+}
+.compose-asset-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.compose-asset-row strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compose-asset-row small { color: var(--ink-faint); font-size: 12px; }
 
 .poster-edit-toggle,
 .poster-save-version {
@@ -679,7 +785,23 @@
     overflow: auto;
     -webkit-overflow-scrolling: touch;
   }
-  .pdock-pick { display: flex; gap: 6px; }
+  .pdock-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pdock-empty-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ink-dim);
+    line-height: 1.5;
+  }
+  .pdock-empty-hint button {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+    cursor: pointer;
+  }
   /* Five fixed actions — the whole point of the 2.0 dock. */
   .pdock-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
   .pdock-act,

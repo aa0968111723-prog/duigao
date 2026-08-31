@@ -278,11 +278,27 @@ try {
     await page.getByTestId("poster-edit-toggle").click();
     await page.waitForSelector('[data-testid="poster-save-version"]', { timeout: 15000 });
     await page.waitForSelector('[data-testid="poster-compose-canvas"]', { timeout: 15000 });
+    await page.getByTestId("poster-pick-room-asset").waitFor({ state: "visible", timeout: 10000 });
+    check("房間素材按鈕看得到", await page.getByTestId("poster-pick-room-asset").count() === 1);
+    check("空畫布提示在", await page.getByTestId("poster-compose-empty-hint").count() >= 1);
     const chipsBeforeSave = await page.locator(".m-vchip").filter({ hasText: /初稿|改/ }).count();
     await page.getByTestId("poster-save-version").click();
     await page.waitForTimeout(600);
     const chipsAfterEmpty = await page.locator(".m-vchip").filter({ hasText: /初稿|改/ }).count();
     check("空畫布存成新版本不會多一版", chipsAfterEmpty === chipsBeforeSave);
+    const imagesBeforePick = await page.locator(".proposal-image").count();
+    await page.getByTestId("poster-pick-room-asset").click();
+    await page.getByTestId("poster-compose-asset-picker").waitFor({ state: "visible", timeout: 10000 });
+    const roomRow = page.getByTestId("poster-compose-asset-row").first();
+    const rowVisible = await roomRow.waitFor({ state: "visible", timeout: 8000 }).then(() => true).catch(() => false);
+    if (rowVisible) {
+      await roomRow.click();
+      await page.waitForFunction((n) => document.querySelectorAll(".proposal-image").length > n, imagesBeforePick, { timeout: 15000 });
+      check("從房間撿放到畫布", await page.locator(".proposal-image").count() > imagesBeforePick);
+    } else {
+      const pickerText = await page.getByTestId("poster-compose-asset-picker").innerText().catch(() => "");
+      check("從房間撿放到畫布", false, pickerText || "picker 沒有可撿的房間文宣");
+    }
     const plusAsset = page.getByRole("button", { name: "＋素材" });
     if (await plusAsset.count()) await plusAsset.click();
     await page.getByTestId("poster-catalog-open").click();

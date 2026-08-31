@@ -39,7 +39,10 @@ import { adoptVersionDisplayUrls, branchForId, branchSummaryFor, branchVersions,
 import { roomCode, uid, uuid } from "./lib/id";
 import { deleteRoom, listRooms, listUploadSessions, loadDiscussionReadLocal, loadFlag, loadGuest, loadRoom, saveDiscussionRead, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
 import { useDiscussionDraft } from "./hooks/useDiscussionDraft";
-import { insertLibraryAsset } from "./cloud/assetLibrary";
+import { insertLibraryAsset, listLibraryAssets } from "./cloud/assetLibrary";
+import { COMPOSE_PAPER_FILENAME } from "./features/visual-proposal/composePaper";
+import type { ComposeMaterial } from "./features/visual-proposal/composeMaterials";
+import { resolveComposeMaterialDataUrl } from "./features/visual-proposal/composeMaterialResolve";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
@@ -1321,7 +1324,13 @@ export function App() {
           const dataUrl = await fileToDataUrl(file);
           const idx = branchCount + newVersions.length;
           const id = opts?.stableId && newVersions.length === 0 ? opts.stableId : uid("v_");
-          newVersions.push({ id, label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl, ...(targetBranchId ? { branchId: targetBranchId } : {}) });
+          newVersions.push({
+            id,
+            label: VERSION_LABELS[idx] ?? `改${idx}`,
+            imageDataUrl: dataUrl,
+            ...(file.name === COMPOSE_PAPER_FILENAME ? { filename: COMPOSE_PAPER_FILENAME } : {}),
+            ...(targetBranchId ? { branchId: targetBranchId } : {}),
+          });
         }
         if (newVersions.length === 0) {
           showToast("這個檔案不是圖片，換一張文宣試試。", { tone: "error" });
@@ -1893,6 +1902,29 @@ export function App() {
       showToast(err instanceof Error ? err.message : "存成新版本失敗，還在這一版，請再試一次。", { tone: "error" });
     }
   }, [activeBranchId, addImageFiles, cloud.boundRoomId, cloud.canManageMedia, guest, showToast, view.versionId]);
+
+  const listComposeLibrary = useCallback(async () => {
+    const client = getSupabase();
+    if (!client || !cloud.boundRoomId) return [];
+    return Promise.race([
+      listLibraryAssets(client, cloud.boundRoomId),
+      new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error("library timeout")), 4000);
+      }),
+    ]);
+  }, [cloud.boundRoomId]);
+
+  const resolveComposeMaterial = useCallback(async (material: ComposeMaterial) => {
+    const current = roomRef.current;
+    if (!current) {
+      const { COMPOSE_PLACE_FAIL } = await import("./features/visual-proposal/composeMaterials");
+      throw new Error(COMPOSE_PLACE_FAIL);
+    }
+    const client = getSupabase();
+    return resolveComposeMaterialDataUrl(material, current.versions, {
+      signedUrlForPath: client ? (path) => signedUrl(client, path) : undefined,
+    });
+  }, []);
 
   const updateProjectBranch = useCallback(
     (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => {
@@ -3565,6 +3597,9 @@ export function App() {
         syncCanvaVersion,
         canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
         saveComposeVersion: savePosterComposeVersion,
+        composeVersions: normalizedRoom?.versions ?? reviewRoom.versions,
+        listComposeLibrary,
+        resolveComposeMaterial,
         setTitle: (title) => {
           if (activeBranchId) {
             updateProjectBranch(activeBranchId, { name: title });

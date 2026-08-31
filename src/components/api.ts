@@ -19,6 +19,8 @@ import type {
 import type { BriefInput } from "../cloud/videoReview";
 import type { ReviewData } from "../cloud/useCloudRoom";
 import type { IntelligentAsset, RoomContextFocus } from "../lib/assetIntelligence";
+import type { LibraryAsset } from "../cloud/assetLibrary";
+import type { ComposeMaterial } from "../features/visual-proposal/composeMaterials";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -129,6 +131,12 @@ export type WorkspaceApi = {
   canManage: boolean;
   /** Export the working layer as a new poster version. Never overwrites the old one. */
   saveComposeVersion: () => Promise<void>;
+  /** Full-room versions for compose pick (not the current-branch slice). */
+  composeVersions?: import("../lib/types").Version[];
+  /** Room + library rows for compose pick. App owns the Supabase client. */
+  listComposeLibrary?: () => Promise<LibraryAsset[]>;
+  /** Resolve a picked material to a canvas-safe data URL. Never a Storage path. */
+  resolveComposeMaterial?: (material: ComposeMaterial) => Promise<string>;
   setTitle: (title: string) => void;
   copySummary: () => void;
   markCoachSeen: () => void;
