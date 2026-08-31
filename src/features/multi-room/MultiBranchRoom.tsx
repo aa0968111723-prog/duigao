@@ -819,6 +819,8 @@ function PollSheet({ onClose, onCreate }: { onClose: () => void; onCreate: (ques
 export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const normalized = normalizeRoomBranches(api.room);
   const isMobile = useIsMobile();
+  const roomTitleRef = useRef<HTMLInputElement>(null);
+  const focusedUnnamedRoomRef = useRef<string | null>(null);
   // 討論殼的 composer 是 fixed dock，靠 --kb 騎在鍵盤上；殼自己就是
   // publisher（ref-counted，與 overlay 裡的對稿工作區共存）。
   useViewport();
@@ -834,6 +836,15 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const railVisible = tabletUp && !railCollapsed;
   const [discussPane, setDiscussPane] = useState<"chat" | "board" | "calendar">(api.activeWhiteboardId ? "board" : "chat");
   const [splitCompanion, setSplitCompanion] = useState<"chat" | "board">("chat");
+  useEffect(() => {
+    if (!api.canManage || api.room.title.trim() !== "未命名活動房" || focusedUnnamedRoomRef.current === api.room.id) return;
+    focusedUnnamedRoomRef.current = api.room.id;
+    const frame = requestAnimationFrame(() => {
+      roomTitleRef.current?.focus();
+      roomTitleRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [api.canManage, api.room.id, api.room.title]);
   // WB03「打開來源訊息」：關板→切對話→捲動到訊息＋1.6s 高亮。訊息元素
   // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
   const openDiscussionMessage = (messageId: string) => {
@@ -1108,7 +1119,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         ) : (
           <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="返回"><BrandMark compact /></button>
         )}
-        <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input className="project-room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="未命名活動房" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
+        <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input ref={roomTitleRef} className="project-room-title-input" data-testid="room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="例如：秋季茶會" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
         {!hideRoomChrome && (
           <>
             <span className="project-presence" data-testid="room-presence">{roomPresenceLabel(api.online, Boolean(api.realtimeJoined))}</span>
@@ -1180,7 +1191,6 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                 <div className="rd-tabs" role="tablist" aria-label="討論">
                   <button type="button" className={discussPane === "chat" ? "is-active" : ""} onClick={() => { setDiscussPane("chat"); api.onOpenWhiteboard(null); }}>對話</button>
                   <button type="button" className={discussPane === "board" ? "is-active" : ""} onClick={() => setDiscussPane("board")}>白板</button>
-                  <button type="button" className={discussPane === "calendar" ? "is-active" : ""} data-testid="schedule-tab" onClick={() => setDiscussPane("calendar")}>時程</button>
                 </div>
                 {discussPane === "calendar" ? (
                   <div className={tabletUp ? "sched-split-host" : undefined} data-testid={tabletUp ? "schedule-split" : undefined}>
@@ -1350,6 +1360,18 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                 {search && <button type="button" onClick={() => setSearch("")} aria-label="清除搜尋">×</button>}
               </div>
               <nav className="project-entry-chips" aria-label="房間內容">
+                <button
+                  type="button"
+                  data-testid="open-schedule-pane"
+                  onClick={() => {
+                    closeMoreFromAction();
+                    setPushedPane(null);
+                    setDiscussPane("calendar");
+                    api.onOpenWhiteboard(null);
+                  }}
+                >
+                  <span aria-hidden>◷</span>時程
+                </button>
                 {PANE_META.map((item) => (
                   <button
                     type="button"

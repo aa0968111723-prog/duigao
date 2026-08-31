@@ -107,8 +107,8 @@
   font-size: 12px;
 }
 .wb-focus-bottom button span { display: block; font-size: 18px; line-height: 1; margin-bottom: 2px; }
-.wb-focus-bottom[data-compact="true"] button { min-width: 48px; font-size: 0; line-height: 0; }
-.wb-focus-bottom[data-compact="true"] button span { font-size: 18px; line-height: 1; margin-bottom: 0; }
+.wb-focus-bottom[data-compact="true"] button { min-width: 64px; font-size: 12px; line-height: 1.2; }
+.wb-focus-bottom[data-compact="true"] button span { font-size: 17px; line-height: 1; margin-bottom: 3px; }
 .wb-focus-bottom button.is-active { background: var(--raise); color: var(--accent); }
 .wb-focus-bottom button:disabled { color: var(--ink-faint); }
 .wb-context-bar { align-items: center; }
@@ -135,6 +135,40 @@
 .wb-frame-title { position: absolute; top: -22px; left: 8px; font-size: 12px; color: var(--ink-faint); }
 
 .wb-notice { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,.96); border: 1px solid var(--line-soft); color: var(--ink); box-shadow: 0 8px 24px rgba(31,39,65,.1); font-size: 13px; pointer-events: none; z-index: 3; }
+
+/* 空板不是壞掉的畫布：先回答「現在可以做什麼」，再讓工具退到第二層。 */
+.wb-starter {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  width: min(520px, calc(100% - 28px));
+  transform: translate(-50%, -50%);
+  padding: 22px;
+  border: 1px solid var(--line-soft);
+  border-radius: 22px;
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 18px 50px rgba(31,39,65,.12);
+  text-align: center;
+}
+.wb-starter-kicker { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.wb-starter h3 { margin: 5px 0 4px; font-size: clamp(20px, 5vw, 26px); letter-spacing: -.02em; }
+.wb-starter > p { margin: 0 0 16px; color: var(--ink-faint); font-size: 13px; }
+.wb-starter-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.wb-starter-actions button {
+  min-height: 88px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f8f9fd;
+  color: var(--ink);
+  text-align: left;
+}
+.wb-starter-actions button:first-child { border-color: rgba(97,87,239,.28); background: var(--accent-soft); }
+.wb-starter-actions button > span { display: block; margin-bottom: 7px; color: var(--accent); font-size: 20px; }
+.wb-starter-actions strong, .wb-starter-actions small { display: block; }
+.wb-starter-actions strong { font-size: 14px; }
+.wb-starter-actions small { margin-top: 3px; color: var(--ink-faint); font-size: 11px; line-height: 1.35; }
 
 /* ---- WB03：frame 互動／freehand ---- */
 .wb-frame-handle { position: absolute; left: 0; right: 0; top: 0; min-height: 30px; pointer-events: auto; touch-action: none; cursor: grab; padding: 4px 8px; }
@@ -234,6 +268,15 @@
 }
 .wb-side-rail-head strong { flex: 1; font-size: 14px; }
 .wb-side-rail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+@media (max-width: 767px) {
+  .wb-starter { padding: 18px 14px; }
+  .wb-starter-actions { grid-template-columns: 1fr; }
+  .wb-starter-actions button { min-height: 60px; display: grid; grid-template-columns: 30px 1fr; column-gap: 8px; align-items: center; }
+  .wb-starter-actions button > span { grid-row: 1 / span 2; margin: 0; }
+  .wb-starter-actions small { margin-top: 1px; }
+  .wb-context-bar .wb-context-dismiss { display: none; }
+}
 
 /* 側欄裡的討論自己捲：主討論靠整頁捲＋fixed composer，側欄是固定高度的
    容器 — 不給 feed 自己的捲軸就看不到舊訊息，訊息一多連輸入框都被裁掉。 */

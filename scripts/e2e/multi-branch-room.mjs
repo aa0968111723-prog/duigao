@@ -383,6 +383,9 @@ try {
     }
     faults.videoUploadDelayMs = 0;
     await page.waitForSelector("video.v-video", { timeout: 90000 });
+    // 雲端較慢時，upload 完成與 room snapshot 會讓 overlay 短暫重掛。
+    // 不能只等「曾出現」就立刻讀 count；要求播放器＋唯一版本連續穩定
+    // 300ms，再保留下面的精確 ===1 斷言。
     await page.waitForFunction(() => {
       const key = "__duigaoVideoStableAt";
       const ready = document.querySelectorAll("video.v-video").length === 1

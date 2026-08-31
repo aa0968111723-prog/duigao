@@ -3,7 +3,7 @@
 .sched-head h2 { margin: 0 0 8px; font-size: 18px; line-height: 1.35; }
 .sched-ranges { display: flex; gap: 6px; }
 .sched-ranges button, .sched-day, .sched-card, .sched-add, .sched-draft button {
-  min-height: 44px; min-width: 44px; border-radius: 12px; border: 1px solid var(--line, #2a2622); background: #1a1816; color: inherit; font: inherit;
+  min-height: 44px; min-width: 44px; border-radius: 12px; border: 1px solid var(--line, #e2e5ee); background: var(--panel, #fff); color: inherit; font: inherit;
 }
 .sched-ranges button.is-active { border-color: #c45c4a; }
 .sched-days { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
@@ -11,6 +11,11 @@
 .sched-card { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; margin-top: 6px; padding: 10px 12px; text-align: left; }
 .sched-card small { color: var(--ink-faint, #8a8278); }
 .sched-add { margin-top: auto; }
+.sched-empty { display: grid; justify-items: center; gap: 8px; margin: 4px 0; padding: 24px 18px; border: 1px dashed var(--line, #e2e5ee); border-radius: 18px; background: var(--panel, #fff); text-align: center; }
+.sched-empty > span { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 14px; background: var(--accent-soft, #efefff); color: var(--accent, #6157ef); font-size: 22px; }
+.sched-empty strong { font-size: 17px; }
+.sched-empty p { margin: 0; color: var(--ink-faint, #7c8496); font-size: 13px; }
+.sched-empty button { min-height: 48px; margin-top: 4px; padding: 0 22px; border: 0; border-radius: 14px; background: var(--accent, #6157ef); color: #fff; font: inherit; font-weight: 700; }
 .sched-delete { color: #c45c4a; }
 .sched-sheet-row { display: flex; flex-direction: column; gap: 4px; }
 .sched-draft select { min-height: 44px; font-size: 16px; }
