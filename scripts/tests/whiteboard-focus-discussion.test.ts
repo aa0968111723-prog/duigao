@@ -95,6 +95,9 @@ test("手機寬度 rail 不 inline；sheet 開著", () => {
   assert.match(workspace, /data-focus-sheet/);
   assert.match(workspace, /wb-focus-sheet/);
   assert.match(workspace, /discussionSlot/);
+  const sheetBlock = workspace.slice(workspace.indexOf("wb-focus-sheet"));
+  assert.match(sheetBlock, /wb-add-child/);
+  assert.match(sheetBlock, /wb-next-step/);
   const mbr = src("src/features/multi-room/MultiBranchRoom.tsx");
   assert.match(mbr, /discussionSlot: !railVisible/);
 });

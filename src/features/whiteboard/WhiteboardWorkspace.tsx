@@ -2253,7 +2253,30 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               <small>來源：{focusCard.sourceLabel}</small>
               {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
               {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
-              <div className="wb-focus-card-actions">
+              <div className="wb-focus-card-actions" data-testid="wb-node-actions">
+                <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
+                {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
+                  <button type="button" data-testid="wb-next-step" onClick={() => {
+                    const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
+                    api.onUpsertNode(next.node, "now");
+                    api.onCreateEdge(next.edge);
+                    record(nodeCreateDraft(nextOpId(), next.node));
+                    setSelected([next.node.id]);
+                    beginEdit(next.node);
+                    setCamera(focusCamera(next.node, viewport, camera.zoom));
+                  }}>+ 下一步</button>
+                )}
+                {(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
+                  <button type="button" data-testid="wb-add-child" onClick={() => {
+                    const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
+                    api.onUpsertNode(next.node, "now");
+                    api.onCreateEdge(next.edge);
+                    record(nodeCreateDraft(nextOpId(), next.node));
+                    setSelected([next.node.id]);
+                    beginEdit(next.node);
+                    setCamera(focusCamera(next.node, viewport, camera.zoom));
+                  }}>+ 子項目</button>
+                )}
                 {discussionIdFromNode(selectedNode) && (
                   <button type="button" data-testid="wb-open-source-message" onClick={() => api.onOpenDiscussionMessage?.(discussionIdFromNode(selectedNode)!)}>打開原訊息</button>
                 )}
@@ -2264,6 +2287,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     else setSheet("ai");
                   }}>問同事</button>
                 )}
+                <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>針對這張討論</button>
+                <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
               </div>
             </div>
             <div className="wb-focus-sheet-discussion" data-testid="wb-focus-discussion">
