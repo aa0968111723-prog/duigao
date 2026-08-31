@@ -252,15 +252,19 @@ try {
     await latestMsg.getByTestId("discussion-edit").click();
     const editBox = page.getByTestId("discussion-edit-form").getByTestId("discussion-edit-input");
     await editBox.waitFor({ state: "visible", timeout: 8000 });
+    await editBox.click();
     await editBox.fill("先把招生流程攤在白板上（改過）");
+    await editBox.evaluate((el, value) => {
+      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+      descriptor?.set?.call(el, value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }, "先把招生流程攤在白板上（改過）");
     await page.waitForFunction(
       () => document.querySelector('[data-testid="discussion-edit-input"]')?.value?.includes("改過"),
       null,
       { timeout: 5000 },
     );
-    await page.getByTestId("discussion-edit-form").evaluate((form) => {
-      if (form instanceof HTMLFormElement) form.requestSubmit();
-    });
+    await page.getByTestId("discussion-edit-save").click();
     await page.locator(".rd-msg", { hasText: "先把招生流程攤在白板上（改過）" }).first().waitFor({ state: "visible", timeout: 20000 });
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });
