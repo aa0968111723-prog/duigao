@@ -45,7 +45,7 @@ import type { VideoUploadState } from "../../components/api";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { BrandMark } from "../../components/BrandMark";
 import { firstLayerChrome } from "./roomChrome";
-import { canvaEntryState } from "../../lib/canvaContract";
+import { CANVA_ENTRY_COPY, canvaEntryState } from "../../lib/canvaContract";
 
 export type MultiBranchRoomApi = {
   room: Room;
@@ -553,8 +553,12 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
         setDesigns([]);
         setListError(
           result.code === "NOT_CONNECTED"
-            ? "Canva 連結已失效，請重新連結。"
-            : "拿不到設計清單，請稍後再試。",
+            ? CANVA_ENTRY_COPY.connect
+            : result.code === "CANVA_NOT_CONFIGURED"
+              ? CANVA_ENTRY_COPY["not-configured"]
+              : result.code === "CANVA_UNREACHABLE"
+                ? CANVA_ENTRY_COPY.unreachable
+                : "拿不到設計清單，請稍後再試。",
         );
         if (result.code === "NOT_CONNECTED") setConnected(false);
       }
@@ -585,10 +589,11 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
 
   if (!connected) {
     return (
-      <div>
+      <div data-testid="canva-entry-connect">
         <button type="button" className="project-sheet-back" onClick={onBack}>‹ 返回</button>
         <h2>從 Canva 匯入</h2>
-        <p className="project-sheet-note">先把你的 Canva 帳號連結進來（會開 Canva 官方授權頁，這裡不會經手你的密碼）。授權完成回到這裡按「我連好了」。</p>
+        <p className="project-sheet-note">{CANVA_ENTRY_COPY.connect}</p>
+        <p className="project-sheet-note">會開 Canva 官方授權頁，這裡不會經手你的密碼。授權完成回到這裡按「我連好了」。</p>
         <button
           type="button"
           className="project-save-button project-submit"
@@ -622,7 +627,7 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
             <a href={fallbackUrl} target="_blank" rel="noreferrer noopener" data-testid="canva-connect-fallback">點這裡開 Canva 授權頁</a>
           </p>
         )}
-        <button type="button" className="project-text-button" data-testid="canva-recheck" onClick={checkStatus}>我連好了，重新檢查</button>
+        <button type="button" className="project-text-button" data-testid="canva-recheck" onClick={checkStatus}>我連好了</button>
         {message && <p className="project-sheet-error" role="alert">{message}</p>}
       </div>
     );
@@ -630,6 +635,7 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
 
   return (
     <form
+      data-testid="canva-entry-picker"
       onSubmit={(event) => {
         event.preventDefault();
         if (!selectedId || !name.trim() || busy) return;
@@ -647,7 +653,7 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
     >
       <button type="button" className="project-sheet-back" onClick={onBack}>‹ 返回</button>
       <h2>從 Canva 匯入</h2>
-      <p className="project-sheet-note">挑一份設計，匯出成圖片放進這間房。Canva 上的原稿不會被改動。</p>
+      <p className="project-sheet-note">挑一份設計，匯出成圖片放進這間房。Canva 上的原稿不會被改動。匯入只會新增一版，不會蓋掉舊版本。</p>
       {designs === null ? (
         <p className="project-sheet-note">載入設計清單…</p>
       ) : designs.length === 0 ? (
@@ -676,6 +682,60 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
       {message && <p className="project-sheet-error" role="alert">{message}</p>}
       <button type="submit" className="project-save-button project-submit" data-testid="canva-import-submit" disabled={!selectedId || !name.trim() || busy}>{busy ? "匯入中…" : "匯入"}</button>
     </form>
+  );
+}
+
+/**
+ * 新增內容面板的 Canva 入口：health 沒過仍可見，四態分 testid／文案。
+ * 未設定或連不到只是不能按進去，整塊不准蒸發。
+ */
+function CanvaCreateOption({
+  canva,
+  onOpen,
+}: {
+  canva: NonNullable<MultiBranchRoomApi["canva"]>;
+  onOpen: () => void;
+}) {
+  const [connected, setConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    const healthEntry = canvaEntryState(canva.health, null);
+    if (healthEntry !== "connect" && healthEntry !== "picker") return;
+    let cancelled = false;
+    void canva.status().then((ok) => {
+      if (!cancelled) setConnected(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canva]);
+  const entry = canvaEntryState(canva.health, connected);
+  const button = (enabled: boolean) => (
+    <button type="button" data-testid="canva-import-option" disabled={!enabled} onClick={enabled ? onOpen : undefined}>
+      <span aria-hidden>▤</span>
+      Canva 文宣
+    </button>
+  );
+  if (entry === "not-configured") {
+    return (
+      <div className="project-canva-gated" data-testid="canva-entry-not-configured">
+        {button(false)}
+        <p className="project-sheet-note">{CANVA_ENTRY_COPY["not-configured"]}</p>
+      </div>
+    );
+  }
+  if (entry === "unreachable") {
+    return (
+      <div className="project-canva-gated" data-testid="canva-entry-unreachable">
+        {button(false)}
+        <p className="project-sheet-note">{CANVA_ENTRY_COPY.unreachable}</p>
+      </div>
+    );
+  }
+  const testid = entry === "picker" ? "canva-entry-picker" : "canva-entry-connect";
+  return (
+    <div className="project-canva-gated" data-testid={testid}>
+      {button(true)}
+    </div>
   );
 }
 
@@ -712,41 +772,7 @@ function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType, onR
                   CUTOS 影片成品
                 </button>
               )}
-              {canva && (() => {
-                const entry = canvaEntryState(canva.health, null);
-                if (entry === "not-configured") {
-                  return (
-                    <div className="project-canva-gated">
-                      <button type="button" data-testid="canva-import-option" disabled>
-                        <span aria-hidden>▤</span>
-                        Canva 文宣
-                      </button>
-                      <p className="project-sheet-note" data-testid="canva-not-configured">
-                        這台正式站還沒設定 Canva 整合，所以不能連。稿仍可從本機上傳。
-                      </p>
-                    </div>
-                  );
-                }
-                if (entry === "unreachable") {
-                  return (
-                    <div className="project-canva-gated">
-                      <button type="button" data-testid="canva-import-option" disabled>
-                        <span aria-hidden>▤</span>
-                        Canva 文宣
-                      </button>
-                      <p className="project-sheet-note" data-testid="canva-not-configured">
-                        暫時連不上 Canva 橋，稍後再試。
-                      </p>
-                    </div>
-                  );
-                }
-                return (
-                  <button type="button" data-testid="canva-import-option" onClick={() => setType("canva")}>
-                    <span aria-hidden>▤</span>
-                    Canva 文宣
-                  </button>
-                );
-              })()}
+              {canva && <CanvaCreateOption canva={canva} onOpen={() => setType("canva")} />}
             </div>
           </>
         ) : (

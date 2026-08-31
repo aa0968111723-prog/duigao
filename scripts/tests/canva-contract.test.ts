@@ -11,7 +11,14 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canShowCanvaSync, canvaEntryState, extractCanvaDesignId } from "../../src/lib/canvaContract";
+import {
+  CANVA_ENTRY_COPY,
+  CANVA_ENTRY_TESTID,
+  CANVA_EXPORT_PENDING_COPY,
+  canShowCanvaSync,
+  canvaEntryState,
+  extractCanvaDesignId,
+} from "../../src/lib/canvaContract";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -78,16 +85,41 @@ test("client 呼叫層永不經手 token / secret", () => {
 
 test("Canva 入口三態：沒設定仍可見，不准整座蒸發", () => {
   assert.equal(canvaEntryState({ ok: false, code: "CANVA_NOT_CONFIGURED" }, false), "not-configured");
+  assert.equal(canvaEntryState({ ok: false, code: "CANVA_UNREACHABLE" }, false), "unreachable");
+  assert.equal(canvaEntryState({ ok: false }, false), "unreachable");
   assert.equal(canvaEntryState({ ok: true }, false), "connect");
   assert.equal(canvaEntryState({ ok: true }, true), "picker");
+  assert.equal(canvaEntryState(null, false), "loading");
   const room = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
-  assert.match(room, /canva-not-configured/);
+  assert.match(room, /canva-entry-not-configured/);
+  assert.match(room, /canva-entry-unreachable/);
+  assert.match(room, /canva-entry-connect/);
+  assert.match(room, /canva-entry-picker/);
   assert.match(room, /canva-import-option/);
   assert.match(room, /canva-connect/);
   assert.match(room, /canva-design-item/);
+  assert.match(room, /CanvaCreateOption/);
+  assert.match(room, /CANVA_ENTRY_COPY\["not-configured"\]/);
+  assert.match(room, /CANVA_ENTRY_COPY\.unreachable/);
+  assert.match(room, /CANVA_ENTRY_COPY\.connect/);
+  assert.match(room, /我連好了/);
+  assert.doesNotMatch(room, /這台正式站還沒設定 Canva/);
+  assert.doesNotMatch(room, /暫時連不上 Canva 橋/);
+  assert.equal(
+    CANVA_ENTRY_COPY["not-configured"],
+    "Canva 整合尚未設定。金鑰在 Supabase 函式 secrets，不在這份程式裡。",
+  );
+  assert.equal(CANVA_ENTRY_COPY.unreachable, "現在連不到 Canva 橋，稍後再試。");
+  assert.equal(CANVA_ENTRY_COPY.connect, "還沒連結這個 Canva 帳號");
   const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
   assert.match(app, /canvaHealthState/);
+  assert.match(app, /CANVA_EXPORT_PENDING_COPY/);
   assert.doesNotMatch(app, /setCanvaReady\(Boolean\(health\.ok\)\)/);
+  assert.equal(CANVA_ENTRY_TESTID["not-configured"], "canva-entry-not-configured");
+  assert.equal(CANVA_ENTRY_TESTID.unreachable, "canva-entry-unreachable");
+  assert.equal(CANVA_ENTRY_TESTID.connect, "canva-entry-connect");
+  assert.equal(CANVA_ENTRY_TESTID.picker, "canva-entry-picker");
+  assert.equal(CANVA_EXPORT_PENDING_COPY, "Canva 還在轉檔，請再試一次");
 });
 
 test("同步這一版：同一 designId append，舊 id／path 不變", () => {
@@ -97,6 +129,8 @@ test("同步這一版：同一 designId append，舊 id／path 不變", () => {
   const edge = readFileSync(resolve(ROOT, "supabase/functions/canva-bridge/index.ts"), "utf8");
   assert.match(edge, /crypto\.randomUUID\(\)/);
   assert.match(edge, /upsert: false/);
+  assert.match(edge, /\.from\("versions"\)\.insert\(/);
+  assert.doesNotMatch(edge, /\.from\("versions"\)\.update\(/);
   assert.match(edge, /canva_design_id: designId/);
   const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
   assert.match(app, /syncCanvaVersion/);
