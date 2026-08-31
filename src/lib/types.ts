@@ -66,6 +66,17 @@ export type Version = {
   optimizedVideoPath?: string;
   optimized?: boolean;
   sourceFileSize?: number;
+  /** Cloud Storage path. Used to prove append-only sync did not overwrite. */
+  imagePath?: string;
+  /**
+   * Original upload filename when known. Compose paper stamps `紙底.png`
+   * so the room picker can exclude the carrier without a migration.
+   */
+  filename?: string;
+  /** Canva design this version was imported from. Absent = not a Canva draft. */
+  canvaDesignId?: string;
+  canvaPageId?: string;
+  canvaPageNumber?: number;
 };
 
 /** The versions a picker should offer: everything still on the table. */

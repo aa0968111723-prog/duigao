@@ -31,9 +31,23 @@ export type CanvaBridgeRequest =
 
 export type CanvaBridgeHealth = {
   ok: boolean;
-  /** 未設定 env 時 false＋此碼；client 以此隱藏整個入口（誠實不可用）。 */
+  /** 未設定 env 時 false＋此碼；入口仍可見，只是不能連。 */
   code?: "CANVA_NOT_CONFIGURED" | "CANVA_UNREACHABLE";
 };
+
+export type CanvaEntryState = "loading" | "not-configured" | "unreachable" | "connect" | "picker";
+
+/** 內容面板 Canva 三態。health 沒過不准假裝已連。 */
+export function canvaEntryState(
+  health: CanvaBridgeHealth | null | undefined,
+  connected: boolean | null,
+): CanvaEntryState {
+  if (!health) return "loading";
+  if (!health.ok && health.code === "CANVA_NOT_CONFIGURED") return "not-configured";
+  if (!health.ok) return "unreachable";
+  if (connected) return "picker";
+  return "connect";
+}
 
 export type CanvaBridgeStatus = { ok: true; connected: boolean } | { ok: false; code: string };
 
@@ -137,4 +151,11 @@ export function parseCanvaDesignRef(input: string): CanvaDesignRef | null {
 
 export function canvaEditUrl(designId: string): string {
   return `https://www.canva.com/design/${designId}/edit`;
+}
+
+export function canShowCanvaSync(
+  version: { canvaDesignId?: string } | null | undefined,
+  canManage: boolean,
+): boolean {
+  return Boolean(canManage && version?.canvaDesignId);
 }

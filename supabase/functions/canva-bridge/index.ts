@@ -509,6 +509,10 @@ async function handle(request: Request): Promise<Response> {
       .order("sort_order", { ascending: false })
       .limit(1);
     const sortOrder = (Array.isArray(sortRows) && sortRows[0] ? Number(sortRows[0].sort_order) : -1) + 1;
+    const pageNumberRaw = Number(body.pageNumber);
+    const pageNumber = Number.isInteger(pageNumberRaw) && pageNumberRaw >= 1 && pageNumberRaw <= 500 ? pageNumberRaw : 1;
+    const rawPageId = text(body.pageId);
+    const pageId = isSafeDesignId(rawPageId) ? rawPageId : null;
     const { error: insertError } = await supabase.from("versions").insert({
       id: versionId,
       room_id: roomId,
@@ -516,6 +520,9 @@ async function handle(request: Request): Promise<Response> {
       sort_order: sortOrder,
       image_path: imagePath,
       mime_type: "image/png",
+      canva_design_id: designId,
+      canva_page_number: pageNumber,
+      ...(pageId ? { canva_page_id: pageId } : {}),
       ...(branchId ? { branch_id: branchId } : {}),
     });
     if (insertError) {
@@ -523,7 +530,7 @@ async function handle(request: Request): Promise<Response> {
       await supabase.storage.from("room-assets").remove([imagePath]).catch(() => undefined);
       return jsonResponse({ ok: false, code: "IMPORT_FAILED" });
     }
-    return jsonResponse({ ok: true, versionId, label, fileSize: bytes.byteLength });
+    return jsonResponse({ ok: true, versionId, label, fileSize: bytes.byteLength, pageNumber, pageId });
   }
 
   return jsonResponse({ ok: false, code: "INVALID_REQUEST" }, 400);

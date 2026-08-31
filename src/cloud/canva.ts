@@ -2,8 +2,8 @@
  * canva-bridge 的 client 呼叫層（PR-05 第一階段）。
  *
  * client 只認識 bridge 的動作詞彙；Canva 的 client secret 與使用者 token
- * 從不出現在瀏覽器。health 帶 5 分鐘快取 — 它 gate 的是「入口要不要
- * 出現」，不是即時狀態面板；負向 30 秒（與 cutos 同紀律，Grok 07 F6）。
+ * 從不出現在瀏覽器。health 帶 5 分鐘快取 — 用來分三態，不再把入口藏掉。
+ * 負向 30 秒（與 cutos 同紀律，Grok 07 F6）。
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { invokeErrorContentType, looksLikeSpaHtml, parseFunctionPayload, rejectAsUnreachable } from "./apiResponse";

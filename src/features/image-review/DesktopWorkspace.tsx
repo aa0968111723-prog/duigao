@@ -7,6 +7,7 @@ import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { Viewer } from "./Stage";
 import { nextPinNumber, type WorkspaceApi } from "../../components/api";
+import { canShowCanvaSync } from "../../lib/canvaContract";
 
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "pan", label: "看" },
@@ -130,6 +131,16 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
           />
         )}
 
+        {canShowCanvaSync(room.versions.find((item) => item.id === view.versionId), api.canManage) && (
+          <button
+            type="button"
+            className="chip"
+            data-testid="canva-sync-version"
+            onClick={() => { void api.syncCanvaVersion?.(view.versionId); }}
+          >
+            同步這一版
+          </button>
+        )}
         {api.canManage && (
           <button
             type="button"
@@ -162,6 +173,10 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
               showToast={api.showToast}
               canManage={api.canManage}
               onSaveVersion={api.saveComposeVersion}
+              versions={api.composeVersions ?? room.versions}
+              branches={room.branches}
+              listLibrary={api.listComposeLibrary}
+              resolveMaterial={api.resolveComposeMaterial}
               pref={{
                 prefs: room.proposalPrefs ?? [],
                 userId: api.guest.id,

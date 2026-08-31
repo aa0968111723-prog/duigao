@@ -13,6 +13,7 @@ import { Viewer } from "./Stage";
 import { ImmersiveViewer } from "./ImmersiveViewer";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
 import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "../../components/api";
+import { canShowCanvaSync } from "../../lib/canvaContract";
 import { BrandMark } from "../../components/BrandMark";
 
 const COLOR_MODES: { id: ColorMode; label: string }[] = [
@@ -294,6 +295,16 @@ export function MobileWorkspace({ api, presence }: Props) {
             <span aria-hidden>＋</span>
           </UniversalIntake>
         )}
+        {canShowCanvaSync(room.versions.find((item) => item.id === view.versionId), api.canManage) && (
+          <button
+            type="button"
+            className="m-vchip"
+            data-testid="canva-sync-version"
+            onClick={() => { void api.syncCanvaVersion?.(view.versionId); }}
+          >
+            同步這一版
+          </button>
+        )}
         {api.canManage && (
           <button
             type="button"
@@ -353,6 +364,10 @@ export function MobileWorkspace({ api, presence }: Props) {
             pin={proposalPinBinding}
             canManage={api.canManage}
             onSaveVersion={api.saveComposeVersion}
+            versions={api.composeVersions ?? room.versions}
+            branches={room.branches}
+            listLibrary={api.listComposeLibrary}
+            resolveMaterial={api.resolveComposeMaterial}
             pref={{
               prefs: room.proposalPrefs ?? [],
               userId: api.guest.id,

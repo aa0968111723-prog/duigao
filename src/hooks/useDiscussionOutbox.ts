@@ -33,6 +33,8 @@ export function useDiscussionOutbox(args: {
   ghosts: DiscussionMessage[];
   send: (message: DiscussionMessage) => void;
   retry: (messageId: string) => void;
+  /** 還在 ghost 的列（insert 未進快照）也能改 body／tombstone，不能只改 room.discussion。 */
+  patch: (message: DiscussionMessage) => void;
 } {
   const { insert, bound, boundRoomId, localRoomId, serverIds, ownerId } = args;
   const ownerRef = useRef(ownerId);
@@ -116,6 +118,14 @@ export function useDiscussionOutbox(args: {
     },
     [dispatch],
   );
+
+  const patch = useCallback((message: DiscussionMessage) => {
+    setEntries((current) => {
+      const entry = current[message.id];
+      if (!entry) return current;
+      return { ...current, [message.id]: { ...entry, message } };
+    });
+  }, []);
 
   // 回網：failed 的一次性 flush（outbox 仍是唯一 retry owner — 這裡就是
   // outbox 自己）。sending 不碰（in-flight 或等 abort deadline）。
@@ -207,5 +217,5 @@ export function useDiscussionOutbox(args: {
   }
   ghosts.sort((a, b) => a.createdAt - b.createdAt);
 
-  return { sendStates, ghosts, send, retry };
+  return { sendStates, ghosts, send, retry, patch };
 }

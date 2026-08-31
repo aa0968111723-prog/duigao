@@ -11,7 +11,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractCanvaDesignId } from "../../src/lib/canvaContract";
+import { canShowCanvaSync, canvaEntryState, extractCanvaDesignId } from "../../src/lib/canvaContract";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -74,4 +74,40 @@ test("client 呼叫層永不經手 token / secret", () => {
   for (const action of ["health", "status", "connect-url", "list-designs", "import-design"]) {
     assert.ok(client.includes(`"${action}"`), `client 缺動作 ${action}`);
   }
+});
+
+test("Canva 入口三態：沒設定仍可見，不准整座蒸發", () => {
+  assert.equal(canvaEntryState({ ok: false, code: "CANVA_NOT_CONFIGURED" }, false), "not-configured");
+  assert.equal(canvaEntryState({ ok: true }, false), "connect");
+  assert.equal(canvaEntryState({ ok: true }, true), "picker");
+  const room = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
+  assert.match(room, /canva-not-configured/);
+  assert.match(room, /canva-import-option/);
+  assert.match(room, /canva-connect/);
+  assert.match(room, /canva-design-item/);
+  const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
+  assert.match(app, /canvaHealthState/);
+  assert.doesNotMatch(app, /setCanvaReady\(Boolean\(health\.ok\)\)/);
+});
+
+test("同步這一版：同一 designId append，舊 id／path 不變", () => {
+  assert.equal(canShowCanvaSync({ canvaDesignId: "DAGabc" }, true), true);
+  assert.equal(canShowCanvaSync({ canvaDesignId: "DAGabc" }, false), false);
+  assert.equal(canShowCanvaSync({}, true), false);
+  const edge = readFileSync(resolve(ROOT, "supabase/functions/canva-bridge/index.ts"), "utf8");
+  assert.match(edge, /crypto\.randomUUID\(\)/);
+  assert.match(edge, /upsert: false/);
+  assert.match(edge, /canva_design_id: designId/);
+  const app = readFileSync(resolve(ROOT, "src/App.tsx"), "utf8");
+  assert.match(app, /syncCanvaVersion/);
+  assert.match(app, /importFromCanva\(version\.canvaDesignId/);
+  const mobile = readFileSync(resolve(ROOT, "src/features/image-review/MobileWorkspace.tsx"), "utf8");
+  const desktop = readFileSync(resolve(ROOT, "src/features/image-review/DesktopWorkspace.tsx"), "utf8");
+  for (const file of [mobile, desktop]) {
+    assert.match(file, /canva-sync-version/);
+    assert.match(file, /同步這一版/);
+  }
+  const repo = readFileSync(resolve(ROOT, "src/cloud/roomRepository.ts"), "utf8");
+  assert.match(repo, /canvaDesignId: row\.canva_design_id/);
+  assert.match(repo, /imagePath: row\.image_path/);
 });

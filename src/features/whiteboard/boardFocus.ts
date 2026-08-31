@@ -172,6 +172,60 @@ export function shouldMountFocusSheet(input: {
   return input.hasFocus && !rail;
 }
 
+/** 手機焦點 sheet peek：矮到讓畫布上半與四鍵底欄露得出來。 */
+export const FOCUS_SHEET_PEEK_HEIGHT = 80;
+/** composer 最少高度；鍵盤起來時 sheet 要為它留空。 */
+export const FOCUS_SHEET_COMPOSER_MIN = 48;
+
+export function readSafeAreaBottom(): number {
+  if (typeof document === "undefined") return 0;
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;padding-bottom:env(safe-area-inset-bottom,0px)";
+  document.body.appendChild(probe);
+  const px = Number.parseFloat(getComputedStyle(probe).paddingBottom) || 0;
+  probe.remove();
+  return px;
+}
+
+/**
+ * --kb > 0 時 sheet 高度上限 = usableHeight - composerMin - safe-area。
+ * 鍵盤沒起來就不另外扣，避免 half 被無故壓矮。
+ */
+export function focusSheetMaxHeight(input: {
+  usableHeight: number;
+  keyboardInset: number;
+  safeAreaBottom?: number;
+  peekHeight?: number;
+}): number {
+  const peek = input.peekHeight ?? FOCUS_SHEET_PEEK_HEIGHT;
+  const usable = Math.max(0, input.usableHeight);
+  if (input.keyboardInset <= 0) return usable;
+  return Math.max(peek, usable - FOCUS_SHEET_COMPOSER_MIN - Math.max(0, input.safeAreaBottom ?? 0));
+}
+
+export function focusSheetSnapHeights(input: {
+  usableHeight: number;
+  keyboardInset: number;
+  safeAreaBottom?: number;
+  peekHeight?: number;
+}): { peek: number; half: number; full: number; viewportHeight: number; maxHeight: number } {
+  const peek = input.peekHeight ?? FOCUS_SHEET_PEEK_HEIGHT;
+  const viewportHeight = Math.max(0, input.usableHeight);
+  const maxHeight = focusSheetMaxHeight({ ...input, peekHeight: peek });
+  return {
+    peek,
+    half: Math.min(maxHeight, Math.max(peek, Math.round(viewportHeight * 0.42))),
+    full: Math.min(maxHeight, Math.max(peek, Math.round(viewportHeight * 0.76))),
+    viewportHeight,
+    maxHeight,
+  };
+}
+
+/** 針對這張討論：只准停在 peek／half，不准跳 full。 */
+export function snapAfterFocusDiscuss(current: "peek" | "half" | "full"): "peek" | "half" {
+  return current === "peek" ? "peek" : "half";
+}
+
 export function readBoardSession(key: string): BoardSession | undefined {
   return SESSION.get(key);
 }

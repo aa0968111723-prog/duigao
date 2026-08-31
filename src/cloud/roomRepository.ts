@@ -119,11 +119,21 @@ function anchorColumns(pin: CommentPin): Record<string, unknown> {
  * alternative — one failed signature taking down the whole room load — is the
  * behaviour this shape exists to avoid.
  */
+function canvaFieldsFromRow(row: VersionRow): Pick<Version, "imagePath" | "canvaDesignId" | "canvaPageId" | "canvaPageNumber"> {
+  return {
+    ...(row.image_path ? { imagePath: row.image_path } : {}),
+    ...(row.canva_design_id ? { canvaDesignId: row.canva_design_id } : {}),
+    ...(row.canva_page_id ? { canvaPageId: row.canva_page_id } : {}),
+    ...(typeof row.canva_page_number === "number" ? { canvaPageNumber: row.canva_page_number } : {}),
+  };
+}
+
 async function versionFromRow(supabase: SupabaseClient, row: VersionRow): Promise<Version> {
   const poster = row.image_path ? await signedUrl(supabase, row.image_path).catch(() => "") : "";
   const archivedAt = row.archived_at ?? undefined;
+  const canva = canvaFieldsFromRow(row);
   if (row.media_kind !== "video") {
-    return { id: row.id, label: row.label, imageDataUrl: poster, kind: "image", branchId: row.branch_id ?? undefined, archivedAt };
+    return { id: row.id, label: row.label, imageDataUrl: poster, kind: "image", branchId: row.branch_id ?? undefined, archivedAt, ...canva };
   }
   const playPath = row.optimized_video_path || row.video_path;
   const videoUrl = playPath ? await signedVideoUrl(supabase, playPath).catch(() => "") : "";
@@ -144,6 +154,7 @@ async function versionFromRow(supabase: SupabaseClient, row: VersionRow): Promis
     optimizedVideoPath: row.optimized_video_path ?? undefined,
     optimized: row.optimized ?? undefined,
     sourceFileSize: row.source_file_size ?? undefined,
+    ...canva,
   };
 }
 

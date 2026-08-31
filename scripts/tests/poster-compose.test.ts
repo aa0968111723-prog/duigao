@@ -7,6 +7,11 @@ import { branchOpenCommentCount, normalizeRoomBranches } from "../../src/lib/roo
 import type { Room, RoomBranch } from "../../src/lib/types.ts";
 import type { VisualProposal } from "../../src/features/visual-proposal/store.ts";
 import { mergeProposalDocsForHydrate } from "../../src/features/visual-proposal/mergeHydrate.ts";
+import { isComposePaperVersion } from "../../src/features/visual-proposal/composePaper.ts";
+import {
+  listComposeMaterials,
+  placeComposeMaterial,
+} from "../../src/features/visual-proposal/composeMaterials.ts";
 import {
   appendVersionWithoutOverwrite,
   canSaveComposeVersion,
@@ -250,6 +255,31 @@ test("新版出現後舊版待處理則數仍掛在被留言的 version", () => 
   assert.equal(branchOpenCommentCount(normalized, poster.id), 2);
 });
 
+test("Canva 同步走 appendVersionWithoutOverwrite 精神：舊 id／path 留下", () => {
+  const old: VersionIdentity = {
+    id: "v_canva_old",
+    label: "Canva 招生海報",
+    imageDataUrl: "data:image/png;base64,OLDCANVACANVACANVACANVA",
+    imagePath: "rooms/r1/versions/v_canva_old/poster.png",
+  };
+  const next: VersionIdentity = {
+    id: "v_canva_new",
+    label: "改一",
+    imageDataUrl: "data:image/png;base64,NEWCANVACANVACANVACANVA",
+    imagePath: "rooms/r1/versions/v_canva_new/poster.png",
+  };
+  const saved = appendVersionWithoutOverwrite([old], next);
+  assert.equal(saved.ok, true);
+  if (!saved.ok) return;
+  assert.equal(saved.versions.length, 2);
+  assert.equal(versionIdentitiesUnchanged([old], saved.versions, "v_canva_old"), true);
+  assert.notEqual(saved.versions[1].id, old.id);
+  assert.notEqual(saved.versions[1].imagePath, old.imagePath);
+  const app = src("src/App.tsx");
+  assert.match(app, /importFromCanva\(version\.canvaDesignId/);
+  assert.match(app, /nextPosterVersionLabel/);
+});
+
 test("畫布與存檔走既有 testid，不改第一層 IA", () => {
   const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
   const stage = src("src/features/image-review/Stage.tsx");
@@ -258,6 +288,112 @@ test("畫布與存檔走既有 testid，不改第一層 IA", () => {
   assert.match(stage, /data-testid="poster-compose-stage"/);
   assert.match(chrome, /FIRST_LAYER_TABS = \["對話", "白板"\]/);
   assert.match(chrome, /FIRST_LAYER_TOP = \["back", "title", "presence", "voice", "more"\]/);
+});
+
+test("composeMaterials 排除紙底與當前版，素材庫與文宣去重且偏好庫名", () => {
+  const posters = [
+    { id: "v_a", label: "社徽", imageDataUrl: "data:image/png;base64,AAAAAAAAAAAA", kind: "image" as const },
+    { id: "v_b", label: "場勘", imageDataUrl: "data:image/png;base64,BBBBBBBBBBBB", kind: "image" as const },
+    { id: "v_c", label: "舊海報", imageDataUrl: "data:image/png;base64,CCCCCCCCCCCC", kind: "image" as const },
+  ];
+  const paper = {
+    id: "v_paper",
+    label: "紙底",
+    filename: "紙底.png",
+    imageDataUrl: "data:image/png;base64,PAPERPAPERPAPER",
+    kind: "image" as const,
+  };
+  assert.equal(isComposePaperVersion(paper), true);
+  assert.equal(isComposePaperVersion(posters[0]), false);
+  const list = listComposeMaterials({
+    versions: [...posters, paper],
+    library: [{ id: "lib_1", title: "素材庫社徽", kind: "poster", linkedVersionId: "v_a" }],
+    editingVersionId: "v_c",
+  });
+  assert.equal(list.some((item) => item.versionId === "v_paper"), false);
+  assert.equal(list.some((item) => item.versionId === "v_c"), false);
+  assert.equal(list.filter((item) => item.versionId === "v_a").length, 1);
+  assert.equal(list.find((item) => item.versionId === "v_a")?.kind, "library");
+  assert.equal(list.find((item) => item.versionId === "v_a")?.title, "素材庫社徽");
+  assert.equal(list.find((item) => item.versionId === "v_a")?.sourceLabel, "素材庫");
+  assert.equal(list.find((item) => item.versionId === "v_b")?.kind, "version");
+  assert.equal(list.find((item) => item.versionId === "v_b")?.sourceLabel, "房間文宣");
+  assert.equal(list.length, 2);
+});
+
+test("composeMaterials 看得到其他分支的文宣，不限當前 branch slice", () => {
+  const list = listComposeMaterials({
+    versions: [
+      { id: "v_paper", label: "紙底", filename: "紙底.png", imageDataUrl: "data:image/png;base64,PAPERPAPERPAPER" },
+      { id: "v_other", label: "演講文宣 · 初稿", imageDataUrl: "data:image/png;base64,POSTERPOSTER", kind: "image" },
+    ],
+    library: [],
+    editingVersionId: "v_paper",
+  });
+  assert.equal(list.length, 1);
+  assert.equal(list[0].versionId, "v_other");
+});
+
+test("composeMaterials 排除影片版本與影片素材庫列", () => {
+  const list = listComposeMaterials({
+    versions: [
+      { id: "v_img", label: "圖", imageDataUrl: "data:image/png;base64,AAAAAAAAAAAA", kind: "image" },
+      { id: "v_vid", label: "片", imageDataUrl: "data:image/png;base64,BBBBBBBBBBBB", kind: "video" },
+    ],
+    library: [
+      { id: "lib_vid", title: "影片庫", kind: "video", linkedVersionId: "v_vid" },
+      { id: "lib_doc", title: "企劃", kind: "document", linkedVersionId: "v_img" },
+    ],
+    editingVersionId: "none",
+  });
+  assert.equal(list.length, 1);
+  assert.equal(list[0].versionId, "v_img");
+});
+
+test("placeComposeMaterial 只加 layer，拒絕非 data URL，不改 versions", () => {
+  const versions = [{ id: "v_old", imageDataUrl: "data:image/png;base64,OLDOLDOLDOLD" }];
+  const material = {
+    id: "ver:v_a",
+    title: "社徽",
+    kind: "version" as const,
+    versionId: "v_a",
+    previewUrl: "",
+    sourceLabel: "房間文宣",
+  };
+  const placed = placeComposeMaterial(emptyDoc(), material, "data:image/png;base64,NEWLAYERNEWLAYERNEW");
+  assert.equal(placed.ok, true);
+  if (placed.ok) {
+    assert.equal(placed.item.type, "image");
+    assert.match(placed.item.imageDataUrl, /^data:image\//);
+    assert.equal(placed.doc.items.length, 1);
+    assert.equal(placed.doc.versionId, "v_old");
+  }
+  assert.equal(versions[0].imageDataUrl, "data:image/png;base64,OLDOLDOLDOLD");
+  const http = placeComposeMaterial(emptyDoc(), material, "https://example.invalid/poster.png");
+  assert.equal(http.ok, false);
+  if (!http.ok) assert.match(http.reason, /現傳/);
+});
+
+test("Dock / Controls 有房間素材與 picker，空畫布提示存在", () => {
+  const dock = src("src/features/visual-proposal/ProposalDock.tsx");
+  const controls = src("src/features/visual-proposal/ProposalControls.tsx");
+  const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
+  const quick = src("src/features/visual-proposal/ProposalQuickElement.tsx");
+  for (const file of [dock, controls]) {
+    assert.match(file, /poster-pick-room-asset/);
+    assert.match(file, /poster-compose-asset-picker/);
+    assert.match(file, /ComposeAssetPicker/);
+  }
+  assert.match(overlay, /poster-compose-empty-hint/);
+  assert.match(overlay, /把 logo、照片丟上來/);
+  assert.match(overlay, /從房間撿/);
+  assert.match(quick, /poster-layer-duplicate/);
+  assert.match(quick, /poster-layer-forward/);
+  assert.match(quick, /poster-layer-back/);
+  assert.match(src("src/App.tsx"), /listLibraryAssets/);
+  assert.match(src("src/App.tsx"), /resolveComposeMaterialDataUrl/);
+  assert.doesNotMatch(src("src/features/visual-proposal/ProposalDock.tsx"), /getSupabase/);
+  assert.doesNotMatch(src("src/features/multi-room/roomChrome.ts"), /FIRST_LAYER_TABS = \["對話", "白板",/);
 });
 
 test("純原稿隱藏 pin／svg.overlay／region-rect，工作層 overlay 仍在 ready 時畫", () => {

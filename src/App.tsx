@@ -39,7 +39,10 @@ import { adoptVersionDisplayUrls, branchForId, branchSummaryFor, branchVersions,
 import { roomCode, uid, uuid } from "./lib/id";
 import { deleteRoom, listRooms, listUploadSessions, loadDiscussionReadLocal, loadFlag, loadGuest, loadRoom, saveDiscussionRead, saveFlag, saveGuest, saveRoom, uploadSessionMatchesFile } from "./lib/store";
 import { useDiscussionDraft } from "./hooks/useDiscussionDraft";
-import { insertLibraryAsset } from "./cloud/assetLibrary";
+import { insertLibraryAsset, listLibraryAssets } from "./cloud/assetLibrary";
+import { COMPOSE_PAPER_FILENAME } from "./features/visual-proposal/composePaper";
+import type { ComposeMaterial } from "./features/visual-proposal/composeMaterials";
+import { resolveComposeMaterialDataUrl } from "./features/visual-proposal/composeMaterialResolve";
 import { Collab, type CollabStatus } from "./lib/peer";
 import { isCloudConfigured } from "./cloud/config";
 import { CloudError } from "./cloud/errors";
@@ -1321,7 +1324,13 @@ export function App() {
           const dataUrl = await fileToDataUrl(file);
           const idx = branchCount + newVersions.length;
           const id = opts?.stableId && newVersions.length === 0 ? opts.stableId : uid("v_");
-          newVersions.push({ id, label: VERSION_LABELS[idx] ?? `改${idx}`, imageDataUrl: dataUrl, ...(targetBranchId ? { branchId: targetBranchId } : {}) });
+          newVersions.push({
+            id,
+            label: VERSION_LABELS[idx] ?? `改${idx}`,
+            imageDataUrl: dataUrl,
+            ...(file.name === COMPOSE_PAPER_FILENAME ? { filename: COMPOSE_PAPER_FILENAME } : {}),
+            ...(targetBranchId ? { branchId: targetBranchId } : {}),
+          });
         }
         if (newVersions.length === 0) {
           showToast("這個檔案不是圖片，換一張文宣試試。", { tone: "error" });
@@ -1662,13 +1671,13 @@ export function App() {
     [guest, showToast],
   );
 
-  // Canva 文宣匯入（PR-05）：健檢過了入口才存在 — 誠實不可用。
-  const [canvaReady, setCanvaReady] = useState(false);
+  // Canva 文宣匯入：health 沒過入口仍在（三態），不准整座蒸發。
+  const [canvaHealthState, setCanvaHealthState] = useState<import("./lib/canvaContract").CanvaBridgeHealth | null>(null);
   useEffect(() => {
-    if (!cloud.boundRoomId || !room?.projectMode || !isCloudConfigured) { setCanvaReady(false); return; }
+    if (!cloud.boundRoomId || !room?.projectMode || !isCloudConfigured) { setCanvaHealthState(null); return; }
     let cancelled = false;
     void canvaHealth(getSupabase()!).then((health) => {
-      if (!cancelled) setCanvaReady(Boolean(health.ok));
+      if (!cancelled) setCanvaHealthState(health);
     });
     return () => { cancelled = true; };
   }, [cloud.boundRoomId, room?.projectMode]);
@@ -1730,17 +1739,36 @@ export function App() {
     [guest, showToast],
   );
 
+  const syncCanvaVersion = useCallback(
+    async (versionId: string) => {
+      const current = roomRef.current;
+      if (!current || !guest) return;
+      const version = current.versions.find((item) => item.id === versionId);
+      if (!version?.canvaDesignId) return;
+      if (cloudRef.current.boundRoomId && !cloudRef.current.canManageMedia) {
+        showToast("檢視者不能同步 Canva。", { tone: "error" });
+        return;
+      }
+      const { nextPosterVersionLabel } = await import("./features/visual-proposal/saveComposeVersion");
+      const count = current.versions.filter((item) => !version.branchId || item.branchId === version.branchId).length;
+      const result = await importFromCanva(version.canvaDesignId, nextPosterVersionLabel(count), version.branchId);
+      if (!result.ok) showToast(result.message, { tone: "error" });
+    },
+    [guest, importFromCanva, showToast],
+  );
+
   const canvaSheetApi = useMemo(
     () =>
-      canvaReady
+      isCloudConfigured && cloud.boundRoomId && room?.projectMode
         ? {
+            health: canvaHealthState,
             status: () => canvaStatus(getSupabase()!),
             connectUrl: () => canvaConnectUrl(getSupabase()!),
             listDesigns: () => canvaListDesigns(getSupabase()!),
             importDesign: importFromCanva,
           }
         : undefined,
-    [canvaReady, importFromCanva],
+    [canvaHealthState, importFromCanva, cloud.boundRoomId, room?.projectMode],
   );
 
   const createProjectContent = useCallback(
@@ -1874,6 +1902,29 @@ export function App() {
       showToast(err instanceof Error ? err.message : "存成新版本失敗，還在這一版，請再試一次。", { tone: "error" });
     }
   }, [activeBranchId, addImageFiles, cloud.boundRoomId, cloud.canManageMedia, guest, showToast, view.versionId]);
+
+  const listComposeLibrary = useCallback(async () => {
+    const client = getSupabase();
+    if (!client || !cloud.boundRoomId) return [];
+    return Promise.race([
+      listLibraryAssets(client, cloud.boundRoomId),
+      new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error("library timeout")), 4000);
+      }),
+    ]);
+  }, [cloud.boundRoomId]);
+
+  const resolveComposeMaterial = useCallback(async (material: ComposeMaterial) => {
+    const current = roomRef.current;
+    if (!current) {
+      const { COMPOSE_PLACE_FAIL } = await import("./features/visual-proposal/composeMaterials");
+      throw new Error(COMPOSE_PLACE_FAIL);
+    }
+    const client = getSupabase();
+    return resolveComposeMaterialDataUrl(material, current.versions, {
+      signedUrlForPath: client ? (path) => signedUrl(client, path) : undefined,
+    });
+  }, []);
 
   const updateProjectBranch = useCallback(
     (branchId: string, patch: Partial<Pick<RoomBranch, "name" | "sortOrder" | "status">>) => {
@@ -2156,14 +2207,22 @@ export function App() {
     (messageId: string, body: string) => {
       const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
       const patch = discussionEditPatch(body);
-      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
+      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId)
+        ?? discussionOutboxRef.current.ghosts.find((item) => item.id === messageId);
       // guest → 登入 userId 切換的空窗：送出時可能是 guest.id，按儲存時已是 cloud.userId
+      // insert 還沒進快照時列只活在 ghost；只查 room.discussion 會讓「編輯」按了沒有字。
       if (!patch || !current || !actorIds.some((id) => canEditDiscussion(current, id))) return;
       const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
-      updateRoom((r) => ({
-        ...r,
-        discussion: (r.discussion ?? []).map((item) => item.id === messageId ? next : item),
-      }));
+      updateRoom((r) => {
+        const list = r.discussion ?? [];
+        return {
+          ...r,
+          discussion: list.some((item) => item.id === messageId)
+            ? list.map((item) => (item.id === messageId ? next : item))
+            : [...list, next],
+        };
+      });
+      discussionOutboxRef.current.patch(next);
       void cloudRef.current.writes.updateDiscussion?.(next);
     },
     [cloud.userId, guest, updateRoom],
@@ -2172,14 +2231,21 @@ export function App() {
   const tombstoneDiscussion = useCallback(
     (messageId: string) => {
       const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
-      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
+      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId)
+        ?? discussionOutboxRef.current.ghosts.find((item) => item.id === messageId);
       const canManage = cloud.boundRoomId ? cloud.canManageMedia : true;
       if (!current || !actorIds.some((id) => canTombstoneDiscussion(current, id, canManage))) return;
       const next = { ...current, deletedAt: Date.now() };
-      updateRoom((r) => ({
-        ...r,
-        discussion: (r.discussion ?? []).map((item) => (item.id === messageId ? next : item)),
-      }));
+      updateRoom((r) => {
+        const list = r.discussion ?? [];
+        return {
+          ...r,
+          discussion: list.some((item) => item.id === messageId)
+            ? list.map((item) => (item.id === messageId ? next : item))
+            : [...list, next],
+        };
+      });
+      discussionOutboxRef.current.patch(next);
       void cloudRef.current.writes.tombstoneDiscussion?.(next);
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, updateRoom],
@@ -3538,8 +3604,12 @@ export function App() {
         setChatInput,
         sendChat,
         addFiles,
+        syncCanvaVersion,
         canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
         saveComposeVersion: savePosterComposeVersion,
+        composeVersions: normalizedRoom?.versions ?? reviewRoom.versions,
+        listComposeLibrary,
+        resolveComposeMaterial,
         setTitle: (title) => {
           if (activeBranchId) {
             updateProjectBranch(activeBranchId, { name: title });

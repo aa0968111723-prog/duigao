@@ -326,7 +326,31 @@ video.wb-media-frame { pointer-events: auto; }
 }
 .wb-focus-card strong { font-size: 15px; }
 .wb-focus-card small { color: var(--ink-faint); font-size: 12px; }
-.wb-focus-card.is-in-sheet { position: static; margin: 0 10px 8px; box-shadow: none; background: #f8f9fd; }
+.wb-focus-card.is-in-sheet { position: static; margin: 0 10px 8px; box-shadow: none; background: #f8f9fd; padding: 8px 12px; }
+.wb-focus-discuss {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 0 10px 8px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: #2f6fed;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+.wb-focus-actions {
+  margin: 0 10px 8px;
+  border-radius: 12px;
+  background: #f3f5fb;
+  color: var(--ink);
+}
+.wb-focus-actions summary {
+  min-height: 40px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
 .wb-focus-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .wb-focus-card-actions button {
   min-height: 40px;
@@ -375,6 +399,13 @@ video.wb-media-frame { pointer-events: auto; }
   border-radius: 18px 18px 0 0;
   box-shadow: 0 -12px 32px rgba(31,39,65,.12);
 }
+.wb-focus-sheet .m-sheet-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .wb-focus-sheet-discussion {
   flex: 1;
   min-height: 0;
@@ -383,9 +414,17 @@ video.wb-media-frame { pointer-events: auto; }
   overflow: hidden;
 }
 .wb-focus-sheet-discussion .rd-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wb-focus-sheet-discussion .rd-voice-note,
+.wb-focus-sheet-discussion .rd-voice-dock,
+.wb-focus-sheet-discussion .rd-decisions { display: none; }
 .wb-focus-sheet-discussion .rd-feed { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
-.wb-focus-sheet-discussion .rd-composer {
+.wb-focus-sheet-discussion .rd-composer,
+.wb-focus-sheet-discussion .is-discussion-root .rd-composer,
+.wb-focus-sheet .rd-composer {
   position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
   flex: none;
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
   background: linear-gradient(transparent, #fff 28%);

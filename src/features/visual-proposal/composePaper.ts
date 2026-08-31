@@ -5,6 +5,23 @@ export const COMPOSE_PAPER_WIDTH = 1080;
 export const COMPOSE_PAPER_HEIGHT = 1350;
 export const COMPOSE_PAPER_COLOR = "#f4f1ea";
 export const COMPOSE_PAPER_FILENAME = "紙底.png";
+export const COMPOSE_PAPER_LABEL = "紙底";
+
+/**
+ * Paper draft is a carrier, not a pickable finished poster.
+ * Only explicit COMPOSE_PAPER_* label / filename / data-URL features count.
+ * Do not infer from 「初稿」 or canvas emptiness.
+ */
+export function isComposePaperVersion(version: {
+  label?: string;
+  filename?: string;
+  imageDataUrl?: string;
+}): boolean {
+  if (version.label === COMPOSE_PAPER_FILENAME || version.label === COMPOSE_PAPER_LABEL) return true;
+  if (version.filename === COMPOSE_PAPER_FILENAME || version.filename === COMPOSE_PAPER_LABEL) return true;
+  const url = version.imageDataUrl ?? "";
+  return url.includes(COMPOSE_PAPER_FILENAME) || url.includes(COMPOSE_PAPER_LABEL);
+}
 
 /**
  * 前端生一張固定比例紙底 PNG。這不是成品，只是為了讓既有
