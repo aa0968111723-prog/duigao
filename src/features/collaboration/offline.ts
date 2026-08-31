@@ -11,6 +11,28 @@ export function isCloudWriteAcknowledged(result: unknown): result is true | Whit
   return Boolean(result && typeof result === "object" && "id" in result && "version" in result);
 }
 
+/**
+ * The IndexedDB board snapshot is an offline fallback, not a delta log. A
+ * write to one card must therefore keep every other card already on this
+ * board. Returning only the newly stamped cards was enough to make a board
+ * look as though its earlier cards had vanished after reopening offline.
+ */
+export function mergeBoardSnapshotNodes(
+  current: WhiteboardNode[],
+  changed: WhiteboardNode[],
+  whiteboardId: string,
+): WhiteboardNode[] {
+  const byId = new Map(
+    current
+      .filter((node) => node.whiteboardId === whiteboardId)
+      .map((node) => [node.id, node]),
+  );
+  for (const node of changed) {
+    if (node.whiteboardId === whiteboardId) byId.set(node.id, node);
+  }
+  return [...byId.values()];
+}
+
 export type NodeWriteRetry = {
   acknowledged: boolean;
   queueDurable: boolean;

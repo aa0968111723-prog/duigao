@@ -355,6 +355,7 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   const revisions = useRef<Map<string, number>>(new Map());
   const pending = useRef<PendingWrite[]>([]);
   const reloadTimer = useRef<number | null>(null);
+  const lastBoardLoadError = useRef<{ boardId: string; at: number } | null>(null);
   const roomRef = useRef<Room | null>(room);
   const activeBranchRef = useRef<string | null>(activeBranchId ?? null);
   const activeWhiteboardRef = useRef<string | null>(activeWhiteboardId ?? null);
@@ -481,10 +482,24 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       const otherEdges = (current.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId !== whiteboardId);
       onSnapshot({ ...current, whiteboardNodes: [...otherNodes, ...graph.nodes], whiteboardEdges: [...otherEdges, ...graph.edges] });
       return true;
-    } catch {
+    } catch (err) {
+      // Do not turn a rejected graph query into a blank board. The caller keeps
+      // its IndexedDB snapshot on screen and the person gets an actionable
+      // explanation instead of believing their work was deleted.
+      setStatus("error");
+      const previous = lastBoardLoadError.current;
+      if (!previous || previous.boardId !== whiteboardId || Date.now() - previous.at > 4_000) {
+        lastBoardLoadError.current = { boardId: whiteboardId, at: Date.now() };
+        showToast(
+          isPermissionDenied(err)
+            ? "你沒有讀取這張白板的權限。"
+            : "白板暫時讀不到，已保留這台裝置上的內容；請稍後重試。",
+          { tone: "error" },
+        );
+      }
       return false;
     }
-  }, [supabase, onSnapshot]);
+  }, [supabase, onSnapshot, showToast]);
 
   const scheduleReload = useCallback(() => {
     if (reloadTimer.current) window.clearTimeout(reloadTimer.current);

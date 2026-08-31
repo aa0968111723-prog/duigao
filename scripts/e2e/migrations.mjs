@@ -1672,6 +1672,10 @@ try {
     "whiteboard_frames 已加入 supabase_realtime publication",
     psql(`select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'whiteboard_frames';`).out === "1",
   );
+  ok(
+    "白板、節點與連線都在 realtime publication（多人不用重開）",
+    psql(`select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename in ('whiteboards', 'whiteboard_nodes', 'whiteboard_edges');`).out === "3",
+  );
   // 0024 snapshot CHECK：缺 edges 陣列被拒（設計如此 — Grok wb01 F8c 記錄）
   ok("快照缺 edges 陣列被 CHECK 擋下", as(owner, `insert into public.whiteboard_versions (id, whiteboard_id, room_id, snapshot, created_by) values (gen_random_uuid(), '${collabBoard}'::uuid, '${capRoom}'::uuid, '{"nodes":[]}'::jsonb, '${owner}'::uuid);`).failed);
 

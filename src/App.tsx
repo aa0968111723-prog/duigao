@@ -189,6 +189,7 @@ import {
   isBrowserOnline,
   isCloudWriteAcknowledged,
   listPendingEdits,
+  mergeBoardSnapshotNodes,
   loadBoardSnapshot,
   queuePendingEdit,
   mergeDiscussionSnapshot,
@@ -2417,8 +2418,11 @@ export function App() {
           whiteboardId: board.id,
           roomId: current.id,
           whiteboard: board,
-          nodes: [...(current.whiteboardNodes ?? []).filter((node) => node.whiteboardId !== board.id), ...stamped],
-          edges: current.whiteboardEdges ?? [],
+          // Snapshot is per board. Keep earlier cards on this board as well as
+          // the cards changed in this operation; otherwise reopening from the
+          // offline cache only restores the most recently edited card.
+          nodes: mergeBoardSnapshotNodes(current.whiteboardNodes ?? [], stamped, board.id),
+          edges: (current.whiteboardEdges ?? []).filter((edge) => edge.whiteboardId === board.id),
         });
       }
     },
