@@ -498,6 +498,7 @@ html.is-compose .pdock,
 .m-app.is-proposal .pdock {
   animation: compose-dock-in 150ms ease;
 }
+html.is-compose .coach { display: none; }
 @keyframes compose-dock-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
