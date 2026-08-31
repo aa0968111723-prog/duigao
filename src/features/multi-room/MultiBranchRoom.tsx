@@ -838,8 +838,9 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
   const openDiscussionMessage = (messageId: string) => {
     // Split View（平板）：討論就在左邊側欄，關掉白板反而把使用者正在看的
-    // 東西收走（自審 N13）。只有手機的「切 tab」語意才需要關板。
-    if (!railVisible && !boardFocused) {
+    // 東西收走（自審 N13）。手機「打開原訊息」是明確要回對話，必須關板，
+    // 否則 Focus overlay 會擋住第一層「更多」。
+    if (!railVisible) {
       api.onOpenWhiteboard(null);
       setDiscussPane("chat");
     }

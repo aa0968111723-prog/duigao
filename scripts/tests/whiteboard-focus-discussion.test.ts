@@ -104,6 +104,10 @@ test("手機寬度 rail 不 inline；sheet 開著", () => {
   assert.doesNotMatch(askBlock.slice(0, 900), /if \(api\.onAskColleague\) \{\s*api\.onAskColleague/);
   const mbr = src("src/features/multi-room/MultiBranchRoom.tsx");
   assert.match(mbr, /discussionSlot: !railVisible/);
+  // 手機打開原訊息必須關板，不能因為 boardFocused 就留在 overlay
+  const openSrc = mbr.slice(mbr.indexOf("openDiscussionMessage"));
+  assert.match(openSrc.slice(0, 500), /if \(!railVisible\)/);
+  assert.doesNotMatch(openSrc.slice(0, 500), /!boardFocused/);
 });
 
 test("discussion → node 有 linked entity；node → discussion 回得去", () => {
