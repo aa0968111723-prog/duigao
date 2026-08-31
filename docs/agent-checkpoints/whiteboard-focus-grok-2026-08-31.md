@@ -1,6 +1,8 @@
 # Checkpoint — 白板焦點 × Grok 同事（2026-08-31）
 
-基準：`main` @ `e343e19`（#171/#172/#173/#175 已在）。雲端分支 `cursor/whiteboard-discussion-focus-grok-1f8d`。
+基準：`main` @ `e343e19`（#171/#172/#173/#175 已在）。雲端分支 `cursor/whiteboard-discussion-focus-grok-1f8d` @ `769d038`。
+
+本機協作 E2E 134/134（`5c9f8cc`）。GitHub `browser` 上一輪在平板 `wb-side-rail` 逾時；腳本已對齊 viewport。§7 稽核見 `/opt/cursor/artifacts/completion-audit.md`。
 
 ## 讀到的現況（程式為準，各三行）
 焦點：選取是本機 `selected[]`，與 Focus Mode（開板 portal）正交；`focusNodeId` 只拉相機一次。沒有「房間焦點」物件，選卡 ≠ 團隊在討論這張。
