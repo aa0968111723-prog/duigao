@@ -1119,7 +1119,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
         ) : (
           <button type="button" className="project-home-button" onClick={api.onGoHome} aria-label="返回"><BrandMark compact /></button>
         )}
-        <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input ref={roomTitleRef} className="project-room-title-input" data-testid="room-title-input" autoFocus={api.room.title.trim() === "未命名活動房"} value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="例如：秋季茶會" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
+        <div className="project-room-heading"><span className="project-kicker">對稿・活動房</span>{api.canManage ? <input ref={roomTitleRef} className="project-room-title-input" data-testid="room-title-input" value={api.room.title} onChange={(event) => api.onRenameRoom(event.target.value)} placeholder="例如：秋季茶會" aria-label="活動房標題" /> : <h1>{api.room.title}</h1>}</div>
         {!hideRoomChrome && (
           <>
             <span className="project-presence" data-testid="room-presence">{roomPresenceLabel(api.online, Boolean(api.realtimeJoined))}</span>
