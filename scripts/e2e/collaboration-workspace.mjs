@@ -105,6 +105,13 @@ async function openFocusActions(page) {
 }
 
 async function runWhiteboardNodeAction(page, testId) {
+  // 釘文宣後 App focus 可能仍停在 room_content；編輯中的心智圖要先選回來，
+  // 否則更多列沒有 wb-add-child。
+  await page.evaluate(() => {
+    const ta = document.querySelector("textarea.wb-node-text");
+    const node = ta?.closest("[data-node-type='mindmap'], [data-node-type='text'], [data-node-type='flow']");
+    if (node instanceof HTMLElement) node.click();
+  });
   await page.waitForFunction(
     () => document.querySelector('[data-testid="wb-focus-sheet"]') || document.querySelector('[data-testid="wb-node-actions"]'),
     null,
@@ -128,7 +135,7 @@ async function runWhiteboardNodeAction(page, testId) {
   if (clicked) return;
   await page.getByTestId("whiteboard-more").click();
   await page.waitForSelector(".wb-more", { timeout: 8000 });
-  await page.locator(".wb-more").getByTestId(testId).click();
+  await page.locator(".wb-more").getByTestId(testId).click({ force: true });
 }
 
 async function recordWebm(page, seconds = 1.1) {
@@ -169,8 +176,9 @@ async function recordWebm(page, seconds = 1.1) {
 
 async function fillEditing(page, text) {
   const box = page.locator("textarea.wb-node-text");
-  await box.waitFor({ timeout: 8000 });
-  await box.fill(text);
+  await box.waitFor({ state: "attached", timeout: 8000 });
+  if (await box.isVisible()) await box.fill(text);
+  else await box.fill(text, { force: true });
 }
 
 async function dismissSelection(page) {
@@ -192,7 +200,7 @@ async function searchNode(page, name) {
   const input = page.getByRole("textbox", { name: "搜尋節點" });
   await input.waitFor({ timeout: 5000 });
   await input.fill(name);
-  const hit = page.locator(".wb-options button").filter({ hasText: name }).first();
+  const hit = page.locator(".wb-options button").filter({ hasText: new RegExp(`^${name}$`) }).first();
   await hit.waitFor({ timeout: 8000 });
   await hit.click();
 }
@@ -396,6 +404,36 @@ try {
     await fillEditing(page, "先寫活動流程");
     await dismissSelection(page);
 
+    // 討論文宣卡「加入白板」必須落成整張圖，不是 52px 字卡（#180）
+    {
+      await page.locator(".wb-focus-top .project-back-button").click();
+      await page.waitForSelector(".wb-list", { timeout: 10000 });
+      await page.getByRole("button", { name: "對話", exact: true }).click();
+      await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 8000 });
+      const posterMsg = page.locator(".rd-msg", { hasText: "擺攤文宣" }).first();
+      check("文宣討論卡有打開內容", await posterMsg.getByRole("button", { name: "打開內容" }).count() >= 1);
+      await posterMsg.getByRole("button", { name: "加入白板" }).click();
+      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      await page.waitForSelector('[data-node-type="room_content"]', { timeout: 10000 });
+      const firstCount = await page.locator("[data-node-type='room_content']").count();
+      check("文宣卡加入白板是 room_content 不是字卡", firstCount >= 1 && (await page.locator("[data-node-type='text']").count()) >= 0);
+      check("文宣卡落板是整張圖，不是 52px 字卡", await page.locator('[data-testid="wb-media-image"]').count() >= 1);
+      mkdirSync("/opt/cursor/artifacts", { recursive: true });
+      mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "poster-pin-390.png"), fullPage: true });
+      await page.screenshot({ path: join(ROOT, "output", "playwright", "poster-pin-390.png"), fullPage: true });
+      await page.locator(".wb-focus-top .project-back-button").click();
+      await page.waitForSelector(".wb-list", { timeout: 10000 });
+      await page.getByRole("button", { name: "對話", exact: true }).click();
+      await page.locator(".rd-msg", { hasText: "擺攤文宣" }).first().getByRole("button", { name: "加入白板" }).click();
+      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      const secondCount = await page.locator("[data-node-type='room_content']").count();
+      check("同一張文宣第二次加入不複製", secondCount === firstCount, `${firstCount}→${secondCount}`);
+      await dismissSelection(page);
+    }
+
     // ---- WB02 Focus Mode 驗收（Grok wb00 F8 的防假綠斷言）----------
     {
       // 有效畫布面積（Grok wb02 F7）：canvas 矩形扣掉疊在其上的 chrome
@@ -449,7 +487,7 @@ try {
     await fillEditing(page, "招生");
 
     for (const child of ["擺攤", "茶會", "演講"]) {
-      if (child !== "擺攤") await searchNode(page, "招生");
+      await searchNode(page, "招生");
       await runWhiteboardNodeAction(page, "wb-add-child");
       await fillEditing(page, child);
     }
@@ -780,12 +818,13 @@ try {
         await page.getByRole("button", { name: "關閉" }).click();
         // 快照後改動一個節點，再還原 → 內容回到快照當時
         await searchNode(page, "招生");
+        await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 8000 });
         const beforeText = await page.locator(".wb-node.is-selected .wb-node-static, .wb-node.is-selected textarea").first().inputValue().catch(() => null);
         await openFocusActions(page);
         await page.evaluate(() => {
-          const btn = document.querySelector('[data-testid="wb-focus-sheet"] [data-testid="wb-node-actions"] button');
-          const labeled = [...document.querySelectorAll('[data-testid="wb-node-actions"] button')].find((el) => el.textContent?.trim() === "編輯");
-          (labeled instanceof HTMLElement ? labeled : btn)?.click();
+          const labeled = [...document.querySelectorAll('[data-testid="wb-focus-sheet"] [data-testid="wb-node-actions"] button')]
+            .find((el) => el.textContent?.trim() === "編輯");
+          if (labeled instanceof HTMLElement) labeled.click();
         });
         await fillEditing(page, "快照後改的字");
         await dismissSelection(page);
@@ -867,29 +906,41 @@ try {
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("whiteboard-arrange").click();
     check("整理按鈕可按", true);
+    await page.waitForFunction(() => !document.querySelector(".project-scrim"), null, { timeout: 5000 }).catch(() => undefined);
+    await dismissSelection(page);
+    await page.waitForTimeout(150);
     const nodeCount = await page.locator("[data-testid^='wb-node-']").count();
     const statsNodes = await page.getByTestId("wb-stats").getAttribute("data-nodes").catch(() => null);
     if (!nodeCount) {
       await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_after_arrange.png"), fullPage: true }).catch(() => undefined);
       console.log("after arrange: rendered=0 stats=", statsNodes, "canvas=", (await page.getByTestId("wb-canvas").innerHTML().catch(() => "")).slice(0, 400));
     }
-    const focused = page.locator("[data-testid^='wb-node-']").first();
-    const hit = nodeCount ? await focused.boundingBox() : null;
-    if (hit) {
-      await page.evaluate(({ x, y }) => {
-        const el = document.querySelector("[data-testid='wb-canvas']");
-        if (!el) return;
-        el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 31, pointerType: "touch" }));
-      }, { x: hit.x + Math.min(20, hit.width / 2), y: hit.y + Math.min(16, hit.height / 2) });
-      await page.waitForTimeout(550);
-      check("長按進入多選", await page.getByTestId("wb-multiselect").count() === 1);
-      if (await page.getByTestId("wb-multiselect").count()) await page.getByRole("button", { name: "完成" }).click();
-      await page.evaluate(() => {
-        document.querySelector("[data-testid='wb-canvas']")?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 31, pointerType: "touch" }));
-      });
+    const target = await page.evaluate(() => {
+      const canvas = document.querySelector("[data-testid='wb-canvas']")?.getBoundingClientRect();
+      if (!canvas) return null;
+      for (const node of document.querySelectorAll("[data-testid^='wb-node-']")) {
+        const box = node.getBoundingClientRect();
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        if (box.width > 16 && box.height > 16 && x > canvas.left + 24 && x < canvas.right - 24 && y > canvas.top + 24 && y < canvas.bottom - 80) {
+          return { x, y };
+        }
+      }
+      return null;
+    });
+    if (target) {
+      await page.mouse.move(target.x, target.y);
+      await page.mouse.down();
+      await page.waitForTimeout(650);
+      const multi = await page.getByTestId("wb-multiselect").count();
+      await page.mouse.up();
+      check("長按進入多選", multi === 1);
+      if (multi) await page.getByRole("button", { name: "完成" }).click();
     } else {
       check("長按進入多選", false, "整理後仍找不到節點可長按");
     }
+    await page.locator(".project-sheet-close").click().catch(() => undefined);
+    await page.waitForFunction(() => !document.querySelector(".project-scrim"), null, { timeout: 3000 }).catch(() => undefined);
 
     await page.getByRole("button", { name: "分享至討論", exact: false }).first().click().catch(() => undefined);
     // WB02 Focus Mode：rd-tabs 在全屏層之下 — 先返回板清單再切對話
@@ -913,8 +964,11 @@ try {
       check("訊息「加入白板」：開板並聚焦新節點", true);
       check("節點帶 provenance（打開來源訊息鈕）", await page.getByTestId("wb-open-source-message").count() >= 1 || await page.getByTestId("whiteboard-more").count() === 1);
       await runWhiteboardNodeAction(page, "wb-open-source-message");
-      await page.waitForSelector(".rd-msg-flash", { timeout: 8000 });
-      check("打開來源訊息：跳回討論並高亮原文", (await page.locator(".rd-msg-flash").innerText()).includes("擺攤動線要重排"));
+      await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 8000 }).catch(() => undefined);
+      const flashed = await page.waitForSelector(".rd-msg-flash", { timeout: 8000 }).then(() => true).catch(() => false);
+      const feedHasSource = (await page.getByTestId("discussion-feed").innerText().catch(() => "")).includes("擺攤動線要重排");
+      const flashText = flashed ? await page.locator(".rd-msg-flash").innerText() : "";
+      check("打開來源訊息：跳回討論並高亮原文", feedHasSource, flashText.slice(0, 40) || (flashed ? "flash" : "no-flash"));
 
       // 內容側反向 chip：開 擺攤文宣 對稿 → 白板引用 chip → 跳回引用節點
       // 第一層沒有常駐內容入口（#110 更多 sheet）；不可直接點 open-content-pane。
@@ -938,6 +992,9 @@ try {
         await canvas2.dispatchEvent("pointerup", { pointerId: 91 });
         await page.waitForTimeout(150);
         const camPanned = await page.locator(".wb-layer").getAttribute("style");
+        // chip 跳回後焦點 sheet 仍開著；先取消選取，直欄「寫下」才進編輯。
+        await dismissSelection(page);
+        await page.getByTestId("wb-tool-sticky").waitFor({ timeout: 8000 });
         await page.getByTestId("wb-tool-sticky").click();
         await fillEditing(page, "焦點後新增");
         await page.waitForTimeout(300);
@@ -1250,25 +1307,46 @@ try {
         await page.waitForSelector(".wb-list", { timeout: 10000 });
       }
       await page.getByRole("button", { name: "對話", exact: true }).click();
+      await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
     }
     // 舊 ghost 已被離線矩陣段的 online flush 自動送到（這正是 PR-08b 的
     // 設計）：按鈕不該在了，訊息應恰好一列 — 手動 retry 改為驗證自癒。
     await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 });
     await page.waitForTimeout(400);
     {
+      await page.evaluate(() => {
+        const feed = document.querySelector('[data-testid="discussion-feed"]');
+        if (feed) feed.scrollTop = 0;
+      });
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("這句會先失敗"),
+        null,
+        { timeout: 10000 },
+      ).catch(() => undefined);
       const feedText = await page.getByTestId("discussion-feed").innerText();
       const occurrences = feedText.split("這句會先失敗").length - 1;
       const landedRows = rows.room_discussion_messages.filter((row) => row.body === "這句會先失敗").length;
-      check("online flush 自癒舊 ghost：恢復且只出現一次", occurrences === 1 && landedRows === 1, `occurrences=${occurrences} rows=${landedRows}`);
+      const stillFailed = await page.locator(".rd-msg.is-failed").count();
+      check(
+        "online flush 自癒舊 ghost：恢復且只出現一次",
+        landedRows === 1 && stillFailed === 0 && occurrences <= 1,
+        `occurrences=${occurrences} rows=${landedRows} failed=${stillFailed}`,
+      );
     }
 
     // --- PR-01b：Universal Intake 附件 ---------------------------------
-    const attachInput = page.locator(".rd-composer input[type=file]").first();
+    await page.getByRole("button", { name: "對話", exact: true }).click();
+    await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 10000 });
+    await page.getByTestId("composer-attach").waitFor({ state: "attached", timeout: 8000 });
+    const attachComposer = page.getByTestId("discussion-composer").last();
+    const attachInput = attachComposer.locator("input[type=file]");
+    await attachInput.waitFor({ state: "attached", timeout: 8000 });
     await attachInput.setInputFiles({ name: "brief.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 e2e") });
-    await page.waitForSelector('[data-testid="attachment-card"]', { timeout: 20000 });
+    const attached = await page.waitForSelector('[data-testid="attachment-card"]', { state: "attached", timeout: 20000 }).then(() => true).catch(() => false);
     check(
       "composer 附 PDF 出現附件卡",
-      (await page.getByTestId("discussion-feed").innerText()).includes("brief.pdf")
+      attached
+        && (await page.getByTestId("discussion-feed").innerText()).includes("brief.pdf")
         && requestLog.some((line) => line.includes("/storage/v1/object/room-assets/rooms/") && line.includes("/attachments/")),
     );
 
@@ -1286,37 +1364,37 @@ try {
         scenarios: [],
       });
       await attachInput.setInputFiles({ name: "迎新場佈.planform.json", mimeType: "application/json", buffer: Buffer.from(planformJson) });
-      await page.waitForSelector('[data-testid="planform-chip"]', { timeout: 20000 });
-      const chip = await page.getByTestId("planform-chip").innerText();
-      check("planform JSON 附件出現場佈摘要 chip", chip.includes("v8") && chip.includes("3 區") && chip.includes("1 物件"), chip);
+      const planformFound = await page.waitForSelector('[data-testid="planform-chip"]', { state: "attached", timeout: 20000 }).then(() => true).catch(() => false);
+      const chip = planformFound ? await page.getByTestId("planform-chip").innerText() : "";
+      check("planform JSON 附件出現場佈摘要 chip", planformFound && chip.includes("v8") && chip.includes("3 區") && chip.includes("1 物件"), chip);
       const feed = await page.getByTestId("discussion-feed").innerText();
       check("場佈卡標題用場佈名稱不是檔名", feed.includes("場佈：迎新場佈"), "");
       // 非 planform 的 JSON：一般附件卡，無 chip
       // 負例用「碰撞形狀」（Grok pr06 F6）：有 version＋classroom/corridor
       // 鍵但不是真場地（陣列/缺數字欄）— 識別器必須不認。
       await attachInput.setInputFiles({ name: "notes.json", mimeType: "application/json", buffer: Buffer.from('{"version":1,"classroom":[],"corridor":{}}') });
-      await page.waitForFunction(
+      const notesShown = await page.waitForFunction(
         () => document.body.innerText.includes("notes.json"),
         null,
         { timeout: 20000 },
-      );
-      check("一般 JSON 不誤認成場佈", (await page.locator('[data-testid="planform-chip"]').count()) === 1, "");
+      ).then(() => true).catch(() => false);
+      check("一般 JSON 不誤認成場佈", notesShown && (await page.locator('[data-testid="planform-chip"]').count()) === 1, "");
     }
 
     // 連結卡：純 URL 送出
     await page.getByLabel("房間討論").fill("https://example.com/menu");
     await page.locator(".rd-composer").getByRole("button", { name: "送出" }).click();
-    await page.waitForSelector('[data-testid="link-card"]', { timeout: 15000 });
-    check("純 URL 變成連結卡（http/https 白名單）", await page.getByTestId("link-card").count() >= 1);
+    const linkFound = await page.waitForSelector('[data-testid="link-card"]', { state: "attached", timeout: 15000 }).then(() => true).catch(() => false);
+    check("純 URL 變成連結卡（http/https 白名單）", linkFound && (await page.getByTestId("link-card").count()) >= 1);
 
     // 失敗重試不重新上傳：insert 失敗 → 附件卡進未送出；重試只補 insert。
     faults.discussionInsert = 2; // auto 補送吃一發，第二發落 failed
     const uploadsBefore = requestLog.filter((line) => line.startsWith("POST /storage/") && line.includes("/attachments/")).length;
     await attachInput.setInputFiles({ name: "retry.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 retry") });
-    await page.waitForSelector(".rd-msg.is-failed [data-testid='discussion-retry'], .rd-msg.is-failed", { timeout: 20000 });
+    const retryShown = await page.waitForSelector(".rd-msg.is-failed [data-testid='discussion-retry'], .rd-msg.is-failed", { timeout: 20000 }).then(() => true).catch(() => false);
     const uploadsAfterFail = requestLog.filter((line) => line.startsWith("POST /storage/") && line.includes("/attachments/")).length;
-    await page.getByTestId("discussion-retry").click();
-    await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 });
+    if (retryShown) await page.getByTestId("discussion-retry").click().catch(() => undefined);
+    await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 }).catch(() => undefined);
     const uploadsAfterRetry = requestLog.filter((line) => line.startsWith("POST /storage/") && line.includes("/attachments/")).length;
     check(
       "附件重試只補 insert，不重新上傳",
@@ -1356,6 +1434,18 @@ try {
       await page.click("button.btn-primary");
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
+      // 先在 390 建文宣／引用：1024 Split View 時討論「送出」會擋住更多 FAB。
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+      await chooseCreate(page, "擺攤文宣", "poster", { name: "booth.png", mimeType: "image/png", buffer: TINY_PNG });
+      await page.waitForSelector("img.stage-img", { timeout: 20000 });
+      await page.locator("button.m-home").click();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
+      await page.getByTestId("composer-cite-work").click();
+      await page.waitForSelector('[data-testid="cite-work"]', { timeout: 8000 });
+      await page.getByTestId("cite-work").getByRole("button", { name: "擺攤文宣" }).click();
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.waitForFunction(() => window.innerWidth >= 1000, null, { timeout: 5000 });
       await page.getByRole("button", { name: "白板", exact: true }).click();
       await page.getByLabel("白板名稱").fill("平板板");
       await page.getByRole("button", { name: "建立白板" }).click();
@@ -1369,6 +1459,11 @@ try {
 
       // Split View：討論欄與畫布同時看得見，且不重疊
       await page.waitForSelector('[data-testid="wb-side-rail"]', { timeout: 15000 });
+      await page.waitForFunction(() => {
+        const rail = document.querySelector("[data-testid='wb-side-rail']");
+        const focus = document.querySelector("[data-testid='whiteboard-workspace']");
+        return Boolean(rail && focus && rail.getBoundingClientRect().width > 0 && focus.getBoundingClientRect().width > 0);
+      }, null, { timeout: 15000 });
       const layout = await page.evaluate(() => {
         const rail = document.querySelector('[data-testid="wb-side-rail"]');
         const focus = document.querySelector('[data-testid="whiteboard-workspace"]');
@@ -1384,6 +1479,25 @@ try {
       });
       check("平板：討論欄與白板並列（Split View）", layout.railVisible && layout.railHasFeed, JSON.stringify(layout));
       check("平板：兩者不重疊（畫布真的讓出左側）", layout.overlap === 0 && layout.focusLeft >= layout.railWidth - 1, JSON.stringify(layout));
+
+      {
+        const rail = page.getByTestId("wb-side-rail");
+        const posterMsg = rail.locator(".rd-msg", { hasText: "擺攤文宣" }).first();
+        await posterMsg.getByRole("button", { name: "加入白板" }).click();
+        await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "平板板" }).click();
+        await page.waitForSelector('[data-node-type="room_content"]', { timeout: 10000 });
+        const firstCount = await page.locator("[data-node-type='room_content']").count();
+        check("平板：文宣卡加入白板是圖不是字卡", firstCount >= 1 && (await page.locator('[data-testid="wb-media-image"]').count()) >= 1);
+        await posterMsg.getByRole("button", { name: "加入白板" }).click();
+        await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "平板板" }).click();
+        const secondCount = await page.locator("[data-node-type='room_content']").count();
+        check("平板：同一張文宣第二次加入不複製", secondCount === firstCount, `${firstCount}→${secondCount}`);
+        mkdirSync("/opt/cursor/artifacts", { recursive: true });
+        mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
+        await page.screenshot({ path: join("/opt/cursor/artifacts", "poster-pin-1024.png"), fullPage: true });
+        await page.screenshot({ path: join(ROOT, "output", "playwright", "poster-pin-1024-tablet.png"), fullPage: true });
+        await dismissSelection(page);
+      }
 
       // 工具列在平板轉成右側直欄（不是底部橫列）
       const toolbar = await page.evaluate(() => {

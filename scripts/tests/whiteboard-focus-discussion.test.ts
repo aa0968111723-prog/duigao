@@ -23,13 +23,21 @@ import {
   FOCUS_SHEET_COMPOSER_MIN,
   FOCUS_SHEET_PEEK_HEIGHT,
   focusSheetSnapHeights,
+  incomingFocusAction,
   shouldInlineDiscussionRail,
   shouldMountFocusSheet,
   snapAfterFocusDiscuss,
+  snapAfterSelectionOrEdit,
   workLayerItemsFromNodes,
 } from "../../src/features/whiteboard/boardFocus";
-import { stickyFromDiscussion } from "../../src/features/collaboration/links";
-import { discussionPayloadFromNode } from "../../src/features/collaboration/links";
+import {
+  discussionPayloadFromFocusNode,
+  discussionPayloadFromNode,
+  discussionShowsContentActions,
+  placeFromDiscussion,
+  placeRoomContentFromDiscussion,
+  stickyFromDiscussion,
+} from "../../src/features/collaboration/links";
 import { canEditDiscussion, isMemberActor } from "../../src/features/collaboration/discussionHonesty";
 import {
   colleagueBubbleClass,
@@ -133,7 +141,11 @@ test("390 選卡：half 第一屏看得到討論與輸入框，動作收進 disc
   assert.ok(phone.half > 200, "half 必須裝得下摘要＋討論鈕＋composer");
   const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
   assert.match(workspace, /useState<SheetSnap>\("half"\)/);
-  assert.match(workspace, /if \(selected\[0\]\) setFocusSheetSnap\("half"\)/);
+  assert.match(workspace, /snapAfterSelectionOrEdit/);
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: false, selectionChanged: true }), "half");
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: true, selectionChanged: true }), "peek");
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: true, selectionChanged: false }), null);
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: false, editing: true, selectionChanged: true }), null);
   assert.doesNotMatch(workspace, /viewportHeight=\{typeof window === "undefined" \? 640 : window\.innerHeight\}/);
   assert.match(workspace, /viewportHeight=\{sheetSnaps\.viewportHeight\}/);
   assert.match(workspace, /peekHeight=\{sheetSnaps\.peek\}/);
@@ -374,4 +386,219 @@ test("預覽 origin 跟焦點；套用失敗預覽留著", () => {
   assert.ok(origin.x > 100);
   const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
   assert.match(workspace, /預覽還在，白板維持原狀/);
+});
+
+test("messagesForFocus：version 節點吃得到同 versionId、不同 nodeId 的訊息", () => {
+  const poster = node({
+    id: "n-poster",
+    nodeType: "room_content",
+    linkedEntityType: "version",
+    linkedEntityId: "v-poster",
+    sourceVersionId: "v-poster",
+    content: { mediaKind: "poster", title: "擺攤文宣" },
+  });
+  const related = messagesForFocus([
+    message({ id: "m-same", payload: { versionId: "v-poster", nodeId: "other-node" } }),
+    message({ id: "m-other", payload: { versionId: "v-other" } }),
+    message({ id: "m-plain", payload: {} }),
+  ], poster);
+  assert.equal(related.length, 1);
+  assert.equal(related[0].id, "m-same");
+});
+
+test("messagesForFocus：影片區間只吃落在區間內的 startTime；點對點 0.5s", () => {
+  const clip = node({
+    id: "n-vid",
+    nodeType: "room_content",
+    linkedEntityType: "branch",
+    linkedEntityId: "br-vid",
+    content: { mediaKind: "video", title: "招生影片", startTime: 12, endTime: 30 },
+  });
+  const inRange = messagesForFocus([
+    message({ id: "m-in", payload: { branchId: "br-vid", startTime: 15 } }),
+    message({ id: "m-out", payload: { branchId: "br-vid", startTime: 40 } }),
+  ], clip);
+  assert.equal(inRange.length, 1);
+  assert.equal(inRange[0].id, "m-in");
+  const point = node({
+    id: "n-point",
+    nodeType: "room_content",
+    linkedEntityType: "branch",
+    linkedEntityId: "br-vid",
+    content: { mediaKind: "video", startTime: 12 },
+  });
+  assert.equal(messagesForFocus([message({ id: "near", payload: { startTime: 12.4 } })], point).length, 1);
+  assert.equal(messagesForFocus([message({ id: "far", payload: { startTime: 12.6 } })], point).length, 0);
+});
+
+test("messagesForFocus：planSectionId 對得上才算；別段不算", () => {
+  const section = node({
+    id: "n-plan",
+    nodeType: "room_content",
+    linkedEntityType: "plan",
+    linkedEntityId: "br-plan",
+    anchor: { type: "plan-section", branchId: "br-plan", sectionId: "s1" },
+    content: { mediaKind: "plan", subtitle: "受眾是高中生" },
+  });
+  const related = messagesForFocus([
+    message({ id: "m-hit", payload: { branchId: "br-plan", planSectionId: "s1" } }),
+    message({ id: "m-miss", payload: { branchId: "br-plan", planSectionId: "s2" } }),
+  ], section);
+  assert.equal(related.length, 1);
+  assert.equal(related[0].id, "m-hit");
+});
+
+test("焦點卡來源：poster 不是無來源；討論釘仍含討論", () => {
+  const poster = focusCardFromNode(node({
+    nodeType: "room_content",
+    linkedEntityType: "version",
+    linkedEntityId: "v1",
+    content: { mediaKind: "poster", title: "擺攤文宣", versionLabel: "改一" },
+  }));
+  assert.equal(poster.title, "擺攤文宣");
+  assert.match(poster.sourceLabel, /文宣/);
+  assert.doesNotMatch(poster.sourceLabel, /無來源/);
+  const region = focusCardFromNode(node({
+    nodeType: "room_content",
+    linkedEntityType: "version",
+    linkedEntityId: "v1",
+    anchor: { type: "image-region", versionId: "v1", region: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 } },
+    content: { mediaKind: "poster", title: "擺攤文宣", subtitle: "主標太淡" },
+  }));
+  assert.equal(region.sourceLabel, "文宣圈選 · 主標太淡");
+  const sticky = stickyFromDiscussion(message({ id: "msg-88", authorName: "阿哲", body: "釘這句" }), "b1", "u1");
+  const discussion = focusCardFromNode(sticky);
+  assert.match(discussion.sourceLabel, /討論/);
+  const ctx = boardAskContext({
+    nodes: [node({
+      id: "n-poster",
+      nodeType: "room_content",
+      linkedEntityType: "version",
+      content: { mediaKind: "poster", title: "擺攤文宣" },
+    })],
+    focusNode: node({
+      id: "n-poster",
+      nodeType: "room_content",
+      linkedEntityType: "version",
+      content: { mediaKind: "poster", title: "擺攤文宣" },
+    }),
+  });
+  assert.equal(ctx.focus?.source, "version");
+  assert.match(ctx.focus?.sourceLabel ?? "", /文宣/);
+  assert.doesNotMatch(JSON.stringify(ctx), /storage\/v1|room-assets\//);
+});
+
+test("placeRoomContentFromDiscussion：文宣／影片落成 room_content；純 text 仍便利貼；同實體不複製", () => {
+  const room = {
+    versions: [{
+      id: "v1",
+      branchId: "br-poster",
+      label: "改一",
+      kind: "image" as const,
+      imageDataUrl: "data:image/png;base64,abc",
+    }],
+    branches: [{ id: "br-poster", name: "擺攤文宣", branchType: "poster" as const }],
+    plans: [],
+  };
+  const posterMsg = message({
+    id: "m-poster",
+    kind: "poster",
+    body: "擺攤文宣",
+    payload: { versionId: "v1", title: "擺攤文宣" },
+  });
+  const first = placeRoomContentFromDiscussion(posterMsg, "b1", "u1", room);
+  assert.equal(first.created, true);
+  assert.equal(first.node.nodeType, "room_content");
+  assert.notEqual(first.node.nodeType, "text");
+  assert.equal(first.node.content.mediaKind, "poster");
+  assert.ok(first.node.content.thumbnailUrl);
+  assert.equal(first.node.anchor?.messageId, "m-poster");
+  const second = placeRoomContentFromDiscussion(posterMsg, "b1", "u1", room, [first.node]);
+  assert.equal(second.created, false);
+  assert.equal(second.node.id, first.node.id);
+
+  const videoMsg = message({
+    id: "m-vid",
+    kind: "video",
+    body: "招生影片",
+    payload: { branchId: "br-vid", startTime: 12, endTime: 30, title: "招生影片" },
+  });
+  const videoRoom = {
+    versions: [{
+      id: "v-vid",
+      branchId: "br-vid",
+      label: "A",
+      kind: "video" as const,
+      imageDataUrl: "https://example.test/poster.jpg",
+      videoUrl: "https://example.test/clip.mp4",
+    }],
+    branches: [{ id: "br-vid", name: "招生影片", branchType: "video" as const }],
+    plans: [],
+  };
+  const video = placeRoomContentFromDiscussion(videoMsg, "b1", "u1", videoRoom);
+  assert.equal(video.node.content.mediaKind, "video");
+  assert.equal(video.node.content.startTime, 12);
+  assert.equal(video.node.nodeType, "room_content");
+
+  const text = placeFromDiscussion(message({ id: "m-text", kind: "text", body: "先推茶會" }), "b1", "u1", room);
+  assert.equal(text.node.nodeType, "text");
+  assert.equal(text.node.linkedEntityType, "discussion");
+});
+
+test("composer 焦點錨帶 versionId／時間／段落；內容卡按鈕不只認 branchId", () => {
+  const posterPayload = discussionPayloadFromFocusNode(node({
+    id: "n-poster",
+    nodeType: "room_content",
+    linkedEntityType: "version",
+    linkedEntityId: "v1",
+    sourceVersionId: "v1",
+    content: { mediaKind: "poster", title: "擺攤文宣" },
+  }));
+  assert.equal(posterPayload.versionId, "v1");
+  assert.equal(posterPayload.nodeId, "n-poster");
+  const videoPayload = discussionPayloadFromFocusNode(node({
+    id: "n-vid",
+    nodeType: "room_content",
+    linkedEntityType: "branch",
+    linkedEntityId: "br-vid",
+    content: { mediaKind: "video", startTime: 12, endTime: 30 },
+  }));
+  assert.equal(videoPayload.startTime, 12);
+  assert.equal(videoPayload.branchId, "br-vid");
+  const planPayload = discussionPayloadFromFocusNode(node({
+    id: "n-plan",
+    nodeType: "room_content",
+    linkedEntityType: "plan",
+    linkedEntityId: "br-plan",
+    anchor: { type: "plan-section", branchId: "br-plan", sectionId: "s1" },
+    content: { mediaKind: "plan" },
+  }));
+  assert.equal(planPayload.branchId, "br-plan");
+  assert.equal(planPayload.planSectionId, "s1");
+  assert.equal(discussionShowsContentActions(message({ kind: "poster", payload: { versionId: "v1" } })), true);
+  assert.equal(discussionShowsContentActions(message({ kind: "text", payload: {} })), false);
+  const drawer = src("src/features/room-discussion/RoomDiscussion.tsx");
+  assert.match(drawer, /discussionShowsContentActions/);
+  assert.match(drawer, /discussionPayloadFromFocusNode/);
+  assert.match(drawer, /打開內容/);
+  assert.doesNotMatch(drawer, /kind === "poster".*&& message\.payload\.branchId/);
+  const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  assert.match(workspace, /連到相關內容/);
+  assert.match(workspace, /wb-relate-content/);
+  assert.match(workspace, /openContentFromNode/);
+  const app = src("src/App.tsx");
+  assert.match(app, /placeFromDiscussion/);
+  assert.doesNotMatch(app, /stickyFromDiscussion\(/);
+  assert.match(workspace, /incomingFocusAction/);
+  assert.match(workspace, /childSourceNode/);
+  assert.match(workspace, /stepSourceNode/);
+});
+
+test("incoming focus：編輯中的另一張卡不被釘文宣搶走", () => {
+  assert.equal(incomingFocusAction({ incomingId: null, appliedId: "poster", editingId: "mind" }), "clear");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: "poster", editingId: "mind" }), "skip");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: "mind" }), "consume");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: null, selectedId: "mind" }), "consume");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: null }), "apply");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: "poster" }), "apply");
 });

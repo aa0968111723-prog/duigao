@@ -2,9 +2,9 @@
  * Whiteboard extras already typed by #113 / ContextAnchor.
  * Persists on existing node.anchor jsonb + linkedEntity* — no new tables.
  */
-import { anchorToNodeLink, type ContextAnchor } from "../../lib/contextAnchor";
+import { anchorFromNode, anchorToNodeLink, openTarget, type ContextAnchor } from "../../lib/contextAnchor";
 import type { AnnotationRegion, PlanBlock, PlanDocument, Room } from "../../lib/types";
-import type { WhiteboardNode } from "./types";
+import type { DiscussionMessage, WhiteboardNode } from "./types";
 
 export type PosterRegionMark = {
   pinId: string;
@@ -89,5 +89,67 @@ export function contentOpenFromNode(node: WhiteboardNode): {
   return {
     startTime: node.content.startTime,
     endTime: node.content.endTime,
+  };
+}
+
+export type ContentOpen = {
+  branchId?: string;
+  versionId?: string;
+  region?: AnnotationRegion;
+  startTime?: number;
+  endTime?: number;
+  planSectionId?: string;
+};
+
+export function branchIdForVersion(
+  room: Pick<Room, "versions"> | undefined,
+  versionId?: string,
+): string | undefined {
+  if (!versionId || !room?.versions) return undefined;
+  return room.versions.find((version) => version.id === versionId)?.branchId;
+}
+
+/**
+ * Room-aware open. openTarget stays a pure contract (image arm / version-only
+ * video stay none). Branch lookup lives here so App can still open the draft.
+ */
+export function openContentFromNode(
+  node: WhiteboardNode,
+  room?: Pick<Room, "versions">,
+): ContentOpen {
+  const fromAnchor = contentOpenFromNode(node);
+  const target = openTarget(anchorFromNode(node));
+  let branchId: string | undefined;
+  if (target.surface === "content") branchId = target.branchId;
+  else if (node.linkedEntityType === "branch" || node.linkedEntityType === "plan") branchId = node.linkedEntityId;
+  const versionId = fromAnchor.versionId
+    || node.sourceVersionId
+    || (node.linkedEntityType === "version" ? node.linkedEntityId : undefined);
+  if (!branchId) branchId = branchIdForVersion(room, versionId);
+  const startTime = fromAnchor.startTime
+    ?? (target.surface === "content" ? target.startTime : undefined);
+  return {
+    branchId,
+    versionId,
+    region: fromAnchor.region,
+    startTime,
+    endTime: fromAnchor.endTime,
+    planSectionId: fromAnchor.planSectionId,
+  };
+}
+
+export function openContentFromDiscussion(
+  message: Pick<DiscussionMessage, "payload">,
+  room?: Pick<Room, "versions">,
+): ContentOpen {
+  const payload = message.payload ?? {};
+  const versionId = payload.versionId;
+  const branchId = payload.branchId || branchIdForVersion(room, versionId);
+  return {
+    branchId,
+    versionId,
+    startTime: payload.startTime,
+    endTime: payload.endTime,
+    planSectionId: payload.planSectionId,
   };
 }

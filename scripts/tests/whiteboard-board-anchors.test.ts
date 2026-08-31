@@ -13,6 +13,7 @@ import {
   planParagraphs,
   posterRegionMarks,
   contentOpenFromNode,
+  openContentFromNode,
 } from "../../src/features/collaboration/boardAnchors";
 import type { Room } from "../../src/lib/types";
 import type { WhiteboardNode } from "../../src/features/collaboration/types";
@@ -86,6 +87,71 @@ test("plan-section uses existing plan.blocks ids; omitted blocks stay honest", (
   assert.equal(placed.link.linkedEntityType, "plan");
   assert.equal(placed.link.linkedEntityId, "p");
   assert.match(placed.subtitle ?? "", /受眾是高中生/);
+});
+
+test("openContentFromNode：圈選／影片時間／企劃段落；只有 versionId 的影片可反查 branch", () => {
+  const regionPlaced = nodeFromImageRegion({
+    versionId: "v1",
+    region: { x: 0.1, y: 0.2, width: 0.4, height: 0.3 },
+    label: "主標太淡",
+  });
+  const poster = {
+    id: "n-poster",
+    whiteboardId: "b1",
+    roomId: "r1",
+    nodeType: "room_content",
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 120,
+    content: { mediaKind: "poster", title: "擺攤文宣" },
+    linkedEntityType: regionPlaced.link.linkedEntityType,
+    linkedEntityId: regionPlaced.link.linkedEntityId,
+    sourceVersionId: regionPlaced.sourceVersionId,
+    anchor: regionPlaced.anchor,
+    createdBy: "u",
+    createdAt: 1,
+    updatedAt: 1,
+    version: 1,
+  } as WhiteboardNode;
+  const fixture = {
+    versions: [
+      { id: "v1", branchId: "b-poster", label: "A", kind: "image" },
+      { id: "v-vid", branchId: "b-video", label: "B", kind: "video" },
+    ],
+  } as Room;
+  const posterOpen = openContentFromNode(poster, fixture);
+  assert.equal(posterOpen.versionId, "v1");
+  assert.deepEqual(posterOpen.region, { x: 0.1, y: 0.2, width: 0.4, height: 0.3 });
+  assert.equal(posterOpen.branchId, "b-poster");
+
+  const video = {
+    ...poster,
+    id: "n-vid",
+    linkedEntityType: "version",
+    linkedEntityId: "v-vid",
+    sourceVersionId: "v-vid",
+    anchor: undefined,
+    content: { mediaKind: "video", startTime: 12, endTime: 30, title: "招生影片" },
+  } as WhiteboardNode;
+  const videoOpen = openContentFromNode(video, fixture);
+  assert.equal(videoOpen.startTime, 12);
+  assert.equal(videoOpen.branchId, "b-video");
+  assert.equal(videoOpen.versionId, "v-vid");
+
+  const planPlaced = nodeFromPlanSection({ branchId: "p", section: { id: "s1", text: "受眾是高中生" } });
+  const plan = {
+    ...poster,
+    id: "n-plan",
+    linkedEntityType: planPlaced.link.linkedEntityType,
+    linkedEntityId: planPlaced.link.linkedEntityId,
+    sourceVersionId: undefined,
+    anchor: planPlaced.anchor,
+    content: { mediaKind: "plan", subtitle: planPlaced.subtitle },
+  } as WhiteboardNode;
+  const planOpen = openContentFromNode(plan, fixture);
+  assert.equal(planOpen.planSectionId, "s1");
+  assert.equal(planOpen.branchId, "p");
 });
 
 test("workspace wires poster-region and plan-section sheets; compact toolbar under 768", () => {

@@ -146,7 +146,7 @@ import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiShe
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
-import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
+import { discussionPayloadFromNode, placeFromDiscussion } from "./features/collaboration/links";
 import {
   auditWrite,
   colleagueTurnFromResponse,
@@ -2525,13 +2525,23 @@ export function App() {
 
   const addMessageToBoard = useCallback(
     (message: DiscussionMessage, whiteboardId: string) => {
-      const node = stickyFromDiscussion(message, whiteboardId, cloud.userId ?? guest?.id ?? "local", {
-        x: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 4) * 24,
-        y: 80 + ((roomRef.current?.whiteboardNodes ?? []).length % 5) * 24,
-      });
-      upsertNode(node);
+      const roomNow = roomRef.current;
+      const actor = cloud.userId ?? guest?.id ?? "local";
+      const existing = (roomNow?.whiteboardNodes ?? []).filter((node) => node.whiteboardId === whiteboardId);
+      const placed = placeFromDiscussion(
+        message,
+        whiteboardId,
+        actor,
+        roomNow ?? { versions: [], branches: [], plans: [] },
+        existing,
+        {
+          x: 80 + (existing.length % 4) * 24,
+          y: 80 + (existing.length % 5) * 24,
+        },
+      );
+      if (placed.created) upsertNode(placed.node);
       setActiveWhiteboardId(whiteboardId);
-      setFocusNodeId(node.id);
+      setFocusNodeId(placed.node.id);
     },
     [cloud.userId, guest, upsertNode],
   );
