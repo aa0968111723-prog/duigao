@@ -2151,10 +2151,11 @@ export function App() {
 
   const editDiscussion = useCallback(
     (messageId: string, body: string) => {
-      const userId = cloud.userId ?? guest?.id;
+      const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
       const patch = discussionEditPatch(body);
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
-      if (!userId || !patch || !current || !canEditDiscussion(current, userId)) return;
+      // guest → 登入 userId 切換的空窗：送出時可能是 guest.id，按儲存時已是 cloud.userId
+      if (!patch || !current || !actorIds.some((id) => canEditDiscussion(current, id))) return;
       const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
       updateRoom((r) => ({
         ...r,
@@ -2167,10 +2168,10 @@ export function App() {
 
   const tombstoneDiscussion = useCallback(
     (messageId: string) => {
-      const userId = cloud.userId ?? guest?.id;
+      const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
       const canManage = cloud.boundRoomId ? cloud.canManageMedia : true;
-      if (!userId || !current || !canTombstoneDiscussion(current, userId, canManage)) return;
+      if (!current || !actorIds.some((id) => canTombstoneDiscussion(current, id, canManage))) return;
       const next = { ...current, deletedAt: Date.now() };
       updateRoom((r) => ({
         ...r,
