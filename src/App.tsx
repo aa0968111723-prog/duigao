@@ -143,16 +143,6 @@ import { AssetAiFab, RoomAiSheet } from "./features/asset-intelligence/RoomAiShe
 import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContextResponse } from "./lib/assetIntelligence";
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
-// #region agent log
-function agentLog(hypothesisId: string, location: string, message: string, data: Record<string, unknown>) {
-  const payload = { hypothesisId, location, message, data, timestamp: Date.now() };
-  try { (window as unknown as { __agentDbg?: (p: unknown) => void }).__agentDbg?.(payload); } catch { /* ignore */ }
-  const base = import.meta.env.VITE_SUPABASE_URL;
-  if (typeof base === "string" && base) {
-    fetch(`${base}/__debug_log`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }).catch(() => undefined);
-  }
-}
-// #endregion
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
 import {
   auditWrite,
@@ -678,27 +668,7 @@ export function App() {
         // 讀取失敗造成的空討論不覆蓋畫面上已有的對話（見上方註解）。
         // 只在「同一間房」時保留 —— 換房時 current 是上一間房，
         // 沿用它會把別間房的訊息畫進這間房。
-        discussion: (() => {
-          const merged = mergeDiscussionSnapshot(current, normalized);
-          // #region agent log
-          const cur = current?.discussion ?? [];
-          const inc = normalized.discussion ?? [];
-          if (cur.some((m) => m.body.includes("招生流程")) || inc.some((m) => m.body.includes("招生流程")) || (merged ?? []).some((m) => m.body.includes("招生流程"))) {
-            agentLog("C", "App.tsx:mergeDiscussionSnapshot", "discussion snapshot merge", {
-              currentId: current?.id ?? null,
-              incomingId: normalized.id,
-              currentCount: cur.length,
-              incomingDefined: normalized.discussion !== undefined,
-              incomingCount: inc.length,
-              mergedCount: merged?.length ?? 0,
-              currentBodies: cur.map((m) => ({ id: m.id, body: m.body, edited: Boolean(m.payload?.edited) })),
-              incomingBodies: inc.map((m) => ({ id: m.id, body: m.body, edited: Boolean(m.payload?.edited) })),
-              mergedBodies: (merged ?? []).map((m) => ({ id: m.id, body: m.body, edited: Boolean(m.payload?.edited) })),
-            });
-          }
-          // #endregion
-          return merged;
-        })(),
+        discussion: mergeDiscussionSnapshot(current, normalized),
         // 專案房不可被快照「降級」：loadRoomFull 的 projectMode 推斷在
         // room_mode PATCH 還沒落地、又只有一個分支時會誤判 single，
         // 那會讓房間殼整個掉出去換成單房對稿樹。
@@ -2184,25 +2154,8 @@ export function App() {
       const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
       const patch = discussionEditPatch(body);
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
-      const willApply = Boolean(patch && current && actorIds.some((id) => canEditDiscussion(current, id)));
-      // #region agent log
-      agentLog("B", "App.tsx:editDiscussion", "onEditMessage called", {
-        messageId,
-        body,
-        bodyHasEdit: body.includes("改過"),
-        hasPatch: Boolean(patch),
-        hasCurrent: Boolean(current),
-        willApply,
-        authorId: current?.authorId ?? null,
-        currentBody: current?.body ?? null,
-        actorIds,
-        canByActor: current ? actorIds.map((id) => ({ id, ok: canEditDiscussion(current, id) })) : [],
-        discussionIds: (roomRef.current?.discussion ?? []).map((item) => item.id),
-        hasUpdateFn: Boolean(cloudRef.current.writes.updateDiscussion),
-      });
-      // #endregion
       // guest → 登入 userId 切換的空窗：送出時可能是 guest.id，按儲存時已是 cloud.userId
-      if (!willApply || !patch || !current) return;
+      if (!patch || !current || !actorIds.some((id) => canEditDiscussion(current, id))) return;
       const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
       updateRoom((r) => ({
         ...r,

@@ -842,12 +842,6 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
     const frame = requestAnimationFrame(() => {
       roomTitleRef.current?.focus();
       roomTitleRef.current?.select();
-      // #region agent log
-      const payload = { hypothesisId: "E", location: "MultiBranchRoom.tsx:titleFocus", message: "unnamed room title focused", data: { roomId: api.room.id, title: api.room.title, activeTestId: typeof document !== "undefined" ? document.activeElement?.getAttribute("data-testid") : null }, timestamp: Date.now() };
-      try { (window as unknown as { __agentDbg?: (p: unknown) => void }).__agentDbg?.(payload); } catch { /* ignore */ }
-      const base = import.meta.env.VITE_SUPABASE_URL;
-      if (typeof base === "string" && base) fetch(`${base}/__debug_log`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }).catch(() => undefined);
-      // #endregion
     });
     return () => cancelAnimationFrame(frame);
   }, [api.canManage, api.room.id, api.room.title]);
