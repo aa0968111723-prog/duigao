@@ -358,11 +358,23 @@ export function reconcileNodes(local: WhiteboardNode[], remote: WhiteboardNode[]
  *   - 伺服器沒回答（undefined）且是同一間房 → 保留現況，不抹掉。
  *   - 伺服器沒回答且換了房 → 不可沿用上一間房的訊息，回 undefined。
  */
-export function mergeDiscussionSnapshot<T>(
+export function mergeDiscussionSnapshot<T extends { id: string; updatedAt?: number }>(
   current: { id: string; discussion?: T[] } | null | undefined,
   incoming: { id: string; discussion?: T[] },
 ): T[] | undefined {
-  if (incoming.discussion !== undefined) return incoming.discussion;
-  if (current && current.id === incoming.id) return current.discussion;
-  return undefined;
+  if (incoming.discussion === undefined) {
+    if (current && current.id === incoming.id) return current.discussion;
+    return undefined;
+  }
+  // 伺服器有回答（含空陣列）→ 採用。同一 id 若本地 updatedAt 較新
+  // （剛編輯／tombstone、PATCH 還沒進這份快照）不得被較舊列蓋掉。
+  if (!current || current.id !== incoming.id || !current.discussion?.length) {
+    return incoming.discussion;
+  }
+  const localById = new Map(current.discussion.map((item) => [item.id, item]));
+  return incoming.discussion.map((item) => {
+    const local = localById.get(item.id);
+    if (local && (local.updatedAt ?? 0) > (item.updatedAt ?? 0)) return local;
+    return item;
+  });
 }

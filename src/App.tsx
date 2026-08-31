@@ -2175,14 +2175,22 @@ export function App() {
     (messageId: string, body: string) => {
       const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
       const patch = discussionEditPatch(body);
-      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
+      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId)
+        ?? discussionOutboxRef.current.ghosts.find((item) => item.id === messageId);
       // guest → 登入 userId 切換的空窗：送出時可能是 guest.id，按儲存時已是 cloud.userId
+      // insert 還沒進快照時列只活在 ghost；只查 room.discussion 會讓「編輯」按了沒有字。
       if (!patch || !current || !actorIds.some((id) => canEditDiscussion(current, id))) return;
       const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
-      updateRoom((r) => ({
-        ...r,
-        discussion: (r.discussion ?? []).map((item) => item.id === messageId ? next : item),
-      }));
+      updateRoom((r) => {
+        const list = r.discussion ?? [];
+        return {
+          ...r,
+          discussion: list.some((item) => item.id === messageId)
+            ? list.map((item) => (item.id === messageId ? next : item))
+            : [...list, next],
+        };
+      });
+      discussionOutboxRef.current.patch(next);
       void cloudRef.current.writes.updateDiscussion?.(next);
     },
     [cloud.userId, guest, updateRoom],
@@ -2191,14 +2199,21 @@ export function App() {
   const tombstoneDiscussion = useCallback(
     (messageId: string) => {
       const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
-      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
+      const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId)
+        ?? discussionOutboxRef.current.ghosts.find((item) => item.id === messageId);
       const canManage = cloud.boundRoomId ? cloud.canManageMedia : true;
       if (!current || !actorIds.some((id) => canTombstoneDiscussion(current, id, canManage))) return;
       const next = { ...current, deletedAt: Date.now() };
-      updateRoom((r) => ({
-        ...r,
-        discussion: (r.discussion ?? []).map((item) => (item.id === messageId ? next : item)),
-      }));
+      updateRoom((r) => {
+        const list = r.discussion ?? [];
+        return {
+          ...r,
+          discussion: list.some((item) => item.id === messageId)
+            ? list.map((item) => (item.id === messageId ? next : item))
+            : [...list, next],
+        };
+      });
+      discussionOutboxRef.current.patch(next);
       void cloudRef.current.writes.tombstoneDiscussion?.(next);
     },
     [cloud.boundRoomId, cloud.canManageMedia, cloud.userId, guest, updateRoom],

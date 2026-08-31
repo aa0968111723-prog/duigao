@@ -160,3 +160,11 @@ test("伺服器回答時一律採用，不會被同房的舊資料蓋回去", ()
   );
   assert.deepEqual(kept, [{ id: "new" }]);
 });
+
+test("同一則本地較新（剛編輯）不得被較舊快照蓋掉", () => {
+  const kept = mergeDiscussionSnapshot(
+    { id: "room-1", discussion: [{ id: "m1", updatedAt: 200, body: "改過" }] },
+    { id: "room-1", discussion: [{ id: "m1", updatedAt: 100, body: "原稿" }] },
+  );
+  assert.deepEqual(kept, [{ id: "m1", updatedAt: 200, body: "改過" }]);
+});
