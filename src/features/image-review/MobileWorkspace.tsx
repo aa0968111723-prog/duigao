@@ -3,7 +3,7 @@ import type { ColorMode, CompareMode } from "../../lib/types";
 import type { CollabStatus } from "../../lib/peer";
 import { useViewport } from "../../hooks/useViewport";
 import { loadFlag, saveFlag } from "../../lib/store";
-import { ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
+import { ComposeExitBar, ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
 import { pruneProposalVersions, startComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
 import { CommentCard } from "../discussion/CommentCard";
@@ -240,9 +240,16 @@ export function MobileWorkspace({ api, presence }: Props) {
     else setComposeInset(0);
   }, [draftPin]);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("is-compose", proposalMode);
+    return () => document.documentElement.classList.remove("is-compose");
+  }, [proposalMode]);
+
   return (
     <div
       className={`m-app ${proposalMode ? "is-proposal" : ""}`}
+      data-testid="editor-mode"
+      data-mode={proposalMode ? "compose" : "review"}
       style={{
         ["--m-peek" as string]: sheetVisible && hasThread ? "52px" : "0px",
         ["--m-status" as string]: task ? "44px" : "0px",
@@ -305,7 +312,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             同步這一版
           </button>
         )}
-        {api.canManage && (
+        {api.canManage && !proposalMode && (
           <button
             type="button"
             className="m-vchip poster-edit-toggle"
@@ -326,6 +333,13 @@ export function MobileWorkspace({ api, presence }: Props) {
           </button>
         )}
       </div>
+
+      {proposalMode && (
+        <ComposeExitBar
+          title={proposalStore.active?.title || "提案"}
+          onExit={() => setProposalSession(null)}
+        />
+      )}
 
       <div className="m-stage-area">
         <Viewer api={api} compact onOpenImmersive={() => setImmersiveOpen(true)} />

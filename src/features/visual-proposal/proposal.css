@@ -448,6 +448,113 @@
   gap: 8px;
 }
 
+.compose-exit-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 36px;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.compose-exit-bar span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compose-exit-bar button {
+  flex: none;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pquick-shortcuts {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+}
+.compose-stage-col {
+  grid-area: stage;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.compose-stage-col .stage-wrap { flex: 1; min-height: 0; }
+html.is-compose .pdock,
+.workspace.is-compose .pdock,
+.m-app.is-proposal .pdock {
+  animation: compose-dock-in 150ms ease;
+}
+@keyframes compose-dock-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.workspace.is-compose .toolbar {
+  display: block;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+}
+.workspace.is-compose .pdock { display: flex; flex-direction: column; gap: 8px; }
+.workspace.is-compose .pdock-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.workspace.is-compose .pdock-act,
+.workspace.is-compose .pdock-done {
+  flex: 1 0 auto;
+  min-width: 4.6rem;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.workspace.is-compose .pdock-act {
+  border: 1px solid var(--line);
+  background: var(--raise);
+  color: var(--ink);
+}
+.workspace.is-compose .pdock-act.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.workspace.is-compose .pdock-done {
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.workspace.is-compose .pdock-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.workspace.is-compose .pdock-empty-hint { margin: 0; font-size: 12px; color: var(--ink-dim); line-height: 1.5; }
+.workspace.is-compose .pdock-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: #f7f8fc;
+  color: var(--ink);
+  cursor: pointer;
+}
+
 /* Desktop control can live in the toolbar without turning it into a dashboard. */
 .proposal-desktop-wrap { position: relative; }
 .proposal-desktop-wrap > summary {
@@ -802,10 +909,18 @@
     text-decoration: underline;
     cursor: pointer;
   }
-  /* Five fixed actions — the whole point of the 2.0 dock. */
-  .pdock-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  /* Five fixed actions — horizontal scroll, never wrap into the home indicator. */
+  .pdock-bar {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   .pdock-act,
   .pdock-done {
+    flex: 1 0 auto;
+    min-width: 4.4rem;
     min-height: 46px;
     padding: 0 4px;
     border-radius: 10px;

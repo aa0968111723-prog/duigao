@@ -293,6 +293,32 @@ test("畫布與存檔走既有 testid，不改第一層 IA", () => {
   assert.match(chrome, /FIRST_LAYER_TOP = \["back", "title", "presence", "voice", "more"\]/);
 });
 
+test("看稿與改稿工具列互斥：editor-mode、compose-exit、compose 沒有 pin", () => {
+  const mobile = src("src/features/image-review/MobileWorkspace.tsx");
+  const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
+  const dock = src("src/features/visual-proposal/ProposalDock.tsx");
+  const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
+  const chrome = src("src/features/multi-room/roomChrome.ts");
+  for (const file of [mobile, desktop]) {
+    assert.match(file, /data-testid="editor-mode"/);
+    assert.match(file, /data-mode=\{[^}]*\? "compose" : "review"\}/);
+    assert.match(file, /ComposeExitBar/);
+  }
+  assert.match(dock, /data-testid="compose-exit"/);
+  assert.match(dock, /存成新版本/);
+  assert.match(dock, /存檔中…/);
+  assert.doesNotMatch(dock, /id: "pin"|tool === "pin"|label: "修改點"/);
+  assert.doesNotMatch(desktop, /proposal-desktop-wrap/);
+  assert.doesNotMatch(desktop, /ProposalControls/);
+  assert.match(desktop, /ProposalDock/);
+  assert.match(overlay, /把 logo、照片丟上來/);
+  assert.match(overlay, /原稿不會被改/);
+  assert.match(dock, /把 logo、照片丟上來/);
+  assert.match(dock, /原稿不會被改/);
+  assert.match(chrome, /FIRST_LAYER_TABS = \["對話", "白板"\]/);
+  assert.doesNotMatch(chrome, /FIRST_LAYER_TABS = \["對話", "白板",/);
+});
+
 test("開源圖庫搜尋 fixture 落成 raster image item，不是 SVG 存檔", () => {
   const hits = searchOpenStickers("茶");
   assert.ok(hits.length >= 1);
@@ -479,6 +505,7 @@ test("Dock / Controls 有房間素材與 picker，空畫布提示存在", () => 
   assert.match(quick, /poster-layer-back/);
   assert.match(src("src/App.tsx"), /listLibraryAssets/);
   assert.match(src("src/App.tsx"), /resolveComposeMaterialDataUrl/);
+  assert.match(src("src/App.tsx"), /已加一版，可對照/);
   assert.doesNotMatch(src("src/features/visual-proposal/ProposalDock.tsx"), /getSupabase/);
   assert.doesNotMatch(src("src/features/multi-room/roomChrome.ts"), /FIRST_LAYER_TABS = \["對話", "白板",/);
 });

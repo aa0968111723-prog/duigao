@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ColorMode, CompareMode, Tool } from "../../lib/types";
-import { ProposalControls } from "../visual-proposal/ProposalControls";
-import { pruneProposalVersions, startComposeEditing } from "../visual-proposal/store";
+import { ComposeExitBar, ProposalDock } from "../visual-proposal/ProposalDock";
+import { ProposalQuickElement } from "../visual-proposal/ProposalQuickElement";
+import { pruneProposalVersions, startComposeEditing, useProposalStore } from "../visual-proposal/store";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
@@ -31,6 +32,9 @@ const COMPARE_MODES: { id: CompareMode; label: string }[] = [
 /** Desktop keeps the familiar three-pane layout: stage, toolbar, side panel. */
 export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   const { room, view, tool, draftPin } = api;
+  const proposal = useProposalStore(room.id, view.versionId, api.guest);
+  const [composeSession, setComposeSession] = useState(false);
+  const composing = composeSession;
 
   useEffect(() => {
     pruneProposalVersions(
@@ -39,9 +43,43 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
     );
   }, [room.id, room.versions]);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("is-compose", composing);
+    return () => document.documentElement.classList.remove("is-compose");
+  }, [composing]);
+
+  useEffect(() => {
+    if (proposal.layerEditing && !composeSession) setComposeSession(true);
+  }, [proposal.layerEditing, composeSession]);
+
+  const enterCompose = () => {
+    api.setTool("pan");
+    api.selectPin(null);
+    if (api.canManage) startComposeEditing(room.id, view.versionId, api.guest);
+    else {
+      proposal.setViewMode("proposal");
+      proposal.setEditing(false);
+    }
+    setComposeSession(true);
+  };
+
+  const exitCompose = () => {
+    setComposeSession(false);
+    proposal.setEditing(false);
+    proposal.setViewMode("original");
+    proposal.selectItem(null);
+  };
+
   return (
-    <main className="workspace">
-      <Viewer api={api} />
+    <main
+      className={`workspace ${composing ? "is-compose" : ""}`}
+      data-testid="editor-mode"
+      data-mode={composing ? "compose" : "review"}
+    >
+      <div className="compose-stage-col">
+        {composing && <ComposeExitBar title={proposal.active?.title || "提案"} onExit={exitCompose} />}
+        <Viewer api={api} />
+      </div>
 
       <div className="toolbar">
         <div className="versions">
@@ -57,7 +95,7 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
               {v.label}
             </button>
           ))}
-          {api.canManage && (
+          {api.canManage && !composing && (
             <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="upload upload-inline">
               <span className="upload-icon">＋</span>
               <span className="upload-text">加一版</span>
@@ -65,6 +103,27 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
           )}
         </div>
 
+        {composing ? (
+          <ProposalDock
+            roomId={room.id}
+            versionId={view.versionId}
+            author={api.guest}
+            showToast={api.showToast}
+            onExit={exitCompose}
+            canManage={api.canManage}
+            onSaveVersion={api.saveComposeVersion}
+            versions={api.composeVersions ?? room.versions}
+            branches={room.branches}
+            listLibrary={api.listComposeLibrary}
+            resolveMaterial={api.resolveComposeMaterial}
+            pref={{
+              prefs: room.proposalPrefs ?? [],
+              userId: api.guest.id,
+              onChoose: (choice) => api.setProposalPref(view.versionId, choice),
+            }}
+          />
+        ) : (
+          <>
         <div className="tool-group">
           {TOOLS.map((t) => (
             <button
@@ -146,52 +205,23 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             type="button"
             className="poster-edit-toggle"
             data-testid="poster-edit-toggle"
-            onClick={() => {
-              api.setTool("pan");
-              api.selectPin(null);
-              startComposeEditing(room.id, view.versionId, api.guest);
-            }}
+            onClick={enterCompose}
           >
             編輯這張
           </button>
         )}
-        <details className="proposal-desktop-wrap">
-          <summary
-            className="btn btn-sm"
-            onClick={() => {
-              api.setTool("pan");
-              api.selectPin(null);
-            }}
-          >
-            視覺提案
-          </summary>
-          <div className="proposal-desktop-popover">
-            <ProposalControls
-              roomId={room.id}
-              versionId={view.versionId}
-              author={api.guest}
-              showToast={api.showToast}
-              canManage={api.canManage}
-              onSaveVersion={api.saveComposeVersion}
-              versions={api.composeVersions ?? room.versions}
-              branches={room.branches}
-              listLibrary={api.listComposeLibrary}
-              resolveMaterial={api.resolveComposeMaterial}
-              pref={{
-                prefs: room.proposalPrefs ?? [],
-                userId: api.guest.id,
-                onChoose: (choice) => api.setProposalPref(view.versionId, choice),
-              }}
-            />
-          </div>
-        </details>
+        <button type="button" className="btn btn-sm" onClick={enterCompose}>
+          視覺提案
+        </button>
 
         <button className="btn btn-sm" onClick={api.undo} disabled={!api.canUndo}>
           復原
         </button>
+          </>
+        )}
       </div>
 
-      <SidePanel api={api} />
+      <SidePanel api={api} composing={composing} />
 
       {draftPin && (
         <div className="compose-backdrop" onPointerDown={() => !api.form.body.trim() && api.cancelPin()}>
@@ -213,11 +243,29 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   );
 }
 
-function SidePanel({ api }: { api: WorkspaceApi }) {
-  const { room } = api;
+function SidePanel({ api, composing }: { api: WorkspaceApi; composing: boolean }) {
+  const { room, view } = api;
   const [tab, setTab] = useState<"comments" | "chat">("comments");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
   const chatRef = useRef<HTMLInputElement>(null);
+
+  if (composing) {
+    return (
+      <aside className="panel">
+        <div className="panel-tabs">
+          <button type="button" className="on">選中元素</button>
+        </div>
+        <div className="panel-body">
+          <ProposalQuickElement
+            roomId={room.id}
+            versionId={view.versionId}
+            author={api.guest}
+            showToast={api.showToast}
+          />
+        </div>
+      </aside>
+    );
+  }
 
   const sendChat = () => {
     api.sendChat();

@@ -50,6 +50,19 @@ type Props = {
 };
 
 type Panel = "none" | "element" | "compare" | "list";
+type AssetSheet = "closed" | "menu" | "room" | "catalog";
+
+/** Thin strip above the poster — 完成 leaves compose without writing versions. */
+export function ComposeExitBar({ title, onExit }: { title: string; onExit: () => void }) {
+  return (
+    <div className="compose-exit-bar">
+      <span>工作層 · {title}</span>
+      <button type="button" data-testid="compose-exit" onClick={onExit}>
+        完成
+      </button>
+    </div>
+  );
+}
 
 /** New text elements walk down the poster hierarchy so one tap needs no setup. */
 const TEXT_ORDER: TextRole[] = ["title", "subtitle", "body", "custom"];
@@ -80,8 +93,7 @@ export function ProposalDock({
   const materialRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const [panel, setPanel] = useState<Panel>("none");
-  const [pickMaterial, setPickMaterial] = useState(true);
-  const [pickCatalog, setPickCatalog] = useState(false);
+  const [assetSheet, setAssetSheet] = useState<AssetSheet>("closed");
   const [saving, setSaving] = useState(false);
   const roomPick = useComposeAssetPick({
     versions,
@@ -93,12 +105,16 @@ export function ProposalDock({
     showToast,
     onPlaced: (item) => {
       proposal.addImage(item);
-      setPickMaterial(false);
+      setAssetSheet("closed");
       setPanel("element");
     },
   });
 
   useEffect(() => { ensureComposeFonts(); }, []);
+
+  useEffect(() => {
+    if (roomPick.open) setAssetSheet("room");
+  }, [roomPick.open]);
 
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -146,19 +162,20 @@ export function ProposalDock({
 
   const active = proposal.active;
 
-  const addText = () => {
-    setPickMaterial(false);
-    setPickCatalog(false);
+  const closePickers = () => {
+    setAssetSheet("closed");
     roomPick.setOpen(false);
+  };
+
+  const addText = () => {
+    closePickers();
     const used = active?.items.filter((i) => i.type === "text").length ?? 0;
     proposal.addText(createTextItem(TEXT_ORDER[Math.min(used, TEXT_ORDER.length - 1)]));
     setPanel("element");
   };
 
   const addShape = () => {
-    setPickMaterial(false);
-    setPickCatalog(false);
-    roomPick.setOpen(false);
+    closePickers();
     proposal.addShape(createShapeItem());
     setPanel("element");
   };
@@ -171,7 +188,7 @@ export function ProposalDock({
       try {
         const prepared = await prepareImageFile(file);
         proposal.addImage(createImageItem(prepared.dataUrl, prepared.name));
-        setPickMaterial(false);
+        setAssetSheet("closed");
         setPanel("element");
         showToast(prepared.note ?? "已加入素材，拖到想要的位置");
       } catch (err) {
@@ -191,9 +208,7 @@ export function ProposalDock({
   };
 
   const togglePanel = (next: Panel) => {
-    setPickMaterial(false);
-    setPickCatalog(false);
-    roomPick.setOpen(false);
+    closePickers();
     setPanel((current) => (current === next ? "none" : next));
   };
 
@@ -210,17 +225,7 @@ export function ProposalDock({
 
       {canManage && active && active.items.length === 0 && !active.background.imageDataUrl && (
         <p className="pdock-empty-hint">
-          把 logo、照片丟上來，或
-          <button
-            type="button"
-            onClick={() => {
-              setPickMaterial(true);
-              roomPick.setOpen(true);
-            }}
-          >
-            從房間撿
-          </button>
-          。拼完按存成新版本。
+          把 logo、照片丟上來。拼完存成新版本。原稿不會被改。
         </p>
       )}
 
@@ -267,45 +272,52 @@ export function ProposalDock({
         </div>
       )}
 
-      {canManage && pickMaterial && (
+      {canManage && assetSheet !== "closed" && (
         <div className="pdock-pick" role="group" aria-label="選擇素材種類">
           <button type="button" className="proposal-chip" data-testid="poster-add-asset" onClick={() => materialRef.current?.click()}>
             圖片
           </button>
           <button
             type="button"
-            className="proposal-chip"
+            className={`proposal-chip ${assetSheet === "room" ? "is-on" : ""}`}
             data-testid="poster-pick-room-asset"
-            onClick={() => roomPick.setOpen((open) => !open)}
+            onClick={() => {
+              const next = assetSheet === "room" ? "menu" : "room";
+              setAssetSheet(next);
+              roomPick.setOpen(next === "room");
+            }}
           >
-            房間素材
+            房間
+          </button>
+          <button
+            type="button"
+            className={`proposal-chip ${assetSheet === "catalog" ? "is-on" : ""}`}
+            data-testid="poster-catalog-open"
+            onClick={() => {
+              const next = assetSheet === "catalog" ? "menu" : "catalog";
+              setAssetSheet(next);
+              roomPick.setOpen(false);
+            }}
+          >
+            開源
           </button>
           <button type="button" className="proposal-chip" onClick={addShape}>
             色塊
           </button>
-          <button
-            type="button"
-            className={`proposal-chip ${pickCatalog ? "is-on" : ""}`}
-            data-testid="poster-catalog-open"
-            onClick={() => setPickCatalog((current) => !current)}
-          >
-            開源圖庫
-          </button>
         </div>
       )}
-      {canManage && pickMaterial && pickCatalog && (
+      {canManage && assetSheet === "catalog" && (
         <OpenStickerPicker
           onPick={(hit) => {
             proposal.addImage(imageItemFromCatalogHit(hit));
-            setPickCatalog(false);
-            setPickMaterial(false);
+            setAssetSheet("closed");
             setPanel("element");
             showToast("已加入開源貼圖，拖到想要的位置");
           }}
         />
       )}
 
-      {canManage && roomPick.open && (
+      {canManage && assetSheet === "room" && (
         <ComposeAssetPicker
           /* poster-compose-asset-picker */
           materials={roomPick.materials}
@@ -313,23 +325,14 @@ export function ProposalDock({
           libraryError={roomPick.libraryError}
           placingId={roomPick.placingId}
           onPick={(material) => void roomPick.pick(material)}
-          onClose={() => roomPick.setOpen(false)}
+          onClose={() => {
+            setAssetSheet("menu");
+            roomPick.setOpen(false);
+          }}
         />
       )}
 
-      {canManage && (
-        <button
-          type="button"
-          className="poster-save-version"
-          data-testid="poster-save-version"
-          disabled={saving}
-          onClick={() => void saveVersion()}
-        >
-          {saving ? "存檔中…" : "存成新版本"}
-        </button>
-      )}
-
-      <nav className="pdock-bar" aria-label="視覺提案操作">
+      <nav className="pdock-bar" aria-label="改稿操作">
         {canManage && (
         <button type="button" className="pdock-act" onClick={addText}>
           ＋文字
@@ -338,12 +341,15 @@ export function ProposalDock({
         {canManage && (
         <button
           type="button"
-          className={`pdock-act ${pickMaterial ? "is-on" : ""}`}
+          className={`pdock-act ${assetSheet !== "closed" ? "is-on" : ""}`}
           onClick={() => {
             setPanel("none");
-            setPickMaterial((v) => {
-              if (v) roomPick.setOpen(false);
-              return !v;
+            setAssetSheet((current) => {
+              if (current !== "closed") {
+                roomPick.setOpen(false);
+                return "closed";
+              }
+              return "menu";
             });
           }}
         >
@@ -357,13 +363,17 @@ export function ProposalDock({
         >
           比較
         </button>
+        {canManage && (
         <button
           type="button"
-          className={`pdock-act ${panel === "list" ? "is-on" : ""}`}
-          onClick={() => togglePanel("list")}
+          className="pdock-act poster-save-version"
+          data-testid="poster-save-version"
+          disabled={saving}
+          onClick={() => void saveVersion()}
         >
-          提案{proposal.docs.length > 1 ? ` ${proposal.docs.length}` : ""}
+          {saving ? "存檔中…" : "存成新版本"}
         </button>
+        )}
         <button type="button" className="pdock-done" onClick={onExit}>
           完成
         </button>
