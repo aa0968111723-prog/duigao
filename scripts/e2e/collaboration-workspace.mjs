@@ -449,6 +449,8 @@ try {
     check("影片落板是可播影片", await page.locator('[data-testid="wb-media-video"]').count() >= 1);
     check("影片卡帶 00:40 時間點", (await page.locator("[data-node-type='room_content']").allTextContents()).some((text) => text.includes("00:40")));
     await dismissSelection(page);
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_full_media_390.png"), fullPage: true });
     await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_compact_toolbar_390.png"), fullPage: true });
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.waitForFunction(
