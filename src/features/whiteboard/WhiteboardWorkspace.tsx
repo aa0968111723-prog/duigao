@@ -1231,6 +1231,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     api.onUpsertNodes(planted.nodes, "now");
     for (const edge of planted.edges) api.onCreateEdge(edge);
     setSelected([planted.rootId]);
+    api.onSelectionFocus?.(planted.rootId);
     setCamera(fitCamera(planted.nodes, viewport, 48));
   };
 
@@ -1238,6 +1239,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const next = liveNodes.find((item) => item.id === nodeId);
     if (!next) return;
     setSelected([next.id]);
+    api.onSelectionFocus?.(next.id);
     setCamera(focusCamera(next, viewport, Math.min(camera.zoom, 1.05)));
   };
 
