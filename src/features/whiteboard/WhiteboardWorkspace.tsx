@@ -1510,9 +1510,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     setCamera(focusCamera(next.node, viewport, camera.zoom));
     setSheet(null);
   };
+  const childSourceNode = (
+    selectedNode && (selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text")
+      ? selectedNode
+      : liveNodes.find((item) => item.id === editingId && (item.nodeType === "mindmap" || item.nodeType === "text"))
+  ) ?? null;
   const addChildFromSelected = () => {
-    if (!selectedNode || !(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text")) return;
-    const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
+    if (!childSourceNode) return;
+    const next = addMindmapChild(childSourceNode.nodeType === "mindmap" ? childSourceNode : { ...childSourceNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
     api.onUpsertNode(next.node, "now");
     api.onCreateEdge(next.edge);
     record(nodeCreateDraft(nextOpId(), next.node));
@@ -1649,7 +1654,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               {chromeWidth < 768 && selectedNode && (selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
                 <button type="button" className="wb-card" data-testid="wb-next-step" onClick={addNextStepFromSelected}>加下一步</button>
               )}
-              {chromeWidth < 768 && selectedNode && (selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
+              {chromeWidth < 768 && childSourceNode && (
                 <button type="button" className="wb-card" data-testid="wb-add-child" onClick={addChildFromSelected}>加子項目</button>
               )}
               {chromeWidth < 768 && selectedNode?.nodeType === "room_content" && selectedNode.linkedEntityId && (
