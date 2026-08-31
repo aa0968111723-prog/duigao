@@ -2370,7 +2370,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           </div>
         )}
         {emptyBoard && !showStarter && (
-          <div className="wb-empty-board" data-testid="wb-empty-board">
+          <div className="wb-empty-board" data-testid="wb-empty-board" onPointerDown={(event) => event.stopPropagation()}>
             <span className="wb-empty-kicker">活動規劃白板</span>
             <strong>{roomName.label}</strong>
             {roomName.unnamed && api.onRenameRoom ? (

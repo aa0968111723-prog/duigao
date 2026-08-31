@@ -47,6 +47,7 @@ import {
   colleagueBubbleClass,
   colleagueFailureKind,
   colleagueTurnFromResponse,
+  colleagueTurnInputFromAsk,
   colleagueWrite,
   createCommentAsColleague,
   GROK_COLLEAGUE_NAME,
@@ -639,8 +640,30 @@ test("問 Grok 失敗是活氣泡不是墓碑；未讀略過墓碑與 pending", 
   assert.match(GROK_TOMBSTONE_COPY, /已收回/);
   const app = src("src/App.tsx");
   assert.match(app, /colleagueTurnFromResponse/);
+  assert.match(app, /colleagueTurnInputFromAsk/);
   assert.match(app, /colleagueFailureKind/);
   assert.doesNotMatch(app, /AI 沒有回應，我沒有假裝已讀/);
+  const unavailable = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: null,
+    agent: { status: "unavailable" },
+  }));
+  assert.equal(unavailable.body, GROK_SEND_FAILED_COPY);
+  const nullAnswer = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: null,
+    agent: { status: "ok" },
+  }));
+  assert.equal(nullAnswer.body, GROK_SEND_FAILED_COPY);
+  const emptyAnswer = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: { text: "   " },
+    agent: { provider: "grok-room-agent", status: "ready" },
+  }));
+  assert.equal(emptyAnswer.body, GROK_SEND_FAILED_COPY);
+  assert.doesNotMatch(unavailable.body, /我看過了/);
+  const liveOk = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: { text: "先點書籤。" },
+    agent: { status: "ok" },
+  }));
+  assert.equal(liveOk.body, "先點書籤。");
 });
 
 test("空板種樹在問 Grok 之前；有引導片；選書籤看得到 treePath", () => {
@@ -649,6 +672,9 @@ test("空板種樹在問 Grok 之前；有引導片；選書籤看得到 treePat
     < verbs.findIndex((item) => item.id === "ask-grok"));
   assert.match(EMPTY_BOARD_GUIDE, /一次只討論一支/);
   const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  const emptyBoardAt = workspace.indexOf('data-testid="wb-empty-board"');
+  const emptyBoardTag = workspace.slice(emptyBoardAt - 80, emptyBoardAt + 120);
+  assert.match(emptyBoardTag, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
   assert.match(workspace, /wb-guide-video/);
   assert.match(workspace, /wb-tree-hint/);
   assert.match(workspace, /wb-colleague-hint/);

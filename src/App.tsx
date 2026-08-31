@@ -152,6 +152,7 @@ import {
   auditWrite,
   colleagueFailureKind,
   colleagueTurnFromResponse,
+  colleagueTurnInputFromAsk,
   colleagueWrite,
   createCommentAsColleague,
   mentionsGrok,
@@ -1014,16 +1015,11 @@ export function App() {
         focus: askExtra.focus,
         workLayer: askExtra.workLayer,
       });
-      const spendExceeded = Boolean(
-        response.agent?.status === "spend_exceeded"
-        || /上限/.test(response.answer?.text ?? ""),
-      );
-      const turn = colleagueTurnFromResponse({
-        answer: response.answer?.text,
-        unconfigured: response.agent?.status === "unconfigured",
-        spendExceeded,
+      const turn = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+        answer: response.answer,
+        agent: response.agent,
         proposals: proposalsFromResponse(response),
-      });
+      }));
       for (const proposal of turn.proposals) colleagueProposalRef.current.set(proposal.id, proposal);
       sendDiscussionRef.current(colleagueWrite({
         body: turn.body,

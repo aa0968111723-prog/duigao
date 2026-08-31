@@ -157,6 +157,36 @@ export function colleagueFailureKind(error: unknown): "unconfigured" | "spend" |
   return "failed";
 }
 
+/** Map HTTP 200 ask results (including answer:null / unavailable) onto turn flags. */
+export function colleagueTurnInputFromAsk(result: {
+  answer?: { text?: string } | null;
+  agent?: { status?: string } | null;
+  proposals?: AiProposal[];
+}): {
+  answer?: string;
+  unconfigured?: boolean;
+  spendExceeded?: boolean;
+  failed?: boolean;
+  proposals?: AiProposal[];
+} {
+  const status = (result.agent?.status ?? "").toLowerCase();
+  if (status === "unconfigured") return { unconfigured: true };
+  if (status === "spend_exceeded" || /上限/.test(result.answer?.text ?? "")) {
+    return { spendExceeded: true };
+  }
+  const text = result.answer?.text?.trim() ?? "";
+  if (
+    status === "unavailable"
+    || status === "error"
+    || status === "failed"
+    || result.answer == null
+    || !text
+  ) {
+    return { failed: true };
+  }
+  return { answer: text, proposals: result.proposals };
+}
+
 /** create_comment 採用後必須長成同事氣泡，不可頂著觸發者發言。 */
 /** 焦點卡「同事剛說…」：對準該節點的最近一則同事正文，不是稽核句。 */
 export function lastColleagueForFocus(
