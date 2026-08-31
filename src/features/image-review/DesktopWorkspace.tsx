@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ColorMode, CompareMode, Tool } from "../../lib/types";
-import { ProposalControls } from "../visual-proposal/ProposalControls";
-import { pruneProposalVersions, startComposeEditing } from "../visual-proposal/store";
+import { ProposalDock } from "../visual-proposal/ProposalDock";
+import { pruneProposalVersions, startComposeEditing, useProposalStore } from "../visual-proposal/store";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
@@ -34,6 +34,8 @@ const COMPARE_MODES: { id: CompareMode; label: string }[] = [
 export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   const { room, view, tool, draftPin } = api;
   const editScope = useEditScope(api, view.versionId, room.id);
+  const proposal = useProposalStore(room.id, view.versionId, api.guest);
+  const composing = proposal.layerEditing;
 
   useEffect(() => {
     pruneProposalVersions(
@@ -42,10 +44,17 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
     );
   }, [room.id, room.versions]);
 
+  useEffect(() => {
+    if (composing && view.compareMode !== "single") {
+      api.setView({ ...view, compareMode: "single" });
+    }
+  }, [api, composing, view]);
+
   return (
-    <main className="workspace">
+    <main className={`workspace${composing ? " is-compose" : ""}`}>
       <div className="stage-with-scope">
         <Viewer api={api} />
+        {!composing && (
         <EditScopeBar
           inferred={editScope.inferred}
           override={editScope.override}
@@ -55,8 +64,31 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
           hint={editScope.hint}
           caption={editScope.caption}
         />
+        )}
       </div>
 
+      {composing ? (
+        <ProposalDock
+          roomId={room.id}
+          versionId={view.versionId}
+          author={api.guest}
+          showToast={api.showToast}
+          onExit={() => proposal.setEditing(false)}
+          canManage={api.canManage}
+          onSaveVersion={api.saveComposeVersion}
+          onGenerateSecondVersion={() => { void editScope.generate("full"); }}
+          onGenerateVisualProposal={() => { void editScope.generate("single"); }}
+          versions={api.composeVersions ?? room.versions}
+          branches={room.branches}
+          listLibrary={api.listComposeLibrary}
+          resolveMaterial={api.resolveComposeMaterial}
+          pref={{
+            prefs: room.proposalPrefs ?? [],
+            userId: api.guest.id,
+            onChoose: (choice) => api.setProposalPref(view.versionId, choice),
+          }}
+        />
+      ) : (
       <div className="toolbar">
         <div className="versions">
           {room.versions.map((v) => (
@@ -169,43 +201,11 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             編輯這張
           </button>
         )}
-        <details className="proposal-desktop-wrap">
-          <summary
-            className="btn btn-sm"
-            onClick={() => {
-              api.setTool("pan");
-              api.selectPin(null);
-            }}
-          >
-            視覺提案
-          </summary>
-          <div className="proposal-desktop-popover">
-            <ProposalControls
-              roomId={room.id}
-              versionId={view.versionId}
-              author={api.guest}
-              showToast={api.showToast}
-              canManage={api.canManage}
-              onSaveVersion={api.saveComposeVersion}
-              onGenerateSecondVersion={() => { void editScope.generate("full"); }}
-              onGenerateVisualProposal={() => { void editScope.generate("single"); }}
-              versions={api.composeVersions ?? room.versions}
-              branches={room.branches}
-              listLibrary={api.listComposeLibrary}
-              resolveMaterial={api.resolveComposeMaterial}
-              pref={{
-                prefs: room.proposalPrefs ?? [],
-                userId: api.guest.id,
-                onChoose: (choice) => api.setProposalPref(view.versionId, choice),
-              }}
-            />
-          </div>
-        </details>
-
         <button className="btn btn-sm" onClick={api.undo} disabled={!api.canUndo}>
           復原
         </button>
       </div>
+      )}
 
       <SidePanel api={api} />
 
