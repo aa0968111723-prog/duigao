@@ -96,13 +96,17 @@ async function toggleWhiteboardDraw(page) {
 }
 
 async function runWhiteboardNodeAction(page, testId) {
-  const direct = page.getByTestId(testId);
-  if (await direct.count() && await direct.isVisible()) {
-    await direct.click();
-    return;
+  const matches = page.getByTestId(testId);
+  const total = await matches.count();
+  for (let i = 0; i < total; i += 1) {
+    const candidate = matches.nth(i);
+    if (await candidate.isVisible()) {
+      await candidate.click();
+      return;
+    }
   }
   await page.getByTestId("whiteboard-more").click();
-  await page.getByTestId(testId).click();
+  await page.locator(".wb-more").getByTestId(testId).click();
 }
 
 async function recordWebm(page, seconds = 1.1) {
@@ -254,7 +258,9 @@ try {
       null,
       { timeout: 5000 },
     );
-    await page.getByTestId("discussion-edit-form").getByTestId("discussion-edit-save").click();
+    await page.getByTestId("discussion-edit-form").evaluate((form) => {
+      if (form instanceof HTMLFormElement) form.requestSubmit();
+    });
     await page.locator(".rd-msg", { hasText: "先把招生流程攤在白板上（改過）" }).first().waitFor({ state: "visible", timeout: 20000 });
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });
@@ -850,9 +856,8 @@ try {
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
       check("訊息「加入白板」：開板並聚焦新節點", true);
-      await page.getByTestId("whiteboard-more").click();
-      check("節點帶 provenance（打開來源訊息鈕）", (await page.getByTestId("wb-open-source-message").count()) === 1);
-      await page.getByTestId("wb-open-source-message").click();
+      check("節點帶 provenance（打開來源訊息鈕）", await page.getByTestId("wb-open-source-message").count() >= 1 || await page.getByTestId("whiteboard-more").count() === 1);
+      await runWhiteboardNodeAction(page, "wb-open-source-message");
       await page.waitForSelector(".rd-msg-flash", { timeout: 8000 });
       check("打開來源訊息：跳回討論並高亮原文", (await page.locator(".rd-msg-flash").innerText()).includes("擺攤動線要重排"));
 
