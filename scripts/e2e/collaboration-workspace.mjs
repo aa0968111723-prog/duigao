@@ -200,7 +200,7 @@ async function searchNode(page, name) {
   const input = page.getByRole("textbox", { name: "搜尋節點" });
   await input.waitFor({ timeout: 5000 });
   await input.fill(name);
-  const hit = page.locator(".wb-options button").filter({ hasText: new RegExp(`^${name}`) }).first();
+  const hit = page.locator(".wb-options button").filter({ hasText: new RegExp(`^${name}$`) }).first();
   await hit.waitFor({ timeout: 8000 });
   await hit.click();
 }
@@ -906,33 +906,20 @@ try {
     await page.getByTestId("whiteboard-arrange").click();
     check("整理按鈕可按", true);
     await page.waitForFunction(() => !document.querySelector(".project-scrim"), null, { timeout: 5000 }).catch(() => undefined);
-    await dismissSelection(page);
     const nodeCount = await page.locator("[data-testid^='wb-node-']").count();
     const statsNodes = await page.getByTestId("wb-stats").getAttribute("data-nodes").catch(() => null);
     if (!nodeCount) {
       await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_after_arrange.png"), fullPage: true }).catch(() => undefined);
       console.log("after arrange: rendered=0 stats=", statsNodes, "canvas=", (await page.getByTestId("wb-canvas").innerHTML().catch(() => "")).slice(0, 400));
     }
-    const hit = await page.evaluate(() => {
-      const canvas = document.querySelector("[data-testid='wb-canvas']")?.getBoundingClientRect();
-      if (!canvas) return null;
-      const nodes = [...document.querySelectorAll("[data-testid^='wb-node-']")];
-      for (const node of nodes) {
-        const box = node.getBoundingClientRect();
-        const x = box.x + Math.min(20, box.width / 2);
-        const y = box.y + Math.min(16, box.height / 2);
-        if (box.width > 8 && box.height > 8 && x > canvas.left + 8 && x < canvas.right - 8 && y > canvas.top + 8 && y < canvas.bottom - 8) {
-          return { x, y };
-        }
-      }
-      return null;
-    });
+    const focused = page.locator("[data-testid^='wb-node-']").first();
+    const hit = nodeCount ? await focused.boundingBox() : null;
     if (hit) {
       await page.evaluate(({ x, y }) => {
         const el = document.querySelector("[data-testid='wb-canvas']");
         if (!el) return;
         el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 31, pointerType: "touch" }));
-      }, hit);
+      }, { x: hit.x + Math.min(20, hit.width / 2), y: hit.y + Math.min(16, hit.height / 2) });
       await page.waitForTimeout(550);
       check("長按進入多選", await page.getByTestId("wb-multiselect").count() === 1);
       if (await page.getByTestId("wb-multiselect").count()) await page.getByRole("button", { name: "完成" }).click();
@@ -1307,12 +1294,22 @@ try {
         await page.waitForSelector(".wb-list", { timeout: 10000 });
       }
       await page.getByRole("button", { name: "對話", exact: true }).click();
+      await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 15000 });
     }
     // 舊 ghost 已被離線矩陣段的 online flush 自動送到（這正是 PR-08b 的
     // 設計）：按鈕不該在了，訊息應恰好一列 — 手動 retry 改為驗證自癒。
     await page.waitForFunction(() => !document.querySelector(".rd-msg.is-failed"), null, { timeout: 15000 });
     await page.waitForTimeout(400);
     {
+      await page.evaluate(() => {
+        const feed = document.querySelector('[data-testid="discussion-feed"]');
+        if (feed) feed.scrollTop = 0;
+      });
+      await page.waitForFunction(
+        () => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("這句會先失敗"),
+        null,
+        { timeout: 10000 },
+      ).catch(() => undefined);
       const feedText = await page.getByTestId("discussion-feed").innerText();
       const occurrences = feedText.split("這句會先失敗").length - 1;
       const landedRows = rows.room_discussion_messages.filter((row) => row.body === "這句會先失敗").length;
@@ -1320,7 +1317,10 @@ try {
     }
 
     // --- PR-01b：Universal Intake 附件 ---------------------------------
+    await page.getByRole("button", { name: "對話", exact: true }).click();
+    await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 10000 });
     const attachInput = page.locator(".rd-composer input[type=file]").first();
+    await attachInput.waitFor({ state: "attached", timeout: 8000 });
     await attachInput.setInputFiles({ name: "brief.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 e2e") });
     await page.waitForSelector('[data-testid="attachment-card"]', { timeout: 20000 });
     check(
