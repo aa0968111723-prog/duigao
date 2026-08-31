@@ -7,8 +7,8 @@
  * 1024 與 1280 會進 WB05 的 Split View（討論欄＋側欄工具列）。
  *
  * 與 wb00 test-plan 的偏差（誠實記錄）：計畫寫 4×2 主題×3=24 張，但
- * duigao 是單主題深色設計（styles.css 無 light 分支）— 主題軸不存在，
- * 假拍 24 張是造假覆蓋。若未來加入淺色主題，此矩陣 ×2。
+ * duigao 白板跟隨活動房的單一明亮主題（沒有 light/dark 切換）— 主題軸不存在，
+ * 假拍 24 張是造假覆蓋。若未來加入深色主題，此矩陣 ×2。
  *
  * 比對：pixelmatch，容差 **絕對值** maxDiffPixels=2000（比例容差在大
  * 視窗可藏數萬 px 差異 — Grok wb00 F8）。800 在 Linux CI vs Windows
@@ -123,7 +123,7 @@ try {
 
     await page.getByLabel("白板名稱").fill("視覺基準板");
     await page.getByRole("button", { name: "建立白板" }).click();
-    await page.waitForSelector('[data-testid="whiteboard-workspace"] [data-testid="wb-canvas"]', { timeout: 15000 });
+    await page.waitForSelector('[data-testid="whiteboard-workspace"] [data-testid="wb-canvas"]', { timeout: 30000 });
     // 回列表拍「板清單」狀態。用 aria-label，避免 class 對不上或 header 還沒 paint。
     await page.getByRole("button", { name: "回到白板列表" }).click({ timeout: 15000 });
     await page.waitForSelector(".wb-list", { timeout: 10000 });

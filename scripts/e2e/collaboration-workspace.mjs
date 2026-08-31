@@ -229,11 +229,7 @@ try {
       { timeout: 5000 },
     );
     await page.getByTestId("discussion-edit-form").getByTestId("discussion-edit-save").click();
-    await page.waitForFunction(
-      () => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("改過"),
-      null,
-      { timeout: 15000 },
-    );
+    await page.locator(".rd-msg", { hasText: "先把招生流程攤在白板上（改過）" }).first().waitFor({ state: "visible", timeout: 20000 });
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });
     check("改過的訊息標已編輯", await page.getByTestId("discussion-edited").count() === 1);

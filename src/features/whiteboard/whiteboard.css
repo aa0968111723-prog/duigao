@@ -21,8 +21,8 @@
 .wb-node-decision { background: #e5f8f0; }
 .wb-node-poll { background: #fff1e1; }
 .wb-node-content { display: flex; gap: 10px; align-items: center; padding: 0; }
-.wb-thumb { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; background: #111; flex-shrink: 0; }
-.wb-thumb-fallback { width: 52px; height: 52px; border-radius: 10px; display: grid; place-items: center; background: var(--raise); color: var(--ink-faint); font-size: 18px; }
+.wb-thumb { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; background: #eef0f7; flex-shrink: 0; }
+.wb-thumb-fallback { width: 52px; height: 52px; border-radius: 10px; display: grid; place-items: center; background: #eef0ff; color: var(--accent); font-size: 12px; font-weight: 800; }
 .wb-card-copy { min-width: 0; }
 .wb-card-copy strong { font-size: 13px; }
 .wb-card-copy small { color: var(--ink-faint); font-size: 11px; }
@@ -53,7 +53,9 @@
   display: flex;
   flex-direction: column;
   /* 背景必須不透明：sticky header z-10 在下面（疊加規則） */
-  background: #12100e;
+  background: #f7f8fc;
+  color: var(--ink);
+  color-scheme: light;
 }
 .wb-focus-top {
   display: flex;
@@ -63,13 +65,14 @@
   padding: 4px 10px 4px 6px;
   padding-top: calc(4px + env(safe-area-inset-top));
   border-bottom: 1px solid var(--line-soft);
+  background: rgba(255,255,255,.92);
   flex: none;
 }
 .wb-focus-top h2 { flex: 1; min-width: 0; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
 .wb-focus-top button { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: var(--ink); font-size: 18px; border-radius: 12px; }
 .wb-focus-top button:disabled { color: var(--ink-faint); }
 .wb-focus-top .project-back-button { font-size: 24px; }
-.wb-online { padding: 4px 10px; border-radius: 999px; background: var(--raise); font-size: 12px; color: var(--ink-dim); flex: none; }
+.wb-online { padding: 4px 10px; border-radius: 999px; background: #eef0ff; font-size: 12px; color: var(--ink-dim); flex: none; }
 .wb-rename { flex: 1; min-width: 0; }
 .wb-rename input { width: 100%; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--raise); color: inherit; font-size: 16px; padding: 8px 10px; }
 .wb-editing-line { padding: 4px 12px; font-size: 12px; color: var(--ink-faint); flex: none; }
@@ -80,15 +83,16 @@
   overflow: hidden;
   touch-action: none;
   background:
-    radial-gradient(circle at 1px 1px, rgba(255,255,255,.06) 1px, transparent 0) 0 0 / 22px 22px,
-    #161310;
+    radial-gradient(circle at 1px 1px, rgba(73,82,112,.16) 1px, transparent 0) 0 0 / 22px 22px,
+    #f7f8fc;
 }
 .wb-focus-bottom {
   display: flex;
   gap: 4px;
   padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line-soft);
-  background: rgba(20,18,16,.96);
+  background: rgba(255,255,255,.96);
+  box-shadow: 0 -8px 24px rgba(31,39,65,.06);
   flex: none;
   overflow-x: auto;
 }
@@ -114,7 +118,7 @@
   position: absolute; top: 10px; left: 10px; right: 10px;
   display: flex; justify-content: space-between; align-items: center;
   padding: 8px 12px; border-radius: 999px;
-  background: rgba(20,18,16,.9); border: 1px solid var(--accent); font-size: 13px;
+  background: rgba(255,255,255,.96); border: 1px solid var(--accent); box-shadow: 0 8px 24px rgba(31,39,65,.1); font-size: 13px;
 }
 .wb-connect-hint button { border: 0; background: transparent; color: var(--accent); min-height: 44px; }
 .wb-node.is-locked { opacity: .82; }
@@ -124,18 +128,18 @@
 .wb-node-unknown { color: var(--ink-faint); font-style: italic; }
 .wb-frame {
   position: absolute; border-radius: 20px;
-  border: 1.5px dashed rgba(255,255,255,.18);
-  background: rgba(255,255,255,.03);
+  border: 1.5px dashed rgba(97,87,239,.28);
+  background: rgba(97,87,239,.035);
   pointer-events: none; /* WB02：frame 尚不可拖/縮（WB03）— 誠實不攔事件 */
 }
 .wb-frame-title { position: absolute; top: -22px; left: 8px; font-size: 12px; color: var(--ink-faint); }
 
-.wb-notice { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: rgba(20,18,16,.94); border: 1px solid var(--line-soft); color: var(--ink); font-size: 13px; pointer-events: none; z-index: 3; }
+.wb-notice { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,.96); border: 1px solid var(--line-soft); color: var(--ink); box-shadow: 0 8px 24px rgba(31,39,65,.1); font-size: 13px; pointer-events: none; z-index: 3; }
 
 /* ---- WB03：frame 互動／freehand ---- */
 .wb-frame-handle { position: absolute; left: 0; right: 0; top: 0; min-height: 30px; pointer-events: auto; touch-action: none; cursor: grab; padding: 4px 8px; }
 .wb-frame.is-selected { outline: 2px solid var(--accent); }
-.wb-frame-resize { position: absolute; right: -8px; bottom: -8px; width: 28px; height: 28px; border-radius: 9px; background: var(--accent); border: 2px solid #12100e; pointer-events: auto; touch-action: none; cursor: nwse-resize; }
+.wb-frame-resize { position: absolute; right: -8px; bottom: -8px; width: 28px; height: 28px; border-radius: 9px; background: var(--accent); border: 2px solid #fff; pointer-events: auto; touch-action: none; cursor: nwse-resize; }
 .wb-frame-rename { display: flex; gap: 6px; align-items: center; flex: 1; min-width: 0; }
 .wb-frame-rename input { flex: 1; min-width: 0; background: var(--raise); border: 1px solid var(--line-soft); border-radius: 8px; color: var(--ink); padding: 8px; font-size: 14px; }
 .wb-freehand { display: block; pointer-events: none; }
@@ -213,7 +217,9 @@
   z-index: var(--z-board-focus);
   display: flex;
   flex-direction: column;
-  background: #12100e;
+  background: #fff;
+  color: var(--ink);
+  color-scheme: light;
   border-right: 1px solid var(--line-soft);
   overflow: hidden;
 }
@@ -242,7 +248,7 @@
 /* ---- WB06：AI 預覽（虛線幽靈節點）與確認列 ---- */
 .wb-node-ai-preview {
   border: 1.5px dashed var(--accent);
-  background: rgba(196, 92, 74, 0.10);
+  background: rgba(97, 87, 239, 0.10);
   box-shadow: none;
   pointer-events: none; /* 還不是板上的東西：點不到、拖不動 */
   opacity: 0.92;
@@ -263,21 +269,23 @@
   gap: 4px;
   padding: 10px 12px;
   border-radius: 14px;
-  background: rgba(20,18,16,.92);
+  background: rgba(255,255,255,.96);
   border: 1px solid var(--line-soft);
+  box-shadow: 0 10px 28px rgba(31,39,65,.1);
+  color: var(--ink);
   pointer-events: auto;
 }
 .wb-focus-card strong { font-size: 15px; }
 .wb-focus-card small { color: var(--ink-faint); font-size: 12px; }
-.wb-focus-card.is-in-sheet { position: static; margin: 0 10px 8px; }
+.wb-focus-card.is-in-sheet { position: static; margin: 0 10px 8px; box-shadow: none; background: #f8f9fd; }
 .wb-focus-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .wb-focus-card-actions button {
   min-height: 40px;
   padding: 0 12px;
   border: 0;
   border-radius: 999px;
-  background: var(--raise);
-  color: inherit;
+  background: #eef0ff;
+  color: var(--ink);
   font-size: 13px;
 }
 /* 掛在 .wb-focus-canvas 裡：底邊是畫布底，五鍵底欄是畫布的兄弟，點得到 */
@@ -311,10 +319,12 @@
   flex-direction: column;
   overflow: hidden;
   pointer-events: auto;
-  background: rgba(22,19,16,.98);
+  background: rgba(255,255,255,.98);
   color: var(--ink);
+  color-scheme: light;
   border-top: 1px solid var(--line-soft);
   border-radius: 18px 18px 0 0;
+  box-shadow: 0 -12px 32px rgba(31,39,65,.12);
 }
 .wb-focus-sheet-discussion {
   flex: 1;
@@ -329,29 +339,42 @@
   position: static;
   flex: none;
   padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, #fff 28%);
 }
 .wb-empty-board {
   position: absolute;
-  inset: 12% 16px auto;
+  left: 50%;
+  top: 18%;
   z-index: 3;
+  width: min(420px, calc(100% - 32px));
+  transform: translateX(-50%);
   display: grid;
   gap: 10px;
   justify-items: center;
   text-align: center;
-  padding: 18px 14px;
-  border-radius: 18px;
-  background: rgba(20,18,16,.88);
+  padding: 22px 16px 18px;
+  border-radius: 22px;
+  background: rgba(255,255,255,.96);
   border: 1px solid var(--line-soft);
+  box-shadow: 0 18px 50px rgba(31,39,65,.12);
+  color: var(--ink);
 }
-.wb-empty-board strong { font-size: 17px; }
+.wb-empty-kicker { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.wb-empty-board strong { font-size: 18px; letter-spacing: -.02em; }
+.wb-empty-board p { margin: 0; color: var(--ink-faint); font-size: 13px; }
 .wb-empty-verbs { display: grid; gap: 8px; width: 100%; }
 .wb-empty-verbs button {
-  min-height: 48px;
-  border: 1px solid var(--line-soft);
+  min-height: 52px;
+  border: 1px solid var(--line);
   border-radius: 14px;
-  background: var(--raise);
-  color: inherit;
+  background: #f8f9fd;
+  color: var(--ink);
   font-size: 15px;
+}
+.wb-empty-verbs button:first-child {
+  border-color: rgba(97,87,239,.28);
+  background: var(--accent-soft);
+  font-weight: 600;
 }
 
 /* 五鍵底欄不被 FAB 蓋住（Focus 時 AssetAiFab 已不掛；這是保險） */

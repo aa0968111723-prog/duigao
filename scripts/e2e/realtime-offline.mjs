@@ -7,14 +7,39 @@
  */
 import { execFileSync } from "node:child_process";
 import http from "node:http";
+import net from "node:net";
 import { mkdtempSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { rows, start as startMock } from "./mock-supabase.mjs";
 
 const ROOT = join(import.meta.dirname, "..", "..");
-const MOCK_PORT = 54428;
-const APP_PORT = 4198;
+
+function listenFree(preferred) {
+  return new Promise((resolve, reject) => {
+    const probe = (port) => {
+      const server = net.createServer();
+      server.unref();
+      server.on("error", (error) => {
+        if (error && error.code === "EADDRINUSE" && port !== 0) {
+          probe(0);
+          return;
+        }
+        reject(error);
+      });
+      server.listen(port, "127.0.0.1", () => {
+        const address = server.address();
+        const chosen = typeof address === "object" && address ? address.port : port;
+        server.close((closeError) => (closeError ? reject(closeError) : resolve(chosen)));
+      });
+    };
+    probe(preferred);
+  });
+}
+
+// 54428／4198 與 mobile-tablet-ux 撞號；CI 同一 job 若上一支沒放掉就 EADDRINUSE。
+const MOCK_PORT = await listenFree(Number(process.env.DUIGAO_RT_MOCK_PORT || 54429));
+const APP_PORT = await listenFree(Number(process.env.DUIGAO_RT_APP_PORT || 4197));
 const APP = `http://127.0.0.1:${APP_PORT}/`;
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 13; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";

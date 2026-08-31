@@ -134,6 +134,20 @@ test("discussion → node 有 linked entity；node → discussion 回得去", ()
   assert.match(drawer, /打開白板並聚焦這張/);
 });
 
+test("Focus 表面是明亮紙面，不走深色 overlay", () => {
+  const css = src("src/features/whiteboard/whiteboard.css");
+  assert.doesNotMatch(css, /#12100e|#161310|rgba\(20,\s*18,\s*16|rgba\(22,\s*19,\s*16/);
+  assert.match(css, /\.wb-focus \{[\s\S]*?background:\s*#f7f8fc/);
+  assert.match(css, /\.wb-focus-canvas \{[\s\S]*?#f7f8fc/);
+  assert.match(css, /\.wb-focus-bottom \{[\s\S]*?background:\s*rgba\(255,\s*255,\s*255/);
+  assert.match(css, /\.wb-focus-card \{[\s\S]*?background:\s*rgba\(255,\s*255,\s*255/);
+  assert.match(css, /\.wb-focus-sheet \.m-sheet \{[\s\S]*?background:\s*rgba\(255,\s*255,\s*255/);
+  assert.match(css, /\.wb-empty-board \{[\s\S]*?background:\s*rgba\(255,\s*255,\s*255/);
+  assert.match(css, /\.wb-side-rail \{[\s\S]*?background:\s*#fff/);
+  const visual = src("scripts/e2e/board-visual.mjs");
+  assert.match(visual, /單一明亮主題/);
+});
+
 test("空板文案不含「新步驟」當唯一 CTA", () => {
   const verbs = emptyBoardVerbs();
   assert.equal(verbs.length, 3);
@@ -148,6 +162,15 @@ test("空板文案不含「新步驟」當唯一 CTA", () => {
   const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
   assert.match(workspace, /wb-empty-board/);
   assert.doesNotMatch(workspace, /wb-empty-board[\s\S]{0,400}新步驟/);
+});
+
+test("討論儲存讀 textarea 的值，不依賴可能還沒跟上的 editDraft", () => {
+  const room = src("src/features/room-discussion/RoomDiscussion.tsx");
+  assert.match(room, /querySelector\('\[data-testid="discussion-edit-input"\]'\)/);
+  assert.match(room, /typed instanceof HTMLTextAreaElement \? typed\.value : editDraft/);
+  const e2e = src("scripts/e2e/collaboration-workspace.mjs");
+  assert.match(e2e, /先把招生流程攤在白板上（改過）/);
+  assert.match(e2e, /\.rd-msg".*hasText/);
 });
 
 test("payload.agent === true：isMemberActor false、canEditDiscussion false、渲染走同事氣泡", () => {
