@@ -54,11 +54,21 @@ export type DiscussionReadWatermark = {
   lastReadAt: number;
 };
 
+export function discussionCountsTowardUnread(
+  message: Pick<DiscussionMessage, "deletedAt" | "payload">,
+): boolean {
+  if (message.deletedAt) return false;
+  if (message.payload?.agent === true && message.payload?.pending === true) return false;
+  return true;
+}
+
 export function firstUnreadMessageId(
-  messages: Pick<DiscussionMessage, "id" | "createdAt">[],
+  messages: Pick<DiscussionMessage, "id" | "createdAt" | "deletedAt" | "payload">[],
   watermark: { lastReadMessageId?: string; lastReadAt?: number } | null | undefined,
 ): string | null {
-  const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  const sorted = [...messages]
+    .filter((item) => discussionCountsTowardUnread(item))
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   if (!sorted.length) return null;
   if (!watermark) return sorted[0].id;
   if (watermark.lastReadMessageId) {
@@ -72,12 +82,14 @@ export function firstUnreadMessageId(
 }
 
 export function unreadCount(
-  messages: Pick<DiscussionMessage, "id" | "createdAt">[],
+  messages: Pick<DiscussionMessage, "id" | "createdAt" | "deletedAt" | "payload">[],
   watermark: { lastReadMessageId?: string; lastReadAt?: number } | null | undefined,
 ): number {
   const first = firstUnreadMessageId(messages, watermark);
   if (!first) return 0;
-  const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  const sorted = [...messages]
+    .filter((item) => discussionCountsTowardUnread(item))
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   const idx = sorted.findIndex((item) => item.id === first);
   return idx < 0 ? 0 : sorted.length - idx;
 }

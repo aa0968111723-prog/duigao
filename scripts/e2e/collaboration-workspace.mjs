@@ -393,12 +393,11 @@ try {
     await page.getByRole("button", { name: "建立白板" }).click();
     await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 10000 });
     check("可建立並打開白板", await page.getByTestId("wb-canvas").count() === 1);
-    check("空板先顯示三個下一步", await page.getByTestId("wb-empty-starter").count() === 1
-      && await page.getByTestId("wb-start-step").count() === 1
-      && await page.getByTestId("wb-start-poster").count() === 1
-      && await page.getByTestId("wb-start-connect").count() === 1);
-    check("空板可種 2026招生樹", await page.getByTestId("wb-start-enrollment-tree").count() === 1);
-    await page.getByTestId("wb-start-step").click();
+    check("空板只顯示 empty-board", await page.getByTestId("wb-empty-board").count() === 1
+      && await page.getByTestId("wb-empty-starter").count() === 0);
+    check("空板主按鈕是種樹", await page.getByTestId("wb-empty-plant-enrollment-tree").count() === 1);
+    check("空板有引導影片標記", await page.getByTestId("wb-guide-video").count() === 1);
+    await page.getByTestId("wb-tool-sticky").click();
     await page.waitForSelector("textarea.wb-node-text", { timeout: 5000 });
     check("寫下一步驟會直接聚焦文字卡", await page.locator("textarea.wb-node-text").evaluate((el) => document.activeElement === el));
     await fillEditing(page, "先寫活動流程");

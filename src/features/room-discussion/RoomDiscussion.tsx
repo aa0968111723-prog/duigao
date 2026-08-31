@@ -436,7 +436,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               {item.body ? <p>{item.body}</p> : null}
             </article>
           ))}
-          {!decided.length && <p className="project-muted">還沒有收斂的決定</p>}
+          {!decided.length && <p className="project-muted">還沒有人寫下決策。問同事只會給提案。</p>}
         </div>
         <div>
           <div className="project-section-title-row">

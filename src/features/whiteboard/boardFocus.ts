@@ -4,13 +4,16 @@
  */
 import { formatVideoRange } from "../collaboration/nodes";
 import type { WhiteboardEdge, WhiteboardNode } from "../collaboration/types";
+import { GROK_THINKING_HINT } from "../collaboration/agentColleague";
 import {
   PLANT_ENROLLMENT_TREE_LABEL,
   PLANT_ENROLLMENT_TREE_VERB_ID,
+  displayEnrollmentTreePath,
   enrollmentAskFocus,
   enrollmentColleaguePrompt,
   enrollmentTreePath,
   messagesForEnrollmentFocus,
+  orderedEnrollmentChildChips,
 } from "../collaboration/enrollmentTree";
 import type { Camera } from "./canvas";
 import type { BoardAiPreview } from "./aiPreview";
@@ -44,12 +47,25 @@ export type BoardSession = {
   pendingPreview: BoardAiPreview | null;
 };
 
+export const EMPTY_BOARD_GUIDE = "一次只討論一支。招生房先長骨架，再把文宣釘上去。";
+
 export const EMPTY_BOARD_VERBS = [
-  { id: "pin-discussion", label: "從對話把一句話釘上來" },
-  { id: "add-asset", label: "放一張文宣／素材" },
   { id: PLANT_ENROLLMENT_TREE_VERB_ID, label: PLANT_ENROLLMENT_TREE_LABEL },
+  { id: "add-asset", label: "放一張文宣／素材" },
+  { id: "pin-discussion", label: "從對話把一句話釘上來" },
   { id: "ask-grok", label: "問 Grok「我們下一步做什麼」" },
 ] as const;
+
+export const TREE_PLANTED_HINT = "點一支開始討論。開場建議先點書籤。";
+export { GROK_THINKING_HINT };
+
+export function shouldMountEmptyStarter(input: {
+  canEdit: boolean;
+  emptyBoard: boolean;
+  lonelyBlankStep: boolean;
+}): boolean {
+  return input.canEdit && !input.emptyBoard && input.lonelyBlankStep;
+}
 
 export const DEFAULT_CAMERA: Camera = { x: 24, y: 24, zoom: 1 };
 
@@ -165,12 +181,6 @@ export function focusCardFromNode(
   const path = ctx?.nodes && ctx.edges
     ? enrollmentTreePath(node, ctx.nodes, ctx.edges)
     : null;
-  const byId = new Map((ctx?.nodes ?? []).map((item) => [item.id, item]));
-  const labelOf = (id: string | null | undefined) => {
-    if (!id) return "";
-    const item = byId.get(id);
-    return (item?.content.text || item?.content.title || "").trim();
-  };
   const sourceLabel = path?.text
     || node.content.sourceLabel?.trim()
     || focusCardSourceLabel(node);
@@ -181,11 +191,13 @@ export function focusCardFromNode(
     sourceLabel,
     openCommentCount: Math.max(0, node.content.openCommentCount ?? 0),
     lastWriter: node.content.lastWriterName?.trim() || null,
-    treePath: path?.text,
+    treePath: path ? displayEnrollmentTreePath(path.labels) : undefined,
     treeRootId: path?.rootId,
     parentId: path?.parentId ?? undefined,
     parentLabel: path && path.labels.length > 1 ? path.labels[path.labels.length - 2] : undefined,
-    childBranches: (path?.childIds ?? []).map((id) => ({ id, label: labelOf(id) })).filter((item) => item.label),
+    childBranches: path
+      ? orderedEnrollmentChildChips(path, ctx?.nodes ?? [])
+      : [],
     colleaguePrompt: enrollmentColleaguePrompt(path?.text),
   };
 }

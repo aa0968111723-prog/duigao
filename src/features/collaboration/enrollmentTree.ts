@@ -80,6 +80,32 @@ export function formatEnrollmentTreePath(labels: string[]): string {
   return labels.map((label) => label.trim()).filter(Boolean).join(" › ");
 }
 
+/** 太長只留尾兩段，前面用省略。兩段以內原樣。 */
+export function displayEnrollmentTreePath(labels: string[]): string {
+  const parts = labels.map((label) => label.trim()).filter(Boolean);
+  if (parts.length <= 2) return parts.join(" › ");
+  return `… › ${parts.slice(-2).join(" › ")}`;
+}
+
+export function orderedEnrollmentChildChips(
+  path: EnrollmentTreePath,
+  nodes: WhiteboardNode[],
+  spec: EnrollmentSpecNode = ENROLLMENT_TREE_2026,
+): { id: string; label: string }[] {
+  const byId = new Map(live(nodes).map((item) => [item.id, item]));
+  const chips = path.childIds
+    .map((id) => ({ id, label: labelOf(byId.get(id)) }))
+    .filter((item) => item.label);
+  const focusedIsRoot = path.rootId === path.nodeIds[path.nodeIds.length - 1];
+  if (!focusedIsRoot) return chips;
+  const order = (spec.children ?? []).map((child) => child.label);
+  return [...chips].sort((a, b) => {
+    const ai = order.indexOf(a.label);
+    const bi = order.indexOf(b.label);
+    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+  });
+}
+
 export function mindmapParentId(nodeId: string, edges: WhiteboardEdge[]): string | null {
   const incoming = treeEdges(edges).find((edge) => edge.targetNodeId === nodeId);
   return incoming?.sourceNodeId ?? null;

@@ -260,6 +260,8 @@ export type DiscussionPayload = {
   proposals?: Array<{ id: string; type: string; label: string }>;
   /** 機器稽核句，不是同事說話。 */
   audit?: boolean;
+  /** 進行中的同事回合：未讀水位略過。 */
+  pending?: boolean;
 };
 
 export type DiscussionMessage = {

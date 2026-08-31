@@ -54,19 +54,23 @@ import {
 import {
   cameraAfterRemount,
   discussionIdFromNode,
+  EMPTY_BOARD_GUIDE,
   emptyBoardVerbs,
   emptyRoomTitle,
   FOCUS_SHEET_PEEK_HEIGHT,
   focusCardFromNode,
   focusNodeIdFromSelection,
   focusSheetSnapHeights,
+  GROK_THINKING_HINT,
   isEmptyBoard,
   readBoardSession,
   readSafeAreaBottom,
   incomingFocusAction,
   snapAfterSelectionOrEdit,
+  shouldMountEmptyStarter,
   shouldMountFocusSheet,
   snapAfterFocusDiscuss,
+  TREE_PLANTED_HINT,
   writeBoardSession,
 } from "./boardFocus";
 import { DragSheet, type SheetSnap } from "../../components/BottomSheet";
@@ -168,7 +172,7 @@ export type WhiteboardApi = {
   onSelectionFocus?: (nodeId: string | null) => void;
   /** 手機 Focus sheet 掛討論（平板走 rail，不要雙掛）。 */
   discussionSlot?: import("react").ReactNode;
-  onAskColleague?: (input: { prompt: string; nodeId?: string }) => void;
+  onAskColleague?: (input: { prompt: string; nodeId?: string }) => void | Promise<void>;
   onPinFromDiscussion?: () => void;
   onRenameRoom?: (title: string) => void;
 };
@@ -442,6 +446,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState<string[]>(["", ""]);
   const [aiBusy, setAiBusy] = useState(false);
+  const [askingGrok, setAskingGrok] = useState(false);
+  const [canvasHint, setCanvasHint] = useState<null | "thinking" | "tree">(null);
+  const [guideBroken, setGuideBroken] = useState(false);
   const [aiPreview, setAiPreview] = useState<BoardAiPreview | null>(null);
   const aiPreviewRef = useRef<BoardAiPreview | null>(null);
   aiPreviewRef.current = aiPreview;
@@ -1248,6 +1255,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       setSelected([existing.id]);
       api.onSelectionFocus?.(existing.id);
       setCamera(focusCamera(existing, viewport, Math.min(camera.zoom, 1.05)));
+      setCanvasHint("tree");
       return;
     }
     if (!canEdit) {
@@ -1266,6 +1274,22 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     setSelected([planted.rootId]);
     api.onSelectionFocus?.(planted.rootId);
     setCamera(fitCamera(planted.nodes, viewport, 48));
+    setCanvasHint("tree");
+  };
+
+  const askGrok = (prompt: string, nodeId?: string) => {
+    if (askingGrok) return;
+    setAskingGrok(true);
+    setCanvasHint("thinking");
+    void Promise.resolve(api.onAskColleague
+      ? api.onAskColleague({ prompt, nodeId })
+      : undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        setAskingGrok(false);
+        setCanvasHint((current) => (current === "thinking" ? null : current));
+      });
+    if (!api.onAskColleague) setSheet("ai");
   };
 
   const focusEnrollmentBranch = (nodeId: string) => {
@@ -1554,9 +1578,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     && ["", "新步驟"].includes(String(activeNodes[0].content.text ?? "").trim())
     ? activeNodes[0]
     : null;
-  const showStarter = canEdit
-    && starterDismissedFor !== board?.id
-    && (activeNodes.length === 0 || Boolean(starterNode));
+  const showStarter = shouldMountEmptyStarter({
+    canEdit,
+    emptyBoard: activeNodes.length === 0,
+    lonelyBlankStep: Boolean(starterNode) && starterDismissedFor !== board?.id,
+  });
   const stepSourceNode = (
     selectedNode && (selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap")
       ? selectedNode
@@ -2353,13 +2379,33 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 if (next?.trim()) api.onRenameRoom?.(next.trim());
               }}>改名稱</button>
             ) : null}
-            <p>這塊板還是空的。選一個下一步：</p>
+            {!guideBroken && (
+              <video
+                className="wb-guide-video"
+                data-testid="wb-guide-video"
+                poster="/guides/enrollment-start.jpg"
+                src="/guides/enrollment-start.mp4"
+                muted
+                playsInline
+                loop
+                preload="metadata"
+                controls={false}
+                onClick={(event) => {
+                  const player = event.currentTarget;
+                  if (player.paused) void player.play();
+                  else player.pause();
+                }}
+                onError={() => setGuideBroken(true)}
+              />
+            )}
+            <p>{EMPTY_BOARD_GUIDE}</p>
             <div className="wb-empty-verbs">
               {emptyBoardVerbs().map((verb) => (
                 <button
                   type="button"
                   key={verb.id}
                   data-testid={`wb-empty-${verb.id}`}
+                  disabled={verb.id === "ask-grok" && askingGrok}
                   onClick={() => {
                     if (verb.id === "pin-discussion") {
                       if (api.onPinFromDiscussion) api.onPinFromDiscussion();
@@ -2371,8 +2417,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     } else if (verb.id === "plant-enrollment-tree") {
                       plantEnrollmentTree();
                     } else if (verb.id === "ask-grok") {
-                      if (api.onAskColleague) api.onAskColleague({ prompt: "我們下一步做什麼" });
-                      else setSheet("ai");
+                      askGrok("我們下一步做什麼");
                     }
                   }}
                 >{verb.label}</button>
@@ -2387,6 +2432,16 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             <button type="button" onClick={() => { setConnectMode(false); setConnectFrom(null); }}>取消</button>
           </div>
         )}
+        {!connectMode && canvasHint === "thinking" && (
+          <div className="wb-connect-hint" data-testid="wb-colleague-hint">
+            <span>{GROK_THINKING_HINT}</span>
+          </div>
+        )}
+        {!connectMode && canvasHint === "tree" && (
+          <div className="wb-connect-hint" data-testid="wb-tree-hint">
+            <span>{TREE_PLANTED_HINT}</span>
+          </div>
+        )}
         {phoneFocusSheet && selectedNode && focusCard && (
           <div className="wb-focus-sheet" data-testid="wb-focus-sheet" data-sheet-snap={focusSheetSnap} style={{ bottom: "var(--kb, 0px)" }}>
             <DragSheet
@@ -2397,7 +2452,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               maxHeight={keyboardInset > 0 ? sheetSnaps.maxHeight : undefined}
               handle={(
                 <>
-                  <span className="m-sheet-summary">焦點 · {focusCard.title}</span>
+                  <span className="m-sheet-summary">焦點 · {focusCard.treePath || focusCard.title}</span>
                   <button
                     type="button"
                     className="wb-context-dismiss"
@@ -2482,13 +2537,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   )}
                   <button type="button" data-testid="wb-share-focus" onClick={() => api.onSetRoomFocus?.(selectedNode.id)}>讓大家看這個</button>
                   {(api.onAskColleague || api.onAskBoardAi) && (
-                    <button type="button" data-testid="wb-ask-colleague" onClick={() => {
-                      if (api.onAskColleague) {
-                        api.onAskColleague({
-                          prompt: focusCard.colleaguePrompt || enrollmentColleaguePrompt(focusCard.treePath),
-                          nodeId: selectedNode.id,
-                        });
-                      } else setSheet("ai");
+                    <button type="button" data-testid="wb-ask-colleague" disabled={askingGrok} onClick={() => {
+                      askGrok(focusCard.colleaguePrompt || enrollmentColleaguePrompt(focusCard.treePath), selectedNode.id);
                     }}>問同事</button>
                   )}
                   <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
@@ -2497,7 +2547,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 </div>
               </details>
               <div className="wb-focus-sheet-discussion" data-testid="wb-focus-discussion">
-                {api.discussionSlot ?? <p className="project-muted">針對這張留言</p>}
+                {api.discussionSlot ?? <p className="project-muted">{focusCard.treePath ? `針對「${focusCard.treePath}」留言` : "針對這張留言"}</p>}
               </div>
             </DragSheet>
           </div>
@@ -2609,13 +2659,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 <button
                   type="button"
                   data-testid="wb-ask-colleague"
+                  disabled={askingGrok}
                   onClick={() => {
-                    if (api.onAskColleague) {
-                      api.onAskColleague({
-                        prompt: focusCard?.colleaguePrompt || enrollmentColleaguePrompt(focusCard?.treePath),
-                        nodeId: selectedNode.id,
-                      });
-                    } else setSheet("ai");
+                    askGrok(focusCard?.colleaguePrompt || enrollmentColleaguePrompt(focusCard?.treePath), selectedNode.id);
                   }}
                 >問同事</button>
               )}
