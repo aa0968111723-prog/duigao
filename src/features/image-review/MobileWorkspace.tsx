@@ -4,7 +4,7 @@ import type { CollabStatus } from "../../lib/peer";
 import { useViewport } from "../../hooks/useViewport";
 import { loadFlag, saveFlag } from "../../lib/store";
 import { ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
-import { pruneProposalVersions, startComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
+import { pruneProposalVersions, shouldSyncComposeSession, startComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
@@ -52,6 +52,7 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [immersiveOpen, setImmersiveOpen] = useState(false);
   const chatRef = useRef<HTMLInputElement>(null);
   const proposalMode = proposalSession != null;
+  const composeExitRef = useRef(false);
   const visibleVersionId = room.versions.some((version) => version.id === view.versionId)
     ? view.versionId
     : room.versions[0]?.id ?? view.versionId;
@@ -80,6 +81,7 @@ export function MobileWorkspace({ api, presence }: Props) {
     if (target.versionId !== view.versionId) {
       api.setView({ ...view, versionId: target.versionId, compareMode: "single" });
     }
+    composeExitRef.current = false;
     setProposalSession({ intent: { kind: "create", linkedCommentId: commentId } });
   };
 
@@ -90,6 +92,7 @@ export function MobileWorkspace({ api, presence }: Props) {
     api.setTool("pan");
     api.selectPin(null);
     if (doc.versionId !== view.versionId) api.setView({ ...view, versionId: doc.versionId, compareMode: "single" });
+    composeExitRef.current = false;
     proposalStore.selectProposal(proposalId);
     setProposalSession({ intent: { kind: "open", proposalId } });
   };
@@ -102,6 +105,8 @@ export function MobileWorkspace({ api, presence }: Props) {
     },
     onOpen: (commentId: string) => {
       const target = room.comments.find((c) => c.id === commentId);
+      composeExitRef.current = true;
+      proposalStore.setEditing(false);
       setProposalSession(null);
       if (!target) return;
       api.setTool("pan");
@@ -121,7 +126,11 @@ export function MobileWorkspace({ api, presence }: Props) {
   }, [room.id, room.versions]);
 
   useEffect(() => {
-    if (proposalStore.layerEditing && !proposalSession) {
+    if (composeExitRef.current) {
+      if (!proposalStore.layerEditing) composeExitRef.current = false;
+      return;
+    }
+    if (shouldSyncComposeSession(proposalStore.layerEditing, proposalSession != null, false)) {
       setProposalSession({ intent: null });
     }
   }, [proposalStore.layerEditing, proposalSession]);
@@ -320,6 +329,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             className="m-vchip poster-edit-toggle"
             data-testid="poster-edit-toggle"
             onClick={() => {
+              composeExitRef.current = false;
               api.setTool("pan");
               api.selectPin(null);
               startComposeEditing(room.id, visibleVersionId, api.guest);
@@ -376,7 +386,11 @@ export function MobileWorkspace({ api, presence }: Props) {
             versionId={visibleVersionId}
             author={api.guest}
             showToast={api.showToast}
-            onExit={() => setProposalSession(null)}
+            onExit={() => {
+              composeExitRef.current = true;
+              proposalStore.setEditing(false);
+              setProposalSession(null);
+            }}
             onHeight={setDockHeight}
             intent={proposalSession.intent}
             pin={proposalPinBinding}
@@ -609,6 +623,7 @@ export function MobileWorkspace({ api, presence }: Props) {
               type="button"
               className="m-row"
               onClick={() => {
+                composeExitRef.current = false;
                 api.setTool("pan");
                 api.selectPin(null);
                 setMore(false);

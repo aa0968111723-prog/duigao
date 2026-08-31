@@ -136,7 +136,7 @@ type ProposalRuntimeState = PersistedProposalState & {
   error: string | null;
 };
 
-type ProposalItemPatch =
+export type ProposalItemPatch =
   | Partial<Omit<ProposalTextItem, "id" | "type">>
   | Partial<Omit<ProposalImageItem, "id" | "type">>
   | Partial<Omit<ProposalShapeItem, "id" | "type">>;
@@ -244,7 +244,14 @@ export function normalizeItem(raw: unknown): ProposalItem | null {
   if (item.type === "image") {
     const img = item as Partial<ProposalImageItem>;
     if (typeof img.imageDataUrl !== "string") return null;
-    return { ...base, type: "image", name: img.name ?? "素材", imageDataUrl: img.imageDataUrl };
+    const crop = normalizeCrop(img.crop);
+    return {
+      ...base,
+      type: "image",
+      name: img.name ?? "素材",
+      imageDataUrl: img.imageDataUrl,
+      ...(crop ? { crop } : {}),
+    };
   }
   if (item.type === "shape") {
     const shape = item as Partial<ProposalShapeItem>;
@@ -349,6 +356,22 @@ export function normalizeDoc(raw: unknown): VisualProposal | null {
 function clampNum(value: unknown, min: number, max: number, fallback: number): number {
   const n = typeof value === "number" && Number.isFinite(value) ? value : fallback;
   return Math.min(max, Math.max(min, n));
+}
+
+function normalizeCrop(raw: unknown): ImageCrop | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const crop = raw as Partial<ImageCrop>;
+  if (typeof crop.x !== "number" || typeof crop.y !== "number" || typeof crop.width !== "number" || typeof crop.height !== "number") {
+    return undefined;
+  }
+  const x = clampNum(crop.x, 0, 0.85, 0);
+  const y = clampNum(crop.y, 0, 0.85, 0);
+  return {
+    x,
+    y,
+    width: clampNum(crop.width, 0.15, 1 - x, 1),
+    height: clampNum(crop.height, 0.15, 1 - y, 1),
+  };
 }
 
 /* ---------- IndexedDB ---------- */
@@ -622,6 +645,66 @@ function editActive(
     viewMode: viewAfterEdit(state.viewMode),
     selectedItemId: selectedItemId === undefined ? state.selectedItemId : selectedItemId,
   };
+}
+
+function commitActiveDoc(
+  roomId: string,
+  versionId: string,
+  author: ProposalAuthor,
+  mutate: (doc: VisualProposal) => VisualProposal,
+  selectedItemId?: string | null,
+): void {
+  const current = snapshot(roomId);
+  const withHistory = { ...current, ...pushUndo(current) };
+  set(roomId, {
+    ...editActive(withHistory, versionId, author, mutate, selectedItemId),
+    editing: true,
+  });
+  persist(roomId);
+}
+
+/** Same path Overlay / Dock use via the hook. Tests drive this, not a copy. */
+export function updateProposalItem(
+  roomId: string,
+  versionId: string,
+  author: ProposalAuthor,
+  itemId: string,
+  patch: ProposalItemPatch,
+): void {
+  commitActiveDoc(
+    roomId,
+    versionId,
+    author,
+    (doc) => ({
+      ...doc,
+      items: doc.items.map((item) => (item.id === itemId ? ({ ...item, ...patch } as ProposalItem) : item)),
+    }),
+    itemId,
+  );
+}
+
+export function addProposalItem(roomId: string, versionId: string, author: ProposalAuthor, item: ProposalItem): void {
+  commitActiveDoc(roomId, versionId, author, (doc) => ({ ...doc, items: [...doc.items, item] }), item.id);
+}
+
+export function undoProposalEdits(roomId: string): void {
+  const current = snapshot(roomId);
+  if (current.undo.length === 0) return;
+  const previous = current.undo[current.undo.length - 1];
+  set(roomId, {
+    ...current,
+    docs: previous.docs,
+    activeByVersion: previous.activeByVersion,
+    undo: current.undo.slice(0, -1),
+    redo: [...current.redo, snapshotHistory(current)].slice(-HISTORY_LIMIT),
+    selectedItemId: null,
+  });
+  persist(roomId);
+}
+
+/** Open compose dock only when editing started, never after 完成 cleared the session. */
+export function shouldSyncComposeSession(layerEditing: boolean, hasSession: boolean, exiting: boolean): boolean {
+  return layerEditing && !hasSession && !exiting;
 }
 
 /* ---------- read-only helpers usable outside the editor ---------- */
@@ -932,8 +1015,8 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
   );
 
   const addImage = useCallback(
-    (item: ProposalImageItem) => commit((doc) => ({ ...doc, items: [...doc.items, item] }), item.id),
-    [commit],
+    (item: ProposalImageItem) => addProposalItem(roomId, versionId, { id: authorId, name: authorName, color: authorColor }, item),
+    [roomId, versionId, authorId, authorName, authorColor],
   );
 
   const addShape = useCallback(
@@ -943,11 +1026,8 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
 
   const updateItem = useCallback(
     (id: string, patch: ProposalItemPatch) =>
-      commit(
-        (doc) => ({ ...doc, items: doc.items.map((item) => (item.id === id ? ({ ...item, ...patch } as ProposalItem) : item)) }),
-        id,
-      ),
-    [commit],
+      updateProposalItem(roomId, versionId, { id: authorId, name: authorName, color: authorColor }, id, patch),
+    [roomId, versionId, authorId, authorName, authorColor],
   );
 
   const updateItemLive = useCallback(
@@ -1017,20 +1097,7 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
     [commit],
   );
 
-  const undo = useCallback(() => {
-    const current = snapshot(roomId);
-    if (current.undo.length === 0) return;
-    const previous = current.undo[current.undo.length - 1];
-    set(roomId, {
-      ...current,
-      docs: previous.docs,
-      activeByVersion: previous.activeByVersion,
-      undo: current.undo.slice(0, -1),
-      redo: [...current.redo, snapshotHistory(current)].slice(-HISTORY_LIMIT),
-      selectedItemId: null,
-    });
-    persist(roomId);
-  }, [roomId]);
+  const undo = useCallback(() => undoProposalEdits(roomId), [roomId]);
 
   const redo = useCallback(() => {
     const current = snapshot(roomId);

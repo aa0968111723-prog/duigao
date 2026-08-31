@@ -439,8 +439,11 @@ const ProposalItemView = memo(function ProposalItemView({ item, selected, onPoin
     return (
       <button
         type="button"
-        className={`proposal-item proposal-image ${selected ? "is-selected" : ""}`}
-        style={shared}
+        className={`proposal-item proposal-image ${selected ? "is-selected" : ""} ${item.crop ? "has-crop" : ""}`}
+        style={{
+          ...shared,
+          ...(item.crop ? { ["--crop-ar" as string]: `${item.crop.width} / ${item.crop.height}` } : {}),
+        }}
         {...handlers}
         aria-label={`素材：${item.name}`}
         aria-pressed={selected}
@@ -453,8 +456,8 @@ const ProposalItemView = memo(function ProposalItemView({ item, selected, onPoin
             style={item.crop ? {
               width: `${100 / item.crop.width}%`,
               height: `${100 / item.crop.height}%`,
-              marginLeft: `${-item.crop.x / item.crop.width * 100}%`,
-              marginTop: `${-item.crop.y / item.crop.height * 100}%`,
+              left: `${-item.crop.x / item.crop.width * 100}%`,
+              top: `${-item.crop.y / item.crop.height * 100}%`,
               maxWidth: "none",
             } : undefined}
           />
