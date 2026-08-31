@@ -9,6 +9,7 @@ import { parseFunctionPayload } from "../cloud/apiResponse";
 import { stripSecrets } from "../../supabase/functions/_shared/roomContext.ts";
 
 export const AGENT_UNCONFIGURED_COPY = "AI 服務尚未設定";
+export const SPEND_LIMIT_COPY = "這一回合花費已達上限";
 export const IMAGINE_NOT_VERSION_COPY = "已生成一張圖，尚未成為正式版本";
 export const DEFAULT_GROK_TEXT_MODEL = "grok-4-1-fast-non-reasoning";
 export const DEFAULT_GROK_IMAGE_MODEL = "grok-imagine-image";
@@ -79,6 +80,9 @@ export type RoomAgentFocus = {
   width?: number;
   height?: number;
   thumbnail?: { kind: "signed-url" | "description"; value: string };
+  nodeId?: string;
+  nodeType?: string;
+  source?: "discussion" | "version" | "schedule" | "none";
 };
 
 export type RoomAgentComment = {
@@ -131,6 +135,9 @@ export type RoomAgentCardInput = {
     signedUrl?: string;
     invite?: string;
     inviteHash?: string;
+    nodeId?: string;
+    nodeType?: string;
+    source?: "discussion" | "version" | "schedule" | "none";
   };
   comments?: Array<{
     id: string;
@@ -264,7 +271,12 @@ export function buildRoomAgentCard(input: RoomAgentCardInput): RoomAgentCard {
     }))
     .filter((item) => item.id && item.body);
 
-  const focus = input.focus
+  const focusSourceRaw = text(input.focus?.source);
+  const focusSource: RoomAgentFocus["source"] =
+    focusSourceRaw === "discussion" || focusSourceRaw === "version" || focusSourceRaw === "schedule" || focusSourceRaw === "none"
+      ? focusSourceRaw
+      : undefined;
+  const focus: RoomAgentFocus | undefined = input.focus
     ? {
         branchId: text(input.focus.branchId).slice(0, 80) || undefined,
         versionId: text(input.focus.versionId).slice(0, 80) || undefined,
@@ -272,6 +284,9 @@ export function buildRoomAgentCard(input: RoomAgentCardInput): RoomAgentCard {
         width: typeof input.focus.width === "number" ? input.focus.width : undefined,
         height: typeof input.focus.height === "number" ? input.focus.height : undefined,
         thumbnail: thumbnailFromFocus(input.focus),
+        nodeId: text(input.focus.nodeId).slice(0, 80) || undefined,
+        nodeType: text(input.focus.nodeType).slice(0, 40) || undefined,
+        source: focusSource,
       }
     : undefined;
 
@@ -434,7 +449,7 @@ export function dispatchRoomAgentTool(
       return refuse(tool, "這一回合不允許生圖。");
     }
     if (spendWouldExceed(spent, IMAGINE_IMAGE_USD, maxUsd)) {
-      return refuse(tool, `這一回合花費上限 $${maxUsd.toFixed(2)}，生圖會超過，已停止。`);
+      return refuse(tool, SPEND_LIMIT_COPY);
     }
     return previewResult(tool, IMAGINE_NOT_VERSION_COPY, { spentUsd: spent + IMAGINE_IMAGE_USD });
   }
@@ -466,7 +481,7 @@ export function dispatchRoomAgentTool(
     const resolution = text(args.resolution, "720p") || "720p";
     const cost = estimateImagineVideoUsd(seconds, resolution);
     if (spendWouldExceed(spent, cost, maxUsd)) {
-      return refuse(tool, `這一回合花費上限 $${maxUsd.toFixed(2)}，生影約 $${cost.toFixed(2)}，已停止。`);
+      return refuse(tool, SPEND_LIMIT_COPY);
     }
     return previewResult(tool, `已生成約 ${Math.max(1, Math.min(15, Math.floor(seconds)))} 秒短影預覽，尚未成為正式版本`, { spentUsd: spent + cost });
   }

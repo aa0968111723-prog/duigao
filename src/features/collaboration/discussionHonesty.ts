@@ -21,6 +21,8 @@ export function canEditDiscussion(
   if (!userId || sendState === "sending" || sendState === "failed") return false;
   if (message.deletedAt) return false;
   if (message.payload.legacy) return false;
+  if (message.payload.agent === true) return false;
+  if (message.payload.audit === true) return false;
   if (message.kind !== "text") return false;
   return message.authorId === userId;
 }
@@ -105,8 +107,24 @@ export function discussionEditPatch(body: string): { body: string } | null {
   return { body: next.slice(0, 4000) };
 }
 
-export function isMemberActor(actor: string | undefined | null): boolean {
+export function isMemberActor(
+  actor:
+    | string
+    | undefined
+    | null
+    | { authorId?: string; authorName?: string; payload?: { agent?: boolean } },
+): boolean {
   if (!actor) return false;
+  if (typeof actor === "object") {
+    if (actor.payload?.agent === true) return false;
+    if (actor.authorName === "Grok") {
+      const id = (actor.authorId ?? "").trim().toLowerCase();
+      if (!id || id === "ai" || id === "agent" || id.startsWith("ai-") || id.startsWith("agent-") || id.startsWith("model-")) {
+        return false;
+      }
+    }
+    return isMemberActor(actor.authorId);
+  }
   const id = actor.trim().toLowerCase();
   if (!id) return false;
   if (id === "ai" || id === "system" || id === "agent") return false;

@@ -12,7 +12,7 @@ import {
   type AiProposal,
   type ApplyProposalResult,
 } from "../../ai/proposals";
-import { AGENT_UNCONFIGURED_COPY, IMAGINE_NOT_VERSION_COPY, estimateImagineVideoUsd } from "../../ai/roomAgentContract";
+import { AGENT_UNCONFIGURED_COPY, IMAGINE_NOT_VERSION_COPY, SPEND_LIMIT_COPY, estimateImagineVideoUsd } from "../../ai/roomAgentContract";
 import { proposalShowsSources } from "../schedule/proposals";
 import "./asset-ai.css";
 
@@ -281,7 +281,10 @@ export function RoomAiSheet({ roomTitle, assets, jobs = [], selectedAssetIds = [
           {PRESETS.map((preset) => <button type="button" key={preset} onClick={() => { setQuery(preset); void ask(preset); }}>{preset}</button>)}
         </div>
 
-        {error && <p className="asset-ai-error" role="alert">{error}</p>}
+        {error && <p className="asset-ai-error" role="alert">{/上限/.test(error) ? SPEND_LIMIT_COPY : error}</p>}
+        {response?.agent?.status === "spend_exceeded" && (
+          <p className="asset-ai-error" role="status" data-testid="room-ai-spend-limit">{SPEND_LIMIT_COPY}</p>
+        )}
         {(response?.agent?.status === "unconfigured" || (!response?.answer && response?.agent?.status === "unconfigured")) && (
           <p className="asset-ai-error" role="status" data-testid="room-ai-unconfigured">{AGENT_UNCONFIGURED_COPY}</p>
         )}

@@ -21,6 +21,14 @@ import { voiceUnavailableReason } from "../collaboration/voice";
 import type { DecisionRecord, DiscussionMessage, DiscussionSupport, Whiteboard } from "../collaboration/types";
 import { shouldFollowLatest, shouldMarkLatestFromFeedEnd } from "./feed";
 import { voiceDockShowsLeave } from "./voiceDockLeave";
+import {
+  colleagueBubbleClass,
+  GROK_MENTION_LABEL,
+  GROK_TOMBSTONE_COPY,
+  insertGrokMention,
+  isColleagueMessage,
+  showsGrokMentionChip,
+} from "../collaboration/agentColleague";
 import "./discussion.css";
 
 export type RoomDiscussionApi = {
@@ -83,6 +91,10 @@ export type RoomDiscussionApi = {
    * 「還在準備」誠實文案；available → VoiceDock（加入/離開/靜音/名單）。
    */
   voice?: import("../../hooks/useVoiceRoom").VoiceDockApi;
+  focusNodeId?: string | null;
+  onAskColleague?: (input: { prompt: string; replyToId?: string; nodeId?: string }) => void;
+  onApplyColleagueProposal?: (proposalId: string) => void;
+  onRejectColleagueProposal?: (proposalId: string) => void;
 };
 
 function humanSize(bytes?: number): string {
@@ -458,25 +470,31 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           // legacy（0001 messages）唯讀：沒有討論表的列可以支持/回覆。
           const readOnly = Boolean((message.payload as { legacy?: boolean }).legacy);
           const tombstoned = messageIsTombstoned(message);
+          const bubble = colleagueBubbleClass(message);
+          const colleague = bubble === "colleague";
+          const proposals = colleague ? (message.payload.proposals ?? []).slice(0, 3) : [];
           return (
             <article
-              className={`rd-msg${sendState === "sending" ? " is-sending" : ""}${sendState === "failed" ? " is-failed" : ""}${highlightId === message.id ? " is-highlight" : ""}${tombstoned ? " is-tombstone" : ""}`}
+              className={`rd-msg${sendState === "sending" ? " is-sending" : ""}${sendState === "failed" ? " is-failed" : ""}${highlightId === message.id ? " is-highlight" : ""}${tombstoned ? " is-tombstone" : ""}${colleague ? " is-colleague" : ""}${bubble === "audit" ? " is-audit" : ""}`}
               key={message.id}
               id={`rd-msg-${message.id}`}
               data-testid={`discussion-${message.id}`}
+              data-colleague={colleague ? "true" : undefined}
+              data-audit={bubble === "audit" ? "true" : undefined}
               data-latest={message.id === lastMessage?.id ? "true" : undefined}
               data-first-unread={message.id === firstUnreadId ? "true" : undefined}
               data-tombstone={tombstoned ? "true" : undefined}
               onContextMenu={(event) => { event.preventDefault(); if (!tombstoned) setMenuId(message.id); }}
             >
               <header>
-                <span className="rd-dot" style={{ background: message.authorColor }} />
-                <b>{message.authorName}</b>
+                <span className="rd-dot" style={{ background: colleague ? "#6b5ce7" : message.authorColor }} />
+                <b>{colleague ? "Grok" : message.authorName}</b>
+                {colleague ? <span className="rd-ai-badge" data-testid="discussion-ai-badge">AI</span> : null}
                 {messageIsEdited(message) && !tombstoned ? <span className="rd-edited" data-testid="discussion-edited">已編輯</span> : null}
                 <time>{timeLabel(message.createdAt)}</time>
               </header>
               {tombstoned ? (
-                <p className="rd-tombstone" data-testid="discussion-tombstone">這則討論已刪除</p>
+                <p className="rd-tombstone" data-testid="discussion-tombstone">{colleague ? GROK_TOMBSTONE_COPY : "這則討論已刪除"}</p>
               ) : editingId === message.id ? (
                 <form
                   className="rd-edit-form"
@@ -506,10 +524,11 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                 <p>{message.body}</p>
               )}
               {!tombstoned && <ReplyRef reference={resolveReply(message, byId)} onJump={jumpToMessage} />}
-              {!tombstoned && (message.kind === "whiteboard" || message.kind === "node") && (
+              {!tombstoned && (message.kind === "whiteboard" || message.kind === "node" || message.payload.nodeId) && (
                 <button
                   type="button"
                   className="rd-ref"
+                  data-testid="discussion-open-board-focus"
                   onClick={() => {
                     // 導航走 ContextAnchor 契約（PR-02d）；壞列（缺
                     // whiteboardId）維持舊行為送空字串，讓 App 端 no-op。
@@ -518,8 +537,21 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                     else api.onOpenBoardNode(message.payload.whiteboardId ?? "", message.payload.nodeId);
                   }}
                 >
-                  {message.payload.title ?? "打開白板"}
+                  {message.payload.nodeId ? "打開白板並聚焦這張" : (message.payload.title ?? "打開白板")}
                 </button>
+              )}
+              {!tombstoned && colleague && proposals.length > 0 && (
+                <div className="rd-colleague-proposals" data-testid="colleague-proposals">
+                  {proposals.map((proposal) => (
+                    <div key={proposal.id} className="rd-proposal-card" data-testid="colleague-proposal-card">
+                      <strong>{proposal.label}</strong>
+                      <div className="rd-actions">
+                        <button type="button" data-testid="colleague-proposal-apply" onClick={() => api.onApplyColleagueProposal?.(proposal.id)}>套用</button>
+                        <button type="button" data-testid="colleague-proposal-reject" onClick={() => api.onRejectColleagueProposal?.(proposal.id)}>不用</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
               {!tombstoned && (message.kind === "poster" || message.kind === "video" || message.kind === "plan") && message.payload.branchId && (
                 <button
@@ -554,7 +586,9 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               {!readOnly && !tombstoned && (
               <div className="rd-actions">
                 <button type="button" onClick={() => setReply(message)}>回覆</button>
+                {!colleague && bubble !== "audit" && (
                 <button type="button" onClick={() => api.onSupport(message.id, !supported)}>支持{supportCount ? ` ${supportCount}` : ""}</button>
+                )}
                 {api.onEditMessage && canEditDiscussion(message, api.userId, sendState) && (
                   <button
                     type="button"
@@ -569,7 +603,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                     onClick={() => api.onTombstoneMessage?.(message.id)}
                   >刪除</button>
                 )}
-                {showRoomActions && api.canManage && (
+                {showRoomActions && api.canManage && !colleague && bubble !== "audit" && (
                   <button
                     type="button"
                     data-testid="discussion-create-poll"
@@ -632,12 +666,14 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               setReply(null);
               return;
             }
+            const payload = {
+              ...(reply ? { quotedBody: replySnippet(reply) } : {}),
+              ...(api.focusNodeId ? { nodeId: api.focusNodeId } : {}),
+            };
             api.onSend({
               body: text,
               replyToId: reply?.id,
-              // quotedBody 只是「來源不在時還能看到什麼」的備援快照。
-              // 現況一律由 resolveReply 從來源現值算出來。
-              payload: reply ? { quotedBody: replySnippet(reply) } : {},
+              payload,
             });
             setReply(null);
           }}
@@ -657,6 +693,27 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                 ✕
               </button>
             </div>
+          )}
+          {showsGrokMentionChip(api.draft) && api.onAskColleague && (
+            <button
+              type="button"
+              className="rd-grok-chip"
+              data-testid="grok-mention-chip"
+              onClick={() => api.setDraft(insertGrokMention(api.draft))}
+            >{GROK_MENTION_LABEL}</button>
+          )}
+          {api.onAskColleague && (
+            <button
+              type="button"
+              className="rd-attach-button"
+              data-testid="rd-ask-colleague"
+              aria-label="問同事"
+              onClick={() => {
+                const prompt = api.draft.trim() || "我們下一步做什麼？";
+                api.onAskColleague?.({ prompt, replyToId: reply?.id, nodeId: api.focusNodeId ?? undefined });
+                api.setDraft("");
+              }}
+            >問同事</button>
           )}
           {api.onAttach && (
             <>

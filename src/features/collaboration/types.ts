@@ -245,6 +245,13 @@ export type DiscussionPayload = {
   title?: string;
   startTime?: number;
   endTime?: number;
+  /** Grok 討論同事（不新增 kind）。渲染：agent===true → 同事氣泡。 */
+  agent?: boolean;
+  agentProvider?: string;
+  proposalIds?: string[];
+  proposals?: Array<{ id: string; type: string; label: string }>;
+  /** 機器稽核句，不是同事說話。 */
+  audit?: boolean;
 };
 
 export type DiscussionMessage = {
