@@ -75,8 +75,13 @@ export type RoomContentKind = "poster" | "video" | "plan" | "asset";
 export type NodeContent = {
   text?: string;
   color?: string;
-  /** Thumbnail URL or data URL — never the original full-res asset. */
+  /**
+   * Display URL from the linked version (signed, cached, or local data URL).
+   * Never original file bytes — those stay on the version, not in node JSON.
+   */
   thumbnailUrl?: string;
+  /** Playable URL from the linked video version. Same rule as thumbnailUrl. */
+  videoUrl?: string;
   title?: string;
   subtitle?: string;
   versionLabel?: string;

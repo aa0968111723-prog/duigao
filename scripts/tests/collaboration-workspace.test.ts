@@ -21,6 +21,10 @@ import {
   parseTimestamp,
   stampPersistedNode,
   touchWhiteboardNodeVersion,
+  boardMediaFromVersion,
+  boardMediaSize,
+  hydrateBoardMedia,
+  showsBoardMedia,
 } from "../../src/features/collaboration/nodes.ts";
 import { arrangeBoard, arrangeFlow, arrangeGrid, arrangeMindmap } from "../../src/features/collaboration/layout.ts";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -116,6 +120,38 @@ test("11-15 room content / video range / plan cards only reference entities", ()
   asset.linkedEntityId = "ver-1";
   asset.content = { title: "booth.png", mediaKind: "asset", filename: "image/png" };
   assert.equal(asset.linkedEntityType, "version");
+});
+
+test("文宣／影片落板帶版本圖與播放網址，不是丟掉 data URL 的空卡", () => {
+  const posterMedia = boardMediaFromVersion({
+    kind: "image",
+    imageDataUrl: "data:image/png;base64,abc",
+    width: 600,
+    height: 800,
+  });
+  assert.equal(posterMedia.thumbnailUrl?.startsWith("data:image/png"), true);
+  assert.equal(posterMedia.videoUrl, undefined);
+  const posterSize = boardMediaSize("poster", { width: 600, height: 800 });
+  assert.ok(posterSize.height > 200, `poster height=${posterSize.height}`);
+  assert.ok(posterSize.width > 160);
+  const videoMedia = boardMediaFromVersion({
+    kind: "video",
+    imageDataUrl: "https://example.test/poster.jpg",
+    videoUrl: "https://example.test/clip.mp4",
+    width: 1920,
+    height: 1080,
+  });
+  assert.equal(videoMedia.videoUrl, "https://example.test/clip.mp4");
+  assert.equal(videoMedia.thumbnailUrl, "https://example.test/poster.jpg");
+  const videoSize = boardMediaSize("video", { width: 1920, height: 1080 });
+  assert.ok(videoSize.width >= 280);
+  assert.equal(showsBoardMedia({ mediaKind: "poster", thumbnailUrl: posterMedia.thumbnailUrl }), true);
+  assert.equal(showsBoardMedia({ mediaKind: "plan", thumbnailUrl: "https://x" }), false);
+  const bare = node("bare", "room_content");
+  bare.content = { mediaKind: "poster", title: "擺攤文宣" };
+  const hydrated = hydrateBoardMedia(bare, { kind: "image", imageDataUrl: "data:image/png;base64,abc" });
+  assert.equal(hydrated.content.thumbnailUrl?.startsWith("data:"), true);
+  assert.ok(!("imageBytes" in hydrated.content));
 });
 
 test("drag persist is throttled, not every animation frame", () => {

@@ -249,19 +249,34 @@ try {
     check("送出後看得到最新一則", await page.locator('[data-testid="discussion-feed"] [data-latest="true"]').innerText().then((text) => text.includes("先把招生流程攤在白板上")));
     const latestMsg = page.locator('[data-testid="discussion-feed"] [data-latest="true"]');
     await latestMsg.getByTestId("discussion-edit").waitFor({ state: "visible", timeout: 15000 });
-    await latestMsg.getByTestId("discussion-edit").click();
-    const editBox = page.getByTestId("discussion-edit-form").getByTestId("discussion-edit-input");
-    await editBox.waitFor({ state: "visible", timeout: 8000 });
-    await editBox.fill("先把招生流程攤在白板上（改過）");
-    await page.waitForFunction(
-      () => document.querySelector('[data-testid="discussion-edit-input"]')?.value?.includes("改過"),
-      null,
-      { timeout: 5000 },
-    );
-    await page.getByTestId("discussion-edit-form").evaluate((form) => {
-      if (form instanceof HTMLFormElement) form.requestSubmit();
-    });
-    await page.locator(".rd-msg", { hasText: "先把招生流程攤在白板上（改過）" }).first().waitFor({ state: "visible", timeout: 20000 });
+    const editedBody = "先把招生流程攤在白板上（改過）";
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (await page.locator(".rd-msg", { hasText: editedBody }).count()) break;
+      if (!await page.getByTestId("discussion-edit-form").count()) {
+        await latestMsg.getByTestId("discussion-edit").click();
+      }
+      const form = page.getByTestId("discussion-edit-form");
+      await form.waitFor({ state: "visible", timeout: 8000 });
+      await form.evaluate((node, value) => {
+        const input = node.querySelector('[data-testid="discussion-edit-input"]');
+        const save = node.querySelector('[data-testid="discussion-edit-save"]');
+        if (!(input instanceof HTMLTextAreaElement)) throw new Error("no discussion-edit-input");
+        Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        if (save instanceof HTMLButtonElement) {
+          save.disabled = false;
+          save.click();
+        } else if (node instanceof HTMLFormElement) {
+          node.requestSubmit();
+        }
+      }, editedBody);
+      try {
+        await page.locator(".rd-msg", { hasText: editedBody }).first().waitFor({ state: "visible", timeout: 8000 });
+        break;
+      } catch (error) {
+        if (attempt === 2) throw error;
+      }
+    }
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });
     check("改過的訊息標已編輯", await page.getByTestId("discussion-edited").count() === 1);
@@ -445,8 +460,12 @@ try {
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /招生影片/ }).click();
     await page.getByTestId("wb-video-0040").click();
     check("可把文宣／企劃／影片時間卡放上白板", await page.locator("[data-node-type='room_content']").count() >= 3);
+    check("文宣落板是整張圖，不是 52px 小卡", await page.locator('[data-testid="wb-media-image"]').count() >= 1);
+    check("影片落板是可播影片", await page.locator('[data-testid="wb-media-video"]').count() >= 1);
     check("影片卡帶 00:40 時間點", (await page.locator("[data-node-type='room_content']").allTextContents()).some((text) => text.includes("00:40")));
     await dismissSelection(page);
+    mkdirSync("/opt/cursor/artifacts", { recursive: true });
+    await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_full_media_390.png"), fullPage: true });
     await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_compact_toolbar_390.png"), fullPage: true });
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.waitForFunction(

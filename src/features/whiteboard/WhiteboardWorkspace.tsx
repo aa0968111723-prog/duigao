@@ -2,20 +2,24 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEv
 import { createPortal } from "react-dom";
 import type { PlanDocument, Room, RoomBranch, RoomPoll } from "../../lib/types";
 import { anchorFromNode, openTarget } from "../../lib/contextAnchor";
-import { branchSummary, latestBranchVersion } from "../../lib/roomBranches";
+import { boardMediaVersion, branchSummary, latestBranchVersion } from "../../lib/roomBranches";
 import { useViewport } from "../../hooks/useViewport";
 import {
   addFlowNextStep,
   addMindmapChild,
   applyNodePatch,
+  boardMediaFromVersion,
+  boardMediaSize,
   createRelationEdges,
   createSticky,
   findNodes,
   formatVideoRange,
   groupSelected,
+  hydrateBoardMedia,
   moveNodes,
   nodeSearchText,
   parseTimestamp,
+  showsBoardMedia,
 } from "../collaboration/nodes";
 import { arrangeBoard } from "../collaboration/layout";
 import { canEditBoard } from "../collaboration/permissions";
@@ -166,6 +170,22 @@ const ADD_OPTIONS: { type: NodeType | "content"; label: string }[] = [
   { type: "image", label: "圖片" },
 ];
 
+function versionForBoardNode(room: Room, node: WhiteboardNode) {
+  const versions = room.versions ?? [];
+  if (node.sourceVersionId) {
+    const found = versions.find((item) => item.id === node.sourceVersionId);
+    if (found && (found.imageDataUrl?.trim() || found.videoUrl?.trim())) return found;
+  }
+  if (node.linkedEntityType === "version" && node.linkedEntityId) {
+    const found = versions.find((item) => item.id === node.linkedEntityId);
+    if (found) return found;
+  }
+  if (node.linkedEntityType === "branch" && node.linkedEntityId) {
+    return boardMediaVersion(room, node.linkedEntityId) ?? latestBranchVersion(room, node.linkedEntityId);
+  }
+  return undefined;
+}
+
 function relative(ts: number): string {
   const minutes = Math.floor(Math.max(0, Date.now() - ts) / 60000);
   if (minutes < 1) return "剛剛";
@@ -195,6 +215,7 @@ const NodeView = memo(function NodeView({
     "wb-node",
     `wb-node-${node.nodeType}`,
     node.nodeType === "room_content" || node.nodeType === "image" ? "wb-node-content" : "",
+    showsBoardMedia(node.content) ? "wb-has-media" : "",
     selected ? "is-selected" : "",
     editing ? "is-editing" : "",
     node.locked ? "is-locked" : "",
@@ -625,8 +646,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   const liveNodes = previewNodes ?? nodes;
   const rendered = useMemo(
-    () => paintOrder(visibleNodes(liveNodes.filter((node) => !node.deletedAt), camera, viewport)),
-    [liveNodes, camera, viewport],
+    () => paintOrder(visibleNodes(
+      liveNodes
+        .filter((node) => !node.deletedAt)
+        .map((node) => hydrateBoardMedia(node, versionForBoardNode(api.room, node))),
+      camera,
+      viewport,
+    )),
+    [liveNodes, camera, viewport, api.room],
   );
   const orderedFrames = useMemo(() => paintOrder(frames), [frames]);
   const hits = search.trim() ? findNodes(liveNodes, search) : [];
@@ -1110,7 +1137,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     record(frameUpdateDraft(nextOpId(), frame, next));
   };
 
-  const addAt = (world: { x: number; y: number }, type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId">) => {
+  const addAt = (
+    world: { x: number; y: number },
+    type: NodeType,
+    content?: WhiteboardNode["content"],
+    linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId">,
+    size?: { width: number; height: number },
+  ) => {
     if (!board || !canEdit) return;
     const node = type === "text"
       ? createSticky({ whiteboardId: board.id, roomId: board.roomId, createdBy: "local", x: world.x - 90, y: world.y - 48 })
@@ -1124,17 +1157,29 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       node.nodeType = type;
       node.content = content ?? node.content;
     }
+    if (type === "room_content" || type === "image") {
+      const fit = size ?? boardMediaSize(content?.mediaKind);
+      node.width = fit.width;
+      node.height = fit.height;
+    } else if (size) {
+      node.width = size.width;
+      node.height = size.height;
+    }
     api.onUpsertNode(node, "now");
     record(nodeCreateDraft(nextOpId(), node));
     setStarterDismissedFor(board.id);
     setSelected([node.id]);
-    beginEdit(node);
+    if (type === "text" || type === "flow" || type === "mindmap") beginEdit(node);
     setSheet(null);
     return node;
   };
 
-  const addAtView = (type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId">) =>
-    addAt(screenToWorld(camera, viewport.width / 2, viewport.height / 2), type, content, linked);
+  const addAtView = (
+    type: NodeType,
+    content?: WhiteboardNode["content"],
+    linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId">,
+    size?: { width: number; height: number },
+  ) => addAt(screenToWorld(camera, viewport.width / 2, viewport.height / 2), type, content, linked, size);
 
   const openPosterPicker = () => {
     setContentKind("poster");
@@ -1261,21 +1306,21 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const placeBranch = (branch: RoomBranch, range?: { startTime?: number; endTime?: number }) => {
     if (!board) return;
     const version = latestBranchVersion(api.room, branch.id);
+    const mediaSource = boardMediaVersion(api.room, branch.id) ?? version;
     const summary = branchSummary(api.room, branch.id);
     const plan: PlanDocument | undefined = api.room.plans?.find((item) => item.branchId === branch.id);
+    const mediaKind = branch.branchType === "copy" ? "plan" : branch.branchType;
     addAtView("room_content", {
       title: branch.name,
-      mediaKind: branch.branchType === "copy" ? "plan" : branch.branchType,
+      mediaKind,
       versionLabel: version?.label ?? summary.latestLabel,
       openCommentCount: summary.openCommentCount,
-      thumbnailUrl: version?.kind === "image" && version.imageDataUrl && !version.imageDataUrl.startsWith("data:")
-        ? version.imageDataUrl
-        : undefined,
+      ...boardMediaFromVersion(mediaSource),
       subtitle: plan ? `更新於 ${relative(plan.updatedAt)}` : undefined,
       duration: version?.duration,
       startTime: range?.startTime,
       endTime: range?.endTime,
-    }, { linkedEntityType: "branch", linkedEntityId: branch.id });
+    }, { linkedEntityType: "branch", linkedEntityId: branch.id }, boardMediaSize(mediaKind, mediaSource));
     setPendingVideo(null);
     setPendingPoster(null);
     setPendingPlan(null);
@@ -1283,6 +1328,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   const placePosterRegion = (branch: RoomBranch, mark?: { region: AnnotationRegion; versionId: string; label: string }) => {
     const version = latestBranchVersion(api.room, branch.id);
+    const mediaSource = boardMediaVersion(api.room, branch.id) ?? version;
     const extra = mark
       ? nodeFromImageRegion({ versionId: mark.versionId, region: mark.region, label: mark.label })
       : null;
@@ -1290,15 +1336,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       title: branch.name,
       mediaKind: "poster",
       versionLabel: version?.label,
-      thumbnailUrl: version?.kind === "image" && version.imageDataUrl && !version.imageDataUrl.startsWith("data:")
-        ? version.imageDataUrl
-        : undefined,
+      openCommentCount: branchSummary(api.room, branch.id).openCommentCount,
+      ...boardMediaFromVersion(mediaSource),
       subtitle: extra?.subtitle,
     }, {
       linkedEntityType: extra?.link.linkedEntityType ?? "branch",
       linkedEntityId: extra?.link.linkedEntityId ?? branch.id,
       ...(extra ? { anchor: extra.anchor, sourceVersionId: extra.sourceVersionId } : {}),
-    });
+    }, boardMediaSize("poster", mediaSource));
     setPendingPoster(null);
   };
 
@@ -1318,16 +1363,15 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   };
 
   const placeAsset = (version: import("../../lib/types").Version) => {
+    const mediaKind = version.kind === "video" ? "video" : "asset";
     addAtView("room_content", {
       title: version.label,
       filename: version.mimeType,
-      mediaKind: "asset",
+      mediaKind,
       versionLabel: version.label,
       duration: version.duration,
-      thumbnailUrl: version.kind === "image" && version.imageDataUrl && !version.imageDataUrl.startsWith("data:")
-        ? version.imageDataUrl
-        : undefined,
-    }, { linkedEntityType: "version", linkedEntityId: version.id });
+      ...boardMediaFromVersion(version),
+    }, { linkedEntityType: "version", linkedEntityId: version.id }, boardMediaSize(mediaKind, version));
   };
 
   const pickBranch = (branch: RoomBranch) => {
