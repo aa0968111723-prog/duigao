@@ -9,6 +9,7 @@ import type { AiProposal } from "../../src/ai/proposals";
 import {
   boardProposals,
   layoutPreview,
+  layoutOriginFromFocus,
   describePreview,
   planApply,
 } from "../../src/features/whiteboard/aiPreview";
@@ -105,6 +106,13 @@ test("planApply：端點對不到的線丟掉（不畫指向虛空的線）", ()
   }, () => "real");
   assert.equal(plan.edges.length, 0);
   assert.equal(plan.nodes.length, 1);
+});
+
+test("layoutOriginFromFocus：有焦點從右側排，沒有用 fallback", () => {
+  assert.deepEqual(layoutOriginFromFocus(null, { x: 12, y: 34 }), { x: 12, y: 34 });
+  const origin = layoutOriginFromFocus({ x: 100, y: 80, width: 180, height: 96 }, { x: 0, y: 0 });
+  assert.equal(origin.y, 80);
+  assert.ok(origin.x > 100);
 });
 
 test("planApply：同一份預覽套用兩次會得到兩批不同 id（重複是使用者的選擇，不是意外）", () => {
