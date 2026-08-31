@@ -58,12 +58,13 @@ import {
 import { DragSheet, type SheetSnap } from "../../components/BottomSheet";
 import { rendererFor } from "./registry";
 import {
-  contentOpenFromNode,
   nodeFromImageRegion,
   nodeFromPlanSection,
+  openContentFromNode,
   planParagraphs,
   posterRegionMarks,
 } from "../collaboration/boardAnchors";
+import { stickyFromDiscussion } from "../collaboration/links";
 import { boardDecisionWrite, boardPollWrite } from "../collaboration/discussionHonesty";
 import type { AnnotationRegion, PlanBlock } from "../../lib/types";
 import "./whiteboard.css";
@@ -442,6 +443,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [videoStart, setVideoStart] = useState("00:40");
   const [videoEnd, setVideoEnd] = useState("");
   const [contentKind, setContentKind] = useState<"all" | "poster" | "video" | "plan" | "asset">("all");
+  const [relateFromId, setRelateFromId] = useState<string | null>(null);
   const [previewNodes, setPreviewNodes] = useState<WhiteboardNode[] | null>(null);
   // F4：拖曳 preview 的同步事實來源 — render 閉包的 previewNodes 在
   // 同批 pointermove 之間是舊值，增量會疊在過期基準上（節點抖動/丟步）
@@ -1303,6 +1305,15 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     findFrame: (id: string) => frames.find((item) => item.id === id),
   };
 
+  const finishRelate = (target?: WhiteboardNode) => {
+    if (!board || !relateFromId || !target || target.id === relateFromId) {
+      setRelateFromId(null);
+      return;
+    }
+    createRelationEdges(board.id, board.roomId, [relateFromId, target.id]).forEach(api.onCreateEdge);
+    setRelateFromId(null);
+  };
+
   const placeBranch = (branch: RoomBranch, range?: { startTime?: number; endTime?: number }) => {
     if (!board) return;
     const version = latestBranchVersion(api.room, branch.id);
@@ -1310,7 +1321,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const summary = branchSummary(api.room, branch.id);
     const plan: PlanDocument | undefined = api.room.plans?.find((item) => item.branchId === branch.id);
     const mediaKind = branch.branchType === "copy" ? "plan" : branch.branchType;
-    addAtView("room_content", {
+    const node = addAtView("room_content", {
       title: branch.name,
       mediaKind,
       versionLabel: version?.label ?? summary.latestLabel,
@@ -1324,6 +1335,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     setPendingVideo(null);
     setPendingPoster(null);
     setPendingPlan(null);
+    finishRelate(node);
+    return node;
   };
 
   const placePosterRegion = (branch: RoomBranch, mark?: { region: AnnotationRegion; versionId: string; label: string }) => {
@@ -1332,7 +1345,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     const extra = mark
       ? nodeFromImageRegion({ versionId: mark.versionId, region: mark.region, label: mark.label })
       : null;
-    addAtView("room_content", {
+    const node = addAtView("room_content", {
       title: branch.name,
       mediaKind: "poster",
       versionLabel: version?.label,
@@ -1345,12 +1358,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       ...(extra ? { anchor: extra.anchor, sourceVersionId: extra.sourceVersionId } : {}),
     }, boardMediaSize("poster", mediaSource));
     setPendingPoster(null);
+    finishRelate(node);
+    return node;
   };
 
   const placePlanSection = (branch: RoomBranch, section?: PlanBlock) => {
     const extra = nodeFromPlanSection({ branchId: branch.id, section: section ? { id: section.id, text: section.text } : undefined });
     const plan = api.room.plans?.find((item) => item.branchId === branch.id);
-    addAtView("room_content", {
+    const node = addAtView("room_content", {
       title: branch.name,
       mediaKind: "plan",
       subtitle: extra.subtitle ?? plan?.title,
@@ -1360,11 +1375,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       anchor: extra.anchor,
     });
     setPendingPlan(null);
+    finishRelate(node);
+    return node;
   };
 
   const placeAsset = (version: import("../../lib/types").Version) => {
     const mediaKind = version.kind === "video" ? "video" : "asset";
-    addAtView("room_content", {
+    const node = addAtView("room_content", {
       title: version.label,
       filename: version.mimeType,
       mediaKind,
@@ -1372,9 +1389,30 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       duration: version.duration,
       ...boardMediaFromVersion(version),
     }, { linkedEntityType: "version", linkedEntityId: version.id }, boardMediaSize(mediaKind, version));
+    finishRelate(node);
+    return node;
   };
 
   const pickBranch = (branch: RoomBranch) => {
+    if (relateFromId && board) {
+      const existing = liveNodes.find((node) =>
+        !node.deletedAt
+        && node.whiteboardId === board.id
+        && node.nodeType === "room_content"
+        && (
+          (node.linkedEntityType === "branch" && node.linkedEntityId === branch.id)
+          || (node.linkedEntityType === "plan" && node.linkedEntityId === branch.id)
+          || (node.linkedEntityType === "version" && node.sourceVersionId && latestBranchVersion(api.room, branch.id)?.id === node.linkedEntityId)
+        )
+        && (branch.branchType !== "video" || node.content.startTime == null),
+      );
+      if (existing) {
+        finishRelate(existing);
+        setSheet(null);
+        setSelected([relateFromId, existing.id]);
+        return;
+      }
+    }
     if (branch.branchType === "video") {
       setPendingVideo(branch);
       setVideoStart("00:40");
@@ -1455,12 +1493,17 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     setSheet(null);
   };
   const openSelectedContent = () => {
-    if (!selectedNode?.linkedEntityId) return;
-    const open = contentOpenFromNode(selectedNode);
-    const target = openTarget(anchorFromNode(selectedNode));
+    if (!selectedNode) return;
+    const open = openContentFromNode(selectedNode, api.room);
     setSheet(null);
-    if (target.surface === "content") api.onOpenContent(target.branchId, open);
-    else api.onOpenContent(selectedNode.linkedEntityId, open);
+    if (!open.branchId) return;
+    api.onOpenContent(open.branchId, open);
+  };
+  const openRelatePicker = () => {
+    if (!selectedNode) return;
+    setRelateFromId(selectedNode.id);
+    setContentKind("all");
+    setSheet("content");
   };
   const openSelectedSourceMessage = () => {
     if (!selectedNode?.linkedEntityId) return;
@@ -1507,7 +1550,39 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           <section className="project-sheet" role="dialog" aria-label="房間內容">
             <div className="project-sheet-grip" />
             <RoomContentPicker room={api.room} onPick={pickBranch} onPickAsset={placeAsset} initialKind={contentKind} />
-            <button type="button" className="project-sheet-close" onClick={() => setSheet(null)}>取消</button>
+            {relateFromId && (
+              <div className="wb-sheet" data-testid="wb-relate-discussion">
+                <h3>討論句</h3>
+                <div className="wb-options">
+                  {(api.room.discussion ?? []).slice(-12).reverse().map((item) => (
+                    <button
+                      type="button"
+                      className="wb-content-item"
+                      key={item.id}
+                      onClick={() => {
+                        if (!board) return;
+                        const existing = liveNodes.find((node) => discussionIdFromNode(node) === item.id);
+                        if (existing) {
+                          finishRelate(existing);
+                          setSheet(null);
+                          return;
+                        }
+                        const sticky = stickyFromDiscussion(item, board.id, "local");
+                        api.onUpsertNode(sticky, "now");
+                        record(nodeCreateDraft(nextOpId(), sticky));
+                        finishRelate(sticky);
+                        setSheet(null);
+                      }}
+                    >
+                      <span aria-hidden>💬</span>
+                      <span><strong>{item.authorName || "成員"}</strong><small>{item.body.slice(0, 48) || item.payload.title || "討論"}</small></span>
+                    </button>
+                  ))}
+                  {!(api.room.discussion ?? []).length && <p className="project-muted">還沒有討論句可以連</p>}
+                </div>
+              </div>
+            )}
+            <button type="button" className="project-sheet-close" onClick={() => { setRelateFromId(null); setSheet(null); }}>取消</button>
           </section>
         </div>
       )}
@@ -2260,18 +2335,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     }}>+ 子項目</button>
                   )}
                   {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
-                    <button type="button" onClick={() => {
-                      const open = contentOpenFromNode(selectedNode);
-                      const target = openTarget(anchorFromNode(selectedNode));
-                      if (target.surface === "content") {
-                        api.onOpenContent(target.branchId, open);
-                      } else {
-                        api.onOpenContent(selectedNode.linkedEntityId!, open);
-                      }
-                    }}>打開內容</button>
+                    <button type="button" onClick={openSelectedContent}>打開內容</button>
                   )}
                   {discussionIdFromNode(selectedNode) && (
                     <button type="button" data-testid="wb-open-source-message" onClick={() => api.onOpenDiscussionMessage?.(discussionIdFromNode(selectedNode)!)}>打開原訊息</button>
+                  )}
+                  {canEdit && (
+                    <button type="button" data-testid="wb-relate-content" onClick={openRelatePicker}>連到相關內容</button>
                   )}
                   <button type="button" data-testid="wb-share-focus" onClick={() => api.onSetRoomFocus?.(selectedNode.id)}>讓大家看這個</button>
                   {(api.onAskColleague || api.onAskBoardAi) && (
@@ -2364,6 +2434,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             <>
               <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
               <button type="button" onClick={() => { setConnectMode(true); setConnectFrom(selectedNode.id); }}>連出去</button>
+              <button type="button" data-testid="wb-relate-content" onClick={openRelatePicker}>連到相關內容</button>
               <button type="button" onClick={openPosterPicker}>釘文宣</button>
               <button type="button" data-testid="wb-node-delete" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
             </>
@@ -2371,6 +2442,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             <>
               <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
               <button type="button" onClick={() => { setConnectMode(true); setConnectFrom(selectedNode.id); }}>連線</button>
+              <button type="button" data-testid="wb-relate-content" onClick={openRelatePicker}>連到相關內容</button>
               {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
                 <button type="button" data-testid="wb-next-step" onClick={addNextStepFromSelected}>+ 下一步</button>
               )}

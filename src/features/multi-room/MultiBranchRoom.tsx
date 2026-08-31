@@ -353,6 +353,7 @@ function PlanEditor({
   onSave,
   onCreateRelation,
   onDeleteRelation,
+  seekSectionId,
 }: {
   room: Room;
   branch: RoomBranch;
@@ -360,6 +361,7 @@ function PlanEditor({
   onSave: (plan: PlanDocument) => void;
   onCreateRelation: (relation: ContentRelation) => void;
   onDeleteRelation: (relationId: string) => void;
+  seekSectionId?: string | null;
 }) {
   const saved = useMemo(
     () => room.plans?.find((item) => item.branchId === branch.id) ?? emptyPlan(branch),
@@ -380,6 +382,12 @@ function PlanEditor({
   useEffect(() => {
     setDraftState((current) => (shouldAdoptRemotePlan(saved, current, dirtyRef.current) ? saved : current));
   }, [saved]);
+
+  useEffect(() => {
+    if (!seekSectionId) return;
+    const el = document.querySelector(`[data-plan-section="${seekSectionId}"]`);
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [seekSectionId, draft.blocks]);
 
   const relations = (room.relations ?? []).filter(
     (relation) => relation.fromBranchId === branch.id || relation.toBranchId === branch.id,
@@ -424,7 +432,7 @@ function PlanEditor({
       <div className="project-blocks">
         {draft.blocks.length === 0 && <p className="project-muted">從底下新增一段內容，手機上保持簡單好改。</p>}
         {draft.blocks.map((block) => (
-          <div className={`project-block project-block-${block.kind}`} key={block.id}>
+          <div className={`project-block project-block-${block.kind}`} key={block.id} data-plan-section={block.id}>
             {block.kind === "checklist" && (
               <input
                 type="checkbox"
@@ -894,6 +902,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const [pollOpen, setPollOpen] = useState(false);
   const [sortRecent, setSortRecent] = useState(true);
   const [contentKind, setContentKind] = useState<"all" | "poster" | "video">("all");
+  const [planSeekSectionId, setPlanSeekSectionId] = useState<string | null>(null);
 
   const activeBranch = normalized.branches?.find((branch) => branch.id === api.activeBranchId) ?? null;
   // poster/video 有版本時 App 會傳 workspace overlay；殼內的分支詳情頁只
@@ -1004,6 +1013,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
 
   const openBranch = (branchId: string, opts?: { startTime?: number; endTime?: number; region?: import("../../lib/types").AnnotationRegion; versionId?: string; planSectionId?: string }) => {
     setPushedPane(null); // 分支詳情/對稿 overlay 蓋上來時，推進面板先收合
+    setPlanSeekSectionId(opts?.planSectionId ?? null);
     api.onOpenBranch(branchId, opts);
   };
 
@@ -1162,7 +1172,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
           {api.loadingBranchId === inShellBranch.id ? (
             <div className="project-branch-empty-detail project-loading-detail"><span className="project-spinner" aria-hidden />正在載入這份內容…</div>
           ) : (inShellBranch.branchType === "plan" || inShellBranch.branchType === "copy") ? (
-            <PlanEditor room={normalized} branch={inShellBranch} canManage={api.canManage} onSave={api.onSavePlan} onCreateRelation={api.onCreateRelation} onDeleteRelation={api.onDeleteRelation} />
+            <PlanEditor room={normalized} branch={inShellBranch} canManage={api.canManage} onSave={api.onSavePlan} onCreateRelation={api.onCreateRelation} onDeleteRelation={api.onDeleteRelation} seekSectionId={planSeekSectionId} />
           ) : (
             <div className="project-branch-empty-detail">
               <p>{branchVersions(normalized, inShellBranch.id).length ? "準備好進入檢視器。" : `這份${branchTypeLabel(inShellBranch.branchType)}還沒有版本。`}</p>

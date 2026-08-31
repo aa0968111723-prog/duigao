@@ -2,6 +2,7 @@
  * 白板焦點：選節點 = 開焦點，不是只亮框。
  * 房間焦點與本機選取分開；session 活在模組層，切對話／白板不丟。
  */
+import { formatVideoRange } from "../collaboration/nodes";
 import type { WhiteboardNode } from "../collaboration/types";
 import type { Camera } from "./canvas";
 import type { BoardAiPreview } from "./aiPreview";
@@ -64,7 +65,7 @@ export function isEmptyBoard(nodes: WhiteboardNode[]): boolean {
 
 export function nodeFocusSource(node: Pick<WhiteboardNode, "linkedEntityType" | "anchor">): FocusSource {
   if (node.linkedEntityType === "discussion") return "discussion";
-  if (node.linkedEntityType === "version" || node.linkedEntityType === "branch") return "version";
+  if (node.linkedEntityType === "version" || node.linkedEntityType === "branch" || node.linkedEntityType === "plan") return "version";
   if (node.linkedEntityType === "calendar") return "schedule";
   const anchorType = typeof node.anchor?.type === "string" ? node.anchor.type : "";
   if (anchorType === "message" || anchorType === "discussion") return "discussion";
@@ -89,14 +90,60 @@ export function discussionIdFromNode(
   return null;
 }
 
+function focusCardTitle(node: WhiteboardNode): string {
+  const kind = node.content.mediaKind;
+  const range = formatVideoRange(node.content.startTime, node.content.endTime);
+  const text = (
+    node.content.text
+    || node.content.title
+    || node.content.subtitle
+    || node.content.versionLabel
+    || node.content.sourceLabel
+    || ""
+  ).trim();
+  if (kind === "video" && range) return (text ? `${text} · ${range}` : `影片 · ${range}`).slice(0, 80);
+  if (text) return text.slice(0, 80);
+  if (kind === "poster") return "文宣";
+  if (kind === "video") return "影片";
+  if (kind === "plan" || node.linkedEntityType === "plan") return "企劃";
+  if (node.linkedEntityType === "version" || node.linkedEntityType === "branch") return "文宣";
+  return "未命名卡片";
+}
+
+function focusCardSourceLabel(node: WhiteboardNode): string {
+  const stamped = node.content.sourceLabel?.trim();
+  if (stamped) return stamped;
+  const kind = node.content.mediaKind;
+  const subtitle = node.content.subtitle?.trim();
+  const versionLabel = node.content.versionLabel?.trim();
+  const range = formatVideoRange(node.content.startTime, node.content.endTime);
+  const anchorType = typeof node.anchor?.type === "string" ? node.anchor.type : "";
+  if (kind === "poster" || anchorType === "image-region") {
+    if (anchorType === "image-region") return subtitle ? `文宣圈選 · ${subtitle}` : "文宣圈選";
+    return versionLabel ? `文宣 · ${versionLabel}` : "文宣";
+  }
+  if (kind === "video") return range ? `影片 · ${range}` : "影片";
+  if (kind === "plan" || node.linkedEntityType === "plan" || anchorType === "plan-section") {
+    return subtitle ? `企劃 · ${subtitle}` : "企劃";
+  }
+  if (node.linkedEntityType === "discussion" || anchorType === "message") return "討論";
+  if (node.linkedEntityType === "calendar") return "時程";
+  if (node.linkedEntityType || node.sourceVersionId || node.anchor) {
+    if (node.linkedEntityType === "version" || node.linkedEntityType === "branch") {
+      return versionLabel ? `文宣 · ${versionLabel}` : "文宣";
+    }
+    return focusSourceLabel(nodeFocusSource(node));
+  }
+  return "無來源";
+}
+
 export function focusCardFromNode(node: WhiteboardNode): BoardFocusCard {
   const source = nodeFocusSource(node);
-  const title = (node.content.text || node.content.title || node.content.sourceLabel || "未命名卡片").trim();
   return {
     nodeId: node.id,
-    title: title.slice(0, 80),
+    title: focusCardTitle(node),
     source,
-    sourceLabel: node.content.sourceLabel?.trim() || focusSourceLabel(source),
+    sourceLabel: focusCardSourceLabel(node),
     openCommentCount: Math.max(0, node.content.openCommentCount ?? 0),
     lastWriter: node.content.lastWriterName?.trim() || null,
   };
@@ -166,17 +213,95 @@ export function cameraAfterRemount(input: {
   return null;
 }
 
-export function messagesForFocus<T extends { payload?: { nodeId?: string; messageId?: string }; id?: string }>(
+const VIDEO_POINT_TOLERANCE = 0.5;
+
+function finiteTime(value: unknown): number | null {
+  const time = Number(value);
+  return Number.isFinite(time) && time >= 0 ? time : null;
+}
+
+function nodeSectionId(node: Pick<WhiteboardNode, "anchor">): string | undefined {
+  const sectionId = node.anchor?.sectionId;
+  return typeof sectionId === "string" && sectionId ? sectionId : undefined;
+}
+
+function videoTimesRelated(
+  nodeStart: number,
+  nodeEnd: number | null,
+  messageStart: number,
+  messageEnd: number | null,
+): boolean {
+  const nodeIsPoint = nodeEnd === null || nodeEnd <= nodeStart;
+  const messageIsPoint = messageEnd === null || messageEnd <= messageStart;
+  if (nodeIsPoint && messageIsPoint) {
+    return Math.abs(messageStart - nodeStart) <= VIDEO_POINT_TOLERANCE;
+  }
+  const nodeStop = nodeIsPoint ? nodeStart : nodeEnd!;
+  const messageStop = messageIsPoint ? messageStart : messageEnd!;
+  if (messageIsPoint) return messageStart >= nodeStart && messageStart <= nodeStop;
+  if (nodeIsPoint) return nodeStart >= messageStart && nodeStart <= messageStop;
+  return messageStart <= nodeStop && messageStop >= nodeStart;
+}
+
+type FocusPayload = {
+  nodeId?: string;
+  messageId?: string;
+  versionId?: string;
+  branchId?: string;
+  planSectionId?: string;
+  startTime?: number;
+  endTime?: number;
+};
+
+function versionMatchesFocus(
+  node: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId" | "sourceVersionId">,
+  payload: FocusPayload,
+): boolean {
+  if (!payload.versionId) return false;
+  if (node.linkedEntityType === "version" && payload.versionId === node.linkedEntityId) return true;
+  return Boolean(node.sourceVersionId && payload.versionId === node.sourceVersionId);
+}
+
+function branchMatchesFocus(
+  node: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId">,
+  payload: FocusPayload,
+): boolean {
+  return (node.linkedEntityType === "branch" || node.linkedEntityType === "plan")
+    && Boolean(payload.branchId)
+    && payload.branchId === node.linkedEntityId;
+}
+
+export function messagesForFocus<T extends { payload?: FocusPayload; id?: string }>(
   messages: T[],
-  node: Pick<WhiteboardNode, "id" | "linkedEntityType" | "linkedEntityId" | "anchor"> | null,
+  node: Pick<WhiteboardNode, "id" | "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId" | "content"> | null,
 ): T[] {
   if (!node) return messages;
   const discussionId = discussionIdFromNode(node);
-  const related = messages.filter((message) =>
-    message.payload?.nodeId === node.id
-    || (discussionId && (message.id === discussionId || message.payload?.messageId === discussionId)),
-  );
-  return related;
+  const sectionId = nodeSectionId(node);
+  const nodeStart = finiteTime(node.content?.startTime);
+  const nodeEnd = finiteTime(node.content?.endTime);
+  const timeScoped = nodeStart !== null;
+  const sectionScoped = Boolean(sectionId);
+  return messages.filter((message) => {
+    const payload = message.payload ?? {};
+    if (payload.nodeId === node.id) return true;
+    if (discussionId && (message.id === discussionId || payload.messageId === discussionId)) return true;
+    if (sectionScoped) return payload.planSectionId === sectionId;
+    const messageStart = finiteTime(payload.startTime);
+    const messageEnd = finiteTime(payload.endTime);
+    if (timeScoped) {
+      if (messageStart !== null) {
+        const entityOk = versionMatchesFocus(node, payload)
+          || branchMatchesFocus(node, payload)
+          || (!payload.versionId && !payload.branchId);
+        return entityOk && videoTimesRelated(nodeStart, nodeEnd, messageStart, messageEnd);
+      }
+      return versionMatchesFocus(node, payload);
+    }
+    if (versionMatchesFocus(node, payload)) return true;
+    if (branchMatchesFocus(node, payload)) return true;
+    return false;
+  });
 }
 
 export function workLayerItemsFromNodes(nodes: WhiteboardNode[], limit = 12): Array<{
@@ -212,7 +337,7 @@ export function roomFocusFromPresence(
 }
 
 export type BoardAskContext = {
-  focus?: { label: string; nodeId?: string; nodeType?: string; source?: FocusSource };
+  focus?: { label: string; nodeId?: string; nodeType?: string; source?: FocusSource; sourceLabel?: string };
   workLayer?: { proposalId: string; status: string; items: ReturnType<typeof workLayerItemsFromNodes> };
 };
 
@@ -230,6 +355,7 @@ export function boardAskContext(input: {
           nodeId: card.nodeId,
           nodeType: input.focusNode.nodeType,
           source: card.source,
+          sourceLabel: card.sourceLabel,
         }
       : undefined,
     workLayer: items.length

@@ -29,6 +29,8 @@ import {
   isColleagueMessage,
   showsGrokMentionChip,
 } from "../collaboration/agentColleague";
+import { discussionPayloadFromFocusNode, discussionShowsContentActions } from "../collaboration/links";
+import { openContentFromDiscussion } from "../collaboration/boardAnchors";
 import { messagesForFocus } from "../whiteboard/boardFocus";
 import "./discussion.css";
 
@@ -59,7 +61,7 @@ export type RoomDiscussionApi = {
   /** 0031：自己的未讀水位。只給自己用，不給別人看。 */
   readWatermark?: { lastReadMessageId?: string; lastReadAt?: number } | null;
   onMarkRead?: (messageId: string) => void;
-  onOpenContent?: (branchId: string) => void;
+  onOpenContent?: (branchId: string, opts?: { startTime?: number; endTime?: number; versionId?: string; planSectionId?: string }) => void;
   hideTabs?: boolean;
   pane?: "chat" | "board";
   /** 每則訊息的送出狀態（sending/failed）；來自 App 的 outbox。 */
@@ -215,6 +217,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   const [decisionDraftOpen, setDecisionDraftOpen] = useState(false);
   const [citeSheet, setCiteSheet] = useState<"work" | "attachment" | null>(null);
   const [pollDraft, setPollDraft] = useState<{ question: string; options: string[] } | null>(null);
+  const [showAllDiscussion, setShowAllDiscussion] = useState(false);
 
   const showDecisions = api.showDecisions ?? true;
   const showRoomActions = api.showRoomActions ?? true;
@@ -226,6 +229,16 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     () => [...api.messages].sort((a, b) => a.createdAt - b.createdAt),
     [api.messages],
   );
+  const focusNode = useMemo(
+    () => (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null,
+    [api.room.whiteboardNodes, api.focusNodeId],
+  );
+  const focusedMessages = useMemo(
+    () => messagesForFocus(messages, focusNode),
+    [messages, focusNode],
+  );
+  useEffect(() => { setShowAllDiscussion(false); }, [api.focusNodeId]);
+  const feedMessages = api.focusNodeId && !showAllDiscussion ? focusedMessages : messages;
   // 引用解析用的索引。ghost（尚未落地的樂觀列）已經併在 api.messages 裡，
   // 所以剛送出的回覆立刻就解析得到來源，不會先閃一下「來源不在」。
   const byId = useMemo(() => indexMessages(messages), [messages]);
@@ -285,8 +298,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
 
   useEffect(() => {
     if (!api.focusNodeId) return;
-    const node = (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null;
-    const related = messagesForFocus(messages, node);
+    const related = messagesForFocus(messages, focusNode);
     const target = related[related.length - 1];
     if (target) jumpToMessage(target.id);
     // 只在焦點切換時捲，不跟新訊息搶最新列。
@@ -473,11 +485,19 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       </section>
       )}
 
-      {api.focusNodeId && messagesForFocus(messages, (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null).length === 0 && (
+      {api.focusNodeId && !showAllDiscussion && focusedMessages.length === 0 && (
         <p className="project-muted" data-testid="focus-discuss-empty">針對這張留言</p>
       )}
+      {api.focusNodeId && messages.length > focusedMessages.length && (
+        <button
+          type="button"
+          className="project-text-button"
+          data-testid="focus-discuss-all"
+          onClick={() => setShowAllDiscussion((current) => !current)}
+        >{showAllDiscussion ? "只看這張" : "看全部討論"}</button>
+      )}
       <div className="rd-feed" data-testid="discussion-feed">
-        {messages.map((message) => {
+        {feedMessages.map((message) => {
           const supportCount = api.supports.filter((item) => item.messageId === message.id).length;
           const supported = api.supports.some((item) => item.messageId === message.id && item.userId === api.userId);
           const sendState = api.sendStates?.[message.id];
@@ -540,7 +560,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                 <p>{message.body}</p>
               )}
               {!tombstoned && <ReplyRef reference={resolveReply(message, byId)} onJump={jumpToMessage} />}
-              {!tombstoned && (message.kind === "whiteboard" || message.kind === "node" || message.payload.nodeId) && (
+              {!tombstoned && (message.kind === "whiteboard" || message.kind === "node" || message.payload.nodeId || discussionShowsContentActions(message)) && (
                 <button
                   type="button"
                   className="rd-ref"
@@ -549,11 +569,20 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                     // 導航走 ContextAnchor 契約（PR-02d）；壞列（缺
                     // whiteboardId）維持舊行為送空字串，讓 App 端 no-op。
                     const target = openTarget(anchorFromDiscussion(message.payload));
-                    if (target.surface === "board") api.onOpenBoardNode(target.whiteboardId, target.nodeId);
-                    else api.onOpenBoardNode(message.payload.whiteboardId ?? "", message.payload.nodeId);
+                    if (target.surface === "board") {
+                      api.onOpenBoardNode(target.whiteboardId, target.nodeId);
+                      return;
+                    }
+                    if (message.payload.whiteboardId || message.payload.nodeId) {
+                      api.onOpenBoardNode(message.payload.whiteboardId ?? "", message.payload.nodeId);
+                      return;
+                    }
+                    setBoardPick(message);
                   }}
                 >
-                  {message.payload.nodeId ? "打開白板並聚焦這張" : (message.payload.title ?? "打開白板")}
+                  {message.payload.nodeId || message.kind === "whiteboard" || message.kind === "node"
+                    ? (message.payload.nodeId ? "打開白板並聚焦這張" : (message.payload.title ?? "打開白板"))
+                    : "打開白板並聚焦這張"}
                 </button>
               )}
               {!tombstoned && colleague && proposals.length > 0 && (
@@ -569,16 +598,17 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   ))}
                 </div>
               )}
-              {!tombstoned && (message.kind === "poster" || message.kind === "video" || message.kind === "plan") && message.payload.branchId && (
+              {!tombstoned && discussionShowsContentActions(message) && (
                 <button
                   type="button"
                   className="rd-ref"
+                  data-testid="discussion-open-content"
                   onClick={() => {
-                    const target = openTarget(anchorFromDiscussion(message.payload));
-                    api.onOpenContent?.(target.surface === "content" ? target.branchId : message.payload.branchId!);
+                    const open = openContentFromDiscussion(message, api.room);
+                    if (open.branchId) api.onOpenContent?.(open.branchId, open);
                   }}
                 >
-                  {message.payload.title ?? "房間內容"}
+                  打開內容
                 </button>
               )}
               {!tombstoned && message.kind === "attachment" && (
@@ -640,7 +670,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
             </article>
           );
         })}
-        {!messages.length && <p className="project-muted">先留一句房間層級的討論。文宣圈選和影片時間點回饋會留在各自內容裡。</p>}
+        {!feedMessages.length && !api.focusNodeId && <p className="project-muted">先留一句房間層級的討論。文宣圈選和影片時間點回饋會留在各自內容裡。</p>}
         <div ref={feedEndRef} className="rd-feed-end" data-testid="discussion-feed-end" aria-hidden />
       </div>
 
@@ -684,7 +714,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
             }
             const payload = {
               ...(reply ? { quotedBody: replySnippet(reply) } : {}),
-              ...(api.focusNodeId ? { nodeId: api.focusNodeId } : {}),
+              ...(focusNode ? discussionPayloadFromFocusNode(focusNode) : {}),
             };
             api.onSend({
               body: text,

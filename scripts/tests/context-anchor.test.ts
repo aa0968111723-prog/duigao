@@ -237,6 +237,14 @@ test("openTarget：board / entity-branch / entity-其他 / 無 branch 的 video"
   assert.deepEqual(openTarget({ type: "image-point", x: 0.5, y: 0.5 }), { surface: "none" });
 });
 
+test("openTarget：帶 versionId 的 image 臂仍是 none，不准猜 surface", () => {
+  assert.deepEqual(openTarget({ type: "image-point", x: 0.2, y: 0.3, versionId: "v1" }), { surface: "none" });
+  assert.deepEqual(
+    openTarget({ type: "image-region", region: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, versionId: "v1" }),
+    { surface: "none" },
+  );
+});
+
 test("openTarget：video-range 開在起點（range 的導航語意=從頭播這一段）", () => {
   assert.deepEqual(openTarget({ type: "video-range", startTime: 3, endTime: 9, branchId: "br1" }), {
     surface: "content",

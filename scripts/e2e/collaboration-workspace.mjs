@@ -366,6 +366,41 @@ try {
     await fillEditing(page, "先寫活動流程");
     await dismissSelection(page);
 
+    // 討論文宣卡「加入白板」必須落成整張圖，不是 52px 字卡（#180）
+    {
+      await page.locator(".wb-focus-top .project-back-button").click();
+      await page.waitForSelector(".wb-list", { timeout: 10000 });
+      await page.getByRole("button", { name: "對話", exact: true }).click();
+      await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 8000 });
+      const posterMsg = page.locator(".rd-msg", { hasText: "擺攤文宣" }).first();
+      check("文宣討論卡有打開內容", await posterMsg.getByRole("button", { name: "打開內容" }).count() >= 1);
+      await posterMsg.getByRole("button", { name: "加入白板" }).click();
+      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      await page.waitForSelector('[data-node-type="room_content"]', { timeout: 10000 });
+      const firstCount = await page.locator("[data-node-type='room_content']").count();
+      check("文宣卡加入白板是 room_content 不是字卡", firstCount >= 1 && (await page.locator("[data-node-type='text']").count()) >= 0);
+      check("文宣卡落板是整張圖，不是 52px 字卡", await page.locator('[data-testid="wb-media-image"]').count() >= 1);
+      mkdirSync("/opt/cursor/artifacts", { recursive: true });
+      mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "poster-pin-390.png"), fullPage: true });
+      await page.screenshot({ path: join(ROOT, "output", "playwright", "poster-pin-390.png"), fullPage: true });
+      await page.locator(".wb-focus-top .project-back-button").click();
+      await page.waitForSelector(".wb-list", { timeout: 10000 });
+      await page.getByRole("button", { name: "對話", exact: true }).click();
+      await page.locator(".rd-msg", { hasText: "擺攤文宣" }).first().getByRole("button", { name: "加入白板" }).click();
+      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
+      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      const secondCount = await page.locator("[data-node-type='room_content']").count();
+      check("同一張文宣第二次加入不複製", secondCount === firstCount, `${firstCount}→${secondCount}`);
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.waitForFunction(() => window.innerWidth >= 1000, null, { timeout: 5000 });
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "poster-pin-1024.png"), fullPage: true });
+      await page.screenshot({ path: join(ROOT, "output", "playwright", "poster-pin-1024.png"), fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+    }
+
     // ---- WB02 Focus Mode 驗收（Grok wb00 F8 的防假綠斷言）----------
     {
       // 有效畫布面積（Grok wb02 F7）：canvas 矩形扣掉疊在其上的 chrome
@@ -1318,6 +1353,13 @@ try {
       await page.click("button.btn-primary");
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
+      await chooseCreate(page, "擺攤文宣", "poster", { name: "booth.png", mimeType: "image/png", buffer: TINY_PNG });
+      await page.waitForSelector("img.stage-img", { timeout: 20000 });
+      await page.locator("button.m-home").click();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 15000 });
+      await page.getByTestId("composer-cite-work").click();
+      await page.waitForSelector('[data-testid="cite-work"]', { timeout: 8000 });
+      await page.getByTestId("cite-work").getByRole("button", { name: "擺攤文宣" }).click();
       await page.getByRole("button", { name: "白板", exact: true }).click();
       await page.getByLabel("白板名稱").fill("平板板");
       await page.getByRole("button", { name: "建立白板" }).click();
@@ -1346,6 +1388,24 @@ try {
       });
       check("平板：討論欄與白板並列（Split View）", layout.railVisible && layout.railHasFeed, JSON.stringify(layout));
       check("平板：兩者不重疊（畫布真的讓出左側）", layout.overlap === 0 && layout.focusLeft >= layout.railWidth - 1, JSON.stringify(layout));
+
+      {
+        const rail = page.getByTestId("wb-side-rail");
+        const posterMsg = rail.locator(".rd-msg", { hasText: "擺攤文宣" }).first();
+        await posterMsg.getByRole("button", { name: "加入白板" }).click();
+        await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "平板板" }).click();
+        await page.waitForSelector('[data-node-type="room_content"]', { timeout: 10000 });
+        const firstCount = await page.locator("[data-node-type='room_content']").count();
+        check("平板：文宣卡加入白板是圖不是字卡", firstCount >= 1 && (await page.locator('[data-testid="wb-media-image"]').count()) >= 1);
+        await posterMsg.getByRole("button", { name: "加入白板" }).click();
+        await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "平板板" }).click();
+        const secondCount = await page.locator("[data-node-type='room_content']").count();
+        check("平板：同一張文宣第二次加入不複製", secondCount === firstCount, `${firstCount}→${secondCount}`);
+        mkdirSync("/opt/cursor/artifacts", { recursive: true });
+        mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
+        await page.screenshot({ path: join("/opt/cursor/artifacts", "poster-pin-1024.png"), fullPage: true });
+        await page.screenshot({ path: join(ROOT, "output", "playwright", "poster-pin-1024-tablet.png"), fullPage: true });
+      }
 
       // 工具列在平板轉成右側直欄（不是底部橫列）
       const toolbar = await page.evaluate(() => {
