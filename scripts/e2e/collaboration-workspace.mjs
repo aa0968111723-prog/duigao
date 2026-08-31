@@ -422,12 +422,7 @@ try {
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       const secondCount = await page.locator("[data-node-type='room_content']").count();
       check("同一張文宣第二次加入不複製", secondCount === firstCount, `${firstCount}→${secondCount}`);
-      await page.setViewportSize({ width: 1024, height: 768 });
-      await page.waitForFunction(() => window.innerWidth >= 1000, null, { timeout: 5000 });
-      await page.screenshot({ path: join("/opt/cursor/artifacts", "poster-pin-1024.png"), fullPage: true });
-      await page.screenshot({ path: join(ROOT, "output", "playwright", "poster-pin-1024.png"), fullPage: true });
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
+      await dismissSelection(page);
     }
 
     // ---- WB02 Focus Mode 驗收（Grok wb00 F8 的防假綠斷言）----------
@@ -1390,6 +1385,9 @@ try {
       await page.click("button.btn-primary");
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
+      // 先在 390 建文宣／引用：1024 Split View 時討論「送出」會擋住更多 FAB。
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
       await chooseCreate(page, "擺攤文宣", "poster", { name: "booth.png", mimeType: "image/png", buffer: TINY_PNG });
       await page.waitForSelector("img.stage-img", { timeout: 20000 });
       await page.locator("button.m-home").click();
@@ -1397,6 +1395,8 @@ try {
       await page.getByTestId("composer-cite-work").click();
       await page.waitForSelector('[data-testid="cite-work"]', { timeout: 8000 });
       await page.getByTestId("cite-work").getByRole("button", { name: "擺攤文宣" }).click();
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.waitForFunction(() => window.innerWidth >= 1000, null, { timeout: 5000 });
       await page.getByRole("button", { name: "白板", exact: true }).click();
       await page.getByLabel("白板名稱").fill("平板板");
       await page.getByRole("button", { name: "建立白板" }).click();
