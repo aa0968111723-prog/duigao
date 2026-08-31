@@ -1217,6 +1217,24 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     addAtView("flow");
   };
 
+  const plantEnrollmentTree = () => {
+    if (!board || !canEdit) {
+      setNotice("檢視者不能種樹，只能在已有的招生樹上討論。");
+      return;
+    }
+    const planted = plantEnrollmentTree2026({
+      whiteboardId: board.id,
+      roomId: board.roomId,
+      createdBy: "local",
+    });
+    setStarterDismissedFor(board.id);
+    api.onUpsertNodes(planted.nodes, "now");
+    for (const edge of planted.edges) api.onCreateEdge(edge);
+    setSelected([planted.rootId]);
+    const root = planted.nodes.find((item) => item.id === planted.rootId);
+    if (root) setCamera(focusCamera(root, viewport, camera.zoom));
+  };
+
   const beginRelationship = () => {
     if (!board || !canEdit) return;
     const active = liveNodes.filter((node) => !node.deletedAt);
@@ -2177,6 +2195,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               <button type="button" data-testid="wb-start-connect" onClick={beginRelationship}>
                 <span aria-hidden>↦</span><strong>畫關係</strong><small>先點起點，再點終點</small>
               </button>
+              <button type="button" data-testid="wb-start-enrollment-tree" onClick={plantEnrollmentTree}>
+                <span aria-hidden>枝</span><strong>種一棵 2026招生樹</strong><small>文宣／影片／企劃支線，點一支就討論那條</small>
+              </button>
             </div>
           </section>
         )}
@@ -2213,20 +2234,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                       setContentKind("all");
                       setSheet("content");
                     } else if (verb.id === "plant-enrollment-tree") {
-                      if (!board || !canEdit) {
-                        setNotice("檢視者不能種樹，只能在已有的招生樹上討論。");
-                        return;
-                      }
-                      const planted = plantEnrollmentTree2026({
-                        whiteboardId: board.id,
-                        roomId: board.roomId,
-                        createdBy: "local",
-                      });
-                      api.onUpsertNodes(planted.nodes, "now");
-                      for (const edge of planted.edges) api.onCreateEdge(edge);
-                      setSelected([planted.rootId]);
-                      const root = planted.nodes.find((item) => item.id === planted.rootId);
-                      if (root) setCamera(focusCamera(root, viewport, camera.zoom));
+                      plantEnrollmentTree();
                     } else if (verb.id === "ask-grok") {
                       if (api.onAskColleague) api.onAskColleague({ prompt: "我們下一步做什麼" });
                       else setSheet("ai");
