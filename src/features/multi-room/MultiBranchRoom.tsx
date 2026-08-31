@@ -45,7 +45,7 @@ import type { VideoUploadState } from "../../components/api";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { BrandMark } from "../../components/BrandMark";
 import { firstLayerChrome } from "./roomChrome";
-import { CANVA_ENTRY_COPY, CANVA_ENTRY_TESTID, canvaEntryState } from "../../lib/canvaContract";
+import { CANVA_ENTRY_COPY, canvaEntryState } from "../../lib/canvaContract";
 
 export type MultiBranchRoomApi = {
   room: Room;
@@ -589,7 +589,7 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
 
   if (!connected) {
     return (
-      <div data-testid={CANVA_ENTRY_TESTID.connect}>
+      <div data-testid="canva-entry-connect">
         <button type="button" className="project-sheet-back" onClick={onBack}>‹ 返回</button>
         <h2>從 Canva 匯入</h2>
         <p className="project-sheet-note">{CANVA_ENTRY_COPY.connect}</p>
@@ -635,7 +635,7 @@ function CanvaImportPane({ canva, onBack, onDone }: { canva: NonNullable<MultiBr
 
   return (
     <form
-      data-testid={CANVA_ENTRY_TESTID.picker}
+      data-testid="canva-entry-picker"
       onSubmit={(event) => {
         event.preventDefault();
         if (!selectedId || !name.trim() || busy) return;
@@ -717,7 +717,7 @@ function CanvaCreateOption({
   );
   if (entry === "not-configured") {
     return (
-      <div className="project-canva-gated" data-testid={CANVA_ENTRY_TESTID["not-configured"]}>
+      <div className="project-canva-gated" data-testid="canva-entry-not-configured">
         {button(false)}
         <p className="project-sheet-note">{CANVA_ENTRY_COPY["not-configured"]}</p>
       </div>
@@ -725,13 +725,13 @@ function CanvaCreateOption({
   }
   if (entry === "unreachable") {
     return (
-      <div className="project-canva-gated" data-testid={CANVA_ENTRY_TESTID.unreachable}>
+      <div className="project-canva-gated" data-testid="canva-entry-unreachable">
         {button(false)}
         <p className="project-sheet-note">{CANVA_ENTRY_COPY.unreachable}</p>
       </div>
     );
   }
-  const testid = entry === "picker" ? CANVA_ENTRY_TESTID.picker : CANVA_ENTRY_TESTID.connect;
+  const testid = entry === "picker" ? "canva-entry-picker" : "canva-entry-connect";
   return (
     <div className="project-canva-gated" data-testid={testid}>
       {button(true)}
