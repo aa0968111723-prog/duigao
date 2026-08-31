@@ -2003,6 +2003,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         )}
         {emptyBoard && (
           <div className="wb-empty-board" data-testid="wb-empty-board">
+            <span className="wb-empty-kicker">活動規劃白板</span>
             <strong>{roomName.label}</strong>
             {roomName.unnamed && api.onRenameRoom ? (
               <button type="button" className="project-text-button" data-testid="wb-rename-room" onClick={() => {
