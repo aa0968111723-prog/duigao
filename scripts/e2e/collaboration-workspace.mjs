@@ -176,14 +176,7 @@ async function recordWebm(page, seconds = 1.1) {
 
 async function fillEditing(page, text) {
   const box = page.locator("textarea.wb-node-text");
-  try {
-    await box.waitFor({ state: "attached", timeout: 8000 });
-  } catch {
-    await dismissSelection(page);
-    const sticky = page.getByTestId("wb-tool-sticky");
-    if (await sticky.count()) await sticky.click({ force: true });
-    await box.waitFor({ state: "attached", timeout: 8000 });
-  }
+  await box.waitFor({ state: "attached", timeout: 8000 });
   if (await box.isVisible()) await box.fill(text);
   else await box.fill(text, { force: true });
 }
@@ -911,20 +904,34 @@ try {
     await page.getByTestId("whiteboard-more").click();
     await page.getByTestId("whiteboard-arrange").click();
     check("整理按鈕可按", true);
+    await page.waitForFunction(() => !document.querySelector(".project-scrim"), null, { timeout: 5000 }).catch(() => undefined);
+    await dismissSelection(page);
     const nodeCount = await page.locator("[data-testid^='wb-node-']").count();
     const statsNodes = await page.getByTestId("wb-stats").getAttribute("data-nodes").catch(() => null);
     if (!nodeCount) {
       await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_after_arrange.png"), fullPage: true }).catch(() => undefined);
       console.log("after arrange: rendered=0 stats=", statsNodes, "canvas=", (await page.getByTestId("wb-canvas").innerHTML().catch(() => "")).slice(0, 400));
     }
-    const focused = page.locator("[data-testid^='wb-node-']").first();
-    const hit = nodeCount ? await focused.boundingBox() : null;
+    const hit = await page.evaluate(() => {
+      const canvas = document.querySelector("[data-testid='wb-canvas']")?.getBoundingClientRect();
+      if (!canvas) return null;
+      const nodes = [...document.querySelectorAll("[data-testid^='wb-node-']")];
+      for (const node of nodes) {
+        const box = node.getBoundingClientRect();
+        const x = box.x + Math.min(20, box.width / 2);
+        const y = box.y + Math.min(16, box.height / 2);
+        if (box.width > 8 && box.height > 8 && x > canvas.left + 8 && x < canvas.right - 8 && y > canvas.top + 8 && y < canvas.bottom - 8) {
+          return { x, y };
+        }
+      }
+      return null;
+    });
     if (hit) {
       await page.evaluate(({ x, y }) => {
         const el = document.querySelector("[data-testid='wb-canvas']");
         if (!el) return;
         el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 31, pointerType: "touch" }));
-      }, { x: hit.x + Math.min(20, hit.width / 2), y: hit.y + Math.min(16, hit.height / 2) });
+      }, hit);
       await page.waitForTimeout(550);
       check("長按進入多選", await page.getByTestId("wb-multiselect").count() === 1);
       if (await page.getByTestId("wb-multiselect").count()) await page.getByRole("button", { name: "完成" }).click();
@@ -934,6 +941,8 @@ try {
     } else {
       check("長按進入多選", false, "整理後仍找不到節點可長按");
     }
+    await page.locator(".project-sheet-close").click().catch(() => undefined);
+    await page.waitForFunction(() => !document.querySelector(".project-scrim"), null, { timeout: 3000 }).catch(() => undefined);
 
     await page.getByRole("button", { name: "分享至討論", exact: false }).first().click().catch(() => undefined);
     // WB02 Focus Mode：rd-tabs 在全屏層之下 — 先返回板清單再切對話
