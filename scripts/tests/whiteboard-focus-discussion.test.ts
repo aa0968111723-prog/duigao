@@ -33,6 +33,7 @@ import {
   createCommentAsColleague,
   GROK_COLLEAGUE_NAME,
   isColleagueMessage,
+  lastColleagueForFocus,
   mentionsGrok,
   showsGrokMentionChip,
 } from "../../src/features/collaboration/agentColleague";
@@ -235,6 +236,28 @@ test("平板焦點：相關訊息可捲到；沒有關聯顯示針對這張留�
   assert.match(drawer, /messagesForFocus/);
   assert.match(drawer, /針對這張留言/);
   assert.match(drawer, /focus-discuss-empty/);
+});
+
+test("焦點卡看得到同事剛說，稽核句不算", () => {
+  const line = lastColleagueForFocus([
+    message({
+      id: "g1",
+      authorName: GROK_COLLEAGUE_NAME,
+      body: "目前有三個下一步",
+      createdAt: 20,
+      payload: { agent: true, nodeId: "n1" },
+    }),
+    message({
+      id: "a1",
+      body: "已把 AI 的 2 個建議放上白板",
+      createdAt: 30,
+      payload: { audit: true, nodeId: "n1" },
+    }),
+  ], "n1");
+  assert.equal(line, "同事剛說…目前有三個下一步");
+  assert.equal(lastColleagueForFocus([], "n1"), null);
+  const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  assert.match(workspace, /wb-colleague-said/);
 });
 
 test("預覽 origin 跟焦點；套用失敗預覽留著", () => {

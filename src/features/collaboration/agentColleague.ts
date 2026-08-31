@@ -138,6 +138,33 @@ export function colleagueTurnFromResponse(input: {
 }
 
 /** create_comment 採用後必須長成同事氣泡，不可頂著觸發者發言。 */
+/** 焦點卡「同事剛說…」：對準該節點的最近一則同事正文，不是稽核句。 */
+export function lastColleagueForFocus(
+  messages: Array<{
+    body?: string;
+    payload?: { agent?: boolean; audit?: boolean; nodeId?: string };
+    authorName?: string;
+    authorId?: string;
+    createdAt?: number;
+    deletedAt?: number;
+  }>,
+  nodeId: string | null | undefined,
+): string | null {
+  if (!nodeId) return null;
+  const latest = [...messages]
+    .filter((message) =>
+      !message.deletedAt
+      && isColleagueMessage(message)
+      && !isAuditMessage(message)
+      && message.payload?.nodeId === nodeId
+      && (message.body ?? "").trim(),
+    )
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+    .at(-1);
+  const body = latest?.body?.trim();
+  return body ? `同事剛說…${body.slice(0, 80)}` : null;
+}
+
 export function createCommentAsColleague(
   proposal: Pick<AiProposal, "payload" | "label">,
   triggerUserId: string,

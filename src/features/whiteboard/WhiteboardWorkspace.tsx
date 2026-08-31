@@ -20,6 +20,7 @@ import {
 import { arrangeBoard } from "../collaboration/layout";
 import { canEditBoard } from "../collaboration/permissions";
 import { formatEditorLine } from "../collaboration/presence";
+import { lastColleagueForFocus } from "../collaboration/agentColleague";
 import type { NodeType, PresenceEditor, Whiteboard, WhiteboardEdge, WhiteboardFrame, WhiteboardNode } from "../collaboration/types";
 import { nodeCreateDraft, nodeDeleteDraft, nodeUpdateDraft, applyMasked, applyFrameMasked, frameCreateDraft, frameDeleteDraft, frameUpdateDraft, type OperationDraft } from "../collaboration/operations";
 import { fitCamera, focusCamera, marqueeHits, screenToWorld, visibleNodes, zoomAt, clampZoom, type Camera } from "./canvas";
@@ -1332,6 +1333,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const selectedNode = liveNodes.find((node) => node.id === selected[0]);
   const focusNodeId = focusNodeIdFromSelection(selected);
   const focusCard = selectedNode ? focusCardFromNode(selectedNode) : null;
+  const colleagueSaid = lastColleagueForFocus(api.room.discussion ?? [], focusCard?.nodeId);
   const emptyBoard = isEmptyBoard(liveNodes);
   const roomName = emptyRoomTitle(api.room.title);
   const phoneFocusSheet = shouldMountFocusSheet({
@@ -2236,6 +2238,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           <small>來源：{focusCard.sourceLabel}</small>
           {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
           {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
+          {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
           {api.roomFocusId === focusCard.nodeId ? <small>大家正在看這張</small> : null}
         </aside>
       )}
@@ -2253,6 +2256,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               <small>來源：{focusCard.sourceLabel}</small>
               {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
               {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
+              {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
               <div className="wb-focus-card-actions" data-testid="wb-node-actions">
                 <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
                 {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
