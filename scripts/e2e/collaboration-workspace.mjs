@@ -445,6 +445,8 @@ try {
     await page.getByTestId("wb-content-picker").getByRole("button", { name: /招生影片/ }).click();
     await page.getByTestId("wb-video-0040").click();
     check("可把文宣／企劃／影片時間卡放上白板", await page.locator("[data-node-type='room_content']").count() >= 3);
+    check("文宣落板是整張圖，不是 52px 小卡", await page.locator('[data-testid="wb-media-image"]').count() >= 1);
+    check("影片落板是可播影片", await page.locator('[data-testid="wb-media-video"]').count() >= 1);
     check("影片卡帶 00:40 時間點", (await page.locator("[data-node-type='room_content']").allTextContents()).some((text) => text.includes("00:40")));
     await dismissSelection(page);
     await page.screenshot({ path: join("/opt/cursor/artifacts", "wb_compact_toolbar_390.png"), fullPage: true });

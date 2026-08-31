@@ -16,6 +16,8 @@ import { emptyHistory, pushHistory, undoStep, redoStep, HISTORY_LIMIT } from "..
 import { applyMasked, nodeDeleteDraft, nodeUpdateDraft } from "../../src/features/collaboration/operations";
 import { registeredNodeTypes, rendererFor } from "../../src/features/whiteboard/registry";
 import { NODE_TYPES } from "../../src/features/collaboration/types";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const node = (id: string, over: Partial<WhiteboardNode> = {}): WhiteboardNode => ({
   id,
@@ -287,4 +289,26 @@ test("registry：全部 DB 詞彙都有 renderer 或 fallback；fallback 誠實�
   // 未知型別（DB 比 client 新）：fallback 函式存在且非 throw
   const fallback = rendererFor("future-type" as never);
   assert.ok(typeof fallback === "function");
+});
+
+test("文宣／影片 renderer 畫整張圖或可播影片，企劃仍走卡片", () => {
+  const render = (over: Partial<ReturnType<typeof node>["content"]> & { mediaKind?: string; thumbnailUrl?: string; videoUrl?: string; title?: string }) => {
+    const Renderer = rendererFor("room_content");
+    return renderToStaticMarkup(createElement(() => Renderer({
+      node: node("media", { nodeType: "room_content", content: over }),
+      editing: false,
+      canEdit: true,
+      onChangeText: () => undefined,
+    })));
+  };
+  const poster = render({ mediaKind: "poster", title: "擺攤文宣", versionLabel: "改二", thumbnailUrl: "data:image/png;base64,xx" });
+  assert.ok(poster.includes('data-testid="wb-media-image"'), poster);
+  assert.ok(poster.includes("擺攤文宣"));
+  assert.ok(!poster.includes("wb-thumb"), "整張文宣不該再用 52px thumb");
+  const video = render({ mediaKind: "video", title: "招生影片", videoUrl: "https://example.test/a.mp4", thumbnailUrl: "https://example.test/p.jpg", startTime: 40 });
+  assert.ok(video.includes('data-testid="wb-media-video"'), video);
+  assert.ok(video.includes("https://example.test/a.mp4"));
+  const plan = render({ mediaKind: "plan", title: "擺攤計畫" });
+  assert.ok(plan.includes("wb-thumb-fallback"));
+  assert.ok(!plan.includes("wb-media-image"));
 });

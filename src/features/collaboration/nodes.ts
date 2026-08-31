@@ -11,7 +11,7 @@ const uid = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.r
 
 const DEFAULT_SIZE: Record<NodeType, { width: number; height: number }> = {
   text: { width: 180, height: 96 },
-  image: { width: 168, height: 132 },
+  image: { width: 280, height: 280 },
   room_content: { width: 200, height: 120 },
   flow: { width: 176, height: 72 },
   mindmap: { width: 160, height: 64 },
@@ -261,6 +261,73 @@ export function groupSelected(nodes: WhiteboardNode[], selectedIds: string[], cr
 export function moveNodes(nodes: WhiteboardNode[], ids: string[], dx: number, dy: number): WhiteboardNode[] {
   const moving = new Set(ids);
   return nodes.map((node) => (moving.has(node.id) ? { ...node, x: node.x + dx, y: node.y + dy, updatedAt: Date.now() } : node));
+}
+
+/** Version fields the board may show. Never original file bytes. */
+export type BoardMediaSource = {
+  kind?: "image" | "video";
+  imageDataUrl?: string;
+  videoUrl?: string;
+  width?: number;
+  height?: number;
+};
+
+const MEDIA_BOX = {
+  poster: { width: 280, height: 360 },
+  video: { width: 360, height: 220 },
+  asset: { width: 280, height: 280 },
+  plan: { width: 200, height: 120 },
+} as const;
+
+/** Copy the version's display URLs onto the node. Local/E2E data URLs stay. */
+export function boardMediaFromVersion(version?: BoardMediaSource): Pick<NodeContent, "thumbnailUrl" | "videoUrl"> {
+  if (!version) return {};
+  const thumbnailUrl = version.imageDataUrl?.trim() || undefined;
+  const videoUrl = version.videoUrl?.trim() || undefined;
+  return {
+    ...(thumbnailUrl ? { thumbnailUrl } : {}),
+    ...(videoUrl ? { videoUrl } : {}),
+  };
+}
+
+/** Fit a poster / video / asset onto the canvas without the 52px card size. */
+export function boardMediaSize(
+  kind?: NodeContent["mediaKind"],
+  version?: Pick<BoardMediaSource, "width" | "height">,
+): { width: number; height: number } {
+  const box = MEDIA_BOX[kind && kind in MEDIA_BOX ? kind : "asset"];
+  const vw = version?.width;
+  const vh = version?.height;
+  if (vw && vh && vw > 0 && vh > 0) {
+    const scale = Math.min(box.width / vw, box.height / vh);
+    return {
+      width: Math.max(120, Math.round(vw * scale)),
+      height: Math.max(88, Math.round(vh * scale)),
+    };
+  }
+  return { width: box.width, height: box.height };
+}
+
+export function showsBoardMedia(content: NodeContent): boolean {
+  if (content.mediaKind === "plan") return false;
+  return Boolean(content.videoUrl || content.thumbnailUrl);
+}
+
+/** Prefer live version URLs (signed URLs refresh) over a stale copy on the node. */
+export function hydrateBoardMedia(node: WhiteboardNode, version?: BoardMediaSource): WhiteboardNode {
+  if (node.nodeType !== "room_content" && node.nodeType !== "image") return node;
+  if (node.content.mediaKind === "plan") return node;
+  const media = boardMediaFromVersion(version);
+  if (!media.thumbnailUrl && !media.videoUrl) return node;
+  if (node.content.thumbnailUrl === media.thumbnailUrl && node.content.videoUrl === media.videoUrl) return node;
+  return {
+    ...node,
+    content: {
+      ...node.content,
+      thumbnailUrl: media.thumbnailUrl ?? node.content.thumbnailUrl,
+      videoUrl: media.videoUrl ?? node.content.videoUrl,
+    },
+  };
 }
 
 export function createRelationEdges(

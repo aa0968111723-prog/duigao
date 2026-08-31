@@ -44,22 +44,58 @@ function TextBody({ node, editing, canEdit, onChangeText }: NodeRendererProps) {
   return <span className="wb-node-static">{node.content.text || (node.nodeType === "text" ? "" : "步驟")}</span>;
 }
 
+function contentCaption(content: NodeRendererProps["node"]["content"]) {
+  return (
+    <span className="wb-card-copy">
+      <strong>{content.title ?? "房間內容"}</strong>
+      <small>
+        {content.versionLabel ? `${content.versionLabel}` : ""}
+        {content.openCommentCount ? ` · ${content.openCommentCount} 則待處理` : ""}
+        {content.startTime != null ? ` · ${formatVideoRange(content.startTime, content.endTime)}` : ""}
+        {content.subtitle ? ` · ${content.subtitle}` : ""}
+      </small>
+    </span>
+  );
+}
+
 function ContentBody({ node }: NodeRendererProps) {
   const content = node.content;
+  const playUrl = content.videoUrl;
+  const imageUrl = content.thumbnailUrl;
+  if (playUrl && content.mediaKind !== "plan") {
+    return (
+      <div className="wb-media">
+        <video
+          className="wb-media-frame"
+          data-testid="wb-media-video"
+          src={playUrl}
+          poster={imageUrl}
+          controls
+          playsInline
+          preload="metadata"
+          onPointerDown={(event) => event.stopPropagation()}
+          onLoadedMetadata={(event) => {
+            if (content.startTime != null) event.currentTarget.currentTime = content.startTime;
+          }}
+        />
+        <span className="wb-media-caption">{contentCaption(content)}</span>
+      </div>
+    );
+  }
+  if (imageUrl && content.mediaKind !== "plan") {
+    return (
+      <div className="wb-media">
+        <img className="wb-media-frame" data-testid="wb-media-image" src={imageUrl} alt="" />
+        <span className="wb-media-caption">{contentCaption(content)}</span>
+      </div>
+    );
+  }
   return (
     <>
-      {content.thumbnailUrl
-        ? <img className="wb-thumb" src={content.thumbnailUrl} alt="" />
+      {imageUrl
+        ? <img className="wb-thumb" src={imageUrl} alt="" />
         : <span className="wb-thumb-fallback" aria-hidden>{content.mediaKind === "poster" ? "文宣" : content.mediaKind === "video" ? "▶" : content.mediaKind === "plan" ? "☷" : "素材"}</span>}
-      <span className="wb-card-copy">
-        <strong>{content.title ?? "房間內容"}</strong>
-        <small>
-          {content.versionLabel ? `${content.versionLabel}` : ""}
-          {content.openCommentCount ? ` · ${content.openCommentCount} 則待處理` : ""}
-          {content.startTime != null ? ` · ${formatVideoRange(content.startTime, content.endTime)}` : ""}
-          {content.subtitle ? ` · ${content.subtitle}` : ""}
-        </small>
-      </span>
+      {contentCaption(content)}
     </>
   );
 }
