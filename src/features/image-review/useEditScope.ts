@@ -3,6 +3,7 @@ import { AGENT_UNCONFIGURED_COPY } from "../../ai/roomAgentContract";
 import {
   canGenerateEdit,
   chipCaption,
+  editScopeInputFromWorkspace,
   inferEditScope,
   visualEditHint,
   type EditScope,
@@ -20,27 +21,33 @@ export function useEditScope(api: WorkspaceApi, versionId: string, cloudRoomId?:
   const [hint, setHint] = useState("");
   const proposal = useProposalStore(room.id, versionId, guest);
 
-  const pins = useMemo(() => {
-    return room.comments
-      .filter((pin) => pin.versionId === versionId && !pin.resolved)
-      .map((pin) => ({ body: pin.body, x: pin.x, y: pin.y, region: pin.region }));
-  }, [room.comments, versionId]);
-
   const draft = api.draftPin?.versionId === versionId ? api.draftPin : null;
   const selected = room.comments.find((pin) => pin.id === api.selectedPinId && pin.versionId === versionId);
   const region = draft?.region ?? selected?.region;
-  const regionArea = region ? region.width * region.height : 0;
-  const bodyText = [selected?.body, draft ? api.form.body : "", ...pins.map((pin) => pin.body)].filter(Boolean).join(" ");
+
+  const scopeInput = useMemo(
+    () => editScopeInputFromWorkspace({
+      versionId,
+      comments: room.comments,
+      draftPin: api.draftPin,
+      formBody: api.form.body,
+      selectedPinId: api.selectedPinId,
+      override,
+    }),
+    [api.draftPin, api.form.body, api.selectedPinId, override, room.comments, versionId],
+  );
 
   const inferred: InferEditScopeResult = useMemo(
-    () => inferEditScope({ pins, regionArea, bodyText, override }),
-    [pins, regionArea, bodyText, override],
+    () => inferEditScope(scopeInput),
+    [scopeInput],
   );
 
   const generate = useCallback(async (forced?: EditScope) => {
-    const nextOverride = forced ?? override;
-    const result = inferEditScope({ pins, regionArea, bodyText, override: nextOverride });
-    if (!canGenerateEdit({ pins, regionArea, bodyText }) || !result.scope) {
+    const nextInput = forced && forced !== override
+      ? { ...scopeInput, override: forced }
+      : scopeInput;
+    const result = inferEditScope(nextInput);
+    if (!canGenerateEdit(nextInput) || !result.scope) {
       setHint(EMPTY_EDIT_SCOPE_COPY);
       showToast(EMPTY_EDIT_SCOPE_COPY, { tone: "info" });
       return;
@@ -54,7 +61,7 @@ export function useEditScope(api: WorkspaceApi, versionId: string, cloudRoomId?:
         versionId,
         scope: result.scope,
         label: result.label,
-        bodyText,
+        bodyText: nextInput.bodyText ?? "",
       });
       if (!invoked.ok) {
         setHint(invoked.error);
@@ -72,9 +79,9 @@ export function useEditScope(api: WorkspaceApi, versionId: string, cloudRoomId?:
         version,
         scope: result.scope,
         label: result.label,
-        bodyText,
-        x: region ? region.x + region.width / 2 : (selected?.x ?? 0.5),
-        y: region ? region.y + region.height / 2 : (selected?.y ?? 0.5),
+        bodyText: nextInput.bodyText ?? "",
+        x: region ? region.x + region.width / 2 : (draft?.x ?? selected?.x ?? 0.5),
+        y: region ? region.y + region.height / 2 : (draft?.y ?? selected?.y ?? 0.5),
         width: result.scope === "full" ? 100 : region ? Math.max(18, region.width * 100) : 40,
         authorName: guest.name,
         path: invoked.path,
@@ -92,7 +99,7 @@ export function useEditScope(api: WorkspaceApi, versionId: string, cloudRoomId?:
     } finally {
       setBusy(false);
     }
-  }, [bodyText, cloudRoomId, guest.name, override, pins, proposal, region, regionArea, room.id, room.versions, selected, showToast, versionId]);
+  }, [cloudRoomId, draft, guest.name, override, proposal, region, room.id, room.versions, scopeInput, selected, showToast, versionId]);
 
   return {
     inferred,
