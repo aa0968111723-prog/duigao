@@ -485,7 +485,7 @@ try {
     await fillEditing(page, "招生");
 
     for (const child of ["擺攤", "茶會", "演講"]) {
-      if (child !== "擺攤") await searchNode(page, "招生");
+      await searchNode(page, "招生");
       await runWhiteboardNodeAction(page, "wb-add-child");
       await fillEditing(page, child);
     }
