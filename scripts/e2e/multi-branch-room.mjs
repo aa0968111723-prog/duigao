@@ -377,6 +377,21 @@ try {
     }
     faults.videoUploadDelayMs = 0;
     await page.waitForSelector("video.v-video", { timeout: 90000 });
+    // 雲端較慢時，upload 完成與 room snapshot 會讓 overlay 短暫重掛。
+    // 不能只等「曾出現」就立刻讀 count；要求播放器＋唯一版本連續穩定
+    // 300ms，再保留下面的精確 ===1 斷言。
+    await page.waitForFunction(() => {
+      const key = "__duigaoVideoStableAt";
+      const state = window;
+      const ready = document.querySelectorAll("video.v-video").length === 1
+        && document.querySelectorAll(".m-vchip:not(.m-vchip-add)").length === 1;
+      if (!ready) {
+        delete state[key];
+        return false;
+      }
+      state[key] ??= Date.now();
+      return Date.now() - state[key] >= 300;
+    }, null, { timeout: 15000 });
     check(
       "上傳完成後狀態列自己收掉",
       (await page.getByTestId("project-upload-status").count()) === 0,
