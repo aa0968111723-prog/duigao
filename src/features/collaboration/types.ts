@@ -244,7 +244,7 @@ export type DiscussionPayload = {
   versionId?: string;
   whiteboardId?: string;
   nodeId?: string;
-  /** 招生樹／心智圖路徑，例如「2026招生樹 › 影片 › 招生短片」。 */
+  /** 招生樹／心智圖路徑，例如「202609招生 › 書籤」。 */
   treePath?: string;
   treeRootId?: string;
   pollId?: string;

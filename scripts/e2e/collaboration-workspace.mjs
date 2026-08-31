@@ -1587,7 +1587,7 @@ try {
     }
   }
 
-  // ---- 2026招生樹：空板種樹 → 點支線看到路徑 ----------------------
+  // ---- 202609招生：空板骨架 → 點書籤看到路徑（對齊截圖支線） ------
   {
     const treeCtx = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -1603,27 +1603,26 @@ try {
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
       await page.getByRole("button", { name: "白板", exact: true }).click();
-      await page.getByLabel("白板名稱").fill("2026招生樹");
+      await page.getByLabel("白板名稱").fill("202609招生");
       await page.getByRole("button", { name: "建立白板" }).click();
       await page.waitForSelector('[data-testid="wb-start-enrollment-tree"]', { timeout: 10000 });
       await page.getByTestId("wb-start-enrollment-tree").click();
       await page.waitForSelector('[data-testid="wb-tree-children"]', { timeout: 8000 });
-      check("種樹後焦點卡列出支線", await page.locator('[data-testid="wb-tree-child"][data-tree-label="影片"]').count() >= 1);
-      await page.locator('[data-testid="wb-tree-child"][data-tree-label="影片"]').first().click();
-      await page.waitForSelector('[data-testid="wb-tree-child"][data-tree-label="招生短片"]', { timeout: 8000 });
-      await page.locator('[data-testid="wb-tree-child"][data-tree-label="招生短片"]').first().click();
+      check("骨架列出 202609 支線", await page.locator('[data-testid="wb-tree-child"][data-tree-label="書籤"]').count() >= 1
+        && await page.locator('[data-testid="wb-tree-child"][data-tree-label="胸章"]').count() >= 1);
+      await page.locator('[data-testid="wb-tree-child"][data-tree-label="書籤"]').first().click();
       await page.waitForFunction(() => {
         const path = document.querySelector('[data-testid="wb-tree-path"]')?.textContent ?? "";
         const empty = document.querySelector('[data-testid="focus-discuss-empty"]')?.textContent ?? "";
-        return path.includes("招生短片") && empty.includes("招生短片");
+        return path.includes("書籤") && empty.includes("書籤");
       }, { timeout: 8000 });
       const pathText = (await page.getByTestId("wb-tree-path").first().textContent()) ?? "";
-      check("點招生短片看得到樹路徑", pathText.includes("2026招生樹") && pathText.includes("影片") && pathText.includes("招生短片"), pathText);
+      check("點書籤看得到樹路徑", pathText.includes("202609招生") && pathText.includes("書籤"), pathText);
       const emptyCopy = (await page.getByTestId("focus-discuss-empty").first().textContent().catch(() => "")) ?? "";
-      check("討論框對準招生短片路徑", emptyCopy.includes("2026招生樹") && emptyCopy.includes("影片") && emptyCopy.includes("招生短片"), emptyCopy);
-      await page.screenshot({ path: join("/opt/cursor/artifacts", "enrollment_tree_discuss_path_390.png") });
+      check("討論框對準書籤路徑", emptyCopy.includes("202609招生") && emptyCopy.includes("書籤"), emptyCopy);
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "enrollment_tree_202609_bookmark_390.png") });
     } catch (error) {
-      check("2026招生樹可討論", false, error instanceof Error ? error.message : String(error));
+      check("202609招生可討論", false, error instanceof Error ? error.message : String(error));
     } finally {
       await treeCtx.close();
     }

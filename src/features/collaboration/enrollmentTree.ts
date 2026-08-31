@@ -1,17 +1,20 @@
 /**
- * 2026招生樹：活動房裡用既有 mindmap 討論招生支線。
- * 不新增 DISCUSSION_KINDS / NODE_TYPES；路徑是從 mindmap 邊算出來的。
- * 原稿／versions 不會被這棵樹碰到。
+ * 招生樹：房間裡已經在用的 campaign mindmap（截圖根是「202609招生」）。
+ * 幹部把文宣／版本釘成樹，在支線上討論。不另發明第一層、不是 Canva、不是拼圖目錄。
+ * 空板才長 202609 骨架；已有 20xx招生 根就只討論，不另種一棵玩具樹。
+ * 路徑走 mindmap + relation 邊（落板的 room_content／便利貼也算支線）。
+ * 不新增 DISCUSSION_KINDS / NODE_TYPES。原稿／versions 不碰。
  */
 import { createEdge, createNode } from "./nodes";
 import { discussionPayloadFromNode } from "./links";
 import type { DiscussionPayload, WhiteboardEdge, WhiteboardNode } from "./types";
 
 export const ENROLLMENT_TREE_YEAR = 2026;
-export const ENROLLMENT_TREE_ROOT_LABEL = "2026招生樹";
-export const ENROLLMENT_TREE_SOURCE = "2026招生樹";
+export const ENROLLMENT_TREE_ROOT_LABEL = "202609招生";
+export const ENROLLMENT_TREE_SOURCE = "招生樹";
 export const PLANT_ENROLLMENT_TREE_VERB_ID = "plant-enrollment-tree";
-export const PLANT_ENROLLMENT_TREE_LABEL = "種一棵 2026招生樹";
+export const PLANT_ENROLLMENT_TREE_LABEL = "空板長 202609招生骨架";
+export const FOCUS_ENROLLMENT_TREE_LABEL = "討論這棵招生樹";
 
 export type EnrollmentSpecNode = {
   key: string;
@@ -19,37 +22,41 @@ export type EnrollmentSpecNode = {
   children?: EnrollmentSpecNode[];
 };
 
-/** 社團招生對稿用的預設樹。節點只是討論錨，不是文宣原稿。 */
+/** 對齊 202609 截圖的支線名稱。空板骨架只有標籤，沒有假圖。 */
 export const ENROLLMENT_TREE_2026: EnrollmentSpecNode = {
   key: "root",
   label: ENROLLMENT_TREE_ROOT_LABEL,
   children: [
+    { key: "copy", label: "招募文案" },
     {
-      key: "poster",
-      label: "文宣",
+      key: "print",
+      label: "印製招募文案",
       children: [
-        { key: "poster-hero", label: "主視覺" },
-        { key: "poster-booth", label: "擺攤海報" },
+        { key: "print-front", label: "正" },
+        { key: "print-back", label: "反" },
       ],
     },
     {
-      key: "video",
-      label: "影片",
+      key: "food",
+      label: "美食地圖",
       children: [
-        { key: "video-clip", label: "招生短片" },
+        { key: "food-front", label: "正" },
+        { key: "food-back", label: "反" },
       ],
     },
-    {
-      key: "plan",
-      label: "企劃",
-      children: [
-        { key: "plan-staff", label: "時程與人力" },
-      ],
-    },
-    { key: "booth", label: "擺攤" },
-    { key: "schedule", label: "時程" },
+    { key: "booth", label: "擺攤企劃" },
+    { key: "bookmark", label: "書籤" },
+    { key: "badge", label: "胸章" },
   ],
 };
+
+/** 202609招生、2026招生樹、2026招生 —— 已在板上的真樹，不是空白模板名。 */
+export function isEnrollmentCampaignRootLabel(label: string | undefined | null): boolean {
+  const trimmed = (label ?? "").trim();
+  if (!trimmed) return false;
+  if (trimmed.includes("招生樹")) return true;
+  return /^20\d{2}\d{0,2}\s*招生/.test(trimmed);
+}
 
 export type EnrollmentTreePath = {
   nodeIds: string[];
@@ -65,8 +72,8 @@ function live(nodes: WhiteboardNode[]): WhiteboardNode[] {
   return nodes.filter((node) => !node.deletedAt);
 }
 
-function mindmapEdges(edges: WhiteboardEdge[]): WhiteboardEdge[] {
-  return edges.filter((edge) => edge.edgeType === "mindmap");
+function treeEdges(edges: WhiteboardEdge[]): WhiteboardEdge[] {
+  return edges.filter((edge) => edge.edgeType === "mindmap" || edge.edgeType === "relation");
 }
 
 export function formatEnrollmentTreePath(labels: string[]): string {
@@ -74,18 +81,18 @@ export function formatEnrollmentTreePath(labels: string[]): string {
 }
 
 export function mindmapParentId(nodeId: string, edges: WhiteboardEdge[]): string | null {
-  const incoming = mindmapEdges(edges).find((edge) => edge.targetNodeId === nodeId);
+  const incoming = treeEdges(edges).find((edge) => edge.targetNodeId === nodeId);
   return incoming?.sourceNodeId ?? null;
 }
 
 export function mindmapChildIds(nodeId: string, edges: WhiteboardEdge[]): string[] {
-  return mindmapEdges(edges)
+  return treeEdges(edges)
     .filter((edge) => edge.sourceNodeId === nodeId)
     .map((edge) => edge.targetNodeId);
 }
 
 export function isOnMindmapTree(nodeId: string, edges: WhiteboardEdge[]): boolean {
-  return mindmapEdges(edges).some((edge) => edge.sourceNodeId === nodeId || edge.targetNodeId === nodeId);
+  return treeEdges(edges).some((edge) => edge.sourceNodeId === nodeId || edge.targetNodeId === nodeId);
 }
 
 export function enrollmentAncestorIds(nodeId: string, edges: WhiteboardEdge[]): string[] {
@@ -124,7 +131,9 @@ export function enrollmentTreePath(
   edges: WhiteboardEdge[],
 ): EnrollmentTreePath | null {
   if (!node) return null;
-  if (!isOnMindmapTree(node.id, edges)) return null;
+  const self = live(nodes).find((item) => item.id === node.id);
+  const selfLabel = labelOf(self);
+  if (!isOnMindmapTree(node.id, edges) && !isEnrollmentCampaignRootLabel(selfLabel)) return null;
   const byId = new Map(live(nodes).map((item) => [item.id, item]));
   const ancestorIds = enrollmentAncestorIds(node.id, edges);
   const labels = ancestorIds.map((id) => labelOf(byId.get(id)));
@@ -146,10 +155,21 @@ export function enrollmentTreePath(
 }
 
 export function isEnrollmentTree2026(path: EnrollmentTreePath | null | undefined): boolean {
-  return Boolean(path?.labels[0] === ENROLLMENT_TREE_ROOT_LABEL);
+  return Boolean(path && isEnrollmentCampaignRootLabel(path.labels[0]));
 }
 
-/** 根＝整棵樹的討論；支線＝自己＋祖先（知道自己在哪條招生線）。 */
+export function findEnrollmentTreeRoots(nodes: WhiteboardNode[], edges: WhiteboardEdge[]): WhiteboardNode[] {
+  return live(nodes).filter((node) => {
+    if (!isEnrollmentCampaignRootLabel(labelOf(node))) return false;
+    return mindmapParentId(node.id, edges) == null;
+  });
+}
+
+export function shouldPlantEnrollmentTree(nodes: WhiteboardNode[], edges: WhiteboardEdge[]): boolean {
+  return findEnrollmentTreeRoots(nodes, edges).length === 0;
+}
+
+/** 根＝整棵樹；支線＝自己＋祖先＋子孫（書籤上的便利貼算這條），不含旁支。 */
 export function messagesForEnrollmentFocus<T extends { payload?: { nodeId?: string } }>(
   messages: T[],
   node: Pick<WhiteboardNode, "id"> | null,
@@ -161,7 +181,7 @@ export function messagesForEnrollmentFocus<T extends { payload?: { nodeId?: stri
   const allowed = new Set(
     path.rootId === node.id
       ? [path.rootId, ...enrollmentDescendantIds(path.rootId, edges)]
-      : path.nodeIds,
+      : [...path.nodeIds, ...enrollmentDescendantIds(node.id, edges)],
   );
   return messages.filter((message) => {
     const nodeId = message.payload?.nodeId;

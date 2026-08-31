@@ -24,13 +24,13 @@ const planted = plantEnrollmentTree2026({
   createdBy: "owner",
   idFn: () => `n${++n}`,
 });
-const clip = planted.nodes.find((node) => node.id === planted.byKey["video-clip"]);
+const clip = planted.nodes.find((node) => node.id === planted.byKey.bookmark);
 const ask = boardAskContext({ nodes: planted.nodes, edges: planted.edges, focusNode: clip });
 const card = buildRoomAgentCard({
-  room: { id: "11111111-1111-4111-8111-111111111111", title: "淡江招生房", role: "owner" },
-  contents: [{ branchId: "b-video", type: "video", name: "招生短片", latestVersionLabel: "第一剪", openCommentCount: 1 }],
+  room: { id: "11111111-1111-4111-8111-111111111111", title: "招生房", role: "owner" },
+  contents: [{ branchId: "b-bookmark", type: "poster", name: "書籤", latestVersionLabel: "正面語錄", openCommentCount: 1 }],
   focus: {
-    label: ask.focus?.label ?? "招生短片",
+    label: ask.focus?.label ?? "書籤",
     nodeId: clip.id,
     nodeType: "mindmap",
     source: "discussion",
@@ -67,7 +67,7 @@ const answer = await askGrok({
     videoModel: "grok-imagine-video",
     maxUsd: 0.05,
   },
-  query: `針對「${ask.focus?.treePath}」，招生短片節奏會不會太快？只准提案，不要改原稿。`,
+  query: `針對「${ask.focus?.treePath}」，書籤要不要補師父法語、原有的是否需要更換？只准提案，不要改原稿。`,
   card,
   imagineVideoConfirmed: false,
   fetchFn,

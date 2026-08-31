@@ -223,7 +223,7 @@ test("空板文案不含「新步驟」當唯一 CTA", () => {
   assert.equal(emptyBoardCopyHasLonelyStep(copy), false);
   assert.ok(copy.includes("從對話把一句話釘上來"));
   assert.ok(copy.includes("放一張文宣／素材"));
-  assert.ok(copy.includes("種一棵 2026招生樹"));
+  assert.ok(copy.includes("空板長 202609招生骨架"));
   assert.ok(copy.includes("問 Grok"));
   assert.equal(isEmptyBoard([]), true);
   assert.equal(isEmptyBoard([node({ deletedAt: 9 })]), true);

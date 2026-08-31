@@ -2,18 +2,18 @@
   "choices": [
     {
       "message": {
-        "content": "招生短片這支節奏偏快，先把 0:12 後的社團段放慢半拍，不要動主視覺那條線。",
+        "content": "書籤這支先補正面師父法語，原有的先不要換；胸章那條北藝有材料，不要跟書籤混談。",
         "tool_calls": [
           {
             "function": {
               "name": "imagine_image",
-              "arguments": "{\"prompt\":\"2026招生樹 › 影片 › 招生短片 封面草圖，社團擺攤，不要改原稿\"}"
+              "arguments": "{\"prompt\":\"202609招生 › 書籤 正面語錄草圖，只要提案，不要改原稿\"}"
             }
           },
           {
             "function": {
               "name": "create_plan_draft",
-              "arguments": "{\"title\":\"招生短片節奏改一版\",\"text\":\"針對 2026招生樹 › 影片 › 招生短片\"}"
+              "arguments": "{\"title\":\"書籤補法語\",\"text\":\"針對 202609招生 › 書籤\"}"
             }
           }
         ]

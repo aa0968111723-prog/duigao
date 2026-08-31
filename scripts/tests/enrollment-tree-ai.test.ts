@@ -1,5 +1,5 @@
 /**
- * 代理必須實測 AI：走 askGrok 同一條 production 路徑，對準 2026招生樹 › 影片 › 招生短片。
+ * 代理必須實測 AI：走 askGrok 同一條 production 路徑，對準 202609招生 › 書籤。
  * Fixture 只替換 fetch body；chat/completions 與 images/generations 都要真的被呼叫。
  * Live：有 XAI_API_KEY 就打 api.x.ai；沒有就記錄嘗試過的 blocker。
  *
@@ -36,32 +36,32 @@ function treeCard() {
     createdBy: "owner",
     idFn: () => `n${++n}`,
   });
-  const clip = planted.nodes.find((node) => node.id === planted.byKey["video-clip"]);
-  assert.ok(clip);
-  const ask = boardAskContext({ nodes: planted.nodes, edges: planted.edges, focusNode: clip });
+  const bookmark = planted.nodes.find((node) => node.id === planted.byKey.bookmark);
+  assert.ok(bookmark);
+  const ask = boardAskContext({ nodes: planted.nodes, edges: planted.edges, focusNode: bookmark });
   const card = buildRoomAgentCard({
-    room: { id: "11111111-1111-4111-8111-111111111111", title: "淡江招生房", role: "owner" },
+    room: { id: "11111111-1111-4111-8111-111111111111", title: "招生房", role: "owner" },
     contents: [
-      { branchId: "b-video", type: "video", name: "招生短片", latestVersionLabel: "第一剪", openCommentCount: 1 },
+      { branchId: "b-bookmark", type: "poster", name: "書籤", latestVersionLabel: "正面語錄", openCommentCount: 1 },
     ],
     focus: {
-      label: ask.focus?.label ?? "招生短片",
-      nodeId: clip.id,
+      label: ask.focus?.label ?? "書籤",
+      nodeId: bookmark.id,
       nodeType: "mindmap",
       source: "discussion",
       treePath: ask.focus?.treePath,
       treeRootId: ask.focus?.treeRootId,
     },
-    comments: [{ id: "c1", body: "0:12 社團段太快", region: "0:12" }],
+    comments: [{ id: "c1", body: "需要補充師父法語，正面語錄", region: "正面" }],
   });
-  return { planted, clip, ask, card };
+  return { planted, clip: bookmark, ask, card };
 }
 
-test("askGrok 對準招生短片：chat + Imagine 都被呼叫，原稿 path 不出現", async () => {
+test("askGrok 對準書籤：chat + Imagine 都被呼叫，原稿 path 不出現", async () => {
   const { card, ask, clip } = treeCard();
-  assert.equal(card.focus?.treePath, "2026招生樹 › 影片 › 招生短片");
+  assert.equal(card.focus?.treePath, "202609招生 › 書籤");
   assert.deepEqual(roomAgentCardLeaks(card), []);
-  const request = grokChatRequestBody({ query: ask.focus?.label ?? "針對招生短片", card });
+  const request = grokChatRequestBody({ query: ask.focus?.label ?? "針對書籤", card });
   assert.equal(grokRequestEnablesSearch(request), false);
   assert.match(JSON.stringify(request.messages), /招生樹路徑/);
 
@@ -109,13 +109,13 @@ test("askGrok 對準招生短片：chat + Imagine 都被呼叫，原稿 path 不
   assert.ok(urls.some((url) => url.includes("https://api.x.ai/v1/chat/completions")), "must hit Grok chat");
   assert.ok(urls.some((url) => url.includes("/images/generations")), "must hit Imagine");
   assert.equal(stored[0], "image");
-  assert.match(bodies[0] ?? "", /2026招生樹 › 影片 › 招生短片/);
+  assert.match(bodies[0] ?? "", /202609招生 › 書籤/);
   assert.doesNotMatch(bodies.join("\n"), /\/versions\//);
   assert.equal(answer?.actions.some((item) => item.type === "imagine_image"), true);
   const imagine = answer?.actions.find((item) => item.type === "imagine_image");
   assert.match(String(imagine?.payload.workLayerRef ?? ""), /\/proposals\//);
   assert.doesNotMatch(String(imagine?.payload.workLayerRef ?? ""), /\/versions\//);
-  assert.match(answer?.text ?? "", /招生短片/);
+  assert.match(answer?.text ?? "", /書籤/);
 
   const parsed = parseGrokProviderPayload(FIXTURE, "application/json");
   assert.equal(parsed.ok, true);
@@ -132,7 +132,7 @@ test("askGrok 對準招生短片：chat + Imagine 都被呼叫，原稿 path 不
     proposals: (answer?.actions ?? []).map((item) => ({ id: item.type, type: item.type, label: item.label })),
   });
   assert.equal(bubble.payload.agent, true);
-  assert.equal(bubble.payload.treePath, "2026招生樹 › 影片 › 招生短片");
+  assert.equal(bubble.payload.treePath, "202609招生 › 書籤");
   assert.equal(bubble.payload.nodeId, clip.id);
 
   writeEvidence({
@@ -148,7 +148,7 @@ test("askGrok 對準招生短片：chat + Imagine 都被呼叫，原稿 path 不
 test("executeImagineImage 也走同一支 Imagine 函式（不是測試自己 fetch）", async () => {
   const urls: string[] = [];
   const image = await executeImagineImage({
-    prompt: "2026招生樹 › 影片 › 招生短片 封面",
+    prompt: "202609招生 › 書籤 正面語錄草圖",
     apiKey: "xai-test",
     model: "grok-imagine-image",
     fetchFn: async (url) => {
@@ -219,7 +219,7 @@ test("live XAI：有金鑰就打真的；沒有就留下嘗試過的 blocker", a
 });
 
 function enrollmentQuery(treePath?: string): string {
-  return `針對「${treePath ?? "2026招生樹"}」，招生短片節奏會不會太快？只准提案，不要改原稿。`;
+  return `針對「${treePath ?? "202609招生 › 書籤"}」，書籤要不要補師父法語、原有的是否需要更換？只准提案，不要改原稿。`;
 }
 
 function writeEvidence(payload: Record<string, unknown>): void {

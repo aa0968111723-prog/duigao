@@ -45,7 +45,11 @@ import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSumm
 import { describePreview, planApply, type BoardAiPreview } from "./aiPreview";
 import {
   enrollmentColleaguePrompt,
+  findEnrollmentTreeRoots,
+  FOCUS_ENROLLMENT_TREE_LABEL,
+  PLANT_ENROLLMENT_TREE_LABEL,
   plantEnrollmentTree2026,
+  shouldPlantEnrollmentTree,
 } from "../collaboration/enrollmentTree";
 import {
   cameraAfterRemount,
@@ -1218,10 +1222,20 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   };
 
   const plantEnrollmentTree = () => {
-    if (!board || !canEdit) {
+    if (!board) return;
+    const existing = findEnrollmentTreeRoots(liveNodes, edges)[0];
+    if (existing) {
+      setStarterDismissedFor(board.id);
+      setSelected([existing.id]);
+      api.onSelectionFocus?.(existing.id);
+      setCamera(focusCamera(existing, viewport, Math.min(camera.zoom, 1.05)));
+      return;
+    }
+    if (!canEdit) {
       setNotice("檢視者不能種樹，只能在已有的招生樹上討論。");
       return;
     }
+    if (!shouldPlantEnrollmentTree(liveNodes, edges)) return;
     const planted = plantEnrollmentTree2026({
       whiteboardId: board.id,
       roomId: board.roomId,
@@ -2204,7 +2218,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 <span aria-hidden>↦</span><strong>畫關係</strong><small>先點起點，再點終點</small>
               </button>
               <button type="button" data-testid="wb-start-enrollment-tree" onClick={plantEnrollmentTree}>
-                <span aria-hidden>枝</span><strong>種一棵 2026招生樹</strong><small>文宣／影片／企劃支線，點一支就討論那條</small>
+                <span aria-hidden>枝</span>
+                <strong>{findEnrollmentTreeRoots(liveNodes, edges)[0] ? FOCUS_ENROLLMENT_TREE_LABEL : PLANT_ENROLLMENT_TREE_LABEL}</strong>
+                <small>已有 202609招生／2026招生樹就點支線討論；空板才長骨架，不另種玩具樹</small>
               </button>
             </div>
           </section>
