@@ -41,6 +41,7 @@ test("種 2026招生樹：根＋文宣／影片／企劃支線，不碰 versions
   assert.ok(tree.nodes.every((node) => !("imageDataUrl" in node.content)));
   const workspace = readFileSync(resolve(ROOT, "src/features/whiteboard/WhiteboardWorkspace.tsx"), "utf8");
   assert.match(workspace, /plant-enrollment-tree/);
+  assert.match(workspace, /wb-start-enrollment-tree/);
   assert.match(workspace, /plantEnrollmentTree2026/);
   assert.match(workspace, /wb-tree-path/);
 });
