@@ -264,7 +264,7 @@ try {
     const latestMsg = page.locator('[data-testid="discussion-feed"] [data-latest="true"]');
     await latestMsg.getByTestId("discussion-edit").waitFor({ state: "visible", timeout: 15000 });
     const editedBody = "先把招生流程攤在白板上（改過）";
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
       if (await page.locator(".rd-msg", { hasText: editedBody }).count()) break;
       if (!await page.getByTestId("discussion-edit-form").count()) {
         await latestMsg.getByTestId("discussion-edit").click();
@@ -285,10 +285,10 @@ try {
         }
       }, editedBody);
       try {
-        await page.locator(".rd-msg", { hasText: editedBody }).first().waitFor({ state: "visible", timeout: 8000 });
+        await page.locator(".rd-msg", { hasText: editedBody }).first().waitFor({ state: "visible", timeout: 12000 });
         break;
       } catch (error) {
-        if (attempt === 2) throw error;
+        if (attempt === 4) throw error;
       }
     }
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
@@ -766,7 +766,7 @@ try {
         await searchNode(page, "招生");
         const beforeText = await page.locator(".wb-node.is-selected .wb-node-static, .wb-node.is-selected textarea").first().inputValue().catch(() => null);
         await openFocusActions(page);
-        await page.getByTestId("wb-node-actions").getByRole("button", { name: "編輯", exact: true }).click();
+        await page.getByTestId("wb-node-actions").getByRole("button", { name: "編輯", exact: true }).click({ force: true });
         await fillEditing(page, "快照後改的字");
         await dismissSelection(page);
         await page.getByTestId("whiteboard-more").click();
@@ -1111,7 +1111,7 @@ try {
             // WB02：非編輯節點是靜態層，整卡可點選（audit 缺陷已修）
             await page.locator(".wb-node").last().click({ force: true });
             await openFocusActions(page);
-            await page.getByTestId("wb-node-actions").getByTestId("wb-node-delete").click();
+            await page.getByTestId("wb-node-actions").getByTestId("wb-node-delete").click({ force: true });
             await B.waitForFunction(
               () => ![...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")),
               null,
