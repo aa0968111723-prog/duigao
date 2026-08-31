@@ -172,7 +172,19 @@ export type RoomContextRequest = {
   selectedVersionIds?: string[];
   timeRange?: { startSeconds: number; endSeconds: number } | null;
   imagineVideoConfirmed?: boolean;
-  focus?: { branchId?: string; versionId?: string };
+  focus?: {
+    branchId?: string;
+    versionId?: string;
+    nodeId?: string;
+    nodeType?: string;
+    source?: "discussion" | "version" | "schedule" | "none";
+    label?: string;
+  };
+  workLayer?: {
+    proposalId?: string;
+    status?: string;
+    items?: Array<Record<string, unknown>>;
+  };
 };
 
 export type ImageCitationLocator = {
@@ -451,6 +463,11 @@ export function contextCacheKey(roomId: string, request: RoomContextRequest, ana
     timeRange: request.timeRange ?? null,
     // Confirm re-ask must not reuse the unconfirmed quote. undefined/false share.
     imagineVideoConfirmed: request.imagineVideoConfirmed === true,
+    focusNodeId: request.focus?.nodeId ?? null,
+    workLayerIds: (request.workLayer?.items ?? [])
+      .map((item) => typeof item.id === "string" ? item.id : "")
+      .filter(Boolean)
+      .sort(),
     analysisVersions: [...analysisVersions].sort(),
   });
 }

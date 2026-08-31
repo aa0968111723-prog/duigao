@@ -143,6 +143,10 @@ export type MultiBranchRoomApi = {
       centerWorld: { x: number; y: number };
     },
   ) => Promise<import("../whiteboard/aiPreview").BoardAiPreview>;
+  onAskColleague?: (input: { prompt: string; replyToId?: string; nodeId?: string }) => void;
+  onApplyColleagueProposal?: (proposalId: string) => void;
+  onRejectColleagueProposal?: (proposalId: string) => void;
+  onSetRoomFocus?: (nodeId: string | null) => void;
   stagedAiPreview?: import("../whiteboard/aiPreview").BoardAiPreview | null;
   onConsumeStagedAiPreview?: () => void;
   onApplyBoardAi?: (
@@ -822,6 +826,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   const [pushedPane, setPushedPane] = useState<PushedPane | null>(null);
   // Focus Mode（WB02）：白板全螢幕時抑制 project-fab（條件不渲染，非蓋住）
   const [boardFocused, setBoardFocused] = useState(false);
+  const [localFocusId, setLocalFocusId] = useState<string | null>(null);
   // 平板 Split View 的討論側欄是否收起（手機用不到 — CSS 斷點控制顯示）
   const [railCollapsed, setRailCollapsed] = useState(false);
   const tabletUp = useIsTabletUp();
@@ -833,7 +838,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
   // 可能還沒 render（pane 剛切）— rAF 重試最多 ~1.2s，誠實放棄不假捲。
   const openDiscussionMessage = (messageId: string) => {
     // Split View（平板）：討論就在左邊側欄，關掉白板反而把使用者正在看的
-    // 東西收走（自審 N13）。只有手機的「切 tab」語意才需要關板。
+    // 東西收走（自審 N13）。手機「打開原訊息」是明確要回對話，必須關板，
+    // 否則 Focus overlay 會擋住第一層「更多」。
     if (!railVisible) {
       api.onOpenWhiteboard(null);
       setDiscussPane("chat");
@@ -1049,6 +1055,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       onCreateDecision: api.onCreateDecision,
                       onFinalizeDecision: api.onFinalizeDecision,
                       onOpenContent: openBranch,
+                      focusNodeId: api.focusNodeId || localFocusId,
+                      onAskColleague: api.onAskColleague,
+                      onApplyColleagueProposal: api.onApplyColleagueProposal,
+                      onRejectColleagueProposal: api.onRejectColleagueProposal,
                     }} />
     );
   }
@@ -1265,6 +1275,19 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                     onLoadVersion: api.onLoadVersion,
                     onRestoreVersion: api.onRestoreVersion,
                     onAskBoardAi: api.onAskBoardAi,
+                    onAskColleague: api.onAskColleague,
+                    roomFocusId: api.focusNodeId,
+                    onSetRoomFocus: (id) => {
+                      api.onSetRoomFocus?.(id);
+                      api.onFocusNode?.(id);
+                    },
+                    onSelectionFocus: setLocalFocusId,
+                    discussionSlot: !railVisible ? renderDiscussion("chat") : undefined,
+                    onRenameRoom: api.onRenameRoom,
+                    onPinFromDiscussion: () => {
+                      setDiscussPane("chat");
+                      api.onOpenWhiteboard(null);
+                    },
                     stagedAiPreview: api.stagedAiPreview,
                     onConsumeStagedAiPreview: api.onConsumeStagedAiPreview,
                     onApplyBoardAi: api.onApplyBoardAi,

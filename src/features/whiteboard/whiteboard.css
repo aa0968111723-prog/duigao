@@ -249,3 +249,110 @@
 }
 .wb-ai-bar { gap: 8px; align-items: center; }
 .wb-ai-summary { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-dim); padding-left: 6px; }
+
+/* 焦點卡：不吃畫布高度（overlay），頂欄可收以把畫布撐到 ≥75% */
+.wb-focus.is-node-focus .wb-focus-top { min-height: 36px; }
+.wb-focus.is-node-focus .wb-focus-top h2 { font-size: 15px; }
+.wb-focus-card {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  right: 10px;
+  z-index: 4;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(20,18,16,.92);
+  border: 1px solid var(--line-soft);
+  pointer-events: auto;
+}
+.wb-focus-card strong { font-size: 15px; }
+.wb-focus-card small { color: var(--ink-faint); font-size: 12px; }
+.wb-focus-card.is-in-sheet { position: static; margin: 0 10px 8px; }
+.wb-focus-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.wb-focus-card-actions button {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--raise);
+  color: inherit;
+  font-size: 13px;
+}
+/* 掛在 .wb-focus-canvas 裡：底邊是畫布底，五鍵底欄是畫布的兄弟，點得到 */
+.wb-focus-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--kb, 0px);
+  z-index: 5;
+  pointer-events: none;
+}
+.wb-focus-sheet .m-sheet-handle {
+  position: relative;
+}
+.wb-focus-sheet .m-sheet-handle .wb-context-dismiss {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+}
+.wb-focus-sheet .m-sheet {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto;
+  background: rgba(22,19,16,.98);
+  color: var(--ink);
+  border-top: 1px solid var(--line-soft);
+  border-radius: 18px 18px 0 0;
+}
+.wb-focus-sheet-discussion {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.wb-focus-sheet-discussion .rd-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wb-focus-sheet-discussion .rd-feed { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+.wb-focus-sheet-discussion .rd-composer {
+  position: static;
+  flex: none;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+}
+.wb-empty-board {
+  position: absolute;
+  inset: 12% 16px auto;
+  z-index: 3;
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  text-align: center;
+  padding: 18px 14px;
+  border-radius: 18px;
+  background: rgba(20,18,16,.88);
+  border: 1px solid var(--line-soft);
+}
+.wb-empty-board strong { font-size: 17px; }
+.wb-empty-verbs { display: grid; gap: 8px; width: 100%; }
+.wb-empty-verbs button {
+  min-height: 48px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: var(--raise);
+  color: inherit;
+  font-size: 15px;
+}
+
+/* 五鍵底欄不被 FAB 蓋住（Focus 時 AssetAiFab 已不掛；這是保險） */
+.wb-focus .asset-ai-fab { display: none; }

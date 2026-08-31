@@ -95,6 +95,25 @@ test("RoomContext card keeps focus + open comments and drops old discussion / se
   assert.match(built.comments[0].regionSummary ?? "", /右上日期/);
 });
 
+test("whiteboard focus fields stay on the card and still leak nothing", () => {
+  const built = buildRoomAgentCard({
+    room: { id: "r1", title: "茶會房", role: "editor" },
+    focus: { label: "茶會主視覺", nodeId: "n-focus", nodeType: "text", source: "discussion" },
+    workLayer: {
+      proposalId: "wl",
+      status: "draft",
+      items: [{ id: "n1", type: "text", text: "便利貼內文".repeat(40), x: 24, y: 80 }],
+    },
+    spendPolicy: { maxUsdThisTurn: 0.05, allowImagineImage: true, allowImagineVideo: false },
+  });
+  assert.equal(built.focus?.nodeId, "n-focus");
+  assert.equal(built.focus?.source, "discussion");
+  assert.ok((built.workLayer?.items[0]?.text?.length ?? 0) <= 160);
+  assert.match(built.workLayer?.items[0]?.approxPosition ?? "", /約/);
+  assert.equal(built.spendPolicy.maxUsdThisTurn, 0.05);
+  assert.deepEqual(roomAgentCardLeaks(built), []);
+});
+
 test("unset grok/tku key yields 尚未設定 and never a flagship default", () => {
   const grok = roomAgentHealth({ provider: "grok-room-agent" });
   assert.equal(grok.configured, false);

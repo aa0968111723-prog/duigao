@@ -249,6 +249,8 @@ type Params = {
   activeBranchId?: string | null;
   /** 開著的白板 id：channel 重連/revive 時對它做 loadWhiteboard 自癒。 */
   activeWhiteboardId?: string | null;
+  /** 房間焦點節點 id：presence 只帶不透明 id，不送姓名。 */
+  roomFocusId?: string | null;
   isGuestSession: boolean;
   onSnapshot: (room: Room) => void;
   /** 白板增量（PR-02c）：走專屬回呼，不經 applyRemoteRoom（deep-link 消耗不得重跑）。 */
@@ -321,7 +323,7 @@ function rememberCloudRoom(localRoomId: string, roomId: string, token: string, p
  * Binds the active room to the cloud when configured. Inert (returns
  * local-only) otherwise, so the local IndexedDB + PeerJS path is untouched.
  */
-export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast }: Params) {
+export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, roomFocusId, isGuestSession, onSnapshot, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast }: Params) {
   const [status, setStatus] = useState<SyncStatus>(isCloudConfigured ? "connecting" : "local-only");
   const [online, setOnline] = useState(0);
   const [realtimeJoined, setRealtimeJoined] = useState(false);
@@ -357,6 +359,8 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
   const activeBranchRef = useRef<string | null>(activeBranchId ?? null);
   const activeWhiteboardRef = useRef<string | null>(activeWhiteboardId ?? null);
   activeWhiteboardRef.current = activeWhiteboardId ?? null;
+  const roomFocusRef = useRef<string | null>(roomFocusId ?? null);
+  roomFocusRef.current = roomFocusId ?? null;
   const onBoardPatchRef = useRef(onBoardPatch);
   onBoardPatchRef.current = onBoardPatch;
   const onDiscussionPatchRef = useRef(onDiscussionPatch);
@@ -720,7 +724,10 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
           onPresence: setOnline,
           onPresenceList: (people) => setPresencePeople(people),
           // 重訂閱時 track 的初值現查（F3）
-          getPresenceIdentity: () => ({ boardId: activeWhiteboardRef.current }),
+          getPresenceIdentity: () => ({
+            boardId: activeWhiteboardRef.current,
+            focusNodeId: roomFocusRef.current,
+          }),
           onStatus: (connected) => {
             setRealtimeJoined(connected);
             if (connected) {

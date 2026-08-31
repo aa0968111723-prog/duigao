@@ -30,7 +30,7 @@ export type SyncHandlers = {
    * null，重訂閱後即使人還在板上也顯示「不在板上」，要等下一次開關板才
    * 修正（Grok F3）。**刻意不含姓名**：presence payload 沒有 RLS（P1）。
    */
-  getPresenceIdentity?: () => { boardId: string | null };
+  getPresenceIdentity?: () => { boardId: string | null; focusNodeId?: string | null };
   onStatus?: (connected: boolean) => void;
   /** 討論列增量：不走整房 reload。SPA HTML / 無 id 的 payload 在此丟棄。 */
   onDiscussionUpsert?: (row: Record<string, unknown>) => void;
@@ -54,6 +54,8 @@ export type PresencePerson = {
   userId: string;
   /** 這個人此刻開著的白板 id（null＝不在白板上）。 */
   boardId: string | null;
+  /** 房間焦點節點 id。不透明 uuid，不含姓名（P1 與 boardId 同一紀律）。 */
+  focusNodeId: string | null;
   at: number;
 };
 
@@ -84,8 +86,11 @@ export async function subscribeRoom(
   // 給房外。現在只送不透明的 id 與 boardId（id 本來就是 presence key），
   // 姓名在客戶端用房內成員清單（走 RLS）對照出來。
   const trackPayload = () => {
-    const live = handlers.getPresenceIdentity?.() ?? { boardId: null };
-    return { at: Date.now(), boardId: live.boardId };
+    const live = handlers.getPresenceIdentity?.() ?? { boardId: null, focusNodeId: null };
+    const focusNodeId = typeof live.focusNodeId === "string" && live.focusNodeId.trim()
+      ? live.focusNodeId.trim()
+      : null;
+    return { at: Date.now(), boardId: live.boardId, focusNodeId };
   };
 
   channel
@@ -215,6 +220,9 @@ export async function subscribeRoom(
         people.push({
           userId: key,
           boardId: typeof meta.boardId === "string" ? meta.boardId : null,
+          focusNodeId: typeof meta.focusNodeId === "string" && meta.focusNodeId.trim()
+            ? meta.focusNodeId.trim()
+            : null,
           at: newest < 0 ? 0 : newest,
         });
       }

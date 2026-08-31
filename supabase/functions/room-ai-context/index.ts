@@ -138,7 +138,19 @@ function uuidLike(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function requestValue(value: unknown): { roomId: string; query: string; selectedAssetIds: string[]; selectedBranchIds: string[]; selectedVersionIds: string[]; timeRange: { startSeconds: number; endSeconds: number } | null; imagineVideoConfirmed: boolean; focusBranchId?: string; focusVersionId?: string } | null {
+function requestValue(value: unknown): {
+  roomId: string;
+  query: string;
+  selectedAssetIds: string[];
+  selectedBranchIds: string[];
+  selectedVersionIds: string[];
+  timeRange: { startSeconds: number; endSeconds: number } | null;
+  imagineVideoConfirmed: boolean;
+  focusBranchId?: string;
+  focusVersionId?: string;
+  boardFocus?: { label: string; nodeId?: string; nodeType?: string; source?: "discussion" | "version" | "schedule" | "none" };
+  workLayerItems?: Array<Record<string, unknown>>;
+} | null {
   const input = asObject(value);
   const roomId = text(input.roomId);
   const query = text(input.query).trim().slice(0, 2000);
@@ -147,6 +159,12 @@ function requestValue(value: unknown): { roomId: string; query: string; selected
   const start = Math.max(0, num(range.startSeconds));
   const end = Math.max(start, num(range.endSeconds));
   const focus = asObject(input.focus);
+  const sourceRaw = text(focus.source);
+  const source = sourceRaw === "discussion" || sourceRaw === "version" || sourceRaw === "schedule" || sourceRaw === "none"
+    ? sourceRaw
+    : undefined;
+  const workLayer = asObject(input.workLayer);
+  const rawItems = Array.isArray(workLayer.items) ? workLayer.items : [];
   return {
     roomId,
     query,
@@ -157,6 +175,15 @@ function requestValue(value: unknown): { roomId: string; query: string; selected
     imagineVideoConfirmed: input.imagineVideoConfirmed === true,
     focusBranchId: optional(focus.branchId) || optional(input.focusBranchId),
     focusVersionId: optional(focus.versionId) || optional(input.focusVersionId),
+    boardFocus: text(focus.label) || text(focus.nodeId)
+      ? {
+          label: text(focus.label, "目前焦點").slice(0, 120),
+          nodeId: text(focus.nodeId).slice(0, 80) || undefined,
+          nodeType: text(focus.nodeType).slice(0, 40) || undefined,
+          source,
+        }
+      : undefined,
+    workLayerItems: rawItems.slice(0, 12).map((item) => asObject(item)),
   };
 }
 
@@ -477,18 +504,43 @@ async function handle(request: Request): Promise<Response> {
   });
   const focusAsset = selected.find((asset) => asset.versionId === input.focusVersionId || asset.branchId === input.focusBranchId) ?? selected[0];
   const grok = grokEnv();
+  const boardFocus = input.boardFocus;
+  const workItems = (input.workLayerItems ?? []).slice(0, 12).flatMap((item) => {
+    const id = text(item.id).slice(0, 80);
+    if (!id) return [];
+    const x = typeof item.x === "number" ? item.x : undefined;
+    const y = typeof item.y === "number" ? item.y : undefined;
+    return [{
+      id,
+      type: text(item.type, "text").slice(0, 40),
+      text: text(item.text).slice(0, 160) || undefined,
+      approxPosition: x != null && y != null ? `約 ${Math.round(x)},${Math.round(y)}` : undefined,
+    }];
+  });
   const card = buildCard({
     roomId: input.roomId,
     title: text(room.title, "未命名房間"),
     role,
     contents,
-    focus: focusAsset ? {
-      branchId: focusAsset.branchId,
-      versionId: focusAsset.versionId,
-      label: `${focusAsset.branchName ?? focusAsset.title}${focusAsset.versionLabel ? ` · ${focusAsset.versionLabel}` : ""}`,
-      thumbnail: focusAsset.summary ? { kind: "description", value: (focusAsset.summary ?? "").slice(0, 200) } : undefined,
-    } : undefined,
+    focus: boardFocus
+      ? {
+          label: boardFocus.label,
+          nodeId: boardFocus.nodeId,
+          nodeType: boardFocus.nodeType,
+          source: boardFocus.source,
+          branchId: focusAsset?.branchId,
+          versionId: focusAsset?.versionId,
+        }
+      : focusAsset ? {
+          branchId: focusAsset.branchId,
+          versionId: focusAsset.versionId,
+          label: `${focusAsset.branchName ?? focusAsset.title}${focusAsset.versionLabel ? ` · ${focusAsset.versionLabel}` : ""}`,
+          thumbnail: focusAsset.summary ? { kind: "description", value: (focusAsset.summary ?? "").slice(0, 200) } : undefined,
+        } : undefined,
     comments: openComments,
+    workLayer: workItems.length
+      ? { proposalId: "board-visible", status: "visible", items: workItems }
+      : undefined,
     truncated: payload.truncated,
     maxUsd: grok?.maxUsd ?? 0.05,
     allowImagineVideo: true,

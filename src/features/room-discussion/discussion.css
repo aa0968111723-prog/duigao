@@ -7,6 +7,36 @@
 .rd-msg header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .rd-dot { width: 8px; height: 8px; border-radius: 99px; }
 .rd-msg b { font-size: 13px; }
+.rd-msg.is-colleague {
+  border-color: rgba(107, 92, 231, .45);
+  background: rgba(107, 92, 231, .08);
+}
+.rd-msg.is-audit { opacity: .78; border-style: dashed; }
+.rd-ai-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #6b5ce7;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.rd-grok-chip {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(107, 92, 231, .45);
+  border-radius: 999px;
+  background: rgba(107, 92, 231, .12);
+  color: inherit;
+  font-size: 13px;
+}
+.rd-colleague-proposals { display: grid; gap: 8px; margin-top: 8px; }
+.rd-proposal-card {
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--raise);
+}
 .rd-msg time { margin-left: auto; color: var(--ink-faint); font-size: 11px; }
 .rd-edited { font-size: 11px; color: var(--ink-faint); font-weight: 400; }
 .rd-edit-form { display: grid; gap: 8px; margin-top: 4px; }

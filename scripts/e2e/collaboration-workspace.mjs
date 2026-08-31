@@ -217,11 +217,23 @@ try {
     await page.waitForFunction(() => document.body.innerText.includes("先把招生流程攤在白板上"), null, { timeout: 8000 });
     check("房間討論可送出文字", (await page.getByTestId("discussion-feed").innerText()).includes("先把招生流程攤在白板上"));
     check("送出後看得到最新一則", await page.locator('[data-testid="discussion-feed"] [data-latest="true"]').innerText().then((text) => text.includes("先把招生流程攤在白板上")));
-    await page.getByTestId("discussion-edit").first().click();
-    await page.getByTestId("discussion-edit-input").waitFor({ state: "visible", timeout: 8000 });
-    await page.getByTestId("discussion-edit-input").fill("先把招生流程攤在白板上（改過）");
-    await page.getByTestId("discussion-edit-save").click();
-    await page.waitForFunction(() => document.body.innerText.includes("改過"), null, { timeout: 8000 });
+    const latestMsg = page.locator('[data-testid="discussion-feed"] [data-latest="true"]');
+    await latestMsg.getByTestId("discussion-edit").waitFor({ state: "visible", timeout: 15000 });
+    await latestMsg.getByTestId("discussion-edit").click();
+    const editBox = page.getByTestId("discussion-edit-form").getByTestId("discussion-edit-input");
+    await editBox.waitFor({ state: "visible", timeout: 8000 });
+    await editBox.fill("先把招生流程攤在白板上（改過）");
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="discussion-edit-input"]')?.value?.includes("改過"),
+      null,
+      { timeout: 5000 },
+    );
+    await page.getByTestId("discussion-edit-form").getByTestId("discussion-edit-save").click();
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("改過"),
+      null,
+      { timeout: 15000 },
+    );
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });
     check("改過的訊息標已編輯", await page.getByTestId("discussion-edited").count() === 1);
@@ -683,7 +695,7 @@ try {
         // 快照後改動一個節點，再還原 → 內容回到快照當時
         await searchNode(page, "招生");
         const beforeText = await page.locator(".wb-node.is-selected .wb-node-static, .wb-node.is-selected textarea").first().inputValue().catch(() => null);
-        await page.getByRole("button", { name: "編輯", exact: true }).click();
+        await page.getByTestId("wb-node-actions").getByRole("button", { name: "編輯", exact: true }).click();
         await fillEditing(page, "快照後改的字");
         await dismissSelection(page);
         await page.getByTestId("whiteboard-more").click();
@@ -1027,7 +1039,7 @@ try {
           {
             // WB02：非編輯節點是靜態層，整卡可點選（audit 缺陷已修）
             await page.locator(".wb-node").last().click({ force: true });
-            await page.getByRole("button", { name: "刪除", exact: true }).click();
+            await page.getByTestId("wb-node-actions").getByTestId("wb-node-delete").click();
             await B.waitForFunction(
               () => ![...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")),
               null,
@@ -1254,9 +1266,15 @@ try {
       await page.getByLabel("白板名稱").fill("平板板");
       await page.getByRole("button", { name: "建立白板" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.waitForFunction(
+        () => window.matchMedia("(min-width: 900px) and (min-height: 600px)").matches,
+        null,
+        { timeout: 8000 },
+      );
 
       // Split View：討論欄與畫布同時看得見，且不重疊
-      await page.waitForSelector('[data-testid="wb-side-rail"]', { timeout: 8000 });
+      await page.waitForSelector('[data-testid="wb-side-rail"]', { timeout: 15000 });
       const layout = await page.evaluate(() => {
         const rail = document.querySelector('[data-testid="wb-side-rail"]');
         const focus = document.querySelector('[data-testid="whiteboard-workspace"]');
@@ -1468,6 +1486,8 @@ try {
         return { overflowY: getComputedStyle(feed).overflowY, canScroll: feed.clientHeight > 0 };
       });
       check("平板：側欄討論可自己捲動（F2）", Boolean(railScroll && railScroll.overflowY === "auto" && railScroll.canScroll), JSON.stringify(railScroll));
+    } catch (error) {
+      check("協作工作台平板 Split View", false, error instanceof Error ? error.message : String(error));
     } finally {
       await tablet.close();
     }

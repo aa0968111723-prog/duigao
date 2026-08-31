@@ -37,6 +37,7 @@ export function DiscussionDrawer({
   onReject,
   onSendLink,
   resolveAssetUrl,
+  onAskColleague,
 }: {
   room: Room;
   guest: Guest;
@@ -60,6 +61,7 @@ export function DiscussionDrawer({
   onReject?: (reason: string) => void;
   onSendLink?: (url: string, reply?: { replyToId: string; quotedBody: string }) => boolean;
   resolveAssetUrl?: (path: string) => Promise<string>;
+  onAskColleague?: (input: { prompt: string; replyToId?: string; nodeId?: string }) => void;
 }) {
   const [draft, setDraft, draftReady] = useDiscussionDraft(room.id ? `drawer:${room.id}` : null);
 
@@ -132,6 +134,7 @@ export function DiscussionDrawer({
           onOpenBoardNode: () => undefined,
           onCreateDecision: () => undefined,
           onFinalizeDecision: () => undefined,
+          onAskColleague,
         }}
       />
     </div>

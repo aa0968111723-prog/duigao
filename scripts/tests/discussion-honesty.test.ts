@@ -56,6 +56,10 @@ test("D-02: 只有作者能改自己的文字；legacy／附件／failed 不行"
   assert.equal(canEditDiscussion(message(), "u-a", "failed"), false);
   assert.deepEqual(discussionEditPatch("  先推擺攤  "), { body: "先推擺攤" });
   assert.equal(discussionEditPatch("   "), null);
+  const app = src("src/App.tsx");
+  const editBlock = app.slice(app.indexOf("const editDiscussion"), app.indexOf("const tombstoneDiscussion"));
+  assert.match(editBlock, /cloud\.userId, guest\?\.id/);
+  assert.match(editBlock, /actorIds\.some/);
 });
 
 test("D-03: AI / agent 不得當成員確認決策", () => {

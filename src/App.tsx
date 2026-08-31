@@ -31,7 +31,8 @@ import { cutosHealth, importCutosOutput } from "./cloud/cutos";
 import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanvaDesign } from "./cloud/canva";
 import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, loadBoardVersion, createBoardVersion, loadDiscussionRead as loadCloudDiscussionRead } from "./cloud/collaborationRepository";
 import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type BoardVersionSummary } from "./features/whiteboard/versions";
-import { boardProposals, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
+import { boardProposals, layoutOriginFromFocus, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
+import { boardAskContext, roomFocusFromPresence } from "./features/whiteboard/boardFocus";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -143,6 +144,14 @@ import type { ContextCitation, RoomContextFocus, RoomContextRequest, RoomContext
 import type { DiscussionMessage, Whiteboard, WhiteboardEdge, WhiteboardNode } from "./features/collaboration/types";
 import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraftTitle, discussionEditPatch, isMemberActor, nextReadWatermark, type DiscussionReadWatermark } from "./features/collaboration/discussionHonesty";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "./features/collaboration/links";
+import {
+  auditWrite,
+  colleagueTurnFromResponse,
+  colleagueWrite,
+  createCommentAsColleague,
+  mentionsGrok,
+  SPEND_LIMIT_COPY,
+} from "./features/collaboration/agentColleague";
 import { applyDeadlineToNode, eventFromBoardNode, eventFromDiscussion, nodeFromScheduleEvent, sourceOpenTarget } from "./features/schedule/links";
 import { adoptPersistedScheduleEvent } from "./features/schedule/events";
 import { decideScheduleProposalWrite } from "./features/schedule/proposals";
@@ -295,6 +304,9 @@ export function App() {
    * 交給 Workspace 預覽，使用者看到才決定。
    */
   const [stagedBoardAi, setStagedBoardAi] = useState<BoardAiPreview | null>(null);
+  const colleagueProposalRef = useRef<Map<string, AiProposal>>(new Map());
+  const askColleagueRef = useRef<(input: { prompt: string; replyToId?: string; nodeId?: string }) => void>(() => undefined);
+  const sendDiscussionRef = useRef<(input?: { id?: string; body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string; authorName?: string; authorColor?: string }) => void>(() => undefined);
   /** 有寫入在路上、尚未 ack 的 frame ids（遠端 echo 對它們讓路）。 */
   const inFlightFrameIds = useRef(new Set<string>());
   /** loadFramesForBoard 的請求序號：舊回應不得蓋掉新狀態（R3）。 */
@@ -444,6 +456,11 @@ export function App() {
     };
   }, [activeBranchId]);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const localRoomFocusAtRef = useRef(0);
+  const setRoomFocus = useCallback((nodeId: string | null) => {
+    localRoomFocusAtRef.current = Date.now();
+    setFocusNodeId(nodeId);
+  }, []);
   const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
   const [boardFocus, setBoardFocus] = useState<RoomContextFocus | null>(null);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
@@ -752,9 +769,27 @@ export function App() {
     });
   }, []);
 
-  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast });
+  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, roomFocusId: focusNodeId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
+
+  useEffect(() => {
+    cloudRef.current.retrackPresence?.({ name: guest?.name ?? "" });
+  }, [focusNodeId, guest?.name]);
+
+  const remoteRoomFocus = useMemo(
+    () => roomFocusFromPresence(cloud.presencePeople ?? [], {
+      ignoreUserId: cloud.userId ?? undefined,
+      minAt: localRoomFocusAtRef.current,
+    }),
+    [cloud.presencePeople, cloud.userId],
+  );
+  useEffect(() => {
+    if (!remoteRoomFocus) return;
+    if (remoteRoomFocus.nodeId === focusNodeId) return;
+    if (remoteRoomFocus.at <= localRoomFocusAtRef.current) return;
+    setFocusNodeId(remoteRoomFocus.nodeId);
+  }, [remoteRoomFocus, focusNodeId]);
 
   // 討論送出狀態機：失敗可見可重試、快照替換後樂觀列不消失、綁定前先扣住。
   // 語音房（PR-03）：cloud 綁定的房才活；health gate 在 hook 內。
@@ -952,6 +987,95 @@ export function App() {
       if (aiAskToken.current === token) setAiLoading(false);
     }
   }, [assetIntelligence?.assets]);
+
+  const askColleague = useCallback(async (input: { prompt: string; replyToId?: string; nodeId?: string }) => {
+    const actor = cloud.userId ?? guest?.id ?? "local";
+    const roomNow = roomRef.current;
+    const focusNode = input.nodeId
+      ? (roomNow?.whiteboardNodes ?? []).find((node) => node.id === input.nodeId)
+      : undefined;
+    try {
+      const askExtra = boardAskContext({
+        nodes: roomNow?.whiteboardNodes ?? [],
+        focusNode: focusNode ?? null,
+      });
+      const response = await askAi({
+        query: input.prompt,
+        selectedBranchIds: [],
+        focus: askExtra.focus,
+        workLayer: askExtra.workLayer,
+      });
+      const spendExceeded = Boolean(
+        response.agent?.status === "spend_exceeded"
+        || /上限/.test(response.answer?.text ?? ""),
+      );
+      const turn = colleagueTurnFromResponse({
+        answer: response.answer?.text,
+        unconfigured: response.agent?.status === "unconfigured",
+        spendExceeded,
+        proposals: proposalsFromResponse(response),
+      });
+      for (const proposal of turn.proposals) colleagueProposalRef.current.set(proposal.id, proposal);
+      sendDiscussionRef.current(colleagueWrite({
+        body: turn.body,
+        triggerUserId: actor,
+        replyToId: input.replyToId,
+        nodeId: input.nodeId,
+        proposals: turn.proposals.map((item) => ({ id: item.id, type: item.type, label: item.label })),
+      }));
+      const boardAdds = boardProposals(turn.proposals);
+      if (boardAdds.length && roomNow) {
+        const board = (roomNow.whiteboards ?? []).find((item) => !item.archivedAt);
+        if (board) {
+          const origin = layoutOriginFromFocus(
+            focusNode,
+            { x: 120, y: 120 },
+          );
+          const spots = layoutPreview(boardAdds.length, origin);
+          const nodes = boardAdds.map((proposal, index) => nodeFromAddWhiteboardAction({
+            payload: proposal.payload,
+            whiteboardId: board.id,
+            roomId: roomNow.id,
+            createdBy: actor,
+            x: spots[index].x,
+            y: spots[index].y,
+          }));
+          setActiveWhiteboardId(board.id);
+          setStagedBoardAi({ proposals: boardAdds, nodes, edges: [] });
+        }
+      }
+    } catch (error) {
+      const unconfigured = error instanceof Error && /尚未設定|unconfigured/i.test(error.message);
+      const spendExceeded = error instanceof Error && /上限/.test(error.message);
+      sendDiscussionRef.current(colleagueWrite({
+        body: unconfigured
+          ? "AI 服務尚未設定"
+          : spendExceeded
+            ? SPEND_LIMIT_COPY
+            : "AI 沒有回應，我沒有假裝已讀。",
+        triggerUserId: actor,
+        replyToId: input.replyToId,
+        nodeId: input.nodeId,
+      }));
+    }
+  }, [askAi, cloud.userId, guest]);
+  askColleagueRef.current = askColleague;
+
+  const askAiWithBoard = useCallback((request: RoomContextRequest) => {
+    const current = roomRef.current;
+    const focusNode = focusNodeId
+      ? (current?.whiteboardNodes ?? []).find((node) => node.id === focusNodeId)
+      : undefined;
+    const extra = boardAskContext({
+      nodes: current?.whiteboardNodes ?? [],
+      focusNode,
+    });
+    return askAi({
+      ...request,
+      focus: extra.focus ?? request.focus,
+      workLayer: extra.workLayer ?? request.workLayer,
+    });
+  }, [askAi, focusNodeId]);
 
   const retryAi = useCallback((assetId: string) => {
     const supabase = getSupabase();
@@ -1847,7 +1971,7 @@ export function App() {
   );
 
   const sendDiscussion = useCallback(
-    (input?: { id?: string; body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string }) => {
+    (input?: { id?: string; body?: string; kind?: DiscussionMessage["kind"]; payload?: DiscussionMessage["payload"]; replyToId?: string; authorName?: string; authorColor?: string }) => {
       if (!guest) return;
       const body = (input?.body ?? chatInput).trim();
       if (!body && !input?.kind) return;
@@ -1856,8 +1980,8 @@ export function App() {
         id: input?.id ?? uuid(),
         roomId: roomRef.current?.id ?? "",
         authorId: cloud.userId ?? guest.id,
-        authorName: guest.name,
-        authorColor: guest.color,
+        authorName: input?.authorName ?? guest.name,
+        authorColor: input?.authorColor ?? guest.color,
         kind: input?.kind ?? "text",
         body: body || (input?.payload?.title ?? ""),
         payload: input?.payload ?? {},
@@ -1867,13 +1991,21 @@ export function App() {
       };
       // 純文字訊息加 300ms 去抖（比照 sendChat 的 claim）；帶 payload 的
       // 結構卡各有唯一內容，不需要。
-      if ((input?.kind ?? "text") === "text" && !claim(`discussion:${body}`, 300)) return;
+      if ((input?.kind ?? "text") === "text" && !input?.payload?.agent && !input?.payload?.audit && !claim(`discussion:${body}`, 300)) return;
       updateRoom((r) => ({ ...r, discussion: [...(r.discussion ?? []), message] }));
       discussionOutboxRef.current.send(message);
       setChatInput("");
+      if (!message.payload.agent && !message.payload.audit && mentionsGrok(body)) {
+        queueMicrotask(() => askColleagueRef.current?.({
+          prompt: body,
+          replyToId: message.id,
+          nodeId: message.payload.nodeId,
+        }));
+      }
     },
     [chatInput, claim, cloud.userId, guest, updateRoom],
   );
+  sendDiscussionRef.current = sendDiscussion;
 
   // ---- 討論附件（PR-01b Universal Intake） --------------------------------
   // 順序固定：驗證 → 上傳（upsert:false）→ insertDiscussion。上傳成功但
@@ -2019,10 +2151,11 @@ export function App() {
 
   const editDiscussion = useCallback(
     (messageId: string, body: string) => {
-      const userId = cloud.userId ?? guest?.id;
+      const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
       const patch = discussionEditPatch(body);
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
-      if (!userId || !patch || !current || !canEditDiscussion(current, userId)) return;
+      // guest → 登入 userId 切換的空窗：送出時可能是 guest.id，按儲存時已是 cloud.userId
+      if (!patch || !current || !actorIds.some((id) => canEditDiscussion(current, id))) return;
       const next = { ...current, body: patch.body, updatedAt: Date.now(), payload: { ...current.payload, edited: true } };
       updateRoom((r) => ({
         ...r,
@@ -2035,10 +2168,10 @@ export function App() {
 
   const tombstoneDiscussion = useCallback(
     (messageId: string) => {
-      const userId = cloud.userId ?? guest?.id;
+      const actorIds = [cloud.userId, guest?.id].filter((id): id is string => Boolean(id));
       const current = (roomRef.current?.discussion ?? []).find((item) => item.id === messageId);
       const canManage = cloud.boundRoomId ? cloud.canManageMedia : true;
-      if (!userId || !current || !canTombstoneDiscussion(current, userId, canManage)) return;
+      if (!current || !actorIds.some((id) => canTombstoneDiscussion(current, id, canManage))) return;
       const next = { ...current, deletedAt: Date.now() };
       updateRoom((r) => ({
         ...r,
@@ -2453,11 +2586,12 @@ export function App() {
       }
       if (!current) return { ok: false, reason: "failed", message: "房間還沒準備好。" };
 
-      const audit = (body: string) => sendDiscussion({ kind: "text", body, payload: { title: proposal.label } });
+      const audit = (body: string) => sendDiscussion(auditWrite(body));
 
       try {
         if (proposal.type === "create_comment") {
-          sendDiscussion({ kind: "text", body: commentBodyFromAction(proposal.payload, proposal.label) });
+          const colleague = createCommentAsColleague(proposal, actor, { nodeId: focusNodeId ?? undefined });
+          sendDiscussion(colleague);
         } else if (proposal.type === "create_poll") {
           createProjectPoll(pollFromAction(proposal.payload, current.id, actor));
           audit(`已套用 AI 提案：${proposal.label}`);
@@ -3352,6 +3486,7 @@ export function App() {
           onReject={(reason) => showToast(reason, { tone: "error" })}
           onSendLink={sendLink}
           resolveAssetUrl={resolveAssetUrl}
+          onAskColleague={isCloudConfigured && cloud.boundRoomId ? (input) => { void askColleague(input); } : undefined}
         />
       )
     : undefined;
@@ -3584,6 +3719,7 @@ export function App() {
           });
         },
         onFocusNode: setFocusNodeId,
+        onSetRoomFocus: setRoomFocus,
         whiteboardFrames: boardFrames,
         onCreateFrame: (frame) => {
           setBoardFrames((current) => [...current, frame]);
@@ -3700,7 +3836,17 @@ export function App() {
         // ---- WB06：板內 AI（提案→預覽→套用→稽核） ----
         // 只在雲端房掛（房間 AI 需要 Supabase）— 本機房不擺按不動的入口。
         ...(isCloudConfigured && cloud.boundRoomId ? {
-          onAskBoardAi: async (
+          onAskColleague: (input) => { void askColleague(input); },
+        onSetRoomFocus: setRoomFocus,
+        onApplyColleagueProposal: (proposalId) => {
+          const proposal = colleagueProposalRef.current.get(proposalId);
+          if (proposal) void applyAiProposal(proposal);
+        },
+        onRejectColleagueProposal: (proposalId) => {
+          const proposal = colleagueProposalRef.current.get(proposalId);
+          if (proposal) rejectAiProposal(proposal);
+        },
+        onAskBoardAi: async (
             question: string,
             context: { nodes: WhiteboardNode[]; selectedIds: string[]; centerWorld: { x: number; y: number } },
           ) => {
@@ -3730,15 +3876,26 @@ export function App() {
               .filter(Boolean)
               .slice(0, 40)
               .join("\n");
+            const askExtra = boardAskContext({
+              nodes: context.nodes,
+              focusNode: context.selectedIds[0]
+                ? context.nodes.find((node) => node.id === context.selectedIds[0])
+                : undefined,
+            });
             const response = await askAi({
               query: boardText ? `${question}\n\n（白板上目前的內容）\n${boardText}` : question,
               selectedBranchIds: [...new Set(sendable
                 .filter((node) => node.linkedEntityType === "branch" && node.linkedEntityId)
                 .map((node) => node.linkedEntityId!))],
+              focus: askExtra.focus,
+              workLayer: askExtra.workLayer,
             });
             // 只取白板型別的提案；其餘（投票/企劃/留言）留給房間層的 AI 面板
             const proposals = boardProposals(proposalsFromResponse(response));
-            const origin = context.centerWorld ?? { x: 120, y: 120 };
+            const focusNode = context.selectedIds[0]
+              ? context.nodes.find((node) => node.id === context.selectedIds[0])
+              : undefined;
+            const origin = layoutOriginFromFocus(focusNode, context.centerWorld ?? { x: 120, y: 120 });
             const spots = layoutPreview(proposals.length, origin);
             const actor = cloudRef.current.userId ?? guest?.id ?? "local";
             // AI payload 的 link 必須是 uuid（DB 欄位是 uuid）：不是就整個丟掉
@@ -3811,11 +3968,13 @@ export function App() {
             ));
             const auditRecorded = preview.proposals.length === 0 || auditResults.every(Boolean);
             if (preview.proposals.length) {
-              sendDiscussion({
-                kind: "text",
-                body: `已把 AI 的 ${plan.nodes.length} 個建議放上白板${snapshotTaken ? "（套用前已存快照）" : ""}`,
-                payload: { title: "AI 套用" },
-              });
+              sendDiscussion(auditWrite(
+                `已把 AI 的 ${plan.nodes.length} 個建議放上白板${snapshotTaken ? "（套用前已存快照）" : ""}`,
+              ));
+              sendDiscussion(colleagueWrite({
+                body: "已放到板上，你們可再拖位置",
+                triggerUserId: actor ?? "local",
+              }));
             }
             // 離線時這些寫入是**進佇列**、不是已完成 —— WB04 的還原路徑早就
             // 分得出這個差別，WB06 原本回報一律「已套用」（自審抓到）。
@@ -3981,7 +4140,7 @@ export function App() {
           response={aiResponse}
           loading={aiLoading}
           error={aiError}
-          onAsk={askAi}
+          onAsk={askAiWithBoard}
           onClose={() => setAiSheetOpen(false)}
           onFocus={(citation) => citation.assetId && focusAi({ assetId: citation.assetId, branchId: citation.branchId, versionId: citation.versionId, locator: citation.locator })}
           onRetryAnalysis={retryAi}
@@ -4173,7 +4332,7 @@ export function App() {
         response={aiResponse}
         loading={aiLoading}
         error={aiError}
-        onAsk={askAi}
+        onAsk={askAiWithBoard}
         onClose={() => setAiSheetOpen(false)}
         onFocus={(citation) => citation.assetId && focusAi({ assetId: citation.assetId, branchId: citation.branchId, versionId: citation.versionId, locator: citation.locator })}
         onRetryAnalysis={retryAi}
