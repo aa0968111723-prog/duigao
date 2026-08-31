@@ -234,7 +234,9 @@ export function plantEnrollmentTree2026(input: {
   const byKey: Record<string, string> = {};
   let seq = 0;
   let row = 0;
-  const nextId = () => input.idFn?.() ?? `enroll-2026-${++seq}`;
+  const nextId = () => input.idFn?.() ?? (typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `enroll-2026-${Date.now()}-${++seq}`);
 
   const walk = (item: EnrollmentSpecNode, depth: number, parentId: string | null) => {
     const id = nextId();

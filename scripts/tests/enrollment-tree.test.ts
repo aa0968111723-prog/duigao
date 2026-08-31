@@ -119,6 +119,13 @@ test("空板骨架對齊 202609 截圖支線，不種主視覺／招生短片玩
   assert.match(workspace, /wb-tree-path/);
 });
 
+test("兩間房各自種樹不會共用固定 enroll-2026 id", () => {
+  const a = plantEnrollmentTree2026({ whiteboardId: "wb-a", roomId: "room-a", createdBy: "owner" });
+  const b = plantEnrollmentTree2026({ whiteboardId: "wb-b", roomId: "room-b", createdBy: "owner" });
+  const ids = new Set([...a.nodes.map((node) => node.id), ...b.nodes.map((node) => node.id)]);
+  assert.equal(ids.size, a.nodes.length + b.nodes.length);
+});
+
 test("點書籤：路徑是 202609招生 › 書籤", () => {
   const tree = planted();
   const bookmark = tree.nodes.find((node) => node.id === tree.byKey.bookmark);
