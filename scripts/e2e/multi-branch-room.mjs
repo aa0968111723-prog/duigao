@@ -290,12 +290,14 @@ try {
     await page.getByTestId("poster-pick-room-asset").click();
     await page.getByTestId("poster-compose-asset-picker").waitFor({ state: "visible", timeout: 10000 });
     const roomRow = page.getByTestId("poster-compose-asset-row").first();
-    if (await roomRow.count()) {
+    const rowVisible = await roomRow.waitFor({ state: "visible", timeout: 8000 }).then(() => true).catch(() => false);
+    if (rowVisible) {
       await roomRow.click();
       await page.waitForFunction((n) => document.querySelectorAll(".proposal-image").length > n, imagesBeforePick, { timeout: 15000 });
       check("從房間撿放到畫布", await page.locator(".proposal-image").count() > imagesBeforePick);
     } else {
-      check("從房間撿放到畫布", false, "picker 沒有可撿的房間文宣");
+      const pickerText = await page.getByTestId("poster-compose-asset-picker").innerText().catch(() => "");
+      check("從房間撿放到畫布", false, pickerText || "picker 沒有可撿的房間文宣");
     }
     const plusAsset = page.getByRole("button", { name: "＋素材" });
     if (await plusAsset.count()) await plusAsset.click();

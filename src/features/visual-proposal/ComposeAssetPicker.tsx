@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LibraryAsset } from "../../cloud/assetLibrary";
 import type { Version } from "../../lib/types";
 import type { ShowToast } from "../../toast";
@@ -25,7 +25,13 @@ type Props = {
 /** Room-asset sheet. Visual language matches wb-content-picker; no whiteboard imports. */
 export function ComposeAssetPicker({ materials, loading, libraryError, placingId, onPick, onClose }: Props) {
   return (
-    <div className="compose-asset-picker" data-testid="poster-compose-asset-picker" role="dialog" aria-label="房間素材">
+    <div
+      className="compose-asset-picker"
+      data-testid="poster-compose-asset-picker"
+      data-count={materials.length}
+      role="dialog"
+      aria-label="房間素材"
+    >
       <div className="compose-asset-picker-head">
         <h3>房間素材</h3>
         {onClose && (
@@ -103,44 +109,60 @@ export function useComposeAssetPick(opts: {
   onPlaced: (item: ProposalImageItem) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [materials, setMaterials] = useState<ComposeMaterial[]>([]);
+  const [library, setLibrary] = useState<LibraryAsset[]>([]);
   const [libraryError, setLibraryError] = useState(false);
   const [loading, setLoading] = useState(false);
   const [placingId, setPlacingId] = useState<string | null>(null);
 
+  const versionKey = opts.versions.map((version) => version.id).join(",");
+  const labeled = useMemo(
+    () =>
+      opts.versions.map((version) => {
+        const branch = opts.branches?.find((item) => item.id === version.branchId);
+        return branch ? { ...version, label: `${branch.name} · ${version.label}` } : version;
+      }),
+    // versionKey stands in for opts.versions identity; labels follow room data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [versionKey, opts.branches, opts.versions],
+  );
+
+  const materials = useMemo(
+    () =>
+      listComposeMaterials({
+        versions: labeled,
+        library,
+        editingVersionId: opts.editingVersionId,
+      }),
+    [labeled, library, opts.editingVersionId],
+  );
+
   useEffect(() => {
     if (!open) return;
+    if (!opts.listLibrary) {
+      setLibrary([]);
+      setLibraryError(false);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setLibraryError(false);
-    const run = async () => {
-      let library: LibraryAsset[] = [];
-      if (opts.listLibrary) {
-        try {
-          library = await opts.listLibrary();
-        } catch {
-          if (!cancelled) setLibraryError(true);
-        }
-      }
-      if (cancelled) return;
-      const labeled = opts.versions.map((version) => {
-        const branch = opts.branches?.find((item) => item.id === version.branchId);
-        return branch ? { ...version, label: `${branch.name} · ${version.label}` } : version;
+    void opts
+      .listLibrary()
+      .then((rows) => {
+        if (cancelled) return;
+        setLibrary(rows);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLibraryError(true);
+        setLoading(false);
       });
-      setMaterials(
-        listComposeMaterials({
-          versions: labeled,
-          library,
-          editingVersionId: opts.editingVersionId,
-        }),
-      );
-      setLoading(false);
-    };
-    void run();
     return () => {
       cancelled = true;
     };
-  }, [open, opts.versions, opts.branches, opts.editingVersionId, opts.listLibrary]);
+  }, [open, opts.listLibrary]);
 
   useEffect(() => {
     const onOpen = () => {

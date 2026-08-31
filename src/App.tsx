@@ -1906,7 +1906,12 @@ export function App() {
   const listComposeLibrary = useCallback(async () => {
     const client = getSupabase();
     if (!client || !cloud.boundRoomId) return [];
-    return listLibraryAssets(client, cloud.boundRoomId);
+    return Promise.race([
+      listLibraryAssets(client, cloud.boundRoomId),
+      new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error("library timeout")), 4000);
+      }),
+    ]);
   }, [cloud.boundRoomId]);
 
   const resolveComposeMaterial = useCallback(async (material: ComposeMaterial) => {
