@@ -6,6 +6,9 @@ import { ProposalListPanel } from "./ProposalListPanel";
 import { ProposalCompare } from "./ProposalCompare";
 import { ProposalPreference } from "./ProposalPreference";
 import type { ProposalPinBinding } from "./ProposalCard";
+import { ComposeAssetPicker, useComposeAssetPick } from "./ComposeAssetPicker";
+import type { ComposeMaterial } from "./composeMaterials";
+import type { LibraryAsset } from "../../cloud/assetLibrary";
 import {
   createImageItem,
   createShapeItem,
@@ -15,7 +18,7 @@ import {
   proposalTypeLabel,
 } from "./helpers";
 import type { ShowToast } from "../../toast";
-import type { ProposalPref } from "../../lib/types";
+import type { ProposalPref, Version } from "../../lib/types";
 import "./proposal.css";
 
 export type ProposalPrefBinding = { prefs: ProposalPref[]; userId: string; onChoose: (choice: string) => void };
@@ -37,6 +40,9 @@ type Props = {
   intent?: ProposalIntent | null;
   canManage?: boolean;
   onSaveVersion?: () => Promise<void>;
+  versions?: Version[];
+  listLibrary?: () => Promise<LibraryAsset[]>;
+  resolveMaterial?: (material: ComposeMaterial) => Promise<string>;
 };
 
 type Panel = "none" | "element" | "compare" | "list";
@@ -49,13 +55,41 @@ const TEXT_ORDER: TextRole[] = ["title", "subtitle", "body", "custom"];
  * control appears only after an element is selected or a panel is opened, so
  * the first glance never gets busier than the poster itself.
  */
-export function ProposalDock({ roomId, versionId, author, showToast, onExit, onHeight, pref, pin, intent, canManage = false, onSaveVersion }: Props) {
+export function ProposalDock({
+  roomId,
+  versionId,
+  author,
+  showToast,
+  onExit,
+  onHeight,
+  pref,
+  pin,
+  intent,
+  canManage = false,
+  onSaveVersion,
+  versions = [],
+  listLibrary,
+  resolveMaterial,
+}: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   const materialRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const [panel, setPanel] = useState<Panel>("none");
-  const [pickMaterial, setPickMaterial] = useState(false);
+  const [pickMaterial, setPickMaterial] = useState(true);
   const [saving, setSaving] = useState(false);
+  const roomPick = useComposeAssetPick({
+    versions,
+    editingVersionId: versionId,
+    listLibrary,
+    resolveMaterial,
+    canManage,
+    showToast,
+    onPlaced: (item) => {
+      proposal.addImage(item);
+      setPickMaterial(false);
+      setPanel("element");
+    },
+  });
 
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -105,6 +139,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
 
   const addText = () => {
     setPickMaterial(false);
+    roomPick.setOpen(false);
     const used = active?.items.filter((i) => i.type === "text").length ?? 0;
     proposal.addText(createTextItem(TEXT_ORDER[Math.min(used, TEXT_ORDER.length - 1)]));
     setPanel("element");
@@ -112,6 +147,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
 
   const addShape = () => {
     setPickMaterial(false);
+    roomPick.setOpen(false);
     proposal.addShape(createShapeItem());
     setPanel("element");
   };
@@ -145,6 +181,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
 
   const togglePanel = (next: Panel) => {
     setPickMaterial(false);
+    roomPick.setOpen(false);
     setPanel((current) => (current === next ? "none" : next));
   };
 
@@ -157,6 +194,22 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
             ×
           </button>
         </div>
+      )}
+
+      {canManage && active && active.items.length === 0 && !active.background.imageDataUrl && (
+        <p className="pdock-empty-hint">
+          把 logo、照片丟上來，或
+          <button
+            type="button"
+            onClick={() => {
+              setPickMaterial(true);
+              roomPick.setOpen(true);
+            }}
+          >
+            從房間撿
+          </button>
+          。拼完按存成新版本。
+        </p>
       )}
 
       {active ? (
@@ -207,10 +260,30 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
           <button type="button" className="proposal-chip" data-testid="poster-add-asset" onClick={() => materialRef.current?.click()}>
             圖片
           </button>
+          <button
+            type="button"
+            className="proposal-chip"
+            data-testid="poster-pick-room-asset"
+            onClick={() => roomPick.setOpen((open) => !open)}
+          >
+            房間素材
+          </button>
           <button type="button" className="proposal-chip" onClick={addShape}>
             色塊
           </button>
         </div>
+      )}
+
+      {canManage && roomPick.open && (
+        <ComposeAssetPicker
+          /* poster-compose-asset-picker */
+          materials={roomPick.materials}
+          loading={roomPick.loading}
+          libraryError={roomPick.libraryError}
+          placingId={roomPick.placingId}
+          onPick={(material) => void roomPick.pick(material)}
+          onClose={() => roomPick.setOpen(false)}
+        />
       )}
 
       {canManage && (
@@ -237,7 +310,10 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
           className={`pdock-act ${pickMaterial ? "is-on" : ""}`}
           onClick={() => {
             setPanel("none");
-            setPickMaterial((v) => !v);
+            setPickMaterial((v) => {
+              if (v) roomPick.setOpen(false);
+              return !v;
+            });
           }}
         >
           ＋素材

@@ -5,6 +5,9 @@ import { ProposalElementControls } from "./ProposalElementControls";
 import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
 import { ProposalSummary } from "./ProposalSummary";
 import { ProposalPreference } from "./ProposalPreference";
+import { ComposeAssetPicker, useComposeAssetPick } from "./ComposeAssetPicker";
+import type { ComposeMaterial } from "./composeMaterials";
+import type { LibraryAsset } from "../../cloud/assetLibrary";
 import {
   PROPOSAL_STATUSES,
   PROPOSAL_TYPES,
@@ -15,6 +18,7 @@ import {
   prepareImageFile,
 } from "./helpers";
 import type { ShowToast } from "../../toast";
+import type { Version } from "../../lib/types";
 import type { ProposalPrefBinding } from "./ProposalDock";
 import "./proposal.css";
 
@@ -26,11 +30,36 @@ type Props = {
   pref?: ProposalPrefBinding;
   canManage?: boolean;
   onSaveVersion?: () => Promise<void>;
+  versions?: Version[];
+  listLibrary?: () => Promise<LibraryAsset[]>;
+  resolveMaterial?: (material: ComposeMaterial) => Promise<string>;
 };
 
-export function ProposalControls({ roomId, versionId, author, showToast, pref, canManage = false, onSaveVersion }: Props) {
+export function ProposalControls({
+  roomId,
+  versionId,
+  author,
+  showToast,
+  pref,
+  canManage = false,
+  onSaveVersion,
+  versions = [],
+  listLibrary,
+  resolveMaterial,
+}: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   const [pickText, setPickText] = useState(false);
+  const roomPick = useComposeAssetPick({
+    versions,
+    editingVersionId: versionId,
+    listLibrary,
+    resolveMaterial,
+    canManage,
+    showToast: showToast ?? (() => ""),
+    onPlaced: (item) => {
+      proposal.addImage(item);
+    },
+  });
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -261,6 +290,14 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref, c
             <UniversalIntake profile="proposal" mode="zone" className="proposal-action poster-add-asset" onFiles={(picked) => void uploadMaterial(picked)} onReject={(reason) => showToast?.(reason, { tone: "error" })}>
               <span data-testid="poster-add-asset">＋ 素材</span>
             </UniversalIntake>
+            <button
+              type="button"
+              className="proposal-action"
+              data-testid="poster-pick-room-asset"
+              onClick={() => roomPick.setOpen((open) => !open)}
+            >
+              房間素材
+            </button>
             <button type="button" className="proposal-action" onClick={() => proposal.addShape(createShapeItem())}>
               ＋ 色塊
             </button>
@@ -281,6 +318,28 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref, c
               {saving ? "存檔中…" : "存成新版本"}
             </button>
           </div>
+          )}
+
+          {canManage && active && active.items.length === 0 && !active.background.imageDataUrl && (
+            <p className="pdock-empty-hint">
+              把 logo、照片丟上來，或
+              <button type="button" onClick={() => roomPick.setOpen(true)}>
+                從房間撿
+              </button>
+              。拼完按存成新版本。
+            </p>
+          )}
+
+          {canManage && roomPick.open && (
+            <ComposeAssetPicker
+              /* poster-compose-asset-picker */
+              materials={roomPick.materials}
+              loading={roomPick.loading}
+              libraryError={roomPick.libraryError}
+              placingId={roomPick.placingId}
+              onPick={(material) => void roomPick.pick(material)}
+              onClose={() => roomPick.setOpen(false)}
+            />
           )}
 
           {pickText && (
