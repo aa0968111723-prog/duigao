@@ -1027,7 +1027,7 @@ try {
           {
             // WB02：非編輯節點是靜態層，整卡可點選（audit 缺陷已修）
             await page.locator(".wb-node").last().click({ force: true });
-            await page.getByRole("button", { name: "刪除", exact: true }).click();
+            await page.getByTestId("wb-node-actions").getByTestId("wb-node-delete").click();
             await B.waitForFunction(
               () => ![...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")),
               null,

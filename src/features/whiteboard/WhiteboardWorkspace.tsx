@@ -2115,6 +2115,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     }}>問同事</button>
                   )}
                   <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>針對這張討論</button>
+                  <button type="button" data-testid="wb-lock" onClick={toggleLock}>{selectedNode.locked ? "解鎖" : "鎖定"}</button>
+                  <button type="button" data-testid="wb-node-delete" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
                 </div>
               </div>
               <div className="wb-focus-sheet-discussion" data-testid="wb-focus-discussion">
@@ -2275,7 +2277,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             </>
           )}
           <button type="button" data-testid="wb-lock" onClick={toggleLock}>{selectedNode.locked ? "解鎖" : "鎖定"}</button>
-          <button type="button" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
+          <button type="button" data-testid="wb-node-delete" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
           <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
         </nav>
       ) : (
