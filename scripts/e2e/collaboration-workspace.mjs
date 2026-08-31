@@ -13,7 +13,7 @@
  */
 import { execFileSync } from "node:child_process";
 import http from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile as read } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { faults, requestLog, rows, start as startMock } from "./mock-supabase.mjs";
@@ -205,6 +205,16 @@ try {
     userAgent: ANDROID_UA,
   });
   const page = await context.newPage();
+  // #region agent log
+  const dbg = (hypothesisId, location, message, data) => {
+    mkdirSync("/opt/cursor/logs", { recursive: true });
+    appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({ hypothesisId, location, message, data, timestamp: Date.now() }) + "\n");
+  };
+  await page.exposeFunction("__agentDbg", (payload) => {
+    mkdirSync("/opt/cursor/logs", { recursive: true });
+    appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify(payload) + "\n");
+  });
+  // #endregion
   try {
     await page.goto(APP, { waitUntil: "domcontentloaded" });
     await page.fill("input.text-input", "招生企劃");
@@ -254,7 +264,31 @@ try {
       null,
       { timeout: 5000 },
     );
+    // #region agent log
+    dbg("A", "collaboration-workspace.mjs:after-fill", "edit form after fill", await page.evaluate(() => {
+      const input = document.querySelector('[data-testid="discussion-edit-input"]');
+      const save = document.querySelector('[data-testid="discussion-edit-save"]');
+      const title = document.querySelector('[data-testid="room-title-input"]');
+      return {
+        inputValue: input && "value" in input ? input.value : null,
+        saveDisabled: save instanceof HTMLButtonElement ? save.disabled : null,
+        activeTestId: document.activeElement?.getAttribute?.("data-testid") ?? document.activeElement?.tagName ?? null,
+        titleValue: title && "value" in title ? title.value : null,
+        titleIsActive: document.activeElement === title,
+        formCount: document.querySelectorAll('[data-testid="discussion-edit-form"]').length,
+        msgTexts: [...document.querySelectorAll(".rd-msg")].map((el) => el.textContent?.slice(0, 80)),
+      };
+    }));
+    // #endregion
     await page.getByTestId("discussion-edit-form").getByTestId("discussion-edit-save").click();
+    // #region agent log
+    dbg("A", "collaboration-workspace.mjs:after-save-click", "after save click", await page.evaluate(() => ({
+      formCount: document.querySelectorAll('[data-testid="discussion-edit-form"]').length,
+      hasEditedMark: Boolean(document.querySelector('[data-testid="discussion-edited"]')),
+      feedHasEdit: document.body.innerText.includes("改過"),
+      msgTexts: [...document.querySelectorAll(".rd-msg")].map((el) => el.textContent?.slice(0, 80)),
+    })));
+    // #endregion
     await page.locator(".rd-msg", { hasText: "先把招生流程攤在白板上（改過）" }).first().waitFor({ state: "visible", timeout: 20000 });
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });

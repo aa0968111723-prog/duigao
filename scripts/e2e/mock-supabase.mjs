@@ -9,6 +9,7 @@
  * where Supabase would serve it.
  */
 import http from "node:http";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { loadEdgeHandler, loadSharePreviewHandler, serveHandler } from "./edge-function.mjs";
 
@@ -390,6 +391,16 @@ export const server = http.createServer(async (req, res) => {
   requestLog.push(`${req.method} ${p}${url.search ? url.search.slice(0, 90) : ""}`);
   if (process.env.MOCK_LOG) console.log(req.method, req.url.slice(0, 140));
   if (req.method === "OPTIONS") { cors(res); res.writeHead(204); return res.end(); }
+  // #region agent log
+  if (p === "/__debug_log" && req.method === "POST") {
+    try {
+      const raw = (await readBody(req)).toString() || "{}";
+      mkdirSync("/opt/cursor/logs", { recursive: true });
+      appendFileSync("/opt/cursor/logs/debug.log", (raw.trim() || "{}") + "\n");
+    } catch { /* ignore */ }
+    cors(res); res.writeHead(204); return res.end();
+  }
+  // #endregion
 
   // ---- Edge Functions ----
   if (previewHandler && p.startsWith("/functions/v1/share-preview")) {
@@ -679,6 +690,20 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === "POST") {
       const body = JSON.parse((await readBody(req)).toString() || "[]");
       const rows = Array.isArray(body) ? body : [body];
+      if (table === "room_discussion_messages") {
+        // #region agent log
+        try {
+          mkdirSync("/opt/cursor/logs", { recursive: true });
+          appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({
+            hypothesisId: "D",
+            location: "mock-supabase.mjs:POST",
+            message: "discussion row insert",
+            data: { count: rows.length, ids: rows.map((r) => r.id), bodies: rows.map((r) => r.body), roomIds: rows.map((r) => r.room_id) },
+            timestamp: Date.now(),
+          }) + "\n");
+        } catch { /* ignore */ }
+        // #endregion
+      }
       if (table === "room_discussion_messages" && faults.discussionInsert) {
         // true=1 發；數字=連續 N 發（auto-retry 上限測試用，PR-08b）
         if (typeof faults.discussionInsert === "number" && faults.discussionInsert > 1) faults.discussionInsert -= 1;
@@ -788,6 +813,28 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === "PATCH") {
       const patch = JSON.parse((await readBody(req)).toString() || "{}");
       const rows = filterRows(tables[table], url.searchParams).filter((r) => isMember(r.room_id, uid));
+      // #region agent log
+      if (table === "room_discussion_messages") {
+        try {
+          mkdirSync("/opt/cursor/logs", { recursive: true });
+          appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({
+            hypothesisId: "D",
+            location: "mock-supabase.mjs:PATCH",
+            message: "discussion row patch",
+            data: {
+              matched: rows.length,
+              ids: rows.map((r) => r.id),
+              roomIds: rows.map((r) => r.room_id),
+              beforeBodies: rows.map((r) => r.body),
+              patchBody: patch.body,
+              patchEdited: Boolean(patch.payload?.edited),
+              filter: url.search.slice(0, 180),
+            },
+            timestamp: Date.now(),
+          }) + "\n");
+        } catch { /* ignore */ }
+      }
+      // #endregion
       // Only the row's owner may edit their own verdict / progress, exactly as
       // the RLS policies say.
       if (["version_verdicts", "version_review_progress", "video_reactions", "room_discussion_reads"].includes(table)) {

@@ -32,6 +32,17 @@ import {
 import { messagesForFocus } from "../whiteboard/boardFocus";
 import "./discussion.css";
 
+// #region agent log
+function agentLog(hypothesisId: string, location: string, message: string, data: Record<string, unknown>) {
+  const payload = { hypothesisId, location, message, data, timestamp: Date.now() };
+  try { (window as unknown as { __agentDbg?: (p: unknown) => void }).__agentDbg?.(payload); } catch { /* ignore */ }
+  const base = import.meta.env.VITE_SUPABASE_URL;
+  if (typeof base === "string" && base) {
+    fetch(`${base}/__debug_log`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }).catch(() => undefined);
+  }
+}
+// #endregion
+
 export type RoomDiscussionApi = {
   room: Room;
   guest: Guest;
@@ -518,6 +529,22 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                     const typed = event.currentTarget.querySelector('[data-testid="discussion-edit-input"]');
                     const raw = typed instanceof HTMLTextAreaElement ? typed.value : editDraft;
                     const patch = discussionEditPatch(raw);
+                    // #region agent log
+                    agentLog("A", "RoomDiscussion.tsx:onSubmit", "edit form submit", {
+                      messageId: message.id,
+                      raw,
+                      editDraft,
+                      rawHasEdit: String(raw).includes("改過"),
+                      draftHasEdit: editDraft.includes("改過"),
+                      hasPatch: Boolean(patch),
+                      patchBody: patch?.body ?? null,
+                      hasHandler: Boolean(api.onEditMessage),
+                      sendState: sendState ?? null,
+                      userId: api.userId,
+                      guestId: api.guest.id,
+                      authorId: message.authorId,
+                    });
+                    // #endregion
                     if (!patch || !api.onEditMessage) return;
                     api.onEditMessage(message.id, patch.body);
                     setEditingId(null);
@@ -526,7 +553,14 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   <textarea
                     className="text-input"
                     value={editDraft}
-                    onChange={(event) => setEditDraft(event.target.value)}
+                    onChange={(event) => {
+                      setEditDraft(event.target.value);
+                      // #region agent log
+                      if (event.target.value.includes("改過") || event.target.value.length < 4) {
+                        agentLog("A", "RoomDiscussion.tsx:onChange", "editDraft change", { value: event.target.value, messageId: message.id });
+                      }
+                      // #endregion
+                    }}
                     aria-label="編輯訊息"
                     data-testid="discussion-edit-input"
                     rows={3}
@@ -609,7 +643,20 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
                   <button
                     type="button"
                     data-testid="discussion-edit"
-                    onClick={() => { setEditingId(message.id); setEditDraft(message.body); }}
+                    onClick={() => {
+                      setEditingId(message.id);
+                      setEditDraft(message.body);
+                      // #region agent log
+                      agentLog("E", "RoomDiscussion.tsx:onEditClick", "open edit form", {
+                        messageId: message.id,
+                        body: message.body,
+                        sendState: sendState ?? null,
+                        authorId: message.authorId,
+                        userId: api.userId,
+                        guestId: api.guest.id,
+                      });
+                      // #endregion
+                    }}
                   >編輯</button>
                 )}
                 {api.onTombstoneMessage && (canTombstoneDiscussion(message, api.userId, api.canManage, sendState) || canTombstoneDiscussion(message, api.guest.id, api.canManage, sendState)) && (

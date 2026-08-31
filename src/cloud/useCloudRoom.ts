@@ -1178,13 +1178,33 @@ export function useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, 
       }
     },
     updateDiscussion: async (message) => {
-      if (!supabase || !boundRef.current) return false;
+      // #region agent log
+      const dbg = (extra: Record<string, unknown>) => {
+        const payload = { hypothesisId: "D", location: "useCloudRoom.ts:updateDiscussion", message: "cloud updateDiscussion", data: { id: message.id, roomId: message.roomId, body: message.body, edited: Boolean(message.payload?.edited), bound: Boolean(boundRef.current), hasSupabase: Boolean(supabase), ...extra }, timestamp: Date.now() };
+        try { (window as unknown as { __agentDbg?: (p: unknown) => void }).__agentDbg?.(payload); } catch { /* ignore */ }
+        const base = import.meta.env.VITE_SUPABASE_URL;
+        if (typeof base === "string" && base) fetch(`${base}/__debug_log`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }).catch(() => undefined);
+      };
+      dbg({ phase: "enter" });
+      // #endregion
+      if (!supabase || !boundRef.current) {
+        // #region agent log
+        dbg({ phase: "skip-unbound" });
+        // #endregion
+        return false;
+      }
       setStatus("syncing");
       try {
         await repoUpdateDiscussion(supabase, message);
         setStatus(pending.current.length ? "offline-pending" : "synced");
+        // #region agent log
+        dbg({ phase: "ok" });
+        // #endregion
         return true;
-      } catch {
+      } catch (err) {
+        // #region agent log
+        dbg({ phase: "catch", error: err instanceof Error ? err.message : String(err) });
+        // #endregion
         setStatus("offline-pending");
         return false;
       }
