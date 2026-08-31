@@ -40,14 +40,30 @@ const card = buildRoomAgentCard({
 });
 
 const key = (process.env.XAI_API_KEY ?? "").trim();
-const urls = [];
+const hits = [];
+const recordHit = (url, extra = {}) => {
+  hits.push({ url: String(url), ...extra });
+};
 const fetchFn = key
   ? async (url, init) => {
-      urls.push(String(url));
-      return fetch(url, init);
+      const started = Date.now();
+      const response = await fetch(url, init);
+      const raw = await response.text();
+      recordHit(url, {
+        status: response.status,
+        ok: response.ok,
+        contentType: response.headers.get("content-type"),
+        bodyBytes: raw.length,
+        ms: Date.now() - started,
+      });
+      return {
+        ok: response.ok,
+        headers: { get: (name) => response.headers.get(name) },
+        text: async () => raw,
+      };
     }
   : async (url) => {
-      urls.push(String(url));
+      recordHit(url, { status: 200, ok: true, contentType: "application/json", bodyBytes: 0, ms: 0 });
       if (String(url).includes("/chat/completions")) {
         return { ok: true, headers: { get: () => "application/json" }, text: async () => JSON.stringify(FIXTURE) };
       }
@@ -77,14 +93,31 @@ const answer = await askGrok({
   }),
 });
 
+const text = answer?.text ?? "";
+const actions = answer?.actions ?? [];
+const imagineRef = String(actions.find((item) => item.type === "imagine_image")?.payload?.workLayerRef ?? "");
 const evidence = {
   at: new Date().toISOString(),
-  mode: key ? "live" : "fixture-through-askGrok",
+  mode: key ? "live-xai" : "fixture-through-askGrok",
   treePath: ask.focus?.treePath,
   configured: Boolean(key),
-  urls,
-  text: answer?.text ?? null,
-  actions: answer?.actions?.map((item) => item.type) ?? [],
+  keyRedacted: key ? "xai-…" : null,
+  model: answer?.model ?? null,
+  hits: hits.map((hit) => ({
+    url: hit.url,
+    status: hit.status ?? null,
+    ok: hit.ok ?? null,
+    contentType: hit.contentType ?? null,
+    bodyBytes: hit.bodyBytes ?? null,
+    ms: hit.ms ?? null,
+  })),
+  replyNonEmpty: text.trim().length > 0,
+  textPreview: text.slice(0, 240) || null,
+  staysOnBookmark: Boolean(text) && /書籤/.test(text),
+  mixesBadge: /胸章/.test(text),
+  actions: actions.map((item) => item.type),
+  imagineWorkLayerRef: imagineRef || null,
+  imagineTouchesVersions: /\/versions\//.test(actions.map((item) => String(item.payload?.workLayerRef ?? "")).join("\n")),
   blocker: key ? null : "XAI_API_KEY missing after lookup; fixture exercised the same askGrok path",
 };
 try {
