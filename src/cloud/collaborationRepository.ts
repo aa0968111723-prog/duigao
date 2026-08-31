@@ -374,6 +374,13 @@ export async function loadWhiteboardGraph(supabase: SupabaseClient, roomId: stri
     supabase.from("whiteboard_nodes").select("*").eq("room_id", roomId).eq("whiteboard_id", whiteboardId),
     supabase.from("whiteboard_edges").select("*").eq("room_id", roomId).eq("whiteboard_id", whiteboardId),
   ]);
+  // An RLS, schema, or network failure is not an empty board. Treating it as
+  // one made a failed reload replace a collaborator's visible board with an
+  // empty canvas, while hiding the only useful diagnostic from the caller.
+  const errors = [nodesRes.error, edgesRes.error].filter(Boolean);
+  if (errors.length) {
+    throw new CloudError(errors.map((error) => error!.message).join("; "), "whiteboard-load");
+  }
   return {
     nodes: ((nodesRes.data as NodeRow[] | null) ?? []).map(nodeFromRow).filter((item): item is WhiteboardNode => Boolean(item)),
     edges: ((edgesRes.data as EdgeRow[] | null) ?? []).map(edgeFromRow).filter((item): item is WhiteboardEdge => Boolean(item)),
