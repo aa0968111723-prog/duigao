@@ -653,6 +653,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       incomingId: focusId,
       appliedId: appliedFocusRef.current,
       editingId: editingIdRef.current,
+      selectedId: selectedRef.current[0] ?? null,
     });
     if (action === "clear") {
       appliedFocusRef.current = null;
@@ -663,6 +664,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       appliedFocusRef.current = focusId;
       return;
     }
+    if (!focusId) return;
     const node = nodes.find((item) => item.id === focusId);
     if (!node) return;
     appliedFocusRef.current = focusId;

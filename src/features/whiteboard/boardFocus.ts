@@ -181,10 +181,12 @@ export function incomingFocusAction(input: {
   incomingId: string | null | undefined;
   appliedId: string | null;
   editingId: string | null;
+  selectedId?: string | null;
 }): "apply" | "consume" | "skip" | "clear" {
   if (!input.incomingId) return "clear";
   if (input.appliedId === input.incomingId) return "skip";
   if (input.editingId && input.editingId !== input.incomingId) return "consume";
+  if (input.selectedId && input.selectedId !== input.incomingId) return "consume";
   return "apply";
 }
 

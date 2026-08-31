@@ -590,6 +590,7 @@ test("incoming focus：編輯中的另一張卡不被釘文宣搶走", () => {
   assert.equal(incomingFocusAction({ incomingId: null, appliedId: "poster", editingId: "mind" }), "clear");
   assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: "poster", editingId: "mind" }), "skip");
   assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: "mind" }), "consume");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: null, selectedId: "mind" }), "consume");
   assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: null }), "apply");
   assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: "poster" }), "apply");
 });

@@ -1417,6 +1417,11 @@ try {
 
       // Split View：討論欄與畫布同時看得見，且不重疊
       await page.waitForSelector('[data-testid="wb-side-rail"]', { timeout: 15000 });
+      await page.waitForFunction(() => {
+        const rail = document.querySelector("[data-testid='wb-side-rail']");
+        const focus = document.querySelector("[data-testid='whiteboard-workspace']");
+        return Boolean(rail && focus && rail.getBoundingClientRect().width > 0 && focus.getBoundingClientRect().width > 0);
+      }, null, { timeout: 15000 });
       const layout = await page.evaluate(() => {
         const rail = document.querySelector('[data-testid="wb-side-rail"]');
         const focus = document.querySelector('[data-testid="whiteboard-workspace"]');
