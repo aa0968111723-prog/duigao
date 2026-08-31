@@ -13,6 +13,22 @@ export type InferEditScopeInput = {
   override?: EditScope | null;
 };
 
+/** Minimal workspace snapshot so draft pins count before they are submitted. */
+export type WorkspaceEditScopeSource = {
+  versionId: string;
+  comments: Array<{
+    id: string;
+    versionId: string;
+    resolved?: boolean;
+    body: string;
+    region?: { x: number; y: number; width: number; height: number } | null;
+  }>;
+  draftPin?: { versionId: string; x: number; y: number; region?: { x: number; y: number; width: number; height: number } } | null;
+  formBody?: string;
+  selectedPinId?: string | null;
+  override?: EditScope | null;
+};
+
 export type InferEditScopeResult = {
   scope: EditScope | null;
   label: string;
@@ -42,6 +58,33 @@ export function shortScopeLabel(body: string): string {
 export function canGenerateEdit(input: InferEditScopeInput): boolean {
   const area = input.regionArea ?? 0;
   return input.pins.length > 0 || area > 0;
+}
+
+/**
+ * Saved comments plus an in-progress draft pin/circle.
+ * Placing 「主標看不清」 before submit still yields a pin so the chip is not empty.
+ */
+export function editScopeInputFromWorkspace(source: WorkspaceEditScopeSource): InferEditScopeInput {
+  const comments = (source.comments ?? []).filter(
+    (pin) => pin.versionId === source.versionId && !pin.resolved,
+  );
+  const draft = source.draftPin?.versionId === source.versionId ? source.draftPin : null;
+  const pins: EditScopePin[] = comments.map((pin) => ({ body: pin.body }));
+  if (draft) pins.push({ body: (source.formBody ?? "").trim() });
+  const selected = comments.find((pin) => pin.id === source.selectedPinId);
+  const region = draft?.region ?? selected?.region ?? undefined;
+  const regionArea = region ? region.width * region.height : 0;
+  const bodyText = [
+    selected?.body,
+    draft ? (source.formBody ?? "") : "",
+    ...pins.map((pin) => pin.body),
+  ].filter(Boolean).join(" ");
+  return {
+    pins,
+    regionArea,
+    bodyText,
+    override: source.override ?? null,
+  };
 }
 
 export function inferEditScope(input: InferEditScopeInput): InferEditScopeResult {
