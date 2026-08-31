@@ -81,7 +81,16 @@ export function ScheduleAgenda({ api }: { api: ScheduleAgendaApi }) {
           </nav>
         )}
       </header>
-      <ol className="sched-days">
+      {!api.events.length ? (
+        <div className="sched-empty" data-testid="schedule-empty">
+          <span aria-hidden>◷</span>
+          <strong>這週還沒有行程</strong>
+          <p>先把第一個重要時間放進來，之後再慢慢排。</p>
+          {api.canWrite && (
+            <button type="button" data-testid="schedule-empty-add" onClick={() => openDraft(Date.now(), "activity")}>＋ 加一場</button>
+          )}
+        </div>
+      ) : <ol className="sched-days">
         {days.map((day) => (
           <li
             key={day.dayStart}
@@ -132,7 +141,7 @@ export function ScheduleAgenda({ api }: { api: ScheduleAgendaApi }) {
             ))}
           </li>
         ))}
-      </ol>
+      </ol>}
       {range === "list" && !timelineOpen && (
         <ol className="sched-list">
           {visible.map((event) => (
@@ -145,7 +154,7 @@ export function ScheduleAgenda({ api }: { api: ScheduleAgendaApi }) {
           ))}
         </ol>
       )}
-      {api.canWrite && (
+      {api.canWrite && api.events.length > 0 && (
         <button type="button" className="sched-add" data-testid="schedule-add" onClick={() => openDraft(Date.now(), "activity")}>＋ 新增活動或截止日期</button>
       )}
       {pickedDay != null && (

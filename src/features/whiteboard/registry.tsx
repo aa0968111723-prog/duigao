@@ -50,7 +50,7 @@ function ContentBody({ node }: NodeRendererProps) {
     <>
       {content.thumbnailUrl
         ? <img className="wb-thumb" src={content.thumbnailUrl} alt="" />
-        : <span className="wb-thumb-fallback" aria-hidden>{content.mediaKind === "video" ? "▶" : content.mediaKind === "plan" ? "☷" : "▧"}</span>}
+        : <span className="wb-thumb-fallback" aria-hidden>{content.mediaKind === "poster" ? "文宣" : content.mediaKind === "video" ? "▶" : content.mediaKind === "plan" ? "☷" : "素材"}</span>}
       <span className="wb-card-copy">
         <strong>{content.title ?? "房間內容"}</strong>
         <small>

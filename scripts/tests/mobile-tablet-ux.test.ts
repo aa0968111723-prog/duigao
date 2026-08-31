@@ -55,6 +55,11 @@ test("shell first layer is gated by more, not permanently painted", () => {
   assert.match(shell, /moreOpen &&(?: !hideRoomChrome &&)? \(/);
   assert.doesNotMatch(shell, /project-entry-chips[\s\S]{0,80}hidden=\{hideRoomChrome\}/);
   assert.match(shell, /popstate|duigaoMore/);
+  assert.doesNotMatch(shell, /schedule-tab/);
+  assert.match(shell, /data-testid="open-schedule-pane"/);
+  assert.match(shell, /placeholder="例如：秋季茶會"/);
+  assert.match(shell, /autoFocus=\{api\.room\.title\.trim\(\) === "未命名活動房"\}/);
+  assert.match(shell, /roomTitleRef\.current\?\.focus\(\)/);
 });
 
 test("safe area, keyboard, 44px touch, overflow, reduced motion, orientation", () => {

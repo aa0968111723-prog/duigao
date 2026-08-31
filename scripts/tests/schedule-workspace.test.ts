@@ -222,17 +222,21 @@ test("RLS isolation is encoded: other rooms cannot be selected by policy using i
   assert.doesNotMatch(sql, /disable row level security/);
 });
 
-test("phone toolbar is five items and calendar tab exists", () => {
+test("phone toolbar keeps four planning actions and schedule stays behind 更多", () => {
   const wb = readFileSync(resolve(ROOT, "src/features/whiteboard/WhiteboardWorkspace.tsx"), "utf8");
   assert.match(wb, /wb-compact-toolbar/);
-  assert.match(wb, />畫筆</);
-  assert.match(wb, /文字／便利貼/);
+  assert.match(wb, />寫下</);
+  assert.match(wb, /這張板要怎麼開始/);
+  assert.match(wb, /寫下一步驟/);
+  assert.match(wb, /釘上文宣/);
+  assert.match(wb, /先點起點，再點終點/);
   assert.match(wb, />加入</);
   assert.match(wb, /wb-set-deadline/);
   assert.match(wb, /wb-deadline-form/);
   assert.doesNotMatch(wb, /wb-tool-material/);
   const room = readFileSync(resolve(ROOT, "src/features/multi-room/MultiBranchRoom.tsx"), "utf8");
-  assert.match(room, /schedule-tab/);
+  assert.doesNotMatch(room, /schedule-tab/);
+  assert.match(room, /open-schedule-pane/);
   assert.match(room, /ScheduleAgenda/);
   assert.match(room, /schedule-split/);
   assert.match(room, /setDiscussPane\("chat"\)/);

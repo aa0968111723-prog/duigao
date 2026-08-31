@@ -85,6 +85,26 @@ async function chooseCreate(page, name, type, file) {
   await current.locator("button.project-submit").click();
 }
 
+async function toggleWhiteboardDraw(page) {
+  const direct = page.getByTestId("wb-tool-draw");
+  if (await direct.count() && await direct.isVisible()) {
+    await direct.click();
+    return;
+  }
+  await page.getByTestId("whiteboard-more").click();
+  await page.getByTestId("wb-tool-draw").click();
+}
+
+async function runWhiteboardNodeAction(page, testId) {
+  const direct = page.getByTestId(testId);
+  if (await direct.count() && await direct.isVisible()) {
+    await direct.click();
+    return;
+  }
+  await page.getByTestId("whiteboard-more").click();
+  await page.getByTestId(testId).click();
+}
+
 async function recordWebm(page, seconds = 1.1) {
   return Buffer.from(await page.evaluate(async (secs) => {
     const canvas = document.createElement("canvas");
@@ -130,7 +150,13 @@ async function fillEditing(page, text) {
 async function dismissSelection(page) {
   // WB02：選取節點時情境列取代主工具列 — 開主工具列動作前先取消選取
   const dismiss = page.locator(".wb-context-dismiss");
-  if (await dismiss.count()) await dismiss.click();
+  if (await dismiss.count() && await dismiss.isVisible()) {
+    await dismiss.click();
+    return;
+  }
+  // 手機情境列刻意只留四個工作動作；測試直接觸發同一個取消 handler，
+  // 使用者在介面上則以點畫布空白處取消選取。
+  if (await dismiss.count()) await dismiss.evaluate((button) => button.click());
 }
 
 async function searchNode(page, name) {
@@ -309,6 +335,15 @@ try {
     await page.getByRole("button", { name: "建立白板" }).click();
     await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 10000 });
     check("可建立並打開白板", await page.getByTestId("wb-canvas").count() === 1);
+    check("空板先顯示三個下一步", await page.getByTestId("wb-empty-starter").count() === 1
+      && await page.getByTestId("wb-start-step").count() === 1
+      && await page.getByTestId("wb-start-poster").count() === 1
+      && await page.getByTestId("wb-start-connect").count() === 1);
+    await page.getByTestId("wb-start-step").click();
+    await page.waitForSelector("textarea.wb-node-text", { timeout: 5000 });
+    check("寫下一步驟會直接聚焦文字卡", await page.locator("textarea.wb-node-text").evaluate((el) => document.activeElement === el));
+    await fillEditing(page, "先寫活動流程");
+    await dismissSelection(page);
 
     // ---- WB02 Focus Mode 驗收（Grok wb00 F8 的防假綠斷言）----------
     {
@@ -364,14 +399,14 @@ try {
 
     for (const child of ["擺攤", "茶會", "演講"]) {
       if (child !== "擺攤") await searchNode(page, "招生");
-      await page.getByTestId("wb-add-child").click();
+      await runWhiteboardNodeAction(page, "wb-add-child");
       await fillEditing(page, child);
     }
     check("心智圖可加子節點 擺攤/茶會/演講", (await page.locator("[data-node-type='mindmap']").count()) >= 3);
 
     await searchNode(page, "擺攤");
     for (const step of ["吸引注意", "互動", "介紹活動", "QR", "加入茶會"]) {
-      await page.getByTestId("wb-next-step").click();
+      await runWhiteboardNodeAction(page, "wb-next-step");
       await fillEditing(page, step);
     }
     const flowCount = Number(await page.getByTestId("wb-stats").getAttribute("data-flow"));
@@ -718,20 +753,20 @@ try {
 
       // freehand：繪圖工具畫一筆 → 節點；undo 軟刪
       await dismissSelection(page);
-      await page.getByTestId("wb-tool-draw").click();
+      await toggleWhiteboardDraw(page);
       await canvas.dispatchEvent("pointerdown", { clientX: box.x + 200, clientY: box.y + 320, pointerId: 51 });
       await canvas.dispatchEvent("pointermove", { clientX: box.x + 250, clientY: box.y + 355, pointerId: 51 });
       await canvas.dispatchEvent("pointermove", { clientX: box.x + 300, clientY: box.y + 330, pointerId: 51 });
       await canvas.dispatchEvent("pointerup", { clientX: box.x + 300, clientY: box.y + 330, pointerId: 51 });
       await page.waitForFunction(() => document.querySelectorAll("[data-node-type='freehand']").length >= 1, null, { timeout: 5000 });
       check("繪圖一筆成 freehand 節點（SVG path）", (await page.locator("[data-node-type='freehand'] svg path").count()) >= 1);
-      await page.getByTestId("wb-tool-draw").click();
+      await toggleWhiteboardDraw(page);
       await page.getByTestId("wb-undo").click();
       await page.waitForFunction(() => document.querySelectorAll("[data-node-type='freehand']").length === 0, null, { timeout: 5000 });
       check("freehand 可 undo（軟刪）", true);
 
       // S1/S2 反例：畫到一半第二指落下轉 pinch — 不得誤選節點、zoom 不得暴衝
-      await page.getByTestId("wb-tool-draw").click();
+      await toggleWhiteboardDraw(page);
       const nodeBox = await page.locator(".wb-node").first().boundingBox();
       const zoomBefore = await page.evaluate(() => {
         const style = document.querySelector(".wb-layer")?.getAttribute("style") ?? "";
@@ -752,7 +787,7 @@ try {
       check("繪圖轉 pinch：zoom 不暴衝（S1）", zoomAfter > zoomBefore * 0.5 && zoomAfter < zoomBefore * 2, `${zoomBefore}→${zoomAfter}`);
       check("繪圖轉 pinch：不誤選節點（S2）", (await page.getByTestId("wb-node-actions").count()) === 0);
       check("繪圖轉 pinch：筆畫已取消不成節點", (await page.locator("[data-node-type='freehand']").count()) === 0);
-      await page.getByTestId("wb-tool-draw").click();
+      await toggleWhiteboardDraw(page);
 
       // camera memory：平移後離板重開，視角不歸零
       await canvas.dispatchEvent("pointerdown", { clientX: box.x + 60, clientY: box.y + 420, pointerId: 61 });
@@ -815,6 +850,7 @@ try {
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
       check("訊息「加入白板」：開板並聚焦新節點", true);
+      await page.getByTestId("whiteboard-more").click();
       check("節點帶 provenance（打開來源訊息鈕）", (await page.getByTestId("wb-open-source-message").count()) === 1);
       await page.getByTestId("wb-open-source-message").click();
       await page.waitForSelector(".rd-msg-flash", { timeout: 8000 });
@@ -853,7 +889,7 @@ try {
       await dismissSelection(page);
       await searchNode(page, "擺攤文宣");
       await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
-      await page.getByRole("button", { name: "打開內容" }).click();
+      await runWhiteboardNodeAction(page, "wb-open-content");
       await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
       check("Focus 上可疊對稿 overlay（板不卸載）", (await page.getByTestId("wb-canvas").count()) === 1);
       // S15：只驗 DOM 存在是假綠 — overlay z 若低於 Focus 會被整個蓋住，

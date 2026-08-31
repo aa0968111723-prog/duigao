@@ -364,6 +364,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const [selectTool, setSelectTool] = useState<"off" | "marquee" | "lasso">("off");
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
   const [connectMode, setConnectMode] = useState(false);
+  // 空板起手式只在使用者真的選了一條路之後收起；不刪既有的「新步驟」，
+  // 也不會在單純開板時偷偷寫資料。
+  const [starterDismissedFor, setStarterDismissedFor] = useState<string | null>(null);
   // ---- WB03：繪圖模式（筆畫收集繞過手勢 reducer） ----
   const [drawMode, setDrawMode] = useState(false);
   const [strokePreview, setStrokePreview] = useState<StrokePoint[] | null>(null);
@@ -1123,6 +1126,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     }
     api.onUpsertNode(node, "now");
     record(nodeCreateDraft(nextOpId(), node));
+    setStarterDismissedFor(board.id);
     setSelected([node.id]);
     beginEdit(node);
     setSheet(null);
@@ -1131,6 +1135,37 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   const addAtView = (type: NodeType, content?: WhiteboardNode["content"], linked?: Pick<WhiteboardNode, "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId">) =>
     addAt(screenToWorld(camera, viewport.width / 2, viewport.height / 2), type, content, linked);
+
+  const openPosterPicker = () => {
+    setContentKind("poster");
+    setSheet("content");
+  };
+
+  const beginFirstStep = () => {
+    if (!board || !canEdit) return;
+    const existing = liveNodes.find((node) => !node.deletedAt && (node.nodeType === "flow" || node.nodeType === "text"));
+    setStarterDismissedFor(board.id);
+    if (existing) {
+      setSelected([existing.id]);
+      beginEdit(existing);
+      setCamera(focusCamera(existing, viewport, camera.zoom));
+      return;
+    }
+    addAtView("flow");
+  };
+
+  const beginRelationship = () => {
+    if (!board || !canEdit) return;
+    const active = liveNodes.filter((node) => !node.deletedAt);
+    setStarterDismissedFor(board.id);
+    if (!active.length) addAtView("flow", { text: "起點" });
+    setSelected([]);
+    endEdit();
+    setConnectMode(true);
+    setConnectFrom(null);
+    setDrawMode(false);
+    setSelectTool("off");
+  };
 
   const deleteSelected = () => {
     for (const id of selected) {
@@ -1344,6 +1379,54 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   useEffect(() => {
     api.onSelectionFocus?.(focusNodeId);
   }, [focusNodeId, api]);
+  const activeNodes = liveNodes.filter((node) => !node.deletedAt);
+  const starterNode = activeNodes.length === 1
+    && (activeNodes[0].nodeType === "flow" || activeNodes[0].nodeType === "text")
+    && ["", "新步驟"].includes(String(activeNodes[0].content.text ?? "").trim())
+    ? activeNodes[0]
+    : null;
+  const showStarter = canEdit
+    && starterDismissedFor !== board?.id
+    && (activeNodes.length === 0 || Boolean(starterNode));
+  const addNextStepFromSelected = () => {
+    if (!selectedNode || !(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap")) return;
+    const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
+    api.onUpsertNode(next.node, "now");
+    api.onCreateEdge(next.edge);
+    record(nodeCreateDraft(nextOpId(), next.node));
+    setSelected([next.node.id]);
+    beginEdit(next.node);
+    setCamera(focusCamera(next.node, viewport, camera.zoom));
+    setSheet(null);
+  };
+  const addChildFromSelected = () => {
+    if (!selectedNode || !(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text")) return;
+    const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
+    api.onUpsertNode(next.node, "now");
+    api.onCreateEdge(next.edge);
+    record(nodeCreateDraft(nextOpId(), next.node));
+    setSelected([next.node.id]);
+    beginEdit(next.node);
+    setCamera(focusCamera(next.node, viewport, camera.zoom));
+    setSheet(null);
+  };
+  const openSelectedContent = () => {
+    if (!selectedNode?.linkedEntityId) return;
+    const open = contentOpenFromNode(selectedNode);
+    const target = openTarget(anchorFromNode(selectedNode));
+    setSheet(null);
+    if (target.surface === "content") api.onOpenContent(target.branchId, open);
+    else api.onOpenContent(selectedNode.linkedEntityId, open);
+  };
+  const openSelectedSourceMessage = () => {
+    if (!selectedNode?.linkedEntityId) return;
+    const target = openTarget(anchorFromNode(selectedNode));
+    if (target.surface !== "discussion") return;
+    const exists = (api.room.discussion ?? []).some((message) => message.id === target.messageId);
+    if (!exists) { showNotice("來源訊息已不存在"); return; }
+    setSheet(null);
+    api.onOpenDiscussionMessage?.(target.messageId);
+  };
   const polls: RoomPoll[] = api.room.polls ?? [];
 
   if (!board) return <BoardList api={api} />;
@@ -1408,6 +1491,25 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             <div className="wb-sheet wb-more">
               <h3>更多</h3>
               <button type="button" className="wb-card" data-testid="whiteboard-search" onClick={() => setSheet("search")}>搜尋節點</button>
+              <button type="button" className="wb-card" data-testid="wb-tool-draw" disabled={!canEdit} onClick={() => {
+                setDrawMode((current) => !current);
+                setConnectMode(false);
+                setConnectFrom(null);
+                setSelectTool("off");
+                setSheet(null);
+              }}>{drawMode ? "結束畫筆" : "使用畫筆"}</button>
+              {chromeWidth < 768 && selectedNode && (selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
+                <button type="button" className="wb-card" data-testid="wb-next-step" onClick={addNextStepFromSelected}>加下一步</button>
+              )}
+              {chromeWidth < 768 && selectedNode && (selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
+                <button type="button" className="wb-card" data-testid="wb-add-child" onClick={addChildFromSelected}>加子項目</button>
+              )}
+              {chromeWidth < 768 && selectedNode?.nodeType === "room_content" && selectedNode.linkedEntityId && (
+                <button type="button" className="wb-card" data-testid="wb-open-content" onClick={openSelectedContent}>打開內容</button>
+              )}
+              {chromeWidth < 768 && selectedNode?.linkedEntityType === "discussion" && selectedNode.linkedEntityId && (
+                <button type="button" className="wb-card" data-testid="wb-open-source-message" onClick={openSelectedSourceMessage}>打開來源訊息</button>
+              )}
               <button type="button" className="wb-card" data-testid="whiteboard-arrange" disabled={!canEdit} onClick={() => {
                 const next = arrangeBoard(nodes, edges);
                 api.onUpsertNodes(next);
@@ -1934,7 +2036,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               return <line key={edge.id} x1={x1} y1={y1} x2={x2} y2={y2} stroke={edge.edgeType === "mindmap" ? "#8a7ab0" : edge.edgeType === "flow" ? "#6aa0b8" : "#7d7469"} strokeWidth={2} data-testid={`wb-edge-${edge.id}`} />;
             })}
           </svg>
-          {rendered.map((node) => (
+          {rendered.filter((node) => !(showStarter && starterNode?.id === node.id)).map((node) => (
             <NodeView
               key={node.id}
               node={node}
@@ -1995,13 +2097,32 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           )}
         </div>
 
+        {showStarter && (
+          <section className="wb-starter" data-testid="wb-empty-starter" onPointerDown={(event) => event.stopPropagation()}>
+            <span className="wb-starter-kicker">活動規劃白板</span>
+            <h3>這張板要怎麼開始？</h3>
+            <p>先放下一個步驟，或把房間裡的文宣帶進來。</p>
+            <div className="wb-starter-actions">
+              <button type="button" data-testid="wb-start-step" onClick={beginFirstStep}>
+                <span aria-hidden>✎</span><strong>寫下一步驟</strong><small>直接打字，整理接下來要做的事</small>
+              </button>
+              <button type="button" data-testid="wb-start-poster" onClick={openPosterPicker}>
+                <span aria-hidden>▧</span><strong>釘上文宣</strong><small>從這間房挑一張海報</small>
+              </button>
+              <button type="button" data-testid="wb-start-connect" onClick={beginRelationship}>
+                <span aria-hidden>↦</span><strong>畫關係</strong><small>先點起點，再點終點</small>
+              </button>
+            </div>
+          </section>
+        )}
+
         {multiSelect && (
           <div className="wb-multiselect" data-testid="wb-multiselect">
             <span>已選 {selected.length} 個</span>
             <button type="button" onClick={() => setMultiSelect(false)}>完成</button>
           </div>
         )}
-        {emptyBoard && (
+        {emptyBoard && !showStarter && (
           <div className="wb-empty-board" data-testid="wb-empty-board">
             <span className="wb-empty-kicker">活動規劃白板</span>
             <strong>{roomName.label}</strong>
@@ -2039,7 +2160,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         {notice && <div className="wb-notice" data-testid="wb-notice">{notice}</div>}
         {connectMode && (
           <div className="wb-connect-hint" data-testid="wb-connect-hint">
-            <span>{connectFrom ? "點另一個節點完成連線" : "點第一個節點"}</span>
+            <span>{connectFrom ? "再點一個節點完成連線" : "先點起點，再點終點"}</span>
             <button type="button" onClick={() => { setConnectMode(false); setConnectFrom(null); }}>取消</button>
           </div>
         )}
@@ -2195,90 +2316,67 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         </nav>
       ) : selectedNode && canEdit && !multiSelect && !phoneFocusSheet ? (
         <nav className="wb-focus-bottom wb-context-bar" aria-label="節點動作" data-testid="wb-node-actions">
-          <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
-          <button type="button" onClick={() => { setConnectMode(true); setConnectFrom(selectedNode.id); }}>連線</button>
-          {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
-            <button type="button" data-testid="wb-next-step" onClick={() => {
-              const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
-              api.onUpsertNode(next.node, "now");
-              api.onCreateEdge(next.edge);
-              record(nodeCreateDraft(nextOpId(), next.node));
-              setSelected([next.node.id]);
-              beginEdit(next.node);
-              setCamera(focusCamera(next.node, viewport, camera.zoom));
-            }}>+ 下一步</button>
-          )}
-          {(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
-            <button type="button" data-testid="wb-add-child" onClick={() => {
-              const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
-              api.onUpsertNode(next.node, "now");
-              api.onCreateEdge(next.edge);
-              record(nodeCreateDraft(nextOpId(), next.node));
-              setSelected([next.node.id]);
-              beginEdit(next.node);
-              setCamera(focusCamera(next.node, viewport, camera.zoom));
-            }}>+ 子項目</button>
-          )}
-          {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
-            <button type="button" onClick={() => {
-              const open = contentOpenFromNode(selectedNode);
-              const target = openTarget(anchorFromNode(selectedNode));
-              if (target.surface === "content") {
-                api.onOpenContent(target.branchId, open);
-              } else {
-                api.onOpenContent(selectedNode.linkedEntityId!, open);
-              }
-            }}>打開內容</button>
-          )}
-          {selectedNode.linkedEntityType === "discussion" && selectedNode.linkedEntityId && (
-            <button type="button" data-testid="wb-open-source-message" onClick={() => {
-              const target = openTarget(anchorFromNode(selectedNode));
-              if (target.surface !== "discussion") return;
-              const exists = (api.room.discussion ?? []).some((message) => message.id === target.messageId);
-              if (!exists) {
-                showNotice("來源訊息已不存在");
-                return;
-              }
-              api.onOpenDiscussionMessage?.(target.messageId);
-            }}>打開原訊息</button>
-          )}
-          <button
-            type="button"
-            data-testid="wb-share-focus"
-            onClick={() => {
-              api.onSetRoomFocus?.(selectedNode.id);
-              writeBoardSession(board.id, { roomFocusId: selectedNode.id, camera: cameraRef.current, selection: [selectedNode.id] });
-              setCamera(focusCamera(selectedNode, viewport));
-            }}
-          >讓大家看這個</button>
-          {(api.onAskColleague || api.onAskBoardAi) && (
-            <button
-              type="button"
-              data-testid="wb-ask-colleague"
-              onClick={() => {
-                if (api.onAskColleague) api.onAskColleague({ prompt: "針對這張，我們下一步做什麼？", nodeId: selectedNode.id });
-                else setSheet("ai");
-              }}
-            >問同事</button>
-          )}
-          <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>針對這張討論</button>
-          <button type="button" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
-          {api.onNodeDeadline && (
-            <button type="button" data-testid="wb-set-deadline" onClick={() => setSheet("deadline")}>設定期限</button>
-          )}
-          {selected.length > 1 && (
+          {chromeWidth < 768 ? (
             <>
-              <button type="button" onClick={() => {
-                const grouped = groupSelected(nodes, selected, "local");
-                if (!grouped) return;
-                api.onUpsertNode(grouped.group, "now");
-                api.onUpsertNodes(grouped.nodes);
-              }}>群組</button>
-              <button type="button" onClick={() => createRelationEdges(board.id, board.roomId, selected).forEach(api.onCreateEdge)}>建立關係</button>
+              <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
+              <button type="button" onClick={() => { setConnectMode(true); setConnectFrom(selectedNode.id); }}>連出去</button>
+              <button type="button" onClick={openPosterPicker}>釘文宣</button>
+              <button type="button" data-testid="wb-node-delete" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
+              <button type="button" onClick={() => { setConnectMode(true); setConnectFrom(selectedNode.id); }}>連線</button>
+              {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
+                <button type="button" data-testid="wb-next-step" onClick={addNextStepFromSelected}>+ 下一步</button>
+              )}
+              {(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
+                <button type="button" data-testid="wb-add-child" onClick={addChildFromSelected}>+ 子項目</button>
+              )}
+              {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
+                <button type="button" data-testid="wb-open-content" onClick={openSelectedContent}>打開內容</button>
+              )}
+              {selectedNode.linkedEntityType === "discussion" && selectedNode.linkedEntityId && (
+                <button type="button" data-testid="wb-open-source-message" onClick={openSelectedSourceMessage}>打開原訊息</button>
+              )}
+              <button
+                type="button"
+                data-testid="wb-share-focus"
+                onClick={() => {
+                  api.onSetRoomFocus?.(selectedNode.id);
+                  writeBoardSession(board.id, { roomFocusId: selectedNode.id, camera: cameraRef.current, selection: [selectedNode.id] });
+                  setCamera(focusCamera(selectedNode, viewport));
+                }}
+              >讓大家看這個</button>
+              {(api.onAskColleague || api.onAskBoardAi) && (
+                <button
+                  type="button"
+                  data-testid="wb-ask-colleague"
+                  onClick={() => {
+                    if (api.onAskColleague) api.onAskColleague({ prompt: "針對這張，我們下一步做什麼？", nodeId: selectedNode.id });
+                    else setSheet("ai");
+                  }}
+                >問同事</button>
+              )}
+              <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>針對這張討論</button>
+              <button type="button" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
+              <button type="button" onClick={openPosterPicker}>釘文宣</button>
+              {api.onNodeDeadline && <button type="button" data-testid="wb-set-deadline" onClick={() => setSheet("deadline")}>設定期限</button>}
+              {selected.length > 1 && (
+                <>
+                  <button type="button" onClick={() => {
+                    const grouped = groupSelected(nodes, selected, "local");
+                    if (!grouped) return;
+                    api.onUpsertNode(grouped.group, "now");
+                    api.onUpsertNodes(grouped.nodes);
+                  }}>群組</button>
+                  <button type="button" onClick={() => createRelationEdges(board.id, board.roomId, selected).forEach(api.onCreateEdge)}>建立關係</button>
+                </>
+              )}
+              <button type="button" data-testid="wb-lock" onClick={toggleLock}>{selectedNode.locked ? "解鎖" : "鎖定"}</button>
+              <button type="button" data-testid="wb-node-delete" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
             </>
           )}
-          <button type="button" data-testid="wb-lock" onClick={toggleLock}>{selectedNode.locked ? "解鎖" : "鎖定"}</button>
-          <button type="button" data-testid="wb-node-delete" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
           <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
         </nav>
       ) : (
@@ -2291,16 +2389,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             aria-label={selectTool === "lasso" ? "套索" : selectTool === "marquee" ? "框選" : "選取"}
             onClick={() => { setSelectTool((current) => (current === "off" ? "marquee" : current === "marquee" ? "lasso" : "off")); setDrawMode(false); }}
           ><span>▣</span>{selectTool === "lasso" ? "套索" : selectTool === "marquee" ? "框選" : "選取"}</button>
-          <button
-            type="button"
-            className={drawMode ? "is-active" : ""}
-            data-testid="wb-tool-draw"
-            title="畫筆"
-            aria-label="畫筆"
-            disabled={!canEdit}
-            onClick={() => { setDrawMode((current) => !current); setConnectMode(false); setConnectFrom(null); setSelectTool("off"); }}
-          ><span>✎</span>畫筆</button>
-          <button type="button" data-testid="wb-tool-sticky" title="文字／便利貼" aria-label="文字／便利貼" disabled={!canEdit} onClick={() => addAtView("text")}><span>📝</span>文字／便利貼</button>
+          <button type="button" data-testid="wb-tool-sticky" title="寫下" aria-label="寫下" disabled={!canEdit} onClick={() => addAtView("flow")}><span>✎</span>寫下</button>
           <button
             type="button"
             className={connectMode ? "is-active" : ""}
