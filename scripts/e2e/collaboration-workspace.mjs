@@ -105,6 +105,11 @@ async function openFocusActions(page) {
 }
 
 async function runWhiteboardNodeAction(page, testId) {
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="wb-focus-sheet"]') || document.querySelector('[data-testid="wb-node-actions"]'),
+    null,
+    { timeout: 8000 },
+  ).catch(() => null);
   const clicked = await page.evaluate((id) => {
     const details = document.querySelector('[data-testid="wb-focus-actions"]');
     if (details instanceof HTMLDetailsElement) details.open = true;
@@ -897,7 +902,8 @@ try {
       await sourceMsg.getByRole("button", { name: "加入白板" }).click();
       await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
-      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 10000 });
+      await openFocusActions(page);
       check("訊息「加入白板」：開板並聚焦新節點", true);
       check("節點帶 provenance（打開來源訊息鈕）", await page.getByTestId("wb-open-source-message").count() >= 1 || await page.getByTestId("whiteboard-more").count() === 1);
       await runWhiteboardNodeAction(page, "wb-open-source-message");
@@ -913,7 +919,8 @@ try {
       check("對稿頂列出現「白板 N」引用 chip", (await page.getByTestId("board-refs-chip").first().innerText()).includes("白板"));
       await page.getByTestId("board-refs-chip").first().click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
-      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 10000 });
+      await openFocusActions(page);
       check("chip 跳回白板並聚焦引用節點", true);
 
       // S14：焦點只套一次 — 之後任何節點變動（打字/新增）不得再搶相機
@@ -936,7 +943,8 @@ try {
       // （S14 那段新增了便利貼＝選取已換人，先選回內容卡）
       await dismissSelection(page);
       await searchNode(page, "擺攤文宣");
-      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 10000 });
+      await openFocusActions(page);
       await runWhiteboardNodeAction(page, "wb-open-content");
       await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
       check("Focus 上可疊對稿 overlay（板不卸載）", (await page.getByTestId("wb-canvas").count()) === 1);

@@ -161,7 +161,7 @@ try {
 
     // 選取態：點第一個節點 → 情境列
     await page.locator(".wb-node").first().click({ force: true });
-    await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 8000 });
+    await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 8000 });
     await page.waitForTimeout(250);
     await shot(page, `${size.name}-selected`);
 
