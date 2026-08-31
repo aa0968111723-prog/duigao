@@ -82,6 +82,15 @@ export function unreadCount(
   return idx < 0 ? 0 : sorted.length - idx;
 }
 
+/**
+ * Bound-room unread is a cloud watermark. A failed write (missing
+ * room_discussion_reads, RLS, network) must not hide jump-first-unread.
+ */
+export function applyReadWatermarkAfterCloudAck<T>(next: T, ok: boolean): T | null {
+  if (!ok) return null;
+  return next;
+}
+
 /** Watermark only moves forward along createdAt. */
 export function nextReadWatermark(
   current: DiscussionReadWatermark | null | undefined,

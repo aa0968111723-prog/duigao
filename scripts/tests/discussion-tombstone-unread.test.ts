@@ -9,6 +9,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  applyReadWatermarkAfterCloudAck,
   canEditDiscussion,
   canTombstoneDiscussion,
   discussionTombstonePatch,
@@ -209,4 +210,16 @@ test("T-09 realtime: tombstone 是 upsert，硬刪事件也要變成墓碑而不
   const again = applyDiscussionRealtime(tomb.messages, { op: "delete", id: "m1" });
   assert.equal(again.applied, false);
   assert.equal(again.messages.length, 1);
+});
+
+test("T-12: 雲端未讀水位沒 ack 不得先收起 jump-first-unread", () => {
+  const next = { roomId: "r1", lastReadMessageId: "m1", lastReadAt: 10 };
+  assert.equal(applyReadWatermarkAfterCloudAck(next, false), null);
+  assert.deepEqual(applyReadWatermarkAfterCloudAck(next, true), next);
+  const app = src("src/App.tsx");
+  assert.match(app, /applyReadWatermarkAfterCloudAck/);
+  assert.doesNotMatch(
+    app,
+    /setDiscussionRead\(next\)[\s\S]{0,220}void cloudRef\.current\.writes\.upsertDiscussionRead/,
+  );
 });
