@@ -321,6 +321,19 @@ test("composeMaterials 排除紙底與當前版，素材庫與文宣去重且偏
   assert.equal(list.length, 2);
 });
 
+test("composeMaterials 看得到其他分支的文宣，不限當前 branch slice", () => {
+  const list = listComposeMaterials({
+    versions: [
+      { id: "v_paper", label: "紙底", filename: "紙底.png", imageDataUrl: "data:image/png;base64,PAPERPAPERPAPER" },
+      { id: "v_other", label: "演講文宣 · 初稿", imageDataUrl: "data:image/png;base64,POSTERPOSTER", kind: "image" },
+    ],
+    library: [],
+    editingVersionId: "v_paper",
+  });
+  assert.equal(list.length, 1);
+  assert.equal(list[0].versionId, "v_other");
+});
+
 test("composeMaterials 排除影片版本與影片素材庫列", () => {
   const list = listComposeMaterials({
     versions: [

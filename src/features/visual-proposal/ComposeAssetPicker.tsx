@@ -94,6 +94,7 @@ const STUB_DOC: VisualProposal = {
 
 export function useComposeAssetPick(opts: {
   versions: Version[];
+  branches?: { id: string; name: string }[];
   editingVersionId: string;
   listLibrary?: () => Promise<LibraryAsset[]>;
   resolveMaterial?: (material: ComposeMaterial) => Promise<string>;
@@ -122,9 +123,13 @@ export function useComposeAssetPick(opts: {
         }
       }
       if (cancelled) return;
+      const labeled = opts.versions.map((version) => {
+        const branch = opts.branches?.find((item) => item.id === version.branchId);
+        return branch ? { ...version, label: `${branch.name} · ${version.label}` } : version;
+      });
       setMaterials(
         listComposeMaterials({
-          versions: opts.versions,
+          versions: labeled,
           library,
           editingVersionId: opts.editingVersionId,
         }),
@@ -135,7 +140,7 @@ export function useComposeAssetPick(opts: {
     return () => {
       cancelled = true;
     };
-  }, [open, opts.versions, opts.editingVersionId, opts.listLibrary]);
+  }, [open, opts.versions, opts.branches, opts.editingVersionId, opts.listLibrary]);
 
   useEffect(() => {
     const onOpen = () => {

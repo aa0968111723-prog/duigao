@@ -173,7 +173,8 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
               showToast={api.showToast}
               canManage={api.canManage}
               onSaveVersion={api.saveComposeVersion}
-              versions={room.versions}
+              versions={api.composeVersions ?? room.versions}
+              branches={room.branches}
               listLibrary={api.listComposeLibrary}
               resolveMaterial={api.resolveComposeMaterial}
               pref={{

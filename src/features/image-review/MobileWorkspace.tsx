@@ -364,7 +364,8 @@ export function MobileWorkspace({ api, presence }: Props) {
             pin={proposalPinBinding}
             canManage={api.canManage}
             onSaveVersion={api.saveComposeVersion}
-            versions={room.versions}
+            versions={api.composeVersions ?? room.versions}
+            branches={room.branches}
             listLibrary={api.listComposeLibrary}
             resolveMaterial={api.resolveComposeMaterial}
             pref={{

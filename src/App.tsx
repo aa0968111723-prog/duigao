@@ -3592,6 +3592,7 @@ export function App() {
         syncCanvaVersion,
         canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
         saveComposeVersion: savePosterComposeVersion,
+        composeVersions: normalizedRoom?.versions ?? reviewRoom.versions,
         listComposeLibrary,
         resolveComposeMaterial,
         setTitle: (title) => {

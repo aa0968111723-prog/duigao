@@ -31,6 +31,7 @@ type Props = {
   canManage?: boolean;
   onSaveVersion?: () => Promise<void>;
   versions?: Version[];
+  branches?: { id: string; name: string }[];
   listLibrary?: () => Promise<LibraryAsset[]>;
   resolveMaterial?: (material: ComposeMaterial) => Promise<string>;
 };
@@ -44,6 +45,7 @@ export function ProposalControls({
   canManage = false,
   onSaveVersion,
   versions = [],
+  branches,
   listLibrary,
   resolveMaterial,
 }: Props) {
@@ -51,6 +53,7 @@ export function ProposalControls({
   const [pickText, setPickText] = useState(false);
   const roomPick = useComposeAssetPick({
     versions,
+    branches,
     editingVersionId: versionId,
     listLibrary,
     resolveMaterial,

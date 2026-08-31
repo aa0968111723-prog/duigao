@@ -131,6 +131,8 @@ export type WorkspaceApi = {
   canManage: boolean;
   /** Export the working layer as a new poster version. Never overwrites the old one. */
   saveComposeVersion: () => Promise<void>;
+  /** Full-room versions for compose pick (not the current-branch slice). */
+  composeVersions?: import("../lib/types").Version[];
   /** Room + library rows for compose pick. App owns the Supabase client. */
   listComposeLibrary?: () => Promise<LibraryAsset[]>;
   /** Resolve a picked material to a canvas-safe data URL. Never a Storage path. */
