@@ -16,6 +16,11 @@ import type { BoardAiPreview } from "./aiPreview";
 
 export type FocusSource = "discussion" | "version" | "schedule" | "none";
 
+export type TreeBranchChip = {
+  id: string;
+  label: string;
+};
+
 export type BoardFocusCard = {
   nodeId: string;
   title: string;
@@ -25,6 +30,9 @@ export type BoardFocusCard = {
   lastWriter: string | null;
   treePath?: string;
   treeRootId?: string;
+  parentId?: string;
+  parentLabel?: string;
+  childBranches: TreeBranchChip[];
   colleaguePrompt: string;
 };
 
@@ -110,6 +118,12 @@ export function focusCardFromNode(
   const path = ctx?.nodes && ctx.edges
     ? enrollmentTreePath(node, ctx.nodes, ctx.edges)
     : null;
+  const byId = new Map((ctx?.nodes ?? []).map((item) => [item.id, item]));
+  const labelOf = (id: string | null | undefined) => {
+    if (!id) return "";
+    const item = byId.get(id);
+    return (item?.content.text || item?.content.title || "").trim();
+  };
   const sourceLabel = path?.text
     || node.content.sourceLabel?.trim()
     || focusSourceLabel(source);
@@ -122,6 +136,9 @@ export function focusCardFromNode(
     lastWriter: node.content.lastWriterName?.trim() || null,
     treePath: path?.text,
     treeRootId: path?.rootId,
+    parentId: path?.parentId ?? undefined,
+    parentLabel: path && path.labels.length > 1 ? path.labels[path.labels.length - 2] : undefined,
+    childBranches: (path?.childIds ?? []).map((id) => ({ id, label: labelOf(id) })).filter((item) => item.label),
     colleaguePrompt: enrollmentColleaguePrompt(path?.text),
   };
 }

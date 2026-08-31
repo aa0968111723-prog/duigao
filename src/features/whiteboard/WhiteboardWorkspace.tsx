@@ -237,7 +237,7 @@ const NodeView = memo(function NodeView({
     ...(node.rotation ? { transform: `rotate(${node.rotation}deg)` } : {}),
   };
   return (
-    <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type={node.nodeType}>
+    <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type={node.nodeType} data-enrollment-label={(node.content.text || node.content.title || "").trim() || undefined}>
       {node.locked ? <span className="wb-lock-badge" aria-label="已鎖定">🔒</span> : null}
       <Renderer node={node} editing={editing} canEdit={canEdit} onChangeText={onChangeText} />
     </div>
@@ -1231,8 +1231,14 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     api.onUpsertNodes(planted.nodes, "now");
     for (const edge of planted.edges) api.onCreateEdge(edge);
     setSelected([planted.rootId]);
-    const root = planted.nodes.find((item) => item.id === planted.rootId);
-    if (root) setCamera(focusCamera(root, viewport, camera.zoom));
+    setCamera(fitCamera(planted.nodes, viewport, 48));
+  };
+
+  const focusEnrollmentBranch = (nodeId: string) => {
+    const next = liveNodes.find((item) => item.id === nodeId);
+    if (!next) return;
+    setSelected([next.id]);
+    setCamera(focusCamera(next, viewport, Math.min(camera.zoom, 1.05)));
   };
 
   const beginRelationship = () => {
@@ -2281,6 +2287,20 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
                 {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
                 {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
+                {focusCard.childBranches.length > 0 ? (
+                  <div className="wb-tree-children" data-testid="wb-tree-children">
+                    <small>點一支就討論那條</small>
+                    {focusCard.childBranches.map((child) => (
+                      <button
+                        key={child.id}
+                        type="button"
+                        data-testid="wb-tree-child"
+                        data-tree-label={child.label}
+                        onClick={() => focusEnrollmentBranch(child.id)}
+                      >{child.label}</button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -2529,6 +2549,20 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
           {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
           {api.roomFocusId === focusCard.nodeId ? <small>大家正在看這張</small> : null}
+          {focusCard.childBranches.length > 0 ? (
+            <div className="wb-tree-children" data-testid="wb-tree-children">
+              <small>點一支就討論那條</small>
+              {focusCard.childBranches.map((child) => (
+                <button
+                  key={child.id}
+                  type="button"
+                  data-testid="wb-tree-child"
+                  data-tree-label={child.label}
+                  onClick={() => focusEnrollmentBranch(child.id)}
+                >{child.label}</button>
+              ))}
+            </div>
+          ) : null}
         </aside>
       )}
     </div>,

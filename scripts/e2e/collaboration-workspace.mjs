@@ -1607,13 +1607,17 @@ try {
       await page.getByRole("button", { name: "建立白板" }).click();
       await page.waitForSelector('[data-testid="wb-start-enrollment-tree"]', { timeout: 10000 });
       await page.getByTestId("wb-start-enrollment-tree").click();
-      await page.waitForSelector("text=招生短片", { timeout: 8000 });
-      check("種樹後看得到招生短片節點", await page.getByText("招生短片", { exact: true }).count() >= 1);
-      await page.getByText("招生短片", { exact: true }).click();
+      await page.waitForSelector('[data-testid="wb-tree-children"]', { timeout: 8000 });
+      check("種樹後焦點卡列出支線", await page.locator('[data-testid="wb-tree-child"][data-tree-label="影片"]').count() >= 1);
+      await page.locator('[data-testid="wb-tree-child"][data-tree-label="影片"]').first().click();
+      await page.waitForSelector('[data-testid="wb-tree-child"][data-tree-label="招生短片"]', { timeout: 8000 });
+      await page.locator('[data-testid="wb-tree-child"][data-tree-label="招生短片"]').first().click();
       await page.waitForSelector('[data-testid="wb-tree-path"]', { timeout: 8000 });
       const pathText = (await page.getByTestId("wb-tree-path").first().textContent()) ?? "";
       check("點招生短片看得到樹路徑", pathText.includes("2026招生樹") && pathText.includes("影片") && pathText.includes("招生短片"), pathText);
-      await page.screenshot({ path: join("/opt/cursor/artifacts", "enrollment_tree_discuss_390.png") });
+      const emptyCopy = (await page.getByTestId("focus-discuss-empty").first().textContent().catch(() => "")) ?? "";
+      check("討論框對準招生短片路徑", emptyCopy.includes("招生短片") || pathText.includes("招生短片"), emptyCopy || pathText);
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "enrollment_tree_path_390.png") });
     } catch (error) {
       check("2026招生樹可討論", false, error instanceof Error ? error.message : String(error));
     } finally {

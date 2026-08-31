@@ -55,7 +55,11 @@ test("點招生短片：路徑是 2026招生樹 › 影片 › 招生短片", ()
   assert.equal(isEnrollmentTree2026(path), true);
   const card = focusCardFromNode(clip!, { nodes: tree.nodes, edges: tree.edges });
   assert.equal(card.treePath, "2026招生樹 › 影片 › 招生短片");
+  assert.deepEqual(card.childBranches, []);
+  assert.equal(card.parentLabel, "影片");
   assert.match(card.colleaguePrompt, /2026招生樹 › 影片 › 招生短片/);
+  const rootCard = focusCardFromNode(tree.nodes[0], { nodes: tree.nodes, edges: tree.edges });
+  assert.deepEqual(rootCard.childBranches.map((item) => item.label), ["文宣", "影片", "企劃", "擺攤", "時程"]);
   const payload = discussionPayloadFromEnrollmentNode(clip!, tree.nodes, tree.edges, "淡江招生房");
   assert.equal(payload.nodeId, clip!.id);
   assert.equal(payload.treePath, "2026招生樹 › 影片 › 招生短片");
