@@ -25,6 +25,11 @@ import {
 import { FONT_STYLES } from "../../src/features/visual-proposal/helpers.ts";
 import { COMPOSE_FONT_FACES } from "../../src/features/visual-proposal/composeFonts.ts";
 import { imageItemFromCatalogHit, searchOpenStickers } from "../../src/features/visual-proposal/openCatalog.ts";
+import {
+  composeLayerFlags,
+  startComposeEditing,
+  stopComposeEditing,
+} from "../../src/features/visual-proposal/store.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -317,6 +322,29 @@ test("看稿與改稿工具列互斥：editor-mode、compose-exit、compose 沒�
   assert.match(dock, /原稿不會被改/);
   assert.match(chrome, /FIRST_LAYER_TABS = \["對話", "白板"\]/);
   assert.doesNotMatch(chrome, /FIRST_LAYER_TABS = \["對話", "白板",/);
+});
+
+test("stopComposeEditing clears layerEditing so 完成 cannot auto-reopen compose", () => {
+  const roomId = "room-exit-compose";
+  const author = { id: "u1", name: "主辦", color: "#000" };
+  startComposeEditing(roomId, "v_old", author);
+  assert.equal(composeLayerFlags(roomId).editing, true);
+  assert.equal(composeLayerFlags(roomId).viewMode, "proposal");
+  stopComposeEditing(roomId);
+  assert.equal(composeLayerFlags(roomId).editing, false);
+  assert.equal(composeLayerFlags(roomId).viewMode, "original");
+  const mobile = src("src/features/image-review/MobileWorkspace.tsx");
+  const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
+  for (const file of [mobile, desktop]) {
+    const stopAt = file.indexOf("stopComposeEditing(room.id)");
+    const closeAt = file.indexOf("setProposalSession(null)", stopAt);
+    const deskCloseAt = file.indexOf("setComposeSession(false)", stopAt);
+    assert.ok(stopAt >= 0, "exit must call stopComposeEditing");
+    assert.ok(
+      (closeAt > stopAt) || (deskCloseAt > stopAt),
+      "session must close after stopComposeEditing so layerEditing cannot reopen compose",
+    );
+  }
 });
 
 test("開源圖庫搜尋 fixture 落成 raster image item，不是 SVG 存檔", () => {

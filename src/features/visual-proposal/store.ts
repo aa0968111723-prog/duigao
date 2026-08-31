@@ -1124,6 +1124,22 @@ export function startComposeEditing(roomId: string, versionId: string, author: P
   persist(roomId);
 }
 
+/** Leave compose without writing versions. Work-layer docs stay in the store. */
+export function stopComposeEditing(roomId: string): void {
+  const current = snapshot(roomId);
+  set(roomId, {
+    ...current,
+    editing: false,
+    selectedItemId: null,
+    viewMode: "original",
+  });
+}
+
+export function composeLayerFlags(roomId: string): { editing: boolean; viewMode: string } {
+  const current = snapshot(roomId);
+  return { editing: current.editing, viewMode: current.viewMode };
+}
+
 /** Copy the working layer onto a newly saved version. Old version docs stay. */
 export function cloneProposalsInStore(roomId: string, fromVersionId: string, toVersionId: string): void {
   const current = snapshot(roomId);

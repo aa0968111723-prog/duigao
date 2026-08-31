@@ -110,6 +110,31 @@ async function assertCompose(page, label) {
   return chrome;
 }
 
+async function assertReview(page, label, reviewName) {
+  await page.getByTestId("compose-exit").click();
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="editor-mode"]')?.getAttribute("data-mode") === "review",
+    null,
+    { timeout: 10000 },
+  );
+  const chrome = await page.evaluate((name) => {
+    const root = document.querySelector('[data-testid="editor-mode"]');
+    const reviewBtn = [...document.querySelectorAll("button")].some((el) => (el.textContent || "").replace(/\s+/g, "") === name);
+    return {
+      mode: root?.getAttribute("data-mode") || "",
+      exit: document.querySelectorAll('[data-testid="compose-exit"]').length,
+      reviewBtn,
+      img: (document.querySelector("img.stage-img")?.naturalWidth ?? 0) > 0,
+    };
+  }, reviewName);
+  console.log(label, "after exit", chrome);
+  if (chrome.mode !== "review") throw new Error(`${label}: still compose after 完成 (${chrome.mode})`);
+  if (chrome.exit !== 0) throw new Error(`${label}: compose-exit still mounted`);
+  if (!chrome.reviewBtn) throw new Error(`${label}: ${reviewName} not visible after 完成`);
+  if (!chrome.img) throw new Error(`${label}: poster image gone after 完成`);
+  return chrome;
+}
+
 const tempRoot = mkdtempSync(join(process.env.TEMP ?? process.cwd(), "duigao-compose-shot-"));
 const dist = join(tempRoot, "cloud");
 let mock;
@@ -146,6 +171,8 @@ try {
   await assertCompose(phonePage, "390");
   await phonePage.screenshot({ path: join(ARTIFACTS, "compose-390.png"), fullPage: false });
   console.log("wrote", join(ARTIFACTS, "compose-390.png"));
+  await assertReview(phonePage, "390", "修改");
+  await phonePage.screenshot({ path: join(ARTIFACTS, "compose-390-review.png"), fullPage: false });
   await phone.close();
 
   const desk = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -157,9 +184,15 @@ try {
   await assertCompose(deskPage, "desktop");
   await deskPage.screenshot({ path: join(ARTIFACTS, "compose-desktop.png"), fullPage: false });
   console.log("wrote", join(ARTIFACTS, "compose-desktop.png"));
+  await assertReview(deskPage, "desktop", "修改點");
+  await deskPage.screenshot({ path: join(ARTIFACTS, "compose-desktop-review.png"), fullPage: false });
   await desk.close();
 
-  writeFileSync(join(ARTIFACTS, "compose-shots.log"), "PASS compose-390.png compose-desktop.png editor-mode=compose compose-exit present no pin\n", "utf8");
+  writeFileSync(
+    join(ARTIFACTS, "compose-shots.log"),
+    "PASS compose then 完成→review on 390 and desktop; editor-mode=review; 修改/修改點 visible; compose-exit gone\n",
+    "utf8",
+  );
   console.log("PASS");
 } catch (err) {
   const msg = String(err && err.stack ? err.stack : err);

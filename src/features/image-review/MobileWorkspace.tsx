@@ -4,7 +4,7 @@ import type { CollabStatus } from "../../lib/peer";
 import { useViewport } from "../../hooks/useViewport";
 import { loadFlag, saveFlag } from "../../lib/store";
 import { ComposeExitBar, ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
-import { pruneProposalVersions, startComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
+import { pruneProposalVersions, startComposeEditing, stopComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
@@ -99,6 +99,8 @@ export function MobileWorkspace({ api, presence }: Props) {
     },
     onOpen: (commentId: string) => {
       const target = room.comments.find((c) => c.id === commentId);
+      stopComposeEditing(room.id);
+      proposalStore.setEditing(false);
       setProposalSession(null);
       if (!target) return;
       api.setTool("pan");
@@ -116,6 +118,14 @@ export function MobileWorkspace({ api, presence }: Props) {
       room.versions.map((v) => v.id),
     );
   }, [room.id, room.versions]);
+
+  const exitCompose = () => {
+    stopComposeEditing(room.id);
+    proposalStore.setEditing(false);
+    proposalStore.setViewMode("original");
+    proposalStore.selectItem(null);
+    setProposalSession(null);
+  };
 
   useEffect(() => {
     if (proposalStore.layerEditing && !proposalSession) {
@@ -337,7 +347,7 @@ export function MobileWorkspace({ api, presence }: Props) {
       {proposalMode && (
         <ComposeExitBar
           title={proposalStore.active?.title || "提案"}
-          onExit={() => setProposalSession(null)}
+          onExit={exitCompose}
         />
       )}
 
@@ -372,7 +382,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             versionId={visibleVersionId}
             author={api.guest}
             showToast={api.showToast}
-            onExit={() => setProposalSession(null)}
+            onExit={exitCompose}
             onHeight={setDockHeight}
             intent={proposalSession.intent}
             pin={proposalPinBinding}

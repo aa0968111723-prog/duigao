@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ColorMode, CompareMode, Tool } from "../../lib/types";
 import { ComposeExitBar, ProposalDock } from "../visual-proposal/ProposalDock";
 import { ProposalQuickElement } from "../visual-proposal/ProposalQuickElement";
-import { pruneProposalVersions, startComposeEditing, useProposalStore } from "../visual-proposal/store";
+import { pruneProposalVersions, startComposeEditing, stopComposeEditing, useProposalStore } from "../visual-proposal/store";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
@@ -64,10 +64,11 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   };
 
   const exitCompose = () => {
-    setComposeSession(false);
+    stopComposeEditing(room.id);
     proposal.setEditing(false);
     proposal.setViewMode("original");
     proposal.selectItem(null);
+    setComposeSession(false);
   };
 
   return (
