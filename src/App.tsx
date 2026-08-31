@@ -1905,6 +1905,7 @@ export function App() {
       }
       cloneProposalsInStore(current.id, oldVersion.id, created.id);
       setView((v) => ({ ...v, versionId: created.id, compareMode: "single" }));
+      window.dispatchEvent(new Event("duigao-compose-version-saved"));
       showToast(`已存成${created.label}。${oldVersion.label}還在，討論釘也還在。`, { tone: "success" });
     } catch (err) {
       showToast(err instanceof Error ? err.message : "存成新版本失敗，還在這一版，請再試一次。", { tone: "error" });

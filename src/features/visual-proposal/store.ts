@@ -2,6 +2,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { uid } from "../../lib/id";
 import { cloneProposalDocsToVersion } from "./saveComposeVersion";
 import { mergeActiveByVersionForHydrate, mergeProposalDocsForHydrate } from "./mergeHydrate";
+import { parseCrop, replaceImageKeepingBox, resetImageGeometry, type CropInsets } from "./quickEdit";
 
 export type ProposalAlign = "left" | "center" | "right";
 export type TextRole = "title" | "subtitle" | "body" | "date" | "place" | "cta" | "custom";
@@ -75,6 +76,8 @@ export type ProposalImageItem = ProposalItemBase & {
   type: "image";
   name: string;
   imageDataUrl: string;
+  /** Normalized insets 0–1. Absent / zeros = no crop. Display is CSS-only. */
+  crop?: CropInsets;
 };
 
 /** A plain colour block: the cheapest way to say "put something solid here". */
@@ -240,7 +243,8 @@ export function normalizeItem(raw: unknown): ProposalItem | null {
   if (item.type === "image") {
     const img = item as Partial<ProposalImageItem>;
     if (typeof img.imageDataUrl !== "string") return null;
-    return { ...base, type: "image", name: img.name ?? "素材", imageDataUrl: img.imageDataUrl };
+    const crop = parseCrop(img.crop);
+    return { ...base, type: "image", name: img.name ?? "素材", imageDataUrl: img.imageDataUrl, ...(crop ? { crop } : {}) };
   }
   if (item.type === "shape") {
     const shape = item as Partial<ProposalShapeItem>;
@@ -996,7 +1000,24 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
     [commit],
   );
 
-  const resetItemPosition = useCallback((id: string) => updateItem(id, { x: 0.5, y: 0.5, rotation: 0 }), [updateItem]);
+  const resetItemPosition = useCallback(
+    (id: string) => {
+      const item = active?.items.find((entry) => entry.id === id);
+      if (!item) return;
+      if (item.type === "image") updateItem(id, resetImageGeometry(item));
+      else updateItem(id, { x: 0.5, y: 0.5, rotation: 0 });
+    },
+    [active, updateItem],
+  );
+
+  const replaceSelectedImage = useCallback(
+    (src: { imageDataUrl: string; name: string }) => {
+      if (!selectedItem || selectedItem.type !== "image") return;
+      const next = replaceImageKeepingBox(selectedItem, src);
+      updateItem(selectedItem.id, { imageDataUrl: next.imageDataUrl, name: next.name });
+    },
+    [selectedItem, updateItem],
+  );
 
   const setBackground = useCallback(
     (patch: Partial<ProposalBackground>) => commit((doc) => ({ ...doc, background: { ...doc.background, ...patch } })),
@@ -1088,6 +1109,7 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
     duplicateItem,
     reorderItem,
     resetItemPosition,
+    replaceSelectedImage,
     setBackground,
     setBackgroundLive,
     removeBackgroundImage,

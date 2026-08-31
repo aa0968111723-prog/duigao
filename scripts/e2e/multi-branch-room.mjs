@@ -317,6 +317,15 @@ try {
     await page.getByTestId("poster-add-asset-input").setInputFiles({ name: "社徽.png", mimeType: "image/png", buffer: TINY_PNG });
     await page.waitForSelector(".proposal-image", { timeout: 15000 });
     check("工作層出現自己的圖", await page.locator(".proposal-image").count() > 0);
+    await page.locator(".proposal-image").last().click();
+    const barVisible = await page.getByTestId("quick-edit-bar").waitFor({ state: "visible", timeout: 8000 }).then(() => true).catch(() => false);
+    check("選取素材後出現快捷列", barVisible && await page.getByTestId("quick-edit-bar").count() === 1);
+    check("邊看邊修提示在", await page.getByTestId("live-edit-hint").count() === 1);
+    if (barVisible) {
+      await page.getByTestId("quick-edit-bar").getByRole("button", { name: "裁剪" }).click();
+      check("裁剪模式出現手柄", await page.getByTestId("crop-handle-se").count() === 1);
+      await page.getByTestId("quick-edit-bar").getByRole("button", { name: "取消" }).click({ force: true });
+    }
     await page.getByTestId("poster-save-version").click();
     const saved = await page.waitForFunction(
       () => Array.from(document.querySelectorAll(".m-vchip")).some((el) => (el.textContent || "").includes("改一")),

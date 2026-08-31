@@ -1,15 +1,35 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useProposalStore, type ProposalAuthor, type ProposalItem } from "./store";
 import { OPEN_COMPOSE_PICKER_EVENT } from "./ComposeAssetPicker";
-import { backgroundColorCss, clamp, hexToRgba, objectFitFor, proposalTypeLabel } from "./helpers";
+import { backgroundColorCss, clamp, hexToRgba, objectFitFor, prepareImageFile, proposalTypeLabel } from "./helpers";
 import { ensureComposeFonts } from "./composeFonts";
+import { OpenStickerPicker } from "./OpenStickerPicker";
+import { QuickEditBar } from "./QuickEditBar";
+import {
+  applyCropDrag,
+  clampCrop,
+  CROP_HANDLE_POS,
+  CROP_HANDLES,
+  cropClipPath,
+  cropObjectPosition,
+  IDENTITY_CROP,
+  nudgePosition,
+  type CropHandle,
+  type CropInsets,
+} from "./quickEdit";
+import type { ShowToast } from "../../toast";
 import "./proposal.css";
+
+export const COMPOSE_VERSION_SAVED_EVENT = "duigao-compose-version-saved";
 
 type Props = {
   roomId: string;
   versionId: string;
   author: ProposalAuthor;
   compact?: boolean;
+  canManage?: boolean;
+  showToast?: ShowToast;
+  onBeginCrop?: () => void;
 };
 
 const SAFE = 0.06;
@@ -48,14 +68,127 @@ function angle(a: { x: number; y: number }, b: { x: number; y: number }) {
   return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
 }
 
-export function VisualProposalOverlay({ roomId, versionId, author, compact }: Props) {
+export function VisualProposalOverlay({
+  roomId,
+  versionId,
+  author,
+  compact,
+  canManage = false,
+  showToast,
+  onBeginCrop,
+}: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   useEffect(() => { ensureComposeFonts(); }, []);
   const gesture = useRef<Gesture | null>(null);
   const resize = useRef<{ id: string; cx: number; cy: number; startDist: number; startWidth: number } | null>(null);
+  const cropDrag = useRef<{
+    handle: CropHandle;
+    start: CropInsets;
+    clientX: number;
+    clientY: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const nudgeHold = useRef<ReturnType<typeof setInterval> | null>(null);
+  const nudgeTicks = useRef(0);
+  const replaceFileRef = useRef<HTMLInputElement>(null);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
+  const [quickTool, setQuickTool] = useState<"move" | "crop">("move");
+  const [cropMode, setCropMode] = useState(false);
+  const [cropDraft, setCropDraft] = useState<CropInsets>(IDENTITY_CROP);
+  const [liveHint, setLiveHint] = useState<"watching" | "saved">("watching");
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [stickerOpen, setStickerOpen] = useState(false);
 
   const { active, editing, visible, viewMode, compareSplit, selectedItem, layerEditing } = proposal;
+  const selectedRef = useRef(selectedItem);
+  selectedRef.current = selectedItem;
+
+  const cancelCrop = () => {
+    setCropMode(false);
+    setQuickTool("move");
+    setCropDraft(selectedItem?.type === "image" ? clampCrop(selectedItem.crop) : IDENTITY_CROP);
+  };
+
+  const replaceFromFile = async (file: File) => {
+    try {
+      const prepared = await prepareImageFile(file);
+      proposal.replaceSelectedImage({ imageDataUrl: prepared.dataUrl, name: prepared.name });
+      setReplaceOpen(false);
+      setStickerOpen(false);
+      showToast?.(prepared.note ?? "已換圖，框位還在");
+    } catch (err) {
+      showToast?.(err instanceof Error ? err.message : "換圖失敗，請再試一次", { tone: "error" });
+    }
+  };
+
+  useEffect(() => {
+    const onSaved = () => setLiveHint("saved");
+    window.addEventListener(COMPOSE_VERSION_SAVED_EVENT, onSaved);
+    return () => window.removeEventListener(COMPOSE_VERSION_SAVED_EVENT, onSaved);
+  }, []);
+
+  useEffect(() => {
+    if (editing) setLiveHint((prev) => (prev === "saved" ? "saved" : "watching"));
+  }, [editing]);
+
+  useEffect(() => {
+    if (selectedItem?.type !== "image") {
+      setCropMode(false);
+      setQuickTool("move");
+      setReplaceOpen(false);
+      setStickerOpen(false);
+    }
+  }, [selectedItem?.id, selectedItem?.type]);
+
+  useEffect(() => {
+    if (!editing || !canManage || !selectedItem) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) {
+        return;
+      }
+      const step = event.shiftKey ? 0.03 : 0.01;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        proposal.updateItem(selectedItem.id, nudgePosition(selectedItem.x, selectedItem.y, -step, 0));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        proposal.updateItem(selectedItem.id, nudgePosition(selectedItem.x, selectedItem.y, step, 0));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        proposal.updateItem(selectedItem.id, nudgePosition(selectedItem.x, selectedItem.y, 0, -step));
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        proposal.updateItem(selectedItem.id, nudgePosition(selectedItem.x, selectedItem.y, 0, step));
+      } else if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        proposal.deleteItem(selectedItem.id);
+      } else if (event.key === "Escape" && cropMode) {
+        event.preventDefault();
+        cancelCrop();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canManage, cropMode, editing, proposal, selectedItem]);
+
+  useEffect(() => {
+    if (!editing || !canManage) return;
+    const onPaste = (event: ClipboardEvent) => {
+      if (selectedItem?.type !== "image") return;
+      const file = [...(event.clipboardData?.files ?? [])].find((entry) => entry.type.startsWith("image/"));
+      if (!file) return;
+      event.preventDefault();
+      void replaceFromFile(file);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [canManage, editing, selectedItem]);
+
+  useEffect(() => () => {
+    if (nudgeHold.current) clearInterval(nudgeHold.current);
+  }, []);
 
   // 原稿 mode hides the paint — but keep the layer mounted while composing.
   // Hook `editing` is gated on viewMode==="proposal"; layerEditing is the raw
@@ -68,6 +201,9 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
   const comparing = viewMode === "compare";
   // 對照: the proposal only paints to the right of the split, original shows left.
   const clip = comparing ? { clipPath: `inset(0 0 0 ${compareSplit * 100}%)` } : undefined;
+  const pickable = canManage && !editing;
+  const showQuick = Boolean(canManage && editing && selectedItem);
+  const imageCount = active.items.filter((item) => item.type === "image").length;
 
   const twoPointers = (g: Gesture) => Array.from(g.pointers.values());
 
@@ -94,9 +230,14 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
   };
 
   const onItemPointerDown = (event: ReactPointerEvent<HTMLElement>, item: ProposalItem) => {
-    if (!editing) return;
+    if (!canManage) return;
     event.stopPropagation();
     proposal.selectItem(item.id);
+    if (!editing) {
+      proposal.setEditing(true);
+      return;
+    }
+    if (cropMode) return;
     const layer = event.currentTarget.closest(".proposal-layer") as HTMLElement | null;
     if (!layer) return;
     const rect = layer.getBoundingClientRect();
@@ -169,7 +310,7 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
 
   // Corner resize handle (mouse / single-finger): scale width from centre distance.
   const onHandleDown = (event: ReactPointerEvent<HTMLElement>) => {
-    if (!selectedItem) return;
+    if (!selectedItem || cropMode) return;
     event.stopPropagation();
     const layer = event.currentTarget.closest(".proposal-layer") as HTMLElement | null;
     if (!layer) return;
@@ -195,13 +336,95 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
     proposal.endEdit();
   };
 
+  const startCrop = () => {
+    if (!selectedItem || selectedItem.type !== "image") return;
+    setQuickTool("crop");
+    setCropMode(true);
+    setCropDraft(clampCrop(selectedItem.crop));
+    onBeginCrop?.();
+  };
+
+  const confirmCrop = () => {
+    if (!selectedItem || selectedItem.type !== "image") return;
+    const next = clampCrop(cropDraft);
+    proposal.updateItem(selectedItem.id, { crop: next });
+    setCropMode(false);
+    setQuickTool("move");
+  };
+
+  const onCropHandleDown = (event: ReactPointerEvent<HTMLElement>, handle: CropHandle) => {
+    event.stopPropagation();
+    event.preventDefault();
+    const wrap = event.currentTarget.closest(".proposal-item-wrap") as HTMLElement | null;
+    if (!wrap) return;
+    const rect = wrap.getBoundingClientRect();
+    cropDrag.current = {
+      handle,
+      start: clampCrop(cropDraft),
+      clientX: event.clientX,
+      clientY: event.clientY,
+      width: rect.width || 1,
+      height: rect.height || 1,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onCropHandleMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = cropDrag.current;
+    if (!drag) return;
+    event.stopPropagation();
+    const dx = (event.clientX - drag.clientX) / drag.width;
+    const dy = (event.clientY - drag.clientY) / drag.height;
+    setCropDraft(applyCropDrag(drag.start, drag.handle, dx, dy));
+  };
+
+  const onCropHandleUp = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!cropDrag.current) return;
+    event.stopPropagation();
+    cropDrag.current = null;
+  };
+
+  const stopNudge = () => {
+    if (nudgeHold.current) {
+      clearInterval(nudgeHold.current);
+      nudgeHold.current = null;
+      proposal.endEdit();
+    }
+  };
+
+  const startNudge = (dirX: number, dirY: number) => {
+    if (!selectedItem) return;
+    stopNudge();
+    proposal.beginEdit();
+    const apply = (step: number) => {
+      const current = selectedRef.current;
+      if (!current) return;
+      proposal.updateItemLive(current.id, nudgePosition(current.x, current.y, dirX * step, dirY * step));
+    };
+    apply(0.01);
+    nudgeTicks.current = 0;
+    nudgeHold.current = setInterval(() => {
+      nudgeTicks.current += 1;
+      apply(nudgeTicks.current > 8 ? 0.03 : 0.01);
+    }, 80);
+  };
+
+  const hintText =
+    liveHint === "saved"
+      ? "已加一版，大家可對照"
+      : imageCount === 1
+        ? "大家在看這張 · 你在工作層改 · 可裁剪或換這一塊"
+        : "大家在看這張 · 你在工作層改";
+
   return (
     <div
-      className={`proposal-layer ${editing ? "is-editing" : "is-preview"} ${comparing ? "is-comparing" : ""}`}
+      className={`proposal-layer ${editing ? "is-editing" : "is-preview"} ${pickable ? "can-pick" : ""} ${comparing ? "is-comparing" : ""}`}
       data-testid="poster-compose-canvas"
+      data-cropping={cropMode ? "true" : undefined}
       onPointerDown={(event) => {
         if (!editing) return;
         event.stopPropagation();
+        if (cropMode) return;
         proposal.selectItem(null);
       }}
       aria-label={`${active.title} 視覺提案層`}
@@ -224,10 +447,15 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
             <ProposalItemView
               key={item.id}
               item={item}
-              selected={editing && selectedItem?.id === item.id}
+              selected={(editing || pickable) && selectedItem?.id === item.id}
+              crop={item.type === "image" && cropMode && selectedItem?.id === item.id ? cropDraft : item.type === "image" ? item.crop : undefined}
+              cropping={cropMode && selectedItem?.id === item.id && item.type === "image"}
               onPointerDown={onItemPointerDown}
               onPointerMove={onItemPointerMove}
               onPointerUp={onItemPointerUp}
+              onCropHandleDown={onCropHandleDown}
+              onCropHandleMove={onCropHandleMove}
+              onCropHandleUp={onCropHandleUp}
             />
           ))}
       </div>
@@ -260,7 +488,7 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
       {editing && guides.x != null && <span className="proposal-guide proposal-guide-v" style={{ left: `${guides.x * 100}%` }} aria-hidden />}
       {editing && guides.y != null && <span className="proposal-guide proposal-guide-h" style={{ top: `${guides.y * 100}%` }} aria-hidden />}
 
-      {editing && selectedItem && (
+      {editing && selectedItem && !cropMode && (
         <button
           type="button"
           className="proposal-resize-handle"
@@ -275,6 +503,76 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
           onClick={(e) => e.stopPropagation()}
           aria-label="調整大小"
         />
+      )}
+
+      {showQuick && selectedItem && (
+        <QuickEditBar
+          item={selectedItem}
+          tool={quickTool}
+          cropping={cropMode}
+          onTool={(tool) => {
+            if (tool === "crop") startCrop();
+            else cancelCrop();
+          }}
+          onRotate={(delta) => {
+            proposal.updateItem(selectedItem.id, { rotation: clamp(selectedItem.rotation + delta, -180, 180) });
+          }}
+          onCenter={(axis) => proposal.updateItem(selectedItem.id, { [axis]: 0.5 })}
+          onReplace={() => {
+            setStickerOpen(false);
+            setReplaceOpen(true);
+          }}
+          onDelete={() => proposal.deleteItem(selectedItem.id)}
+          onCropConfirm={confirmCrop}
+          onCropCancel={cancelCrop}
+          onNudgeStart={startNudge}
+          onNudgeEnd={stopNudge}
+        />
+      )}
+
+      {replaceOpen && canManage && editing && (
+        <div
+          className="quick-edit-replace"
+          data-testid="quick-edit-replace"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button type="button" onClick={() => replaceFileRef.current?.click()}>從相簿</button>
+          <button type="button" onClick={() => { setReplaceOpen(false); setStickerOpen(true); }}>開源貼圖</button>
+          <button type="button" onClick={() => setReplaceOpen(false)}>取消</button>
+        </div>
+      )}
+
+      {stickerOpen && canManage && editing && (
+        <div
+          className="quick-edit-stickers"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <OpenStickerPicker
+            onPick={(hit) => {
+              proposal.replaceSelectedImage({ imageDataUrl: hit.pngDataUrl, name: hit.name });
+              setStickerOpen(false);
+              showToast?.("已換圖，框位還在");
+            }}
+          />
+        </div>
+      )}
+
+      <input
+        ref={replaceFileRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void replaceFromFile(file);
+        }}
+      />
+
+      {canManage && editing && (
+        <p className="live-edit-hint" data-testid="live-edit-hint">
+          {hintText}
+        </p>
       )}
 
       <span className={`proposal-preview-label ${active.status === "accepted" ? "is-accepted" : ""}`}>
@@ -301,12 +599,28 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
 type ItemViewProps = {
   item: ProposalItem;
   selected: boolean;
+  crop?: CropInsets;
+  cropping?: boolean;
   onPointerDown: (e: ReactPointerEvent<HTMLElement>, item: ProposalItem) => void;
   onPointerMove: (e: ReactPointerEvent<HTMLElement>) => void;
   onPointerUp: (e: ReactPointerEvent<HTMLElement>) => void;
+  onCropHandleDown: (e: ReactPointerEvent<HTMLElement>, handle: CropHandle) => void;
+  onCropHandleMove: (e: ReactPointerEvent<HTMLElement>) => void;
+  onCropHandleUp: (e: ReactPointerEvent<HTMLElement>) => void;
 };
 
-const ProposalItemView = memo(function ProposalItemView({ item, selected, onPointerDown, onPointerMove, onPointerUp }: ItemViewProps) {
+const ProposalItemView = memo(function ProposalItemView({
+  item,
+  selected,
+  crop,
+  cropping,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onCropHandleDown,
+  onCropHandleMove,
+  onCropHandleUp,
+}: ItemViewProps) {
   const shared: CSSProperties = {
     left: `${item.x * 100}%`,
     top: `${item.y * 100}%`,
@@ -324,17 +638,41 @@ const ProposalItemView = memo(function ProposalItemView({ item, selected, onPoin
   };
 
   if (item.type === "image") {
+    const clip = cropClipPath(crop);
+    const objectPosition = cropObjectPosition(crop);
     return (
-      <button
-        type="button"
-        className={`proposal-item proposal-image ${selected ? "is-selected" : ""}`}
-        style={shared}
-        {...handlers}
-        aria-label={`素材：${item.name}`}
-        aria-pressed={selected}
-      >
-        <img src={item.imageDataUrl} alt={item.name} draggable={false} />
-      </button>
+      <div className={`proposal-item-wrap ${selected ? "is-selected-wrap" : ""}`} style={shared}>
+        <button
+          type="button"
+          className={`proposal-item proposal-image ${selected ? "is-selected" : ""}`}
+          {...handlers}
+          aria-label={`素材：${item.name}`}
+          aria-pressed={selected}
+        >
+          <img
+            src={item.imageDataUrl}
+            alt={item.name}
+            draggable={false}
+            style={clip || objectPosition ? { clipPath: clip, objectPosition } : undefined}
+          />
+        </button>
+        {cropping &&
+          CROP_HANDLES.map((handle) => (
+            <button
+              key={handle}
+              type="button"
+              className={`crop-handle crop-handle-${handle}`}
+              data-testid={`crop-handle-${handle}`}
+              style={CROP_HANDLE_POS[handle]}
+              aria-label={`裁剪 ${handle}`}
+              onPointerDown={(event) => onCropHandleDown(event, handle)}
+              onPointerMove={onCropHandleMove}
+              onPointerUp={onCropHandleUp}
+              onPointerCancel={onCropHandleUp}
+              onClick={(event) => event.stopPropagation()}
+            />
+          ))}
+      </div>
     );
   }
 
