@@ -1,5 +1,5 @@
 import { UniversalIntake } from "../../components/UniversalIntake";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useProposalStore, type ProposalAuthor } from "./store";
 import { ProposalElementControls } from "./ProposalElementControls";
 import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
@@ -16,6 +16,9 @@ import {
 } from "./helpers";
 import type { ShowToast } from "../../toast";
 import type { ProposalPrefBinding } from "./ProposalDock";
+import { imageItemFromCatalogHit } from "./openCatalog";
+import { OpenStickerPicker } from "./OpenStickerPicker";
+import { ensureComposeFonts } from "./composeFonts";
 import "./proposal.css";
 
 type Props = {
@@ -31,11 +34,13 @@ type Props = {
 export function ProposalControls({ roomId, versionId, author, showToast, pref, canManage = false, onSaveVersion }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   const [pickText, setPickText] = useState(false);
+  const [pickCatalog, setPickCatalog] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
   const active = proposal.active;
+  useEffect(() => { ensureComposeFonts(); }, []);
 
   const uploadMaterial = async (files: FileList | null) => {
     if (!canManage || !files?.length) return;
@@ -261,6 +266,14 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref, c
             <UniversalIntake profile="proposal" mode="zone" className="proposal-action poster-add-asset" onFiles={(picked) => void uploadMaterial(picked)} onReject={(reason) => showToast?.(reason, { tone: "error" })}>
               <span data-testid="poster-add-asset">＋ 素材</span>
             </UniversalIntake>
+            <button
+              type="button"
+              className={`proposal-action ${pickCatalog ? "is-on" : ""}`}
+              data-testid="poster-catalog-open"
+              onClick={() => setPickCatalog((current) => !current)}
+            >
+              開源圖庫
+            </button>
             <button type="button" className="proposal-action" onClick={() => proposal.addShape(createShapeItem())}>
               ＋ 色塊
             </button>
@@ -281,6 +294,15 @@ export function ProposalControls({ roomId, versionId, author, showToast, pref, c
               {saving ? "存檔中…" : "存成新版本"}
             </button>
           </div>
+          )}
+          {canManage && pickCatalog && (
+            <OpenStickerPicker
+              onPick={(hit) => {
+                proposal.addImage(imageItemFromCatalogHit(hit));
+                setPickCatalog(false);
+                showToast?.("已加入開源貼圖，拖到想要的位置");
+              }}
+            />
           )}
 
           {pickText && (

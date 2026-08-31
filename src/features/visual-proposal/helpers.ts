@@ -1,4 +1,5 @@
 import { uid } from "../../lib/id";
+import { composeFontFace, composeFontStack } from "./composeFonts";
 import type {
   BgImageFit,
   GradientKind,
@@ -71,16 +72,16 @@ export function objectFitFor(fit: BgImageFit): "cover" | "contain" {
   return fit === "contain" ? "contain" : "cover";
 }
 
-/** Friendly font "feel" names mapped to safe system font stacks — no engineering names. */
+/** Friendly font "feel" names mapped to loaded Traditional Chinese webfonts. */
 export type FontStyle = { key: string; label: string; stack: string; weight: number };
 
 export const FONT_STYLES: FontStyle[] = [
-  { key: "modern", label: "現代", stack: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif', weight: 700 },
-  { key: "solid", label: "穩重", stack: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif', weight: 900 },
-  { key: "soft", label: "柔和", stack: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif', weight: 400 },
-  { key: "lively", label: "活潑", stack: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif', weight: 800 },
-  { key: "serif", label: "明體", stack: '"Noto Serif TC", "Songti TC", "PMingLiU", serif', weight: 600 },
-  { key: "hand", label: "手寫感", stack: '"DFKai-SB", "BiauKai", "Noto Serif TC", cursive', weight: 500 },
+  { key: "modern", label: "現代", stack: composeFontStack("modern"), weight: composeFontFace("modern").weight },
+  { key: "solid", label: "穩重", stack: composeFontStack("solid"), weight: composeFontFace("solid").weight },
+  { key: "soft", label: "柔和", stack: composeFontStack("soft"), weight: composeFontFace("soft").weight },
+  { key: "lively", label: "活潑", stack: composeFontStack("lively"), weight: composeFontFace("lively").weight },
+  { key: "serif", label: "明體", stack: composeFontStack("serif"), weight: composeFontFace("serif").weight },
+  { key: "hand", label: "手寫感", stack: composeFontStack("hand"), weight: composeFontFace("hand").weight },
 ];
 
 export function fontStyleByKey(key: string): FontStyle {

@@ -17,6 +17,9 @@ import {
   versionIdentitiesUnchanged,
   type VersionIdentity,
 } from "../../src/features/visual-proposal/saveComposeVersion.ts";
+import { FONT_STYLES } from "../../src/features/visual-proposal/helpers.ts";
+import { COMPOSE_FONT_FACES } from "../../src/features/visual-proposal/composeFonts.ts";
+import { imageItemFromCatalogHit, searchOpenStickers } from "../../src/features/visual-proposal/openCatalog.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -283,6 +286,90 @@ test("畫布與存檔走既有 testid，不改第一層 IA", () => {
   assert.match(stage, /data-testid="poster-compose-stage"/);
   assert.match(chrome, /FIRST_LAYER_TABS = \["對話", "白板"\]/);
   assert.match(chrome, /FIRST_LAYER_TOP = \["back", "title", "presence", "voice", "more"\]/);
+});
+
+test("開源圖庫搜尋 fixture 落成 raster image item，不是 SVG 存檔", () => {
+  const hits = searchOpenStickers("茶");
+  assert.ok(hits.length >= 1);
+  assert.ok(hits[0].name);
+  const item = imageItemFromCatalogHit(hits[0]);
+  assert.equal(item.type, "image");
+  assert.equal(item.visible, true);
+  assert.match(item.imageDataUrl, /^data:image\/(png|webp|jpe?g)/i);
+  assert.doesNotMatch(item.imageDataUrl, /image\/svg\+xml/);
+  assert.throws(
+    () => imageItemFromCatalogHit({
+      id: "bad",
+      name: "向量",
+      tags: [],
+      pngDataUrl: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+    }),
+    /PNG/,
+  );
+  const fixtureHits = searchOpenStickers("自訂", [{
+    id: "fx",
+    name: "自訂貼圖",
+    tags: ["fixture"],
+    pngDataUrl: "data:image/webp;base64,AAA",
+  }]);
+  assert.equal(fixtureHits.length, 1);
+  assert.equal(fixtureHits[0].name, "自訂貼圖");
+});
+
+test("圖庫落下的可見圖讓 composeHasContent 為真；空畫布仍拒絕", () => {
+  const hit = searchOpenStickers("茶")[0];
+  const item = imageItemFromCatalogHit(hit);
+  const withSticker = emptyDoc({ items: [item] });
+  assert.equal(composeHasContent(withSticker), true);
+  assert.equal(canSaveComposeVersion(withSticker).ok, true);
+  assert.equal(composeHasContent(emptyDoc()), false);
+  assert.equal(canSaveComposeVersion(emptyDoc()).ok, false);
+});
+
+test("六種字體感覺都有可載入的繁中 webfont；手寫感不是系統楷體", () => {
+  assert.equal(FONT_STYLES.length, 6);
+  for (const style of FONT_STYLES) {
+    const face = COMPOSE_FONT_FACES.find((item) => item.key === style.key);
+    assert.ok(face, `missing webfont for ${style.key}`);
+    assert.ok(face.family);
+    assert.match(face.href, /^https:\/\//);
+    assert.match(face.src, /family=/);
+    assert.match(style.stack, new RegExp(face.family.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  const hand = FONT_STYLES.find((style) => style.key === "hand");
+  assert.ok(hand);
+  assert.match(hand.stack, /Iansui/);
+  assert.doesNotMatch(hand.stack, /DFKai-SB|BiauKai/);
+  const html = src("index.html");
+  assert.match(html, /Iansui/);
+  assert.match(html, /Noto\+Sans\+TC:wght@[^"']*900/);
+  assert.match(html, /data-compose-fonts/);
+  const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
+  assert.match(overlay, /ensureComposeFonts/);
+});
+
+test("現傳路徑與 testid 不變；圖庫入口加在＋素材旁", () => {
+  const dock = src("src/features/visual-proposal/ProposalDock.tsx");
+  const snapAt = dock.indexOf("const list = files ? Array.from(files)");
+  const clearAt = dock.indexOf("materialRef.current.value = \"\"");
+  assert.ok(snapAt >= 0 && clearAt > snapAt);
+  assert.match(dock, /＋文字/);
+  assert.match(dock, /色塊/);
+  assert.match(dock, /data-testid="poster-add-asset"/);
+  assert.match(dock, /data-testid="poster-add-asset-input"/);
+  assert.match(dock, /data-testid="poster-save-version"/);
+  assert.match(dock, /data-testid="poster-catalog-open"/);
+  assert.match(dock, /prepareImageFile/);
+  const helpers = src("src/features/visual-proposal/helpers.ts");
+  assert.match(helpers, /file\.type === "image\/svg\+xml"/);
+  const controls = src("src/features/visual-proposal/ProposalControls.tsx");
+  assert.match(controls, /createImageItem/);
+  assert.match(controls, /prepareImageFile/);
+  assert.match(controls, /data-testid="poster-catalog-open"/);
+  const quick = src("src/features/visual-proposal/ProposalQuickElement.tsx");
+  const element = src("src/features/visual-proposal/ProposalElementControls.tsx");
+  assert.match(quick, /FONT_STYLES\.map/);
+  assert.match(element, /FONT_STYLES\.map/);
 });
 
 test("純原稿隱藏 pin／svg.overlay／region-rect，工作層 overlay 仍在 ready 時畫", () => {

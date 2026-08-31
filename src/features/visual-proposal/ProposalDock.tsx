@@ -14,6 +14,9 @@ import {
   proposalStatusLabel,
   proposalTypeLabel,
 } from "./helpers";
+import { imageItemFromCatalogHit } from "./openCatalog";
+import { OpenStickerPicker } from "./OpenStickerPicker";
+import { ensureComposeFonts } from "./composeFonts";
 import type { ShowToast } from "../../toast";
 import type { ProposalPref } from "../../lib/types";
 import "./proposal.css";
@@ -55,7 +58,10 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
   const rootRef = useRef<HTMLElement>(null);
   const [panel, setPanel] = useState<Panel>("none");
   const [pickMaterial, setPickMaterial] = useState(false);
+  const [pickCatalog, setPickCatalog] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => { ensureComposeFonts(); }, []);
 
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -105,6 +111,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
 
   const addText = () => {
     setPickMaterial(false);
+    setPickCatalog(false);
     const used = active?.items.filter((i) => i.type === "text").length ?? 0;
     proposal.addText(createTextItem(TEXT_ORDER[Math.min(used, TEXT_ORDER.length - 1)]));
     setPanel("element");
@@ -112,6 +119,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
 
   const addShape = () => {
     setPickMaterial(false);
+    setPickCatalog(false);
     proposal.addShape(createShapeItem());
     setPanel("element");
   };
@@ -145,6 +153,7 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
 
   const togglePanel = (next: Panel) => {
     setPickMaterial(false);
+    setPickCatalog(false);
     setPanel((current) => (current === next ? "none" : next));
   };
 
@@ -210,7 +219,26 @@ export function ProposalDock({ roomId, versionId, author, showToast, onExit, onH
           <button type="button" className="proposal-chip" onClick={addShape}>
             色塊
           </button>
+          <button
+            type="button"
+            className={`proposal-chip ${pickCatalog ? "is-on" : ""}`}
+            data-testid="poster-catalog-open"
+            onClick={() => setPickCatalog((current) => !current)}
+          >
+            開源圖庫
+          </button>
         </div>
+      )}
+      {canManage && pickMaterial && pickCatalog && (
+        <OpenStickerPicker
+          onPick={(hit) => {
+            proposal.addImage(imageItemFromCatalogHit(hit));
+            setPickCatalog(false);
+            setPickMaterial(false);
+            setPanel("element");
+            showToast("已加入開源貼圖，拖到想要的位置");
+          }}
+        />
       )}
 
       {canManage && (
