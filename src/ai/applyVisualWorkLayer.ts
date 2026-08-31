@@ -36,14 +36,18 @@ function workLayerItems(proposal: AiProposal): Array<Record<string, unknown>> {
   const ref = text(payload.workLayerRef);
   if (proposal.type === "imagine_image" || proposal.type === "propose_add_image" || proposal.type === "imagine_video") {
     const imageDataUrl = ref ? (ref.startsWith("asset:") ? ref : `asset:${ref}`) : text(payload.preview) || "asset:pending";
+    const full = text(payload.scope) === "full";
+    const x = typeof payload.x === "number" ? payload.x : 0.5;
+    const y = typeof payload.y === "number" ? payload.y : 0.5;
+    const width = typeof payload.width === "number" ? payload.width : (full ? 100 : 40);
     return [{
       id: itemId(proposal.id, 0),
       type: "image",
       name: proposal.label.slice(0, 80) || "AI 圖",
       imageDataUrl,
-      x: 0.5,
-      y: 0.5,
-      width: 40,
+      x,
+      y,
+      width,
       rotation: 0,
       opacity: 1,
       visible: true,
