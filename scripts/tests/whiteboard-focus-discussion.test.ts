@@ -99,12 +99,14 @@ test("手機寬度 rail 不 inline；sheet 開著", () => {
   const sheetAt = workspace.indexOf('data-testid="wb-focus-sheet"');
   const addAt = workspace.indexOf('data-testid="whiteboard-add"');
   const canvasAt = workspace.indexOf('data-testid="wb-canvas"');
+  const sheetEnd = workspace.indexOf("底部：AI 預覽確認列");
   assert.ok(canvasAt > 0 && sheetAt > canvasAt && addAt > sheetAt, "sheet 必須寫在畫布裡、五鍵之前");
-  const sheetBlock = workspace.slice(sheetAt, addAt);
+  const sheetBlock = workspace.slice(sheetAt, sheetEnd > sheetAt ? sheetEnd : addAt);
   assert.match(sheetBlock, /wb-add-child/);
   assert.match(sheetBlock, /wb-next-step/);
   assert.match(sheetBlock, /打開內容/);
   assert.match(sheetBlock, /wb-focus-sheet-dismiss/);
+  assert.equal((sheetBlock.match(/wb-context-dismiss/g) ?? []).length, 1, "sheet 只能有一顆取消選取，E2E dismiss 會 strict");
   assert.match(workspace, /!phoneFocusSheet \?/);
   const askBlock = workspace.slice(workspace.indexOf("data-testid=\"wb-ai-ask\""));
   assert.match(askBlock, /onAskBoardAi/);

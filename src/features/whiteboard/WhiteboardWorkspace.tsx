@@ -2115,7 +2115,6 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     }}>問同事</button>
                   )}
                   <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>針對這張討論</button>
-                  <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
                 </div>
               </div>
               <div className="wb-focus-sheet-discussion" data-testid="wb-focus-discussion">
