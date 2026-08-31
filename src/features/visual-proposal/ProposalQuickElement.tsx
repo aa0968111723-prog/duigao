@@ -141,6 +141,30 @@ export function ProposalQuickElement({ roomId, versionId, author, showToast }: P
       />
 
       <div className="pquick-actions">
+        <button
+          type="button"
+          className="proposal-quiet"
+          data-testid="poster-layer-duplicate"
+          onClick={() => proposal.duplicateItem(selected.id)}
+        >
+          複製
+        </button>
+        <button
+          type="button"
+          className="proposal-quiet"
+          data-testid="poster-layer-forward"
+          onClick={() => proposal.reorderItem(selected.id, 1)}
+        >
+          上移
+        </button>
+        <button
+          type="button"
+          className="proposal-quiet"
+          data-testid="poster-layer-back"
+          onClick={() => proposal.reorderItem(selected.id, -1)}
+        >
+          下移
+        </button>
         <button type="button" className="proposal-quiet" onClick={() => proposal.toggleItemVisible(selected.id)}>
           {selected.visible ? "暫時隱藏" : "重新顯示"}
         </button>

@@ -1,5 +1,6 @@
 import { memo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useProposalStore, type ProposalAuthor, type ProposalItem } from "./store";
+import { OPEN_COMPOSE_PICKER_EVENT } from "./ComposeAssetPicker";
 import { backgroundColorCss, clamp, hexToRgba, objectFitFor, proposalTypeLabel } from "./helpers";
 import "./proposal.css";
 
@@ -235,6 +236,23 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
           <span className="proposal-compare-tag proposal-compare-tag-left">原稿</span>
           <span className="proposal-compare-tag proposal-compare-tag-right">提案</span>
         </>
+      )}
+
+      {editing && active.items.length === 0 && !background.imageDataUrl && (
+        <p className="poster-compose-empty-hint" data-testid="poster-compose-empty-hint">
+          把 logo、照片丟上來，或
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              window.dispatchEvent(new Event(OPEN_COMPOSE_PICKER_EVENT));
+            }}
+          >
+            從房間撿
+          </button>
+          。拼完按存成新版本。
+        </p>
       )}
 
       {editing && guides.x != null && <span className="proposal-guide proposal-guide-v" style={{ left: `${guides.x * 100}%` }} aria-hidden />}
