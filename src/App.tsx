@@ -2740,7 +2740,7 @@ export function App() {
           const boundId = cloudRef.current.boundRoomId;
           const applied = await applyVisualWorkLayer({
             proposal,
-            version: { id: version.id, videoPath: version.videoPath },
+            version: { id: version.id, imagePath: version.imagePath, videoPath: version.videoPath },
             roomId: boundId ?? current.id,
             authorName: guest?.name ?? "夥伴",
             upsert: async (roomId, cloudProposal) => {

@@ -26,7 +26,7 @@ import {
   grokUnconfigured,
   GROK_PROVIDER,
 } from "../_shared/roomAgent.ts";
-import { storeImagineAsset } from "../_shared/imagine.ts";
+import { executeImagineEdit, storeImagineAsset, visualEditPromptForScope } from "../_shared/imagine.ts";
 
 type Row = Record<string, unknown>;
 
@@ -290,6 +290,81 @@ async function askAgent(payload: RoomContextPayload, known: Map<string, ContextC
   }
 }
 
+async function handleVisualEdit(input: {
+  supabase: ReturnType<typeof createClient>;
+  roomId: string;
+  userId: string;
+  versionId: string;
+  scope: "single" | "full";
+  label: string;
+  bodyText: string;
+}): Promise<Response> {
+  const grok = grokEnv();
+  if (!grok || grokUnconfigured()) {
+    return new Response(JSON.stringify({
+      answer: null,
+      agent: { provider: GROK_PROVIDER, status: "unconfigured", message: AGENT_UNCONFIGURED_COPY },
+    }), { status: 200, headers: responseHeaders() });
+  }
+  const membership = await input.supabase.from("room_members").select("role").eq("room_id", input.roomId).eq("user_id", input.userId).maybeSingle();
+  if (membership.error || !text(asObject(membership.data).role)) return jsonResponse({ error: "ROOM_NOT_FOUND" }, 404);
+  const version = await input.supabase.from("versions").select("id,image_path,mime_type").eq("id", input.versionId).eq("room_id", input.roomId).maybeSingle();
+  const row = asObject(version.data);
+  const imagePath = text(row.image_path);
+  if (version.error || !imagePath) {
+    return jsonResponse({ error: "VERSION_NOT_FOUND", message: "找不到這一版的圖" }, 404);
+  }
+  const downloaded = await input.supabase.storage.from("room-assets").download(imagePath);
+  if (downloaded.error || !downloaded.data) return jsonResponse({ error: "VERSION_UNREADABLE", message: "這一版的圖暫時讀不到" }, 503);
+  const bytes = new Uint8Array(await downloaded.data.arrayBuffer());
+  const prompt = visualEditPromptForScope(input.scope, input.label, input.bodyText);
+  const generated = await executeImagineEdit({
+    prompt,
+    imageBytes: bytes,
+    mime: text(row.mime_type) || "image/png",
+    model: grok.imageEditModel || grok.imageModel,
+    apiKey: grok.xaiKey,
+  });
+  if (!generated.ok) {
+    return jsonResponse({ error: "IMAGINE_EDIT_FAILED", message: "視覺生成暫時沒有回應，請稍後再試。" }, 503);
+  }
+  const stored = await storeImagineAsset({
+    roomId: input.roomId,
+    bytes: generated.bytes,
+    mime: generated.mime,
+    upload: async (path, fileBytes, fileMime) => {
+      const upload = await input.supabase.storage.from("room-assets").upload(path, fileBytes, {
+        contentType: fileMime,
+        upsert: false,
+      });
+      return { error: upload.error?.message };
+    },
+  });
+  if (!stored.ok || /\/versions\//.test(stored.path)) {
+    return jsonResponse({ error: "STORE_FAILED", message: "視覺生成沒有落到工作層。" }, 503);
+  }
+  const hint = input.scope === "full" ? "第二版預覽，尚未成為正式版本" : "已生成視覺提案，尚未成為正式版本";
+  return new Response(JSON.stringify({
+    answer: {
+      text: hint,
+      citations: [],
+      actions: [{
+        type: "imagine_image",
+        label: hint,
+        payload: stripSecrets({
+          proposalId: stored.proposalId,
+          workLayerRef: stored.path,
+          preview: hint,
+          scope: input.scope,
+        }),
+      }],
+      provider: GROK_PROVIDER,
+      model: generated.model,
+    },
+    agent: { provider: GROK_PROVIDER, status: "ready" },
+  }), { status: 200, headers: responseHeaders() });
+}
+
 async function handle(request: Request): Promise<Response> {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: responseHeaders() });
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: responseHeaders() });
@@ -303,6 +378,21 @@ async function handle(request: Request): Promise<Response> {
   if (authError || !authData.user) return jsonResponse({ error: "UNAUTHENTICATED" }, 401);
   let rawBody: unknown;
   try { rawBody = await request.json(); } catch { return jsonResponse({ error: "INVALID_REQUEST" }, 400); }
+  const visual = asObject(asObject(rawBody).visualEdit);
+  const visualScope = text(visual.scope);
+  const visualVersion = text(visual.versionId);
+  const visualRoom = text(asObject(rawBody).roomId);
+  if (visualVersion && (visualScope === "single" || visualScope === "full") && uuidLike(visualRoom) && uuidLike(visualVersion)) {
+    return handleVisualEdit({
+      supabase,
+      roomId: visualRoom,
+      userId: authData.user.id,
+      versionId: visualVersion,
+      scope: visualScope,
+      label: text(visual.label).slice(0, 80),
+      bodyText: text(visual.bodyText).slice(0, 400),
+    });
+  }
   const input = requestValue(rawBody);
   if (!input) return jsonResponse({ error: "INVALID_REQUEST", message: "需要 roomId 與 query" }, 400);
 

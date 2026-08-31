@@ -453,6 +453,13 @@
   gap: 8px;
 }
 
+.proposal-manual-generate {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* Desktop control can live in the toolbar without turning it into a dashboard. */
 .proposal-desktop-wrap { position: relative; }
 .proposal-desktop-wrap > summary {

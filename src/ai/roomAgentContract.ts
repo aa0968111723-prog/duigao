@@ -11,6 +11,7 @@ import { stripSecrets } from "../../supabase/functions/_shared/roomContext.ts";
 export const AGENT_UNCONFIGURED_COPY = "AI 服務尚未設定";
 export const SPEND_LIMIT_COPY = "這一回合花費已達上限";
 export const IMAGINE_NOT_VERSION_COPY = "已生成一張圖，尚未成為正式版本";
+export const FULL_EDIT_PREVIEW_COPY = "第二版預覽，尚未成為正式版本";
 export const DEFAULT_GROK_TEXT_MODEL = "grok-4-1-fast-non-reasoning";
 export const DEFAULT_GROK_IMAGE_MODEL = "grok-imagine-image";
 export const DEFAULT_GROK_VIDEO_MODEL = "grok-imagine-video";

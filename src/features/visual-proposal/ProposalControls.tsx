@@ -37,6 +37,8 @@ type Props = {
   branches?: { id: string; name: string }[];
   listLibrary?: () => Promise<LibraryAsset[]>;
   resolveMaterial?: (material: ComposeMaterial) => Promise<string>;
+  onGenerateSecondVersion?: () => void;
+  onGenerateVisualProposal?: () => void;
 };
 
 export function ProposalControls({
@@ -51,6 +53,8 @@ export function ProposalControls({
   branches,
   listLibrary,
   resolveMaterial,
+  onGenerateSecondVersion,
+  onGenerateVisualProposal,
 }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   const [pickText, setPickText] = useState(false);
@@ -103,6 +107,20 @@ export function ProposalControls({
         <div>
           <strong>視覺提案</strong>
           <p>只做模擬，不會修改原始文宣。</p>
+          {(onGenerateSecondVersion || onGenerateVisualProposal) && (
+            <div className="proposal-manual-generate">
+              {onGenerateVisualProposal && (
+                <button type="button" className="proposal-quiet" data-testid="manual-generate-proposal" onClick={onGenerateVisualProposal}>
+                  生成視覺提案
+                </button>
+              )}
+              {onGenerateSecondVersion && (
+                <button type="button" className="proposal-quiet" data-testid="manual-generate-second" onClick={onGenerateSecondVersion}>
+                  依修改生第二版
+                </button>
+              )}
+            </div>
+          )}
         </div>
         {active && (
           <div className="proposal-view-switch" aria-label="原稿 / 提案 / 對照">
