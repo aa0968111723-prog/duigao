@@ -1108,7 +1108,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       onCreateDecision: api.onCreateDecision,
                       onFinalizeDecision: api.onFinalizeDecision,
                       onOpenContent: openBranch,
-                      focusNodeId: api.focusNodeId || localFocusId,
+                      focusNodeId: opts?.compact ? (api.focusNodeId || localFocusId) : null,
                       onAskColleague: api.onAskColleague,
                       onApplyColleagueProposal: api.onApplyColleagueProposal,
                       onRejectColleagueProposal: api.onRejectColleagueProposal,
@@ -1231,7 +1231,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
             ) : (
               <section className="project-section" data-testid="discuss-workspace">
                 <div className="rd-tabs" role="tablist" aria-label="討論">
-                  <button type="button" className={discussPane === "chat" ? "is-active" : ""} onClick={() => { setDiscussPane("chat"); api.onOpenWhiteboard(null); }}>對話</button>
+                  <button type="button" className={discussPane === "chat" ? "is-active" : ""} onClick={() => { setDiscussPane("chat"); api.onOpenWhiteboard(null); api.onFocusNode?.(null); setLocalFocusId(null); }}>對話</button>
                   <button type="button" className={discussPane === "board" ? "is-active" : ""} onClick={() => setDiscussPane("board")}>白板</button>
                 </div>
                 {discussPane === "calendar" ? (
