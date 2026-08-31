@@ -71,10 +71,14 @@ export type ProposalTextItem = ProposalItemBase & {
   backdropRadius: number;
 };
 
+export type ImageCrop = { x: number; y: number; width: number; height: number };
+
 export type ProposalImageItem = ProposalItemBase & {
   type: "image";
   name: string;
   imageDataUrl: string;
+  /** Normalized 0–1 box inside the bitmap. Absent = show the whole image. */
+  crop?: ImageCrop;
 };
 
 /** A plain colour block: the cheapest way to say "put something solid here". */

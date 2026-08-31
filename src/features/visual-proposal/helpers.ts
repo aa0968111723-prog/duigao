@@ -4,6 +4,7 @@ import type {
   BgImageFit,
   GradientKind,
   ProposalBackground,
+  ImageCrop,
   ProposalImageItem,
   ProposalShapeItem,
   ProposalStatus,
@@ -158,6 +159,44 @@ export function createImageItem(imageDataUrl: string, name: string): ProposalIma
     opacity: 1,
     visible: true,
   };
+}
+
+export function clampCrop(crop: { x: number; y: number; width: number; height: number }): ImageCrop {
+  const x = clamp(crop.x, 0, 0.85);
+  const y = clamp(crop.y, 0, 0.85);
+  return {
+    x,
+    y,
+    width: clamp(crop.width, 0.15, 1 - x),
+    height: clamp(crop.height, 0.15, 1 - y),
+  };
+}
+
+/** Inset the visible window. Repeatable; stored on the item JSON. */
+export function insetCrop(crop: ImageCrop | undefined, pad = 0.08): ImageCrop {
+  const base = crop ?? { x: 0, y: 0, width: 1, height: 1 };
+  return clampCrop({
+    x: base.x + pad * base.width,
+    y: base.y + pad * base.height,
+    width: base.width * (1 - 2 * pad),
+    height: base.height * (1 - 2 * pad),
+  });
+}
+
+export function replaceImageKeepingFrame(
+  item: ProposalImageItem,
+  imageDataUrl: string,
+  name: string,
+): ProposalImageItem {
+  return { ...item, imageDataUrl, name, crop: undefined };
+}
+
+export function nudgeItemPosition(x: number, y: number, dx: number, dy: number): { x: number; y: number } {
+  return { x: clamp(x + dx, 0, 1), y: clamp(y + dy, 0, 1) };
+}
+
+export function nextRotation(rotation: number, step = 15): number {
+  return ((Math.round(rotation) + step) % 360 + 360) % 360;
 }
 
 /** A colour block — the simplest "cover this / add a band here" proposal element. */

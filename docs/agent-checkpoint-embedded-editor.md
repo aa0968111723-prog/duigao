@@ -1,13 +1,13 @@
 # embedded-editor checkpoint
 branch: feat/embedded-editor-phased
-nextPhase: P3
-done: [P0, P1, P2]
+nextPhase: P4
+done: [P0, P1, P2, P3]
 blocked: []
 notes: |
-  P2 evidence: mobile-tablet-ux.test.ts 「compose 390／768／1024：五鍵一列、split 文宣欄 Dock、第一層仍是對話白板」+ poster-compose 23 pass.
+  P3 evidence: poster-compose.test.ts 「crop JSON round-trip、undo 還原、換圖保留框」24 pass; tsc 0.
 
-  .pdock-bar: repeat(5, minmax(0,1fr)) + flex-wrap nowrap. padding 含 safe-area-inset-bottom.
-  768+ 字 12px min-height 44. 1024 is-tablet-split：workspace.is-compose 單欄 stage/toolbar，.panel display:none。
-  FIRST_LAYER_TABS 仍 ["對話","白板"].
+  ProposalImageItem.crop 0–1. helpers: clampCrop insetCrop replaceImageKeepingFrame nudgeItemPosition nextRotation.
+  Overlay 圖上快捷 data-testid=poster-item-shortcuts：移動／裁剪／換圖／轉／刪。Arrow 微移。換圖 hidden file → replaceImageKeepingFrame 保留 x/y/width/rotation。
+  卸 Overlay「完成擺放」（完成只在 Dock）。
 
-  下一刀 P3：ProposalImageItem.crop JSON；圖上快捷 移動／裁剪／換圖／轉／刪；方向鍵微移；換圖保留框。poster-compose 加 crop round-trip + undo。
+  下一刀 P4：對照滑桿圖下緣；compose 版本列鎖單張；768 對照可拖。

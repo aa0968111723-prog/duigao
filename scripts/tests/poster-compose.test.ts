@@ -22,7 +22,7 @@ import {
   versionIdentitiesUnchanged,
   type VersionIdentity,
 } from "../../src/features/visual-proposal/saveComposeVersion.ts";
-import { FONT_STYLES } from "../../src/features/visual-proposal/helpers.ts";
+import { FONT_STYLES, clampCrop, createImageItem, insetCrop, nextRotation, nudgeItemPosition, replaceImageKeepingFrame } from "../../src/features/visual-proposal/helpers.ts";
 import { COMPOSE_FONT_FACES } from "../../src/features/visual-proposal/composeFonts.ts";
 import { imageItemFromCatalogHit, searchOpenStickers } from "../../src/features/visual-proposal/openCatalog.ts";
 
@@ -114,6 +114,46 @@ test("未 canManage 沒有編輯這張或存成新版本", () => {
   assert.match(dock, /canManage &&/);
   assert.match(dock, /poster-save-version/);
   assert.match(dock, /proposal\.setEditing\(canManage\)/);
+});
+
+test("crop JSON round-trip、undo 還原、換圖保留框", () => {
+  const item = createImageItem("data:image/png;base64,OLDOLDOLDOLDOLDOLD", "舊圖");
+  item.x = 0.31;
+  item.y = 0.44;
+  item.width = 22;
+  item.rotation = 15;
+  const cropped = { ...item, crop: clampCrop({ x: 0.1, y: 0.12, width: 0.7, height: 0.6 }) };
+  assert.equal(cropped.crop.x, 0.1);
+  assert.equal(cropped.crop.width, 0.7);
+  const tighter = insetCrop(cropped.crop);
+  assert.ok(tighter.width < cropped.crop.width);
+  const undone = { ...cropped, crop: item.crop };
+  assert.equal(undone.crop, undefined);
+  const swapped = replaceImageKeepingFrame(cropped, "data:image/png;base64,NEWNEWNEWNEWNEWNEW", "新圖");
+  assert.equal(swapped.x, 0.31);
+  assert.equal(swapped.y, 0.44);
+  assert.equal(swapped.width, 22);
+  assert.equal(swapped.rotation, 15);
+  assert.equal(swapped.name, "新圖");
+  assert.match(swapped.imageDataUrl, /NEWNEW/);
+  assert.equal(swapped.crop, undefined);
+  const nudged = nudgeItemPosition(0.5, 0.5, -0.01, 0.02);
+  assert.equal(nudged.x, 0.49);
+  assert.equal(nudged.y, 0.52);
+  assert.equal(nextRotation(350, 15), 5);
+  const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
+  const store = src("src/features/visual-proposal/store.ts");
+  assert.match(store, /crop\?:/);
+  assert.match(overlay, /data-testid="poster-item-shortcuts"/);
+  assert.match(overlay, /移動/);
+  assert.match(overlay, /裁剪/);
+  assert.match(overlay, /換圖/);
+  assert.match(overlay, /轉/);
+  assert.match(overlay, /刪/);
+  assert.match(overlay, /replaceImageKeepingFrame/);
+  assert.match(overlay, /nudgeItemPosition/);
+  assert.match(overlay, /ArrowLeft/);
+  assert.match(overlay, /insetCrop/);
 });
 
 test("compose 單一皮：Dock 五鍵、完成出口、無 pin 鍵", () => {
