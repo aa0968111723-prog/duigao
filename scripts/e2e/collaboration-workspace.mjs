@@ -275,12 +275,14 @@ try {
         const input = node.querySelector('[data-testid="discussion-edit-input"]');
         const save = node.querySelector('[data-testid="discussion-edit-save"]');
         if (!(input instanceof HTMLTextAreaElement)) throw new Error("no discussion-edit-input");
-        Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.call(input, value);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
+        const write = () => Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.call(input, value);
+        write();
         if (save instanceof HTMLButtonElement) {
           save.disabled = false;
+          write();
           save.click();
         } else if (node instanceof HTMLFormElement) {
+          write();
           node.requestSubmit();
         }
       }, editedBody);
