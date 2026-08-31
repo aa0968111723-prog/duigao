@@ -262,11 +262,17 @@ try {
     await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 20000 });
     await page.waitForSelector('[data-testid="poster-compose-stage"]', { timeout: 20000 });
     await page.waitForFunction(() => document.querySelector("img.stage-img")?.naturalWidth > 0, null, { timeout: 20000 });
-    await page.waitForFunction(
-      () => document.querySelectorAll('[data-testid="poster-compose-stage"]').length === 1,
-      null,
-      { timeout: 20000 },
-    );
+    await page.waitForFunction(() => {
+      const key = "__duigaoComposeStableAt";
+      const ready = document.querySelectorAll('[data-testid="poster-compose-stage"]').length === 1
+        && (document.querySelector("img.stage-img")?.naturalWidth ?? 0) > 0;
+      if (!ready) {
+        delete window[key];
+        return false;
+      }
+      window[key] ??= Date.now();
+      return Date.now() - window[key] >= 300;
+    }, null, { timeout: 20000 });
     check("用素材拼一張打開對稿 overlay", await page.getByTestId("poster-compose-stage").count() === 1);
     check("拼圖文宣 390 無水平溢出", await noHorizontalOverflow(page));
     await page.getByTestId("poster-edit-toggle").click();
@@ -377,6 +383,17 @@ try {
     }
     faults.videoUploadDelayMs = 0;
     await page.waitForSelector("video.v-video", { timeout: 90000 });
+    await page.waitForFunction(() => {
+      const key = "__duigaoVideoStableAt";
+      const ready = document.querySelectorAll("video.v-video").length === 1
+        && document.querySelectorAll(".m-vchip:not(.m-vchip-add)").length === 1;
+      if (!ready) {
+        delete window[key];
+        return false;
+      }
+      window[key] ??= Date.now();
+      return Date.now() - window[key] >= 300;
+    }, null, { timeout: 15000 });
     check(
       "上傳完成後狀態列自己收掉",
       (await page.getByTestId("project-upload-status").count()) === 0,
