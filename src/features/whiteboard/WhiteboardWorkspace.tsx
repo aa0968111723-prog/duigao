@@ -1476,10 +1476,15 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   const selectedNode = liveNodes.find((node) => node.id === selected[0]);
   const focusNodeId = focusNodeIdFromSelection(selected);
+  const prevFocusSelectedRef = useRef<string | null>(null);
   useEffect(() => {
+    const current = selected[0] ?? null;
+    const selectionChanged = current !== prevFocusSelectedRef.current;
+    prevFocusSelectedRef.current = current;
     const snap = snapAfterSelectionOrEdit({
-      hasSelection: Boolean(selected[0]),
+      hasSelection: Boolean(current),
       editing: Boolean(editingId),
+      selectionChanged,
     });
     if (snap) setFocusSheetSnap(snap);
   }, [selected[0], editingId]);

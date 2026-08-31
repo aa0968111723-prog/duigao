@@ -142,9 +142,10 @@ test("390 選卡：half 第一屏看得到討論與輸入框，動作收進 disc
   const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
   assert.match(workspace, /useState<SheetSnap>\("half"\)/);
   assert.match(workspace, /snapAfterSelectionOrEdit/);
-  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: false }), "half");
-  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: true }), "peek");
-  assert.equal(snapAfterSelectionOrEdit({ hasSelection: false, editing: true }), null);
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: false, selectionChanged: true }), "half");
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: true, selectionChanged: true }), "peek");
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: true, selectionChanged: false }), null);
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: false, editing: true, selectionChanged: true }), null);
   assert.doesNotMatch(workspace, /viewportHeight=\{typeof window === "undefined" \? 640 : window\.innerHeight\}/);
   assert.match(workspace, /viewportHeight=\{sheetSnaps\.viewportHeight\}/);
   assert.match(workspace, /peekHeight=\{sheetSnaps\.peek\}/);

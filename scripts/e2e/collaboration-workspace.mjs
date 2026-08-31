@@ -200,7 +200,7 @@ async function searchNode(page, name) {
   const input = page.getByRole("textbox", { name: "搜尋節點" });
   await input.waitFor({ timeout: 5000 });
   await input.fill(name);
-  const hit = page.locator(".wb-options button").filter({ hasText: name }).first();
+  const hit = page.locator(".wb-options button").filter({ hasText: new RegExp(`^${name}`) }).first();
   await hit.waitFor({ timeout: 8000 });
   await hit.click();
 }
@@ -817,12 +817,13 @@ try {
         await page.getByRole("button", { name: "關閉" }).click();
         // 快照後改動一個節點，再還原 → 內容回到快照當時
         await searchNode(page, "招生");
+        await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 8000 });
         const beforeText = await page.locator(".wb-node.is-selected .wb-node-static, .wb-node.is-selected textarea").first().inputValue().catch(() => null);
         await openFocusActions(page);
         await page.evaluate(() => {
-          const btn = document.querySelector('[data-testid="wb-focus-sheet"] [data-testid="wb-node-actions"] button');
-          const labeled = [...document.querySelectorAll('[data-testid="wb-node-actions"] button')].find((el) => el.textContent?.trim() === "編輯");
-          (labeled instanceof HTMLElement ? labeled : btn)?.click();
+          const labeled = [...document.querySelectorAll('[data-testid="wb-focus-sheet"] [data-testid="wb-node-actions"] button')]
+            .find((el) => el.textContent?.trim() === "編輯");
+          if (labeled instanceof HTMLElement) labeled.click();
         });
         await fillEditing(page, "快照後改的字");
         await dismissSelection(page);

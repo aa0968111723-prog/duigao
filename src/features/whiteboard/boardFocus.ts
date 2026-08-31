@@ -245,14 +245,15 @@ export function snapAfterFocusDiscuss(current: "peek" | "half" | "full"): "peek"
 }
 
 /**
- * 選卡未編輯 → half（討論／動作露得出來）。
- * 正在打字 → peek，half sheet 不得蓋住 textarea（chip 跳回後再寫下）。
+ * 選卡變了才改 snap。未編輯 → half；剛新增並開始打字 → peek。
+ * 同一張卡按「編輯」不可改 snap：half→peek 會讓 pointerup 落到畫布、endEdit。
  */
 export function snapAfterSelectionOrEdit(input: {
   hasSelection: boolean;
   editing: boolean;
+  selectionChanged: boolean;
 }): "peek" | "half" | null {
-  if (!input.hasSelection) return null;
+  if (!input.hasSelection || !input.selectionChanged) return null;
   return input.editing ? "peek" : "half";
 }
 
