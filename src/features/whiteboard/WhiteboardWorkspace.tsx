@@ -48,11 +48,15 @@ import {
   discussionIdFromNode,
   emptyBoardVerbs,
   emptyRoomTitle,
+  FOCUS_SHEET_PEEK_HEIGHT,
   focusCardFromNode,
   focusNodeIdFromSelection,
+  focusSheetSnapHeights,
   isEmptyBoard,
   readBoardSession,
+  readSafeAreaBottom,
   shouldMountFocusSheet,
+  snapAfterFocusDiscuss,
   writeBoardSession,
 } from "./boardFocus";
 import { DragSheet, type SheetSnap } from "../../components/BottomSheet";
@@ -459,6 +463,16 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   const usableHeight = useViewport();
   const keyboardInset = Math.max(0, (typeof window !== "undefined" ? window.innerHeight : 0) - usableHeight);
+  const safeAreaBottom = useMemo(
+    () => (typeof document === "undefined" ? 0 : readSafeAreaBottom()),
+    [keyboardInset, usableHeight],
+  );
+  const sheetSnaps = focusSheetSnapHeights({
+    usableHeight,
+    keyboardInset,
+    safeAreaBottom,
+    peekHeight: FOCUS_SHEET_PEEK_HEIGHT,
+  });
 
   // ---- op 入帳＋undo 疊（同一入口，best-effort） ----
   const record = useCallback((draft: OperationDraft | null) => {
@@ -1411,6 +1425,9 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
 
   const selectedNode = liveNodes.find((node) => node.id === selected[0]);
   const focusNodeId = focusNodeIdFromSelection(selected);
+  useEffect(() => {
+    if (selected[0]) setFocusSheetSnap("half");
+  }, [selected[0]]);
   const focusCard = selectedNode ? focusCardFromNode(selectedNode) : null;
   const colleagueSaid = lastColleagueForFocus(api.room.discussion ?? [], focusCard?.nodeId);
   const emptyBoard = isEmptyBoard(liveNodes);
@@ -2209,12 +2226,13 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           </div>
         )}
         {phoneFocusSheet && selectedNode && focusCard && (
-          <div className="wb-focus-sheet" data-testid="wb-focus-sheet" style={{ bottom: "var(--kb, 0px)" }}>
+          <div className="wb-focus-sheet" data-testid="wb-focus-sheet" data-sheet-snap={focusSheetSnap} style={{ bottom: "var(--kb, 0px)" }}>
             <DragSheet
               snap={focusSheetSnap}
               onSnap={setFocusSheetSnap}
-              viewportHeight={typeof window === "undefined" ? 640 : window.innerHeight}
-              peekHeight={120}
+              viewportHeight={sheetSnaps.viewportHeight}
+              peekHeight={sheetSnaps.peek}
+              maxHeight={keyboardInset > 0 ? sheetSnaps.maxHeight : undefined}
               handle={(
                 <>
                   <span className="m-sheet-summary">焦點 · {focusCard.title}</span>
@@ -2235,6 +2253,23 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                 {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
                 {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
                 {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
+              </div>
+              <button
+                type="button"
+                className="wb-focus-discuss"
+                data-testid="wb-focus-discuss"
+                onClick={() => {
+                  setFocusSheetSnap(snapAfterFocusDiscuss(focusSheetSnap));
+                  requestAnimationFrame(() => {
+                    const input = document.querySelector(
+                      '[data-testid="wb-focus-discussion"] [data-testid="discussion-composer-input"]',
+                    ) as HTMLInputElement | null;
+                    input?.focus();
+                  });
+                }}
+              >針對這張討論</button>
+              <details className="wb-focus-actions" data-testid="wb-focus-actions">
+                <summary>這張的操作</summary>
                 <div className="wb-focus-card-actions" data-testid="wb-node-actions">
                   <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
                   {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
@@ -2280,11 +2315,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                       else setSheet("ai");
                     }}>問同事</button>
                   )}
-                  <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>針對這張討論</button>
+                  <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
                   <button type="button" data-testid="wb-lock" onClick={toggleLock}>{selectedNode.locked ? "解鎖" : "鎖定"}</button>
                   <button type="button" data-testid="wb-node-delete" onClick={deleteSelected} disabled={Boolean(selectedNode.locked)}>刪除</button>
                 </div>
-              </div>
+              </details>
               <div className="wb-focus-sheet-discussion" data-testid="wb-focus-discussion">
                 {api.discussionSlot ?? <p className="project-muted">針對這張留言</p>}
               </div>

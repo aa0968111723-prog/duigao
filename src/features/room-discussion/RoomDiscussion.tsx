@@ -474,7 +474,15 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       )}
 
       {api.focusNodeId && messagesForFocus(messages, (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null).length === 0 && (
-        <p className="project-muted" data-testid="focus-discuss-empty">針對這張留言</p>
+        <button
+          type="button"
+          className="project-muted rd-focus-empty"
+          data-testid="focus-discuss-empty"
+          onClick={() => {
+            const input = document.querySelector('[data-testid="discussion-composer"] input') as HTMLInputElement | null;
+            input?.focus();
+          }}
+        >針對這張留言</button>
       )}
       <div className="rd-feed" data-testid="discussion-feed">
         {messages.map((message) => {
@@ -781,6 +789,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           )}
           <input
             className="text-input"
+            data-testid="discussion-composer-input"
             value={api.draft}
             onFocus={() => api.onComposerActive?.(true)}
             onBlur={() => api.onComposerActive?.(false)}

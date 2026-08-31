@@ -14,6 +14,8 @@ type DragSheetProps = {
   onSnap: (s: SheetSnap) => void;
   viewportHeight: number;
   peekHeight?: number;
+  /** 鍵盤起來時 half／full 都不得超過這個高度。 */
+  maxHeight?: number;
   handle: ReactNode;
   children: ReactNode;
 };
@@ -27,13 +29,15 @@ export function DragSheet({
   onSnap,
   viewportHeight,
   peekHeight = 52,
+  maxHeight,
   handle,
   children,
 }: DragSheetProps) {
+  const cap = maxHeight ?? Number.POSITIVE_INFINITY;
   const heights: Record<SheetSnap, number> = {
     peek: peekHeight,
-    half: Math.max(peekHeight, Math.round(viewportHeight * 0.42)),
-    full: Math.max(peekHeight, Math.round(viewportHeight * 0.76)),
+    half: Math.min(cap, Math.max(peekHeight, Math.round(viewportHeight * 0.42))),
+    full: Math.min(cap, Math.max(peekHeight, Math.round(viewportHeight * 0.76))),
   };
   const [dragHeight, setDragHeight] = useState<number | null>(null);
   const start = useRef<{ y: number; h: number } | null>(null);
