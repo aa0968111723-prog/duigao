@@ -14,3 +14,8 @@ Rail：`railVisible = tabletUp(900×600) && !railCollapsed`。手機 `discussPan
 ## 打算改 / 不改
 改：WhiteboardWorkspace、whiteboard.css、aiPreview layout origin、MultiBranchRoom 狀態與手機 sheet、RoomDiscussion 同事氣泡、discussionHonesty、App `create_comment`、roomAgentContract focus 欄、測試。
 不改：`roomChrome` 兩個 FIRST_LAYER、visual-proposal store/mergeHydrate、versions Storage、#163、新 migration、Photoshop/Canva。
+
+## 補齊（同日）
+房間焦點改走既有 presence（只帶不透明 `focusNodeId`，不送姓名）。
+四入口 ask 帶 `boardAskContext`（focus + 最多 12 張可見節點短列）；edge `room-ai-context` 合併進卡。
+平板 rail 焦點切換時捲到相關訊息；沒有關聯顯示「針對這張留言」。

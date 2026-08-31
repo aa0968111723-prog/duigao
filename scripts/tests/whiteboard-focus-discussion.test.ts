@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  boardAskContext,
   cameraAfterRemount,
   discussionIdFromNode,
   emptyBoardCopyHasLonelyStep,
@@ -16,9 +17,12 @@ import {
   focusCardFromNode,
   focusNodeIdFromSelection,
   isEmptyBoard,
+  messagesForFocus,
   nodeFocusSource,
+  roomFocusFromPresence,
   shouldInlineDiscussionRail,
   shouldMountFocusSheet,
+  workLayerItemsFromNodes,
 } from "../../src/features/whiteboard/boardFocus";
 import { stickyFromDiscussion } from "../../src/features/collaboration/links";
 import { discussionPayloadFromNode } from "../../src/features/collaboration/links";
@@ -179,6 +183,55 @@ test("焦點來源與 @Grok chip；第一層仍是對話／白板", () => {
   assert.deepEqual(FIRST_LAYER_TABS, ["對話", "白板"]);
   const chrome = src("src/features/multi-room/roomChrome.ts");
   assert.match(chrome, /FIRST_LAYER_TABS = \["對話", "白板"\]/);
+});
+
+test("房間焦點從 presence 取最新一筆，不含自己較舊的", () => {
+  const picked = roomFocusFromPresence([
+    { userId: "me", focusNodeId: "n-old", at: 10 },
+    { userId: "peer", focusNodeId: "n-shared", at: 20 },
+    { userId: "late", focusNodeId: null, at: 30 },
+  ], { ignoreUserId: "me" });
+  assert.equal(picked?.nodeId, "n-shared");
+  assert.equal(roomFocusFromPresence([
+    { userId: "peer", focusNodeId: "n-stale", at: 5 },
+  ], { minAt: 10 }), null);
+  const sync = src("src/cloud/roomSync.ts");
+  assert.match(sync, /focusNodeId/);
+  assert.match(sync, /不透明/);
+  const app = src("src/App.tsx");
+  assert.match(app, /roomFocusFromPresence/);
+  assert.match(app, /setRoomFocus/);
+});
+
+test("boardAskContext 帶焦點與工作層短列，座標只寫約 x,y", () => {
+  const ctx = boardAskContext({
+    nodes: [node({ id: "n1", content: { text: "茶會主視覺" }, x: 40, y: 80 })],
+    focusNode: node({ id: "n1", linkedEntityType: "discussion", content: { text: "茶會主視覺" } }),
+  });
+  assert.equal(ctx.focus?.nodeId, "n1");
+  assert.equal(ctx.focus?.source, "discussion");
+  assert.equal(ctx.workLayer?.items.length, 1);
+  const items = workLayerItemsFromNodes([node({ x: 24, y: 80 })]);
+  assert.equal(items[0].x, 24);
+  const app = src("src/App.tsx");
+  assert.match(app, /boardAskContext/);
+  assert.match(app, /askAiWithBoard/);
+  const edge = src("supabase/functions/room-ai-context/index.ts");
+  assert.match(edge, /boardFocus/);
+  assert.match(edge, /workLayerItems/);
+});
+
+test("平板焦點：相關訊息可捲到；沒有關聯顯示針對這張留言", () => {
+  const related = messagesForFocus([
+    message({ id: "m-a", payload: { nodeId: "n1" } }),
+    message({ id: "m-b", payload: {} }),
+  ], node({ id: "n1" }));
+  assert.equal(related.length, 1);
+  assert.equal(related[0].id, "m-a");
+  const drawer = src("src/features/room-discussion/RoomDiscussion.tsx");
+  assert.match(drawer, /messagesForFocus/);
+  assert.match(drawer, /針對這張留言/);
+  assert.match(drawer, /focus-discuss-empty/);
 });
 
 test("預覽 origin 跟焦點；套用失敗預覽留著", () => {

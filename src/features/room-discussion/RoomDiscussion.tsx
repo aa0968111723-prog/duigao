@@ -29,6 +29,7 @@ import {
   isColleagueMessage,
   showsGrokMentionChip,
 } from "../collaboration/agentColleague";
+import { messagesForFocus } from "../whiteboard/boardFocus";
 import "./discussion.css";
 
 export type RoomDiscussionApi = {
@@ -282,6 +283,16 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
     setShowJumpLatest(false);
   }, [api.room.id]);
 
+  useEffect(() => {
+    if (!api.focusNodeId) return;
+    const node = (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null;
+    const related = messagesForFocus(messages, node);
+    const target = related[related.length - 1];
+    if (target) jumpToMessage(target.id);
+    // 只在焦點切換時捲，不跟新訊息搶最新列。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 刻意只跟 focusNodeId
+  }, [api.focusNodeId]);
+
   const activePane = api.pane ?? pane;
   useEffect(() => {
     if (activePane === "board") return;
@@ -462,6 +473,9 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       </section>
       )}
 
+      {api.focusNodeId && messagesForFocus(messages, (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null).length === 0 && (
+        <p className="project-muted" data-testid="focus-discuss-empty">針對這張留言</p>
+      )}
       <div className="rd-feed" data-testid="discussion-feed">
         {messages.map((message) => {
           const supportCount = api.supports.filter((item) => item.messageId === message.id).length;

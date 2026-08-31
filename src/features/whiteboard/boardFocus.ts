@@ -194,3 +194,46 @@ export function workLayerItemsFromNodes(nodes: WhiteboardNode[], limit = 12): Ar
     y: node.y,
   }));
 }
+
+/** 房間焦點：presence 上最新一筆不透明 nodeId（不含姓名）。 */
+export function roomFocusFromPresence(
+  people: Array<{ userId: string; focusNodeId?: string | null; at: number }>,
+  opts?: { minAt?: number; ignoreUserId?: string },
+): { nodeId: string; at: number } | null {
+  let newest: { nodeId: string; at: number } | null = null;
+  for (const person of people) {
+    if (opts?.ignoreUserId && person.userId === opts.ignoreUserId) continue;
+    const nodeId = person.focusNodeId?.trim();
+    if (!nodeId) continue;
+    if (opts?.minAt != null && person.at <= opts.minAt) continue;
+    if (!newest || person.at >= newest.at) newest = { nodeId, at: person.at };
+  }
+  return newest;
+}
+
+export type BoardAskContext = {
+  focus?: { label: string; nodeId?: string; nodeType?: string; source?: FocusSource };
+  workLayer?: { proposalId: string; status: string; items: ReturnType<typeof workLayerItemsFromNodes> };
+};
+
+/** 問同事／房間 AI：焦點卡 + 板上可見節點短列。不含 Storage path。 */
+export function boardAskContext(input: {
+  nodes: WhiteboardNode[];
+  focusNode?: WhiteboardNode | null;
+}): BoardAskContext {
+  const items = workLayerItemsFromNodes(input.nodes);
+  const card = input.focusNode ? focusCardFromNode(input.focusNode) : undefined;
+  return {
+    focus: card && input.focusNode
+      ? {
+          label: card.title,
+          nodeId: card.nodeId,
+          nodeType: input.focusNode.nodeType,
+          source: card.source,
+        }
+      : undefined,
+    workLayer: items.length
+      ? { proposalId: "board-visible", status: "visible", items }
+      : undefined,
+  };
+}

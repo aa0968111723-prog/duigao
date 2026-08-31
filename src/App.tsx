@@ -32,6 +32,7 @@ import { canvaConnectUrl, canvaHealth, canvaListDesigns, canvaStatus, importCanv
 import { loadFrames as loadBoardFrames, loadNodeRefs, listBoardVersions, loadBoardVersion, createBoardVersion, loadDiscussionRead as loadCloudDiscussionRead } from "./cloud/collaborationRepository";
 import { buildSnapshot, planRestore, snapshotTooLarge, type BoardSnapshot, type BoardVersionSummary } from "./features/whiteboard/versions";
 import { boardProposals, layoutOriginFromFocus, layoutPreview, type BoardAiPreview } from "./features/whiteboard/aiPreview";
+import { boardAskContext, roomFocusFromPresence } from "./features/whiteboard/boardFocus";
 import { planformPayloadFromSummary, readPlanformSummary } from "./lib/planformArtifact";
 import { regionCenter } from "./lib/region";
 import { branchForId, branchSummaryFor, branchVersions, normalizeRoomBranches, roomForBranch } from "./lib/roomBranches";
@@ -455,6 +456,11 @@ export function App() {
     };
   }, [activeBranchId]);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const localRoomFocusAtRef = useRef(0);
+  const setRoomFocus = useCallback((nodeId: string | null) => {
+    localRoomFocusAtRef.current = Date.now();
+    setFocusNodeId(nodeId);
+  }, []);
   const [openAtSeconds, setOpenAtSeconds] = useState<number | undefined>(undefined);
   const [boardFocus, setBoardFocus] = useState<RoomContextFocus | null>(null);
   const [loadingBranchId, setLoadingBranchId] = useState<string | null>(null);
@@ -763,9 +769,27 @@ export function App() {
     });
   }, []);
 
-  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast });
+  const cloud = useCloudRoom({ guest, room, activeBranchId, activeWhiteboardId, roomFocusId: focusNodeId, isGuestSession, onSnapshot: applyRemoteRoom, onBoardPatch, onDiscussionPatch, onBoardReplace, showToast });
   const cloudRef = useRef(cloud);
   cloudRef.current = cloud;
+
+  useEffect(() => {
+    cloudRef.current.retrackPresence?.({ name: guest?.name ?? "" });
+  }, [focusNodeId, guest?.name]);
+
+  const remoteRoomFocus = useMemo(
+    () => roomFocusFromPresence(cloud.presencePeople ?? [], {
+      ignoreUserId: cloud.userId ?? undefined,
+      minAt: localRoomFocusAtRef.current,
+    }),
+    [cloud.presencePeople, cloud.userId],
+  );
+  useEffect(() => {
+    if (!remoteRoomFocus) return;
+    if (remoteRoomFocus.nodeId === focusNodeId) return;
+    if (remoteRoomFocus.at <= localRoomFocusAtRef.current) return;
+    setFocusNodeId(remoteRoomFocus.nodeId);
+  }, [remoteRoomFocus, focusNodeId]);
 
   // 討論送出狀態機：失敗可見可重試、快照替換後樂觀列不消失、綁定前先扣住。
   // 語音房（PR-03）：cloud 綁定的房才活；health gate 在 hook 內。
@@ -971,9 +995,15 @@ export function App() {
       ? (roomNow?.whiteboardNodes ?? []).find((node) => node.id === input.nodeId)
       : undefined;
     try {
+      const askExtra = boardAskContext({
+        nodes: roomNow?.whiteboardNodes ?? [],
+        focusNode: focusNode ?? null,
+      });
       const response = await askAi({
         query: input.prompt,
         selectedBranchIds: [],
+        focus: askExtra.focus,
+        workLayer: askExtra.workLayer,
       });
       const spendExceeded = Boolean(
         response.agent?.status === "spend_exceeded"
@@ -1030,6 +1060,22 @@ export function App() {
     }
   }, [askAi, cloud.userId, guest]);
   askColleagueRef.current = askColleague;
+
+  const askAiWithBoard = useCallback((request: RoomContextRequest) => {
+    const current = roomRef.current;
+    const focusNode = focusNodeId
+      ? (current?.whiteboardNodes ?? []).find((node) => node.id === focusNodeId)
+      : undefined;
+    const extra = boardAskContext({
+      nodes: current?.whiteboardNodes ?? [],
+      focusNode,
+    });
+    return askAi({
+      ...request,
+      focus: extra.focus ?? request.focus,
+      workLayer: extra.workLayer ?? request.workLayer,
+    });
+  }, [askAi, focusNodeId]);
 
   const retryAi = useCallback((assetId: string) => {
     const supabase = getSupabase();
@@ -3672,7 +3718,7 @@ export function App() {
           });
         },
         onFocusNode: setFocusNodeId,
-        onSetRoomFocus: setFocusNodeId,
+        onSetRoomFocus: setRoomFocus,
         whiteboardFrames: boardFrames,
         onCreateFrame: (frame) => {
           setBoardFrames((current) => [...current, frame]);
@@ -3790,7 +3836,7 @@ export function App() {
         // 只在雲端房掛（房間 AI 需要 Supabase）— 本機房不擺按不動的入口。
         ...(isCloudConfigured && cloud.boundRoomId ? {
           onAskColleague: (input) => { void askColleague(input); },
-        onSetRoomFocus: setFocusNodeId,
+        onSetRoomFocus: setRoomFocus,
         onApplyColleagueProposal: (proposalId) => {
           const proposal = colleagueProposalRef.current.get(proposalId);
           if (proposal) void applyAiProposal(proposal);
@@ -3829,11 +3875,19 @@ export function App() {
               .filter(Boolean)
               .slice(0, 40)
               .join("\n");
+            const askExtra = boardAskContext({
+              nodes: context.nodes,
+              focusNode: context.selectedIds[0]
+                ? context.nodes.find((node) => node.id === context.selectedIds[0])
+                : undefined,
+            });
             const response = await askAi({
               query: boardText ? `${question}\n\n（白板上目前的內容）\n${boardText}` : question,
               selectedBranchIds: [...new Set(sendable
                 .filter((node) => node.linkedEntityType === "branch" && node.linkedEntityId)
                 .map((node) => node.linkedEntityId!))],
+              focus: askExtra.focus,
+              workLayer: askExtra.workLayer,
             });
             // 只取白板型別的提案；其餘（投票/企劃/留言）留給房間層的 AI 面板
             const proposals = boardProposals(proposalsFromResponse(response));
@@ -4085,7 +4139,7 @@ export function App() {
           response={aiResponse}
           loading={aiLoading}
           error={aiError}
-          onAsk={askAi}
+          onAsk={askAiWithBoard}
           onClose={() => setAiSheetOpen(false)}
           onFocus={(citation) => citation.assetId && focusAi({ assetId: citation.assetId, branchId: citation.branchId, versionId: citation.versionId, locator: citation.locator })}
           onRetryAnalysis={retryAi}
@@ -4277,7 +4331,7 @@ export function App() {
         response={aiResponse}
         loading={aiLoading}
         error={aiError}
-        onAsk={askAi}
+        onAsk={askAiWithBoard}
         onClose={() => setAiSheetOpen(false)}
         onFocus={(citation) => citation.assetId && focusAi({ assetId: citation.assetId, branchId: citation.branchId, versionId: citation.versionId, locator: citation.locator })}
         onRetryAnalysis={retryAi}

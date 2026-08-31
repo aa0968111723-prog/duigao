@@ -77,7 +77,17 @@ export function grokUnconfigured(): boolean {
 export type AgentCard = {
   room: { id: string; title: string; role: string };
   contents: Array<{ branchId: string; type: string; name: string; latestVersionLabel: string; openCommentCount: number }>;
-  focus?: { branchId?: string; versionId?: string; label: string; width?: number; height?: number; thumbnail?: { kind: string; value: string } };
+  focus?: {
+    branchId?: string;
+    versionId?: string;
+    label: string;
+    width?: number;
+    height?: number;
+    thumbnail?: { kind: string; value: string };
+    nodeId?: string;
+    nodeType?: string;
+    source?: "discussion" | "version" | "schedule" | "none";
+  };
   comments: Array<{ id: string; versionId?: string; body: string; regionSummary?: string }>;
   workLayer?: { proposalId: string; status: string; items: Array<{ id: string; type: string; role?: string; text?: string; approxPosition?: string }> };
   allowedActions: string[];
