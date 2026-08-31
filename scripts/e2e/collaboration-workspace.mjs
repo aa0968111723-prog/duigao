@@ -96,30 +96,33 @@ async function toggleWhiteboardDraw(page) {
 }
 
 async function openFocusActions(page) {
-  const details = page.getByTestId("wb-focus-actions");
-  if (!(await details.count())) return false;
-  const opened = await details.evaluate((el) => el instanceof HTMLDetailsElement && el.open);
-  if (!opened) await details.locator("summary").click();
-  return true;
+  return page.evaluate(() => {
+    const details = document.querySelector('[data-testid="wb-focus-actions"]');
+    if (!(details instanceof HTMLDetailsElement)) return false;
+    details.open = true;
+    return true;
+  });
 }
 
 async function runWhiteboardNodeAction(page, testId) {
-  await openFocusActions(page);
-  const inSheet = page.locator('[data-testid="wb-focus-sheet"]').getByTestId(testId);
-  if (await inSheet.count()) {
-    await inSheet.first().click({ force: true });
-    return;
-  }
-  const matches = page.getByTestId(testId);
-  const total = await matches.count();
-  for (let i = 0; i < total; i += 1) {
-    const candidate = matches.nth(i);
-    if (await candidate.isVisible()) {
-      await candidate.click();
-      return;
+  const clicked = await page.evaluate((id) => {
+    const details = document.querySelector('[data-testid="wb-focus-actions"]');
+    if (details instanceof HTMLDetailsElement) details.open = true;
+    const sheetBtn = document.querySelector(`[data-testid="wb-focus-sheet"] [data-testid="${id}"]`);
+    if (sheetBtn instanceof HTMLElement) {
+      sheetBtn.click();
+      return "sheet";
     }
-  }
+    const visible = [...document.querySelectorAll(`[data-testid="${id}"]`)].find((el) => el instanceof HTMLElement && el.offsetParent);
+    if (visible instanceof HTMLElement) {
+      visible.click();
+      return "visible";
+    }
+    return "";
+  }, testId);
+  if (clicked) return;
   await page.getByTestId("whiteboard-more").click();
+  await page.waitForSelector(".wb-more", { timeout: 8000 });
   await page.locator(".wb-more").getByTestId(testId).click();
 }
 
@@ -768,7 +771,11 @@ try {
         await searchNode(page, "招生");
         const beforeText = await page.locator(".wb-node.is-selected .wb-node-static, .wb-node.is-selected textarea").first().inputValue().catch(() => null);
         await openFocusActions(page);
-        await page.getByTestId("wb-node-actions").getByRole("button", { name: "編輯", exact: true }).click({ force: true });
+        await page.evaluate(() => {
+          const btn = document.querySelector('[data-testid="wb-focus-sheet"] [data-testid="wb-node-actions"] button');
+          const labeled = [...document.querySelectorAll('[data-testid="wb-node-actions"] button')].find((el) => el.textContent?.trim() === "編輯");
+          (labeled instanceof HTMLElement ? labeled : btn)?.click();
+        });
         await fillEditing(page, "快照後改的字");
         await dismissSelection(page);
         await page.getByTestId("whiteboard-more").click();
@@ -1112,8 +1119,7 @@ try {
           {
             // WB02：非編輯節點是靜態層，整卡可點選（audit 缺陷已修）
             await page.locator(".wb-node").last().click({ force: true });
-            await openFocusActions(page);
-            await page.getByTestId("wb-node-actions").getByTestId("wb-node-delete").click({ force: true });
+            await runWhiteboardNodeAction(page, "wb-node-delete");
             await B.waitForFunction(
               () => ![...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")),
               null,
