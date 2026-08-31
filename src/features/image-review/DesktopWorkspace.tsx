@@ -44,6 +44,12 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
     );
   }, [room.id, room.versions]);
 
+  useEffect(() => {
+    if (composing && view.compareMode !== "single") {
+      api.setView({ ...view, compareMode: "single" });
+    }
+  }, [api, composing, view]);
+
   return (
     <main className={`workspace${composing ? " is-compose" : ""}`}>
       <div className="stage-with-scope">

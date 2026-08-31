@@ -126,6 +126,12 @@ export function MobileWorkspace({ api, presence }: Props) {
     }
   }, [proposalStore.layerEditing, proposalSession]);
 
+  useEffect(() => {
+    if (proposalMode && view.compareMode !== "single") {
+      api.setView({ ...view, compareMode: "single" });
+    }
+  }, [api, proposalMode, view]);
+
   // A cloud room may finish replacing its local id while the compose overlay is
   // opening. Re-assert the plain「編輯這張」session against the room/version now
   // on screen; linked proposal intents still own their own create/select flow.

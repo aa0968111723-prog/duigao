@@ -156,6 +156,22 @@ test("crop JSON round-trip、undo 還原、換圖保留框", () => {
   assert.match(overlay, /insetCrop/);
 });
 
+test("compose 對照滑桿在圖下緣，版本並排鎖單張", () => {
+  const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
+  const mobile = src("src/features/image-review/MobileWorkspace.tsx");
+  const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
+  const css = src("src/features/visual-proposal/proposal.css");
+  assert.match(overlay, /data-testid="proposal-compare-slider"/);
+  assert.match(overlay, /data-testid="proposal-compare-line"/);
+  assert.match(overlay, /setCompareSplit/);
+  assert.match(overlay, /工作層/);
+  assert.match(css, /proposal-compare-slider/);
+  assert.match(css, /touch-action:\s*none/);
+  assert.match(mobile, /proposalMode && view\.compareMode !== "single"/);
+  assert.match(desktop, /composing && view\.compareMode !== "single"/);
+  assert.match(desktop, /compareMode: "single"/);
+});
+
 test("compose 單一皮：Dock 五鍵、完成出口、無 pin 鍵", () => {
   const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
   const mobile = src("src/features/image-review/MobileWorkspace.tsx");

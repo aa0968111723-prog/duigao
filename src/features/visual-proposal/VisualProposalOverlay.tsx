@@ -266,9 +266,38 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
 
       {comparing && (
         <>
-          <span className="proposal-compare-line" style={{ left: `${compareSplit * 100}%` }} aria-hidden />
+          <button
+            type="button"
+            className="proposal-compare-line"
+            data-testid="proposal-compare-line"
+            aria-label="拖動對照"
+            style={{ left: `${compareSplit * 100}%` }}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const layer = event.currentTarget.parentElement;
+              if (!layer) return;
+              const rect = layer.getBoundingClientRect();
+              proposal.setCompareSplit(clamp((event.clientX - rect.left) / (rect.width || 1), 0, 1));
+            }}
+          />
           <span className="proposal-compare-tag proposal-compare-tag-left">原稿</span>
-          <span className="proposal-compare-tag proposal-compare-tag-right">提案</span>
+          <span className="proposal-compare-tag proposal-compare-tag-right">工作層</span>
+          <input
+            type="range"
+            className="proposal-compare-slider"
+            data-testid="proposal-compare-slider"
+            min={0}
+            max={1}
+            step={0.01}
+            value={compareSplit}
+            aria-label="對照位置"
+            onPointerDown={(event) => event.stopPropagation()}
+            onChange={(event) => proposal.setCompareSplit(Number(event.target.value))}
+          />
         </>
       )}
 
