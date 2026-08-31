@@ -375,6 +375,12 @@ function unwrapMultipart(raw, contentType) {
   return { buf: raw, mime: "application/octet-stream" };
 }
 
+/** Optional live/local room-ai-context stand-in (browser site / enrollment AI). */
+let roomAiHandler = null;
+export function setRoomAiHandler(handler) {
+  roomAiHandler = typeof handler === "function" ? handler : null;
+}
+
 /** Set by start({ appOrigin }) — mounts the real Edge Function at /functions/v1. */
 let previewHandler = null;
 let cutosBridgeHandler = null;
@@ -392,6 +398,9 @@ export const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { cors(res); res.writeHead(204); return res.end(); }
 
   // ---- Edge Functions ----
+  if (p === "/functions/v1/room-ai-context" && roomAiHandler) {
+    return roomAiHandler(req, res);
+  }
   if (previewHandler && p.startsWith("/functions/v1/share-preview")) {
     return serveHandler(previewHandler, req, res, mockOrigin);
   }

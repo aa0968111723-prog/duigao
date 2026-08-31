@@ -145,6 +145,67 @@ test("askGrok 對準書籤：chat + Imagine 都被呼叫，原稿 path 不出現
   });
 });
 
+test("askGrok 第一回合只有 list_* 時會再問一輪並回文字", async () => {
+  const { card, ask } = treeCard();
+  let chatTurns = 0;
+  const bodies: string[] = [];
+  const answer = await askGrok({
+    env: {
+      provider: "grok-room-agent",
+      xaiKey: "xai-test-enrollment-tree",
+      textModel: DEFAULT_GROK_TEXT_MODEL,
+      imageModel: "grok-imagine-image",
+      videoModel: "grok-imagine-video",
+      maxUsd: 0.05,
+    },
+    query: enrollmentQuery(ask.focus?.treePath),
+    card,
+    imagineVideoConfirmed: false,
+    fetchFn: async (url, init) => {
+      if (!String(url).includes("/chat/completions")) throw new Error(`unexpected url ${url}`);
+      chatTurns += 1;
+      if (typeof init?.body === "string") bodies.push(init.body);
+      if (chatTurns === 1) {
+        return {
+          ok: true,
+          headers: { get: () => "application/json" },
+          text: async () => JSON.stringify({
+            choices: [{
+              finish_reason: "tool_calls",
+              message: {
+                content: "",
+                tool_calls: [
+                  { id: "c1", type: "function", function: { name: "list_room_contents", arguments: "{}" } },
+                  { id: "c2", type: "function", function: { name: "get_version_brief", arguments: "{}" } },
+                  { id: "c3", type: "function", function: { name: "list_open_comments", arguments: "{}" } },
+                ],
+              },
+            }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({
+          choices: [{
+            message: {
+              content: "針對「202609招生 › 書籤」，正面可補師父法語，原有語錄先不要換；胸章那條不要混進來。",
+            },
+          }],
+        }),
+      };
+    },
+  });
+
+  assert.equal(chatTurns, 2);
+  assert.ok(answer);
+  assert.match(answer?.text ?? "", /書籤/);
+  assert.match(answer?.text ?? "", /師父法語/);
+  assert.match(bodies[1] ?? "", /"role":"tool"/);
+  assert.match(bodies[1] ?? "", /list_room_contents/);
+});
+
 test("executeImagineImage 也走同一支 Imagine 函式（不是測試自己 fetch）", async () => {
   const urls: string[] = [];
   const image = await executeImagineImage({

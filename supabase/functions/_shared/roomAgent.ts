@@ -212,6 +212,25 @@ function looksLikeHtml(body: string, contentType: string | null): boolean {
   return /^\s*<(!doctype\s+html|html[\s>])/i.test(body);
 }
 
+const READ_TOOLS = new Set(["list_room_contents", "get_version_brief", "list_open_comments"]);
+export const ASK_GROK_MAX_TOOL_TURNS = 4;
+const ASK_GROK_TURN_MS = 30_000;
+
+function grokSystemPrompt(imagineVideoConfirmed: boolean): string {
+  return imagineVideoConfirmed
+    ? "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。回覆繁中。禁止 web_search 與 x_search。使用者已確認生影估價，若要生影請呼叫 imagine_video。"
+    : "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。若 card.focus.treePath 存在，對準那條招生樹路徑說話。回覆繁中。禁止 web_search 與 x_search。生影必須先估價：呼叫 imagine_video 會得到估價卡，使用者確認後才生成。";
+}
+
+function visibleGrokText(text: string, actions: unknown[], card: AgentCard): string {
+  const fromModel = (text || (actions.length ? "這是可審核的提案，採用後才會寫入工作層。" : ""))
+    .replace(/https?:\/\/[^\s)]+/gi, "[連結已省略]")
+    .slice(0, 5000);
+  if (fromModel) return fromModel;
+  const path = card.focus?.treePath || card.focus?.label || "這張";
+  return `針對「${path}」，我看過這條支線了。目前只能提案、不能改原稿。`;
+}
+
 export async function askGrok(input: {
   env: GrokEnv;
   query: string;
@@ -221,129 +240,194 @@ export async function askGrok(input: {
   storeImagine?: (input: { bytes: Uint8Array; mime: string; kind: "image" | "video" }) => Promise<{ proposalId: string; path: string } | null>;
 }): Promise<{ text: string; actions: Array<{ type: string; label: string; payload: Record<string, unknown> }>; model: string } | null> {
   const fetchFn = input.fetchFn ?? (fetch as ImagineFetch);
-  const body = JSON.stringify({
-    model: input.env.textModel,
-    stream: false,
-    messages: [
-      {
-        role: "system",
-        content: input.imagineVideoConfirmed
-          ? "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。回覆繁中。禁止 web_search 與 x_search。使用者已確認生影估價，若要生影請呼叫 imagine_video。"
-          : "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。若 card.focus.treePath 存在，對準那條招生樹路徑說話。回覆繁中。禁止 web_search 與 x_search。生影必須先估價：呼叫 imagine_video 會得到估價卡，使用者確認後才生成。",
-      },
-      { role: "user", content: JSON.stringify({ query: input.query.slice(0, 2000), card: input.card }) },
-    ],
-    tools: ALLOWED_TOOLS.map((name) => ({
-      type: "function",
-      function: { name, description: name, parameters: { type: "object", additionalProperties: true } },
-    })),
-  });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const messages: Array<Record<string, unknown>> = [
+    { role: "system", content: grokSystemPrompt(input.imagineVideoConfirmed) },
+    { role: "user", content: JSON.stringify({ query: input.query.slice(0, 2000), card: input.card }) },
+  ];
+  const tools = ALLOWED_TOOLS.map((name) => ({
+    type: "function",
+    function: { name, description: name, parameters: { type: "object", additionalProperties: true } },
+  }));
+  const actions: Array<{ type: string; label: string; payload: Record<string, unknown> }> = [];
+  const logs: string[] = [];
+  let spent = 0;
+  let model = input.env.textModel;
+
   try {
-    const response = await fetchFn("https://api.x.ai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${input.env.xaiKey}`,
-      },
-      body,
-      signal: controller.signal,
-    });
-    const contentType = response.headers.get("content-type");
-    const rawText = await response.text();
-    if (looksLikeHtml(rawText, contentType)) return null;
-    let raw: Record<string, unknown>;
-    try { raw = asObject(JSON.parse(rawText)); } catch { return null; }
-    const choices = Array.isArray(raw.choices) ? raw.choices : [];
-    const message = asObject(asObject(choices[0]).message);
-    const text = asText(message.content) || asText(raw.text) || asText(raw.answer);
-    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-    const actions: Array<{ type: string; label: string; payload: Record<string, unknown> }> = [];
-    let spent = 0;
-    const logs: string[] = [];
-    for (const call of toolCalls.slice(0, 6)) {
-      const fn = asObject(asObject(call).function);
-      const name = asText(fn.name);
-      let args: Record<string, unknown> = {};
-      try { args = asObject(JSON.parse(asText(fn.arguments, "{}"))); } catch { args = {}; }
-      const ran = runTool(name, args, input.card, input.imagineVideoConfirmed, spent);
-      spent = ran.spentUsd;
-      logs.push(`${name}:${ran.result.refused ? "refuse" : "ok"}`);
-      if (name === "imagine_video" && ran.result.refused && ran.result.needsConfirm && !input.imagineVideoConfirmed) {
-        actions.push({
-          type: name,
-          label: ran.result.preview,
-          payload: stripSecrets({
-            needsConfirm: true,
-            seconds: ran.result.seconds,
-            resolution: ran.result.resolution,
-            estimatedUsd: ran.result.estimatedUsd,
-            prompt: ran.result.prompt,
-            preview: ran.result.preview,
+    for (let turn = 0; turn < ASK_GROK_MAX_TOOL_TURNS; turn++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), ASK_GROK_TURN_MS);
+      let rawText: string;
+      let contentType: string | null;
+      try {
+        const response = await fetchFn("https://api.x.ai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${input.env.xaiKey}`,
+          },
+          body: JSON.stringify({
+            model: input.env.textModel,
+            stream: false,
+            messages,
+            tools,
           }),
+          signal: controller.signal,
         });
-        continue;
+        contentType = response.headers.get("content-type");
+        rawText = await response.text();
+      } catch {
+        return turn === 0 ? null : {
+          text: visibleGrokText("", actions, input.card),
+          actions: actions.slice(0, 6),
+          model,
+        };
+      } finally {
+        clearTimeout(timeout);
       }
-      if (ran.result.refused || name === "list_room_contents" || name === "get_version_brief" || name === "list_open_comments") continue;
-      if (name === "imagine_image" || name === "imagine_video") {
-        const generated = name === "imagine_image"
-          ? await executeImagineImage({
-            prompt: asText(args.prompt),
-            size: asText(args.size) || undefined,
-            model: input.env.imageModel,
-            apiKey: input.env.xaiKey,
-            fetchFn,
-          })
-          : await executeImagineVideo({
-            prompt: asText(args.prompt),
-            seconds: typeof args.seconds === "number" ? args.seconds : 6,
-            resolution: asText(args.resolution) || undefined,
-            model: input.env.videoModel,
-            apiKey: input.env.xaiKey,
-            confirmed: input.imagineVideoConfirmed,
-            fetchFn,
+      if (looksLikeHtml(rawText, contentType)) return turn === 0 ? null : {
+        text: visibleGrokText("", actions, input.card),
+        actions: actions.slice(0, 6),
+        model,
+      };
+      let raw: Record<string, unknown>;
+      try { raw = asObject(JSON.parse(rawText)); } catch {
+        return turn === 0 ? null : {
+          text: visibleGrokText("", actions, input.card),
+          actions: actions.slice(0, 6),
+          model,
+        };
+      }
+      if (typeof raw.model === "string" && raw.model.trim()) model = raw.model.trim();
+      const choices = Array.isArray(raw.choices) ? raw.choices : [];
+      const message = asObject(asObject(choices[0]).message);
+      const text = asText(message.content) || asText(raw.text) || asText(raw.answer);
+      const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+      const toolResults: Array<{ id: string; name: string; preview: string }> = [];
+      const echoedCalls: Array<Record<string, unknown>> = [];
+
+      for (const [index, call] of toolCalls.slice(0, 6).entries()) {
+        const rawCall = asObject(call);
+        const fn = asObject(rawCall.function);
+        const name = asText(fn.name);
+        const id = asText(rawCall.id) || `tool-${turn}-${index}`;
+        echoedCalls.push({
+          id,
+          type: asText(rawCall.type, "function") || "function",
+          function: { name, arguments: asText(fn.arguments, "{}") },
+        });
+        let args: Record<string, unknown> = {};
+        try { args = asObject(JSON.parse(asText(fn.arguments, "{}"))); } catch { args = {}; }
+        const ran = runTool(name, args, input.card, input.imagineVideoConfirmed, spent);
+        spent = ran.spentUsd;
+        logs.push(`${name}:${ran.result.refused ? "refuse" : "ok"}`);
+        toolResults.push({ id, name, preview: ran.result.preview });
+        if (name === "imagine_video" && ran.result.refused && ran.result.needsConfirm && !input.imagineVideoConfirmed) {
+          actions.push({
+            type: name,
+            label: ran.result.preview,
+            payload: stripSecrets({
+              needsConfirm: true,
+              seconds: ran.result.seconds,
+              resolution: ran.result.resolution,
+              estimatedUsd: ran.result.estimatedUsd,
+              prompt: ran.result.prompt,
+              preview: ran.result.preview,
+            }),
           });
-        if (!generated.ok) {
-          logs.push(`${name}:imagine-fail`);
           continue;
         }
-        const stored = input.storeImagine
-          ? await input.storeImagine({
-            bytes: generated.bytes,
-            mime: generated.mime,
-            kind: name === "imagine_video" ? "video" : "image",
-          })
-          : null;
-        if (!stored || /\/versions\//.test(stored.path)) {
-          logs.push(`${name}:store-fail`);
+        if (ran.result.refused || READ_TOOLS.has(name)) continue;
+        if (name === "imagine_image" || name === "imagine_video") {
+          const generated = name === "imagine_image"
+            ? await executeImagineImage({
+              prompt: asText(args.prompt),
+              size: asText(args.size) || undefined,
+              model: input.env.imageModel,
+              apiKey: input.env.xaiKey,
+              fetchFn,
+            })
+            : await executeImagineVideo({
+              prompt: asText(args.prompt),
+              seconds: typeof args.seconds === "number" ? args.seconds : 6,
+              resolution: asText(args.resolution) || undefined,
+              model: input.env.videoModel,
+              apiKey: input.env.xaiKey,
+              confirmed: input.imagineVideoConfirmed,
+              fetchFn,
+            });
+          if (!generated.ok) {
+            logs.push(`${name}:imagine-fail`);
+            continue;
+          }
+          const stored = input.storeImagine
+            ? await input.storeImagine({
+              bytes: generated.bytes,
+              mime: generated.mime,
+              kind: name === "imagine_video" ? "video" : "image",
+            })
+            : null;
+          if (!stored || /\/versions\//.test(stored.path)) {
+            logs.push(`${name}:store-fail`);
+            continue;
+          }
+          actions.push({
+            type: name,
+            label: ran.result.preview,
+            payload: stripSecrets({
+              proposalId: stored.proposalId,
+              preview: ran.result.preview,
+              workLayerRef: stored.path,
+            }),
+          });
           continue;
         }
         actions.push({
           type: name,
           label: ran.result.preview,
-          payload: stripSecrets({
-            proposalId: stored.proposalId,
-            preview: ran.result.preview,
-            workLayerRef: stored.path,
-          }),
+          payload: stripSecrets({ proposalId: ran.result.proposalId, preview: ran.result.preview }),
         });
-        continue;
       }
-      actions.push({
-        type: name,
-        label: ran.result.preview,
-        payload: stripSecrets({ proposalId: ran.result.proposalId, preview: ran.result.preview }),
+
+      const answer = (text || (actions.length ? "這是可審核的提案，採用後才會寫入工作層。" : ""))
+        .replace(/https?:\/\/[^\s)]+/gi, "[連結已省略]")
+        .slice(0, 5000);
+      if (answer) {
+        console.log(JSON.stringify({ roomAgent: "grok", tools: logs, spentUsd: spent, model, turns: turn + 1 }));
+        return { text: answer, actions: actions.slice(0, 6), model };
+      }
+
+      const onlyRead = toolResults.length > 0 && toolResults.every((item) => READ_TOOLS.has(item.name));
+      if (!onlyRead || turn >= ASK_GROK_MAX_TOOL_TURNS - 1) {
+        const fallback = visibleGrokText("", actions, input.card);
+        console.log(JSON.stringify({ roomAgent: "grok", tools: logs, spentUsd: spent, model, turns: turn + 1, fallback: true }));
+        return { text: fallback, actions: actions.slice(0, 6), model };
+      }
+
+      messages.push({
+        role: "assistant",
+        content: text || null,
+        tool_calls: echoedCalls,
+      });
+      for (const item of toolResults) {
+        messages.push({
+          role: "tool",
+          tool_call_id: item.id,
+          content: JSON.stringify({ name: item.name, preview: item.preview }),
+        });
+      }
+      messages.push({
+        role: "user",
+        content: "請用繁中直接回答剛才的問題。對準 card.focus.treePath，不要把旁支線混在一起。不要再只呼叫 list_room_contents、get_version_brief、list_open_comments。",
       });
     }
-    console.log(JSON.stringify({ roomAgent: "grok", tools: logs, spentUsd: spent, model: input.env.textModel }));
-    const answer = (text || (actions.length ? "這是可審核的提案，採用後才會寫入工作層。" : "")).replace(/https?:\/\/[^\s)]+/gi, "[連結已省略]").slice(0, 5000);
-    if (!answer) return null;
-    return { text: answer, actions: actions.slice(0, 6), model: input.env.textModel };
+    return {
+      text: visibleGrokText("", actions, input.card),
+      actions: actions.slice(0, 6),
+      model,
+    };
   } catch {
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

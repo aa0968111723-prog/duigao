@@ -304,6 +304,52 @@ test("採用 upserts visual_proposals and leaves the version storage path unchan
   );
 });
 
+test("askGrok 只拿到 list_* 時會再問一輪，不再回 null", async () => {
+  const grokEnv = {
+    provider: "grok-room-agent",
+    xaiKey: "xai-test",
+    textModel: DEFAULT_GROK_TEXT_MODEL,
+    imageModel: "grok-imagine-image",
+    videoModel: "grok-imagine-video",
+    maxUsd: 0.05,
+  };
+  let turns = 0;
+  const answer = await askGrok({
+    env: grokEnv,
+    query: "針對書籤下一步？",
+    card: card(),
+    imagineVideoConfirmed: false,
+    fetchFn: async (url) => {
+      if (!String(url).includes("/chat/completions")) throw new Error(String(url));
+      turns += 1;
+      if (turns === 1) {
+        return {
+          ok: true,
+          headers: { get: () => "application/json" },
+          text: async () => JSON.stringify({
+            choices: [{
+              message: {
+                content: "",
+                tool_calls: [{ id: "t1", function: { name: "list_room_contents", arguments: "{}" } }],
+              },
+            }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({
+          choices: [{ message: { content: "書籤這支先補正面法語，不要改原稿。" } }],
+        }),
+      };
+    },
+  });
+  assert.equal(turns, 2);
+  assert.ok(answer);
+  assert.match(answer?.text ?? "", /書籤/);
+});
+
 test("askGrok calls Imagine for image and only quotes unconfirmed video", async () => {
   const grokEnv = {
     provider: "grok-room-agent",
