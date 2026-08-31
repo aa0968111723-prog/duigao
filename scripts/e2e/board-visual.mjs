@@ -7,7 +7,7 @@
  * 1024 與 1280 會進 WB05 的 Split View（討論欄＋側欄工具列）。
  *
  * 與 wb00 test-plan 的偏差（誠實記錄）：計畫寫 4×2 主題×3=24 張，但
- * duigao 是單主題深色設計（styles.css 無 light 分支）— 主題軸不存在，
+ * duigao 白板跟隨活動房的單一明亮主題（沒有 light/dark 切換）— 主題軸不存在，
  * 假拍 24 張是造假覆蓋。若未來加入淺色主題，此矩陣 ×2。
  *
  * 比對：pixelmatch，容差 **絕對值** maxDiffPixels=2000（比例容差在大
