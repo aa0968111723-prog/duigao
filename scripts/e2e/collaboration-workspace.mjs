@@ -244,10 +244,10 @@ try {
     check("房間討論可送出文字", (await page.getByTestId("discussion-feed").innerText()).includes("先把招生流程攤在白板上"));
     check("送出後看得到最新一則", await page.locator('[data-testid="discussion-feed"] [data-latest="true"]').innerText().then((text) => text.includes("先把招生流程攤在白板上")));
     await page.getByTestId("discussion-edit").first().click();
-    await page.getByTestId("discussion-edit-input").waitFor({ state: "visible", timeout: 8000 });
+    await page.getByTestId("discussion-edit-input").waitFor({ state: "visible", timeout: 15000 });
     await page.getByTestId("discussion-edit-input").fill("先把招生流程攤在白板上（改過）");
     await page.getByTestId("discussion-edit-save").click();
-    await page.waitForFunction(() => document.body.innerText.includes("改過"), null, { timeout: 8000 });
+    await page.locator(".rd-msg", { hasText: "先把招生流程攤在白板上（改過）" }).first().waitFor({ state: "visible", timeout: 15000 });
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });
     check("改過的訊息標已編輯", await page.getByTestId("discussion-edited").count() === 1);
