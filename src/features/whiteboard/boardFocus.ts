@@ -244,6 +244,18 @@ export function snapAfterFocusDiscuss(current: "peek" | "half" | "full"): "peek"
   return current === "peek" ? "peek" : "half";
 }
 
+/**
+ * 選卡未編輯 → half（討論／動作露得出來）。
+ * 正在打字 → peek，half sheet 不得蓋住 textarea（chip 跳回後再寫下）。
+ */
+export function snapAfterSelectionOrEdit(input: {
+  hasSelection: boolean;
+  editing: boolean;
+}): "peek" | "half" | null {
+  if (!input.hasSelection) return null;
+  return input.editing ? "peek" : "half";
+}
+
 export function readBoardSession(key: string): BoardSession | undefined {
   return SESSION.get(key);
 }

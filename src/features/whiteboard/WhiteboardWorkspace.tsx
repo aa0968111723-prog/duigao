@@ -56,6 +56,7 @@ import {
   readBoardSession,
   readSafeAreaBottom,
   incomingFocusAction,
+  snapAfterSelectionOrEdit,
   shouldMountFocusSheet,
   snapAfterFocusDiscuss,
   writeBoardSession,
@@ -1476,8 +1477,12 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   const selectedNode = liveNodes.find((node) => node.id === selected[0]);
   const focusNodeId = focusNodeIdFromSelection(selected);
   useEffect(() => {
-    if (selected[0]) setFocusSheetSnap("half");
-  }, [selected[0]]);
+    const snap = snapAfterSelectionOrEdit({
+      hasSelection: Boolean(selected[0]),
+      editing: Boolean(editingId),
+    });
+    if (snap) setFocusSheetSnap(snap);
+  }, [selected[0], editingId]);
   const focusCard = selectedNode ? focusCardFromNode(selectedNode) : null;
   const colleagueSaid = lastColleagueForFocus(api.room.discussion ?? [], focusCard?.nodeId);
   const emptyBoard = isEmptyBoard(liveNodes);

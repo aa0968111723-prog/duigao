@@ -176,8 +176,16 @@ async function recordWebm(page, seconds = 1.1) {
 
 async function fillEditing(page, text) {
   const box = page.locator("textarea.wb-node-text");
-  await box.waitFor({ timeout: 8000 });
-  await box.fill(text);
+  try {
+    await box.waitFor({ state: "attached", timeout: 8000 });
+  } catch {
+    await dismissSelection(page);
+    const sticky = page.getByTestId("wb-tool-sticky");
+    if (await sticky.count()) await sticky.click({ force: true });
+    await box.waitFor({ state: "attached", timeout: 8000 });
+  }
+  if (await box.isVisible()) await box.fill(text);
+  else await box.fill(text, { force: true });
 }
 
 async function dismissSelection(page) {
@@ -974,6 +982,9 @@ try {
         await canvas2.dispatchEvent("pointerup", { pointerId: 91 });
         await page.waitForTimeout(150);
         const camPanned = await page.locator(".wb-layer").getAttribute("style");
+        // chip 跳回後焦點 sheet 仍開著；先取消選取，直欄「寫下」才進編輯。
+        await dismissSelection(page);
+        await page.getByTestId("wb-tool-sticky").waitFor({ timeout: 8000 });
         await page.getByTestId("wb-tool-sticky").click();
         await fillEditing(page, "焦點後新增");
         await page.waitForTimeout(300);

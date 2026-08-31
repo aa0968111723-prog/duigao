@@ -27,6 +27,7 @@ import {
   shouldInlineDiscussionRail,
   shouldMountFocusSheet,
   snapAfterFocusDiscuss,
+  snapAfterSelectionOrEdit,
   workLayerItemsFromNodes,
 } from "../../src/features/whiteboard/boardFocus";
 import {
@@ -140,7 +141,10 @@ test("390 選卡：half 第一屏看得到討論與輸入框，動作收進 disc
   assert.ok(phone.half > 200, "half 必須裝得下摘要＋討論鈕＋composer");
   const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
   assert.match(workspace, /useState<SheetSnap>\("half"\)/);
-  assert.match(workspace, /if \(selected\[0\]\) setFocusSheetSnap\("half"\)/);
+  assert.match(workspace, /snapAfterSelectionOrEdit/);
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: false }), "half");
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: true, editing: true }), "peek");
+  assert.equal(snapAfterSelectionOrEdit({ hasSelection: false, editing: true }), null);
   assert.doesNotMatch(workspace, /viewportHeight=\{typeof window === "undefined" \? 640 : window\.innerHeight\}/);
   assert.match(workspace, /viewportHeight=\{sheetSnaps\.viewportHeight\}/);
   assert.match(workspace, /peekHeight=\{sheetSnaps\.peek\}/);
