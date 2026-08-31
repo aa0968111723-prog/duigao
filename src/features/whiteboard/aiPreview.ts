@@ -38,6 +38,15 @@ const GAP_Y = 20;
  * 而且每次重算位置都不一樣。整齊的一排比聰明的散佈好懂 — 使用者套用後
  * 可以自己拖。
  */
+/** 有焦點時從該卡右側排；沒有就用視野中心。預覽仍不進 DB。 */
+export function layoutOriginFromFocus(
+  focus: { x: number; y: number; width: number; height: number } | null | undefined,
+  fallback: { x: number; y: number },
+): { x: number; y: number } {
+  if (!focus) return fallback;
+  return { x: focus.x + focus.width + GAP_X, y: focus.y };
+}
+
 export function layoutPreview(
   count: number,
   origin: { x: number; y: number },
