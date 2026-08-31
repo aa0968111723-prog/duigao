@@ -105,6 +105,13 @@ async function openFocusActions(page) {
 }
 
 async function runWhiteboardNodeAction(page, testId) {
+  // 釘文宣後 App focus 可能仍停在 room_content；編輯中的心智圖要先選回來，
+  // 否則更多列沒有 wb-add-child。
+  await page.evaluate(() => {
+    const ta = document.querySelector("textarea.wb-node-text");
+    const node = ta?.closest("[data-node-type='mindmap'], [data-node-type='text'], [data-node-type='flow']");
+    if (node instanceof HTMLElement) node.click();
+  });
   await page.waitForFunction(
     () => document.querySelector('[data-testid="wb-focus-sheet"]') || document.querySelector('[data-testid="wb-node-actions"]'),
     null,
@@ -128,7 +135,7 @@ async function runWhiteboardNodeAction(page, testId) {
   if (clicked) return;
   await page.getByTestId("whiteboard-more").click();
   await page.waitForSelector(".wb-more", { timeout: 8000 });
-  await page.locator(".wb-more").getByTestId(testId).click();
+  await page.locator(".wb-more").getByTestId(testId).click({ force: true });
 }
 
 async function recordWebm(page, seconds = 1.1) {

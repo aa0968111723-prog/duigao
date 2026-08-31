@@ -1333,7 +1333,10 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       api.onSetRoomFocus?.(id);
                       api.onFocusNode?.(id);
                     },
-                    onSelectionFocus: setLocalFocusId,
+                    onSelectionFocus: (id) => {
+                      setLocalFocusId(id);
+                      api.onFocusNode?.(id);
+                    },
                     discussionSlot: !railVisible ? renderDiscussion("chat", { compact: true }) : undefined,
                     onRenameRoom: api.onRenameRoom,
                     onPinFromDiscussion: () => {

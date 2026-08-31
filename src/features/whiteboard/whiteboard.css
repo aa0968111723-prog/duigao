@@ -254,7 +254,10 @@ video.wb-media-frame { pointer-events: auto; }
   top: 0;
   bottom: 0;
   width: var(--wb-rail-w);
-  z-index: var(--z-board-focus);
+  /* 白板 Focus 是 portal 到 body 的同層 z-index；側欄若同值會被後掛的
+     畫布蓋住，討論「加入白板」scrim 點不到（平板 e2e 實抓）。側欄本體
+     只佔左側 340px，畫布已讓位，抬一層只讓固定 overlay 壓過畫布。 */
+  z-index: calc(var(--z-board-focus) + 5);
   display: flex;
   flex-direction: column;
   background: #fff;
