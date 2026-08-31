@@ -44,18 +44,35 @@ const hits = [];
 const recordHit = (url, extra = {}) => {
   hits.push({ url: String(url), ...extra });
 };
+const chatShape = [];
 const fetchFn = key
   ? async (url, init) => {
       const started = Date.now();
       const response = await fetch(url, init);
       const raw = await response.text();
-      recordHit(url, {
+      const extra = {
         status: response.status,
         ok: response.ok,
         contentType: response.headers.get("content-type"),
         bodyBytes: raw.length,
         ms: Date.now() - started,
-      });
+      };
+      if (String(url).includes("/chat/completions")) {
+        try {
+          const parsed = JSON.parse(raw);
+          const message = parsed?.choices?.[0]?.message ?? {};
+          const tools = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+          chatShape.push({
+            responseModel: typeof parsed?.model === "string" ? parsed.model : null,
+            finishReason: parsed?.choices?.[0]?.finish_reason ?? null,
+            contentChars: typeof message.content === "string" ? message.content.length : 0,
+            toolNames: tools.map((item) => item?.function?.name).filter(Boolean),
+          });
+        } catch {
+          chatShape.push({ parseError: true });
+        }
+      }
+      recordHit(url, extra);
       return {
         ok: response.ok,
         headers: { get: (name) => response.headers.get(name) },
@@ -102,7 +119,8 @@ const evidence = {
   treePath: ask.focus?.treePath,
   configured: Boolean(key),
   keyRedacted: key ? "xai-…" : null,
-  model: answer?.model ?? null,
+  model: answer?.model ?? chatShape[0]?.responseModel ?? null,
+  chatShape,
   hits: hits.map((hit) => ({
     url: hit.url,
     status: hit.status ?? null,
@@ -123,6 +141,7 @@ const evidence = {
 try {
   mkdirSync(outDir, { recursive: true });
   writeFileSync(resolve(outDir, "enrollment_tree_ai_probe.json"), `${JSON.stringify(evidence, null, 2)}\n`);
+  if (key) writeFileSync(resolve(outDir, "enrollment_tree_ai_live.json"), `${JSON.stringify(evidence, null, 2)}\n`);
 } catch (error) {
   console.error(error);
 }
