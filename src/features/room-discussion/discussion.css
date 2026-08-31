@@ -3,6 +3,15 @@
 .rd-tabs button { min-height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-faint); }
 .rd-tabs button.is-active { background: var(--raise); color: var(--ink); font-weight: 600; }
 .rd-feed { display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(88px + var(--kb, 0px)); }
+.rd-focus-empty {
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
 .rd-msg { border: 1px solid var(--line-soft); background: var(--panel); border-radius: 16px; padding: 12px 14px; -webkit-touch-callout: none; }
 .rd-msg header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .rd-dot { width: 8px; height: 8px; border-radius: 99px; }

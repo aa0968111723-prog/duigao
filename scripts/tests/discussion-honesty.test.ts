@@ -60,6 +60,8 @@ test("D-02: 只有作者能改自己的文字；legacy／附件／failed 不行"
   const editBlock = app.slice(app.indexOf("const editDiscussion"), app.indexOf("const tombstoneDiscussion"));
   assert.match(editBlock, /cloud\.userId, guest\?\.id/);
   assert.match(editBlock, /actorIds\.some/);
+  assert.match(editBlock, /discussionOutboxRef\.current\.ghosts/);
+  assert.match(editBlock, /discussionOutboxRef\.current\.patch/);
 });
 
 test("D-03: AI / agent 不得當成員確認決策", () => {

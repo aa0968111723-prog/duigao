@@ -86,6 +86,10 @@ export type VersionRow = {
   optimized?: boolean | null;
   source_file_size?: number | null;
   created_at: string;
+  /** 0021. Absent on older rows / local rooms. */
+  canva_design_id?: string | null;
+  canva_page_id?: string | null;
+  canva_page_number?: number | null;
 };
 
 export type CommentRow = {

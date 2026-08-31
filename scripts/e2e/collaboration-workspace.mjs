@@ -95,17 +95,39 @@ async function toggleWhiteboardDraw(page) {
   await page.getByTestId("wb-tool-draw").click();
 }
 
+async function openFocusActions(page) {
+  return page.evaluate(() => {
+    const details = document.querySelector('[data-testid="wb-focus-actions"]');
+    if (!(details instanceof HTMLDetailsElement)) return false;
+    details.open = true;
+    return true;
+  });
+}
+
 async function runWhiteboardNodeAction(page, testId) {
-  const matches = page.getByTestId(testId);
-  const total = await matches.count();
-  for (let i = 0; i < total; i += 1) {
-    const candidate = matches.nth(i);
-    if (await candidate.isVisible()) {
-      await candidate.click();
-      return;
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="wb-focus-sheet"]') || document.querySelector('[data-testid="wb-node-actions"]'),
+    null,
+    { timeout: 8000 },
+  ).catch(() => null);
+  const clicked = await page.evaluate((id) => {
+    const details = document.querySelector('[data-testid="wb-focus-actions"]');
+    if (details instanceof HTMLDetailsElement) details.open = true;
+    const sheetBtn = document.querySelector(`[data-testid="wb-focus-sheet"] [data-testid="${id}"]`);
+    if (sheetBtn instanceof HTMLElement) {
+      sheetBtn.click();
+      return "sheet";
     }
-  }
+    const visible = [...document.querySelectorAll(`[data-testid="${id}"]`)].find((el) => el instanceof HTMLElement && el.offsetParent);
+    if (visible instanceof HTMLElement) {
+      visible.click();
+      return "visible";
+    }
+    return "";
+  }, testId);
+  if (clicked) return;
   await page.getByTestId("whiteboard-more").click();
+  await page.waitForSelector(".wb-more", { timeout: 8000 });
   await page.locator(".wb-more").getByTestId(testId).click();
 }
 
@@ -250,32 +272,39 @@ try {
     const latestMsg = page.locator('[data-testid="discussion-feed"] [data-latest="true"]');
     await latestMsg.getByTestId("discussion-edit").waitFor({ state: "visible", timeout: 15000 });
     const editedBody = "先把招生流程攤在白板上（改過）";
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (await page.locator(".rd-msg", { hasText: editedBody }).count()) break;
-      if (!await page.getByTestId("discussion-edit-form").count()) {
-        await latestMsg.getByTestId("discussion-edit").click();
-      }
-      const form = page.getByTestId("discussion-edit-form");
-      await form.waitFor({ state: "visible", timeout: 8000 });
-      await form.evaluate((node, value) => {
-        const input = node.querySelector('[data-testid="discussion-edit-input"]');
-        const save = node.querySelector('[data-testid="discussion-edit-save"]');
-        if (!(input instanceof HTMLTextAreaElement)) throw new Error("no discussion-edit-input");
-        Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.call(input, value);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        if (save instanceof HTMLButtonElement) {
-          save.disabled = false;
-          save.click();
-        } else if (node instanceof HTMLFormElement) {
-          node.requestSubmit();
-        }
+    await latestMsg.scrollIntoViewIfNeeded();
+    if (!await page.getByTestId("discussion-edit-form").count()) {
+      await latestMsg.getByTestId("discussion-edit").click();
+    }
+    const editInput = page.getByTestId("discussion-edit-input");
+    await editInput.waitFor({ state: "visible", timeout: 8000 });
+    await editInput.click();
+    await editInput.fill(editedBody);
+    if ((await editInput.inputValue()) !== editedBody) {
+      await editInput.evaluate((node, value) => {
+        if (!(node instanceof HTMLTextAreaElement)) throw new Error("no discussion-edit-input");
+        Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.call(node, value);
+        node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertReplacementText", data: value }));
       }, editedBody);
-      try {
-        await page.locator(".rd-msg", { hasText: editedBody }).first().waitFor({ state: "visible", timeout: 8000 });
-        break;
-      } catch (error) {
-        if (attempt === 2) throw error;
-      }
+    }
+    await page.getByTestId("discussion-edit-save").click();
+    try {
+      await page.waitForFunction(
+        (text) => (document.querySelector('[data-testid="discussion-feed"]')?.innerText ?? "").includes(text),
+        editedBody,
+        { timeout: 15000 },
+      );
+    } catch (error) {
+      mkdirSync("/opt/cursor/artifacts", { recursive: true });
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_edit_fail_390.png"), fullPage: true });
+      console.log("discussion edit dump", await page.evaluate(() => ({
+        feed: document.querySelector('[data-testid="discussion-feed"]')?.innerText ?? "",
+        form: Boolean(document.querySelector('[data-testid="discussion-edit-form"]')),
+        input: document.querySelector('[data-testid="discussion-edit-input"]') instanceof HTMLTextAreaElement
+          ? document.querySelector('[data-testid="discussion-edit-input"]').value
+          : null,
+      })));
+      throw error;
     }
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });
@@ -751,7 +780,12 @@ try {
         // 快照後改動一個節點，再還原 → 內容回到快照當時
         await searchNode(page, "招生");
         const beforeText = await page.locator(".wb-node.is-selected .wb-node-static, .wb-node.is-selected textarea").first().inputValue().catch(() => null);
-        await page.getByTestId("wb-node-actions").getByRole("button", { name: "編輯", exact: true }).click();
+        await openFocusActions(page);
+        await page.evaluate(() => {
+          const btn = document.querySelector('[data-testid="wb-focus-sheet"] [data-testid="wb-node-actions"] button');
+          const labeled = [...document.querySelectorAll('[data-testid="wb-node-actions"] button')].find((el) => el.textContent?.trim() === "編輯");
+          (labeled instanceof HTMLElement ? labeled : btn)?.click();
+        });
         await fillEditing(page, "快照後改的字");
         await dismissSelection(page);
         await page.getByTestId("whiteboard-more").click();
@@ -873,7 +907,8 @@ try {
       await sourceMsg.getByRole("button", { name: "加入白板" }).click();
       await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
-      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 10000 });
+      await openFocusActions(page);
       check("訊息「加入白板」：開板並聚焦新節點", true);
       check("節點帶 provenance（打開來源訊息鈕）", await page.getByTestId("wb-open-source-message").count() >= 1 || await page.getByTestId("whiteboard-more").count() === 1);
       await runWhiteboardNodeAction(page, "wb-open-source-message");
@@ -889,7 +924,8 @@ try {
       check("對稿頂列出現「白板 N」引用 chip", (await page.getByTestId("board-refs-chip").first().innerText()).includes("白板"));
       await page.getByTestId("board-refs-chip").first().click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
-      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 10000 });
+      await openFocusActions(page);
       check("chip 跳回白板並聚焦引用節點", true);
 
       // S14：焦點只套一次 — 之後任何節點變動（打字/新增）不得再搶相機
@@ -912,7 +948,8 @@ try {
       // （S14 那段新增了便利貼＝選取已換人，先選回內容卡）
       await dismissSelection(page);
       await searchNode(page, "擺攤文宣");
-      await page.waitForSelector('[data-testid="wb-node-actions"]', { timeout: 10000 });
+      await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 10000 });
+      await openFocusActions(page);
       await runWhiteboardNodeAction(page, "wb-open-content");
       await page.waitForSelector('[data-testid="branch-workspace-overlay"]', { timeout: 15000 });
       check("Focus 上可疊對稿 overlay（板不卸載）", (await page.getByTestId("wb-canvas").count()) === 1);
@@ -1095,7 +1132,7 @@ try {
           {
             // WB02：非編輯節點是靜態層，整卡可點選（audit 缺陷已修）
             await page.locator(".wb-node").last().click({ force: true });
-            await page.getByTestId("wb-node-actions").getByTestId("wb-node-delete").click();
+            await runWhiteboardNodeAction(page, "wb-node-delete");
             await B.waitForFunction(
               () => ![...document.querySelectorAll(".wb-node-static, textarea.wb-node-text")].some((el) => (el.value ?? el.textContent ?? "").includes("跨分頁增量")),
               null,

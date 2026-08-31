@@ -250,6 +250,31 @@ test("新版出現後舊版待處理則數仍掛在被留言的 version", () => 
   assert.equal(branchOpenCommentCount(normalized, poster.id), 2);
 });
 
+test("Canva 同步走 appendVersionWithoutOverwrite 精神：舊 id／path 留下", () => {
+  const old: VersionIdentity = {
+    id: "v_canva_old",
+    label: "Canva 招生海報",
+    imageDataUrl: "data:image/png;base64,OLDCANVACANVACANVACANVA",
+    imagePath: "rooms/r1/versions/v_canva_old/poster.png",
+  };
+  const next: VersionIdentity = {
+    id: "v_canva_new",
+    label: "改一",
+    imageDataUrl: "data:image/png;base64,NEWCANVACANVACANVACANVA",
+    imagePath: "rooms/r1/versions/v_canva_new/poster.png",
+  };
+  const saved = appendVersionWithoutOverwrite([old], next);
+  assert.equal(saved.ok, true);
+  if (!saved.ok) return;
+  assert.equal(saved.versions.length, 2);
+  assert.equal(versionIdentitiesUnchanged([old], saved.versions, "v_canva_old"), true);
+  assert.notEqual(saved.versions[1].id, old.id);
+  assert.notEqual(saved.versions[1].imagePath, old.imagePath);
+  const app = src("src/App.tsx");
+  assert.match(app, /importFromCanva\(version\.canvaDesignId/);
+  assert.match(app, /nextPosterVersionLabel/);
+});
+
 test("畫布與存檔走既有 testid，不改第一層 IA", () => {
   const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
   const stage = src("src/features/image-review/Stage.tsx");

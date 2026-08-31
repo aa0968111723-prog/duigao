@@ -781,6 +781,7 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
           )}
           <input
             className="text-input"
+            data-testid="discussion-composer-input"
             value={api.draft}
             onFocus={() => api.onComposerActive?.(true)}
             onBlur={() => api.onComposerActive?.(false)}

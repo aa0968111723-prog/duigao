@@ -20,8 +20,12 @@ import {
   messagesForFocus,
   nodeFocusSource,
   roomFocusFromPresence,
+  FOCUS_SHEET_COMPOSER_MIN,
+  FOCUS_SHEET_PEEK_HEIGHT,
+  focusSheetSnapHeights,
   shouldInlineDiscussionRail,
   shouldMountFocusSheet,
+  snapAfterFocusDiscuss,
   workLayerItemsFromNodes,
 } from "../../src/features/whiteboard/boardFocus";
 import { stickyFromDiscussion } from "../../src/features/collaboration/links";
@@ -119,6 +123,69 @@ test("手機寬度 rail 不 inline；sheet 開著", () => {
   const openSrc = mbr.slice(mbr.indexOf("openDiscussionMessage"));
   assert.match(openSrc.slice(0, 500), /if \(!railVisible\)/);
   assert.doesNotMatch(openSrc.slice(0, 500), /!boardFocused/);
+});
+
+test("390 選卡：half 第一屏看得到討論與輸入框，動作收進 disclosure", () => {
+  assert.equal(FOCUS_SHEET_PEEK_HEIGHT >= 72 && FOCUS_SHEET_PEEK_HEIGHT <= 96, true);
+  const phone = focusSheetSnapHeights({ usableHeight: 844, keyboardInset: 0, peekHeight: FOCUS_SHEET_PEEK_HEIGHT });
+  assert.equal(phone.viewportHeight, 844);
+  assert.ok(phone.half < 844 * 0.5, "half 必須讓畫布上半露得出來");
+  assert.ok(phone.half > 200, "half 必須裝得下摘要＋討論鈕＋composer");
+  const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  assert.match(workspace, /useState<SheetSnap>\("half"\)/);
+  assert.match(workspace, /if \(selected\[0\]\) setFocusSheetSnap\("half"\)/);
+  assert.doesNotMatch(workspace, /viewportHeight=\{typeof window === "undefined" \? 640 : window\.innerHeight\}/);
+  assert.match(workspace, /viewportHeight=\{sheetSnaps\.viewportHeight\}/);
+  assert.match(workspace, /peekHeight=\{sheetSnaps\.peek\}/);
+  const sheetAt = workspace.indexOf('data-testid="wb-focus-sheet"');
+  const addAt = workspace.indexOf('data-testid="whiteboard-add"');
+  const sheetEnd = workspace.indexOf("底部：AI 預覽確認列");
+  const sheetBlock = workspace.slice(sheetAt, sheetEnd > sheetAt ? sheetEnd : addAt);
+  const discussAt = sheetBlock.indexOf('data-testid="wb-focus-discuss"');
+  const feedAt = sheetBlock.indexOf('data-testid="wb-focus-discussion"');
+  const actionsAt = sheetBlock.indexOf('data-testid="wb-focus-actions"');
+  const composerHint = sheetBlock.indexOf("discussionSlot");
+  assert.ok(discussAt > 0 && feedAt > discussAt, "主按鈕在討論 feed 前面");
+  assert.ok(composerHint > feedAt, "composer 跟 feed 同槽");
+  assert.ok(actionsAt > 0 && sheetBlock.includes("<details"), "八顆動作在 disclosure 裡");
+  assert.match(sheetBlock, /這張的操作/);
+  assert.equal((sheetBlock.match(/wb-context-dismiss/g) ?? []).length, 1);
+  assert.match(sheetBlock, /wb-focus-sheet-dismiss/);
+  assert.match(sheetBlock, /snapAfterFocusDiscuss/);
+  assert.equal(snapAfterFocusDiscuss("full"), "half");
+  assert.equal(snapAfterFocusDiscuss("half"), "half");
+  assert.equal(snapAfterFocusDiscuss("peek"), "peek");
+  const css = src("src/features/whiteboard/whiteboard.css");
+  assert.match(css, /\.wb-focus-sheet-discussion \{[\s\S]*?flex:\s*1/);
+  assert.match(css, /\.wb-focus-sheet-discussion \.rd-composer[\s\S]*?position:\s*static/);
+  assert.match(css, /\.wb-focus-sheet \.rd-composer[\s\S]*?bottom:\s*auto/);
+  assert.match(css, /\.wb-focus-sheet-discussion \.rd-decisions \{ display: none/);
+  const room = src("src/features/multi-room/MultiBranchRoom.tsx");
+  assert.match(room, /discussionSlot: !railVisible \? renderDiscussion\("chat", \{ compact: true \}/);
+  assert.match(room, /showDecisions: opts\?\.compact \? false/);
+});
+
+test("鍵盤起來：sheet 用 usableHeight，half／full 都 cap，composer 不再疊 --kb", () => {
+  const kb = focusSheetSnapHeights({
+    usableHeight: 544,
+    keyboardInset: 300,
+    safeAreaBottom: 0,
+    peekHeight: FOCUS_SHEET_PEEK_HEIGHT,
+  });
+  const sheetMax = 544 - FOCUS_SHEET_COMPOSER_MIN;
+  assert.equal(kb.maxHeight, sheetMax);
+  assert.ok(kb.half <= sheetMax && kb.full <= sheetMax);
+  assert.ok(kb.half >= FOCUS_SHEET_PEEK_HEIGHT);
+  const noKb = focusSheetSnapHeights({ usableHeight: 844, keyboardInset: 0, peekHeight: FOCUS_SHEET_PEEK_HEIGHT });
+  assert.equal(noKb.maxHeight, 844);
+  const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  assert.match(workspace, /maxHeight=\{keyboardInset > 0 \? sheetSnaps\.maxHeight : undefined\}/);
+  assert.match(workspace, /useViewport\(\)/);
+  const hook = src("src/hooks/useViewport.ts");
+  assert.match(hook, /kbConsumers/);
+  const sheet = src("src/components/BottomSheet.tsx");
+  assert.match(sheet, /maxHeight\?: number/);
+  assert.match(sheet, /Math\.min\(cap,/);
 });
 
 test("discussion → node 有 linked entity；node → discussion 回得去", () => {

@@ -45,6 +45,7 @@ import type { VideoUploadState } from "../../components/api";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { BrandMark } from "../../components/BrandMark";
 import { firstLayerChrome } from "./roomChrome";
+import { canvaEntryState } from "../../lib/canvaContract";
 
 export type MultiBranchRoomApi = {
   room: Room;
@@ -65,10 +66,10 @@ export type MultiBranchRoomApi = {
    */
   cutosImport?: (cutosProjectId: string, name: string, retryBranchId?: string) => Promise<{ ok: boolean; message: string; branchId?: string }>;
   /**
-   * Canva 文宣匯入（PR-05 第一階段）。undefined＝不可用（未設定/健檢
-   * 失敗），入口不渲染。連結狀態與清單都問 bridge，token 不進瀏覽器。
+   * Canva 文宣匯入。health 沒過入口仍在（誠實說明），token 不進瀏覽器。
    */
   canva?: {
+    health?: import("../../lib/canvaContract").CanvaBridgeHealth | null;
     status: () => Promise<boolean>;
     connectUrl: () => Promise<string | null>;
     listDesigns: () => Promise<import("../../lib/canvaContract").CanvaBridgeDesignList>;
@@ -703,12 +704,41 @@ function CreateSheet({ onClose, onCreate, onCutosImport, canva, initialType, onR
                   CUTOS 影片成品
                 </button>
               )}
-              {canva && (
-                <button type="button" data-testid="canva-import-option" onClick={() => setType("canva")}>
-                  <span aria-hidden>▤</span>
-                  Canva 文宣
-                </button>
-              )}
+              {canva && (() => {
+                const entry = canvaEntryState(canva.health, null);
+                if (entry === "not-configured") {
+                  return (
+                    <div className="project-canva-gated">
+                      <button type="button" data-testid="canva-import-option" disabled>
+                        <span aria-hidden>▤</span>
+                        Canva 文宣
+                      </button>
+                      <p className="project-sheet-note" data-testid="canva-not-configured">
+                        這台正式站還沒設定 Canva 整合，所以不能連。稿仍可從本機上傳。
+                      </p>
+                    </div>
+                  );
+                }
+                if (entry === "unreachable") {
+                  return (
+                    <div className="project-canva-gated">
+                      <button type="button" data-testid="canva-import-option" disabled>
+                        <span aria-hidden>▤</span>
+                        Canva 文宣
+                      </button>
+                      <p className="project-sheet-note" data-testid="canva-not-configured">
+                        暫時連不上 Canva 橋，稍後再試。
+                      </p>
+                    </div>
+                  );
+                }
+                return (
+                  <button type="button" data-testid="canva-import-option" onClick={() => setType("canva")}>
+                    <span aria-hidden>▤</span>
+                    Canva 文宣
+                  </button>
+                );
+              })()}
             </div>
           </>
         ) : (
@@ -1016,7 +1046,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
    * null（手機是 tab、同時只有一個）。平板的側欄是**同時**顯示，所以要
    * 明確傳 "chat" — 否則側欄是空的（e2e 抓到）。
    */
-  function renderDiscussion(paneOverride?: "chat" | "board") {
+  function renderDiscussion(paneOverride?: "chat" | "board", opts?: { compact?: boolean }) {
     return (
                     <RoomDiscussion api={{
                       room: normalized,
@@ -1024,6 +1054,8 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       userId: api.userId ?? api.guest.id,
                       canManage: api.canManage,
                       canTalk: true,
+                      showDecisions: opts?.compact ? false : undefined,
+                      showVoiceNote: opts?.compact ? false : undefined,
                       messages: (() => {
                         const base = api.room.discussion ?? [];
                         const ids = new Set(base.map((m) => m.id));
@@ -1292,7 +1324,7 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
                       api.onFocusNode?.(id);
                     },
                     onSelectionFocus: setLocalFocusId,
-                    discussionSlot: !railVisible ? renderDiscussion("chat") : undefined,
+                    discussionSlot: !railVisible ? renderDiscussion("chat", { compact: true }) : undefined,
                     onRenameRoom: api.onRenameRoom,
                     onPinFromDiscussion: () => {
                       setDiscussPane("chat");

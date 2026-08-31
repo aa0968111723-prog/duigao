@@ -13,6 +13,7 @@ import { Viewer } from "./Stage";
 import { ImmersiveViewer } from "./ImmersiveViewer";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
 import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "../../components/api";
+import { canShowCanvaSync } from "../../lib/canvaContract";
 import { BrandMark } from "../../components/BrandMark";
 
 const COLOR_MODES: { id: ColorMode; label: string }[] = [
@@ -293,6 +294,16 @@ export function MobileWorkspace({ api, presence }: Props) {
           <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="m-vchip m-vchip-add">
             <span aria-hidden>＋</span>
           </UniversalIntake>
+        )}
+        {canShowCanvaSync(room.versions.find((item) => item.id === view.versionId), api.canManage) && (
+          <button
+            type="button"
+            className="m-vchip"
+            data-testid="canva-sync-version"
+            onClick={() => { void api.syncCanvaVersion?.(view.versionId); }}
+          >
+            同步這一版
+          </button>
         )}
         {api.canManage && (
           <button
