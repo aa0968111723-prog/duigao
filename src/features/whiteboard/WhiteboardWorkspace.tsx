@@ -2042,6 +2042,88 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             <button type="button" onClick={() => { setConnectMode(false); setConnectFrom(null); }}>取消</button>
           </div>
         )}
+        {phoneFocusSheet && selectedNode && focusCard && (
+          <div className="wb-focus-sheet" data-testid="wb-focus-sheet" style={{ bottom: "var(--kb, 0px)" }}>
+            <DragSheet
+              snap={focusSheetSnap}
+              onSnap={setFocusSheetSnap}
+              viewportHeight={typeof window === "undefined" ? 640 : window.innerHeight}
+              peekHeight={120}
+              handle={(
+                <>
+                  <span className="m-sheet-summary">焦點 · {focusCard.title}</span>
+                  <button
+                    type="button"
+                    className="wb-context-dismiss"
+                    data-testid="wb-focus-sheet-dismiss"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => { setSelected([]); endEdit(); }}
+                    aria-label="取消選取"
+                  >✕</button>
+                </>
+              )}
+            >
+              <div className="wb-focus-card is-in-sheet" data-testid="wb-focus-card">
+                <strong>{focusCard.title}</strong>
+                <small>來源：{focusCard.sourceLabel}</small>
+                {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
+                {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
+                {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
+                <div className="wb-focus-card-actions" data-testid="wb-node-actions">
+                  <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
+                  {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
+                    <button type="button" data-testid="wb-next-step" onClick={() => {
+                      const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
+                      api.onUpsertNode(next.node, "now");
+                      api.onCreateEdge(next.edge);
+                      record(nodeCreateDraft(nextOpId(), next.node));
+                      setSelected([next.node.id]);
+                      beginEdit(next.node);
+                      setCamera(focusCamera(next.node, viewport, camera.zoom));
+                    }}>+ 下一步</button>
+                  )}
+                  {(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
+                    <button type="button" data-testid="wb-add-child" onClick={() => {
+                      const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
+                      api.onUpsertNode(next.node, "now");
+                      api.onCreateEdge(next.edge);
+                      record(nodeCreateDraft(nextOpId(), next.node));
+                      setSelected([next.node.id]);
+                      beginEdit(next.node);
+                      setCamera(focusCamera(next.node, viewport, camera.zoom));
+                    }}>+ 子項目</button>
+                  )}
+                  {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
+                    <button type="button" onClick={() => {
+                      const open = contentOpenFromNode(selectedNode);
+                      const target = openTarget(anchorFromNode(selectedNode));
+                      if (target.surface === "content") {
+                        api.onOpenContent(target.branchId, open);
+                      } else {
+                        api.onOpenContent(selectedNode.linkedEntityId!, open);
+                      }
+                    }}>打開內容</button>
+                  )}
+                  {discussionIdFromNode(selectedNode) && (
+                    <button type="button" data-testid="wb-open-source-message" onClick={() => api.onOpenDiscussionMessage?.(discussionIdFromNode(selectedNode)!)}>打開原訊息</button>
+                  )}
+                  <button type="button" data-testid="wb-share-focus" onClick={() => api.onSetRoomFocus?.(selectedNode.id)}>讓大家看這個</button>
+                  {(api.onAskColleague || api.onAskBoardAi) && (
+                    <button type="button" data-testid="wb-ask-colleague" onClick={() => {
+                      if (api.onAskColleague) api.onAskColleague({ prompt: "針對這張，我們下一步做什麼？", nodeId: selectedNode.id });
+                      else setSheet("ai");
+                    }}>問同事</button>
+                  )}
+                  <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>針對這張討論</button>
+                  <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
+                </div>
+              </div>
+              <div className="wb-focus-sheet-discussion" data-testid="wb-focus-discussion">
+                {api.discussionSlot ?? <p className="project-muted">針對這張留言</p>}
+              </div>
+            </DragSheet>
+          </div>
+        )}
       </div>
 
       {/* 底部：AI 預覽確認列 / frame 情境列 / 節點情境列 / 主工具列
@@ -2241,76 +2323,6 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
           {api.roomFocusId === focusCard.nodeId ? <small>大家正在看這張</small> : null}
         </aside>
-      )}
-      {phoneFocusSheet && selectedNode && focusCard && (
-        <div className="wb-focus-sheet" data-testid="wb-focus-sheet" style={{ bottom: "var(--kb, 0px)" }}>
-          <DragSheet
-            snap={focusSheetSnap}
-            onSnap={setFocusSheetSnap}
-            viewportHeight={typeof window === "undefined" ? 640 : window.innerHeight}
-            peekHeight={120}
-            handle={<span className="m-sheet-summary">焦點 · {focusCard.title}</span>}
-          >
-            <div className="wb-focus-card is-in-sheet" data-testid="wb-focus-card">
-              <strong>{focusCard.title}</strong>
-              <small>來源：{focusCard.sourceLabel}</small>
-              {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
-              {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
-              {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
-              <div className="wb-focus-card-actions" data-testid="wb-node-actions">
-                <button type="button" onClick={() => { if (!selectedNode.locked) beginEdit(selectedNode); }} disabled={Boolean(selectedNode.locked)}>編輯</button>
-                {(selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap") && (
-                  <button type="button" data-testid="wb-next-step" onClick={() => {
-                    const next = addFlowNextStep(selectedNode, "下一步", "local", nodes);
-                    api.onUpsertNode(next.node, "now");
-                    api.onCreateEdge(next.edge);
-                    record(nodeCreateDraft(nextOpId(), next.node));
-                    setSelected([next.node.id]);
-                    beginEdit(next.node);
-                    setCamera(focusCamera(next.node, viewport, camera.zoom));
-                  }}>+ 下一步</button>
-                )}
-                {(selectedNode.nodeType === "mindmap" || selectedNode.nodeType === "text") && (
-                  <button type="button" data-testid="wb-add-child" onClick={() => {
-                    const next = addMindmapChild(selectedNode.nodeType === "mindmap" ? selectedNode : { ...selectedNode, nodeType: "mindmap" }, "子項目", "local", edges, nodes);
-                    api.onUpsertNode(next.node, "now");
-                    api.onCreateEdge(next.edge);
-                    record(nodeCreateDraft(nextOpId(), next.node));
-                    setSelected([next.node.id]);
-                    beginEdit(next.node);
-                    setCamera(focusCamera(next.node, viewport, camera.zoom));
-                  }}>+ 子項目</button>
-                )}
-                {selectedNode.nodeType === "room_content" && selectedNode.linkedEntityId && (
-                  <button type="button" onClick={() => {
-                    const open = contentOpenFromNode(selectedNode);
-                    const target = openTarget(anchorFromNode(selectedNode));
-                    if (target.surface === "content") {
-                      api.onOpenContent(target.branchId, open);
-                    } else {
-                      api.onOpenContent(selectedNode.linkedEntityId!, open);
-                    }
-                  }}>打開內容</button>
-                )}
-                {discussionIdFromNode(selectedNode) && (
-                  <button type="button" data-testid="wb-open-source-message" onClick={() => api.onOpenDiscussionMessage?.(discussionIdFromNode(selectedNode)!)}>打開原訊息</button>
-                )}
-                <button type="button" data-testid="wb-share-focus" onClick={() => api.onSetRoomFocus?.(selectedNode.id)}>讓大家看這個</button>
-                {(api.onAskColleague || api.onAskBoardAi) && (
-                  <button type="button" data-testid="wb-ask-colleague" onClick={() => {
-                    if (api.onAskColleague) api.onAskColleague({ prompt: "針對這張，我們下一步做什麼？", nodeId: selectedNode.id });
-                    else setSheet("ai");
-                  }}>問同事</button>
-                )}
-                <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>針對這張討論</button>
-                <button type="button" className="wb-context-dismiss" onClick={() => { setSelected([]); endEdit(); }} aria-label="取消選取">✕</button>
-              </div>
-            </div>
-            <div className="wb-focus-sheet-discussion" data-testid="wb-focus-discussion">
-              {api.discussionSlot ?? <p className="project-muted">針對這張留言</p>}
-            </div>
-          </DragSheet>
-        </div>
       )}
     </div>,
     document.body,

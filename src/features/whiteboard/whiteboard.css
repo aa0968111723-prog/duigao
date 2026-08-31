@@ -280,6 +280,7 @@
   color: inherit;
   font-size: 13px;
 }
+/* 掛在 .wb-focus-canvas 裡：底邊是畫布底，五鍵底欄是畫布的兄弟，點得到 */
 .wb-focus-sheet {
   position: absolute;
   left: 0;
@@ -287,6 +288,23 @@
   bottom: var(--kb, 0px);
   z-index: 5;
   pointer-events: none;
+}
+.wb-focus-sheet .m-sheet-handle {
+  position: relative;
+}
+.wb-focus-sheet .m-sheet-handle .wb-context-dismiss {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
 }
 .wb-focus-sheet .m-sheet {
   display: flex;

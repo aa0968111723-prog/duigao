@@ -96,10 +96,16 @@ test("手機寬度 rail 不 inline；sheet 開著", () => {
   assert.match(workspace, /data-focus-sheet/);
   assert.match(workspace, /wb-focus-sheet/);
   assert.match(workspace, /discussionSlot/);
-  const sheetBlock = workspace.slice(workspace.indexOf("wb-focus-sheet"));
+  const sheetAt = workspace.indexOf('data-testid="wb-focus-sheet"');
+  const addAt = workspace.indexOf('data-testid="whiteboard-add"');
+  const canvasAt = workspace.indexOf('data-testid="wb-canvas"');
+  assert.ok(canvasAt > 0 && sheetAt > canvasAt && addAt > sheetAt, "sheet 必須寫在畫布裡、五鍵之前");
+  const sheetBlock = workspace.slice(sheetAt, addAt);
   assert.match(sheetBlock, /wb-add-child/);
   assert.match(sheetBlock, /wb-next-step/);
   assert.match(sheetBlock, /打開內容/);
+  assert.match(sheetBlock, /wb-focus-sheet-dismiss/);
+  assert.match(workspace, /!phoneFocusSheet \?/);
   const askBlock = workspace.slice(workspace.indexOf("data-testid=\"wb-ai-ask\""));
   assert.match(askBlock, /onAskBoardAi/);
   assert.doesNotMatch(askBlock.slice(0, 900), /if \(api\.onAskColleague\) \{\s*api\.onAskColleague/);
