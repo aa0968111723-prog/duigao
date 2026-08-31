@@ -204,6 +204,9 @@ export function boardMediaVersion(room: Room, branchId: string): Version | undef
  * branch + label (local upload id and cloud row id are not always the same).
  */
 export function adoptVersionDisplayUrls(local: Version[], incoming: Version[]): Version[] {
+  // Project-room summary snapshots omit signed media on purpose (versions: []).
+  // Replacing local with that empty list blanks every poster/video URL.
+  if (!incoming.length) return local;
   return incoming.map((row) => {
     const prev = local.find((item) => item.id === row.id)
       ?? local.find((item) => Boolean(item.branchId) && item.branchId === row.branchId && item.label === row.label);

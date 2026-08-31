@@ -272,4 +272,5 @@ test("雲端快照簽章失敗時，本機圖／影片網址要留下來給白�
   });
   assert.equal(boardMediaVersion(room, "poster")?.imageDataUrl?.startsWith("data:"), true);
   assert.equal(boardMediaVersion(room, "video")?.videoUrl?.startsWith("blob:"), true);
+  assert.equal(adoptVersionDisplayUrls(local, []).length, 2, "摘要快照空 versions 不得清掉本機圖");
 });
