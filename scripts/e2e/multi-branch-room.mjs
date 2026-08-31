@@ -652,14 +652,11 @@ try {
       await page.waitForSelector('[data-testid="canva-sync-version"]', { timeout: 20000 });
       const beforeCount = rows.versions.filter((row) => row.branch_id === canvaBranch?.id).length;
       await page.getByTestId("canva-sync-version").click();
-      await page.waitForFunction(
-        (expected) => {
-          const chips = document.querySelectorAll(".m-vchip:not(.m-vchip-add):not(.poster-edit-toggle)");
-          return chips.length >= expected;
-        },
-        beforeCount + 1,
-        { timeout: 30000 },
-      ).catch(() => null);
+      const syncDeadline = Date.now() + 30000;
+      while (Date.now() < syncDeadline) {
+        if (rows.versions.filter((row) => row.branch_id === canvaBranch?.id).length >= beforeCount + 1) break;
+        await page.waitForTimeout(200);
+      }
       const afterRows = rows.versions.filter((row) => row.branch_id === canvaBranch?.id);
       const oldStill = afterRows.find((row) => row.id === oldCanvaId);
       check(
