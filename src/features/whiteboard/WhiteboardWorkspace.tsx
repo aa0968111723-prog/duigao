@@ -875,8 +875,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
         }
         case "long-press-armed":
           if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
-          longPressTimer.current = window.setTimeout(() => {
-            const world = screenToWorld(camera, event.clientX - rect.left, event.clientY - rect.top);
+          {
+            const armX = event.clientX;
+            const armY = event.clientY;
+            longPressTimer.current = window.setTimeout(() => {
+            const world = screenToWorld(camera, armX - rect.left, armY - rect.top);
             const hit = hitTest(liveNodes.filter((node) => !node.deletedAt), world.x, world.y);
             if (hit) {
               setMultiSelect(true);
@@ -885,7 +888,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               // 長按空白 = 新增選單（wireflow；原實作是死碼）
               setSheet("add");
             }
-          }, LONG_PRESS_MS);
+            }, LONG_PRESS_MS);
+          }
           break;
         case "long-press-cancelled":
           if (longPressTimer.current) {

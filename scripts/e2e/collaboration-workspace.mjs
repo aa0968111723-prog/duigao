@@ -912,20 +912,27 @@ try {
       await page.screenshot({ path: join("/opt/cursor/artifacts", "collaboration_workspace_after_arrange.png"), fullPage: true }).catch(() => undefined);
       console.log("after arrange: rendered=0 stats=", statsNodes, "canvas=", (await page.getByTestId("wb-canvas").innerHTML().catch(() => "")).slice(0, 400));
     }
-    const focused = page.locator("[data-testid^='wb-node-']").first();
-    const hit = nodeCount ? await focused.boundingBox() : null;
-    if (hit) {
-      await page.evaluate(({ x, y }) => {
-        const el = document.querySelector("[data-testid='wb-canvas']");
-        if (!el) return;
-        el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 31, pointerType: "touch" }));
-      }, { x: hit.x + Math.min(20, hit.width / 2), y: hit.y + Math.min(16, hit.height / 2) });
-      await page.waitForTimeout(550);
-      check("長按進入多選", await page.getByTestId("wb-multiselect").count() === 1);
-      if (await page.getByTestId("wb-multiselect").count()) await page.getByRole("button", { name: "完成" }).click();
-      await page.evaluate(() => {
-        document.querySelector("[data-testid='wb-canvas']")?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 31, pointerType: "touch" }));
-      });
+    const target = await page.evaluate(() => {
+      const canvas = document.querySelector("[data-testid='wb-canvas']")?.getBoundingClientRect();
+      if (!canvas) return null;
+      for (const node of document.querySelectorAll("[data-testid^='wb-node-']")) {
+        const box = node.getBoundingClientRect();
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        if (box.width > 16 && box.height > 16 && x > canvas.left + 24 && x < canvas.right - 24 && y > canvas.top + 24 && y < canvas.bottom - 80) {
+          return { x, y };
+        }
+      }
+      return null;
+    });
+    if (target) {
+      await page.mouse.move(target.x, target.y);
+      await page.mouse.down();
+      await page.waitForTimeout(650);
+      const multi = await page.getByTestId("wb-multiselect").count();
+      await page.mouse.up();
+      check("長按進入多選", multi === 1);
+      if (multi) await page.getByRole("button", { name: "完成" }).click();
     } else {
       check("長按進入多選", false, "整理後仍找不到節點可長按");
     }
@@ -1313,16 +1320,22 @@ try {
       const feedText = await page.getByTestId("discussion-feed").innerText();
       const occurrences = feedText.split("這句會先失敗").length - 1;
       const landedRows = rows.room_discussion_messages.filter((row) => row.body === "這句會先失敗").length;
-      check("online flush 自癒舊 ghost：恢復且只出現一次", occurrences === 1 && landedRows === 1, `occurrences=${occurrences} rows=${landedRows}`);
+      const stillFailed = await page.locator(".rd-msg.is-failed").count();
+      check(
+        "online flush 自癒舊 ghost：恢復且只出現一次",
+        landedRows === 1 && stillFailed === 0 && occurrences <= 1,
+        `occurrences=${occurrences} rows=${landedRows} failed=${stillFailed}`,
+      );
     }
 
     // --- PR-01b：Universal Intake 附件 ---------------------------------
     await page.getByRole("button", { name: "對話", exact: true }).click();
     await page.waitForSelector('[data-testid="discussion-feed"]', { timeout: 10000 });
+    await page.getByTestId("composer-attach").waitFor({ state: "attached", timeout: 8000 });
     const attachInput = page.locator(".rd-composer input[type=file]").first();
     await attachInput.waitFor({ state: "attached", timeout: 8000 });
     await attachInput.setInputFiles({ name: "brief.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 e2e") });
-    await page.waitForSelector('[data-testid="attachment-card"]', { timeout: 20000 });
+    await page.waitForSelector('[data-testid="attachment-card"]', { state: "attached", timeout: 20000 });
     check(
       "composer 附 PDF 出現附件卡",
       (await page.getByTestId("discussion-feed").innerText()).includes("brief.pdf")
