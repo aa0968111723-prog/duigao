@@ -1,7 +1,8 @@
-import { memo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useProposalStore, type ProposalAuthor, type ProposalItem } from "./store";
 import { OPEN_COMPOSE_PICKER_EVENT } from "./ComposeAssetPicker";
 import { backgroundColorCss, clamp, hexToRgba, objectFitFor, proposalTypeLabel } from "./helpers";
+import { ensureComposeFonts } from "./composeFonts";
 import "./proposal.css";
 
 type Props = {
@@ -49,6 +50,7 @@ function angle(a: { x: number; y: number }, b: { x: number; y: number }) {
 
 export function VisualProposalOverlay({ roomId, versionId, author, compact }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
+  useEffect(() => { ensureComposeFonts(); }, []);
   const gesture = useRef<Gesture | null>(null);
   const resize = useRef<{ id: string; cx: number; cy: number; startDist: number; startWidth: number } | null>(null);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });

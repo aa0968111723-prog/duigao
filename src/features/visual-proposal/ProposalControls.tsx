@@ -1,5 +1,5 @@
 import { UniversalIntake } from "../../components/UniversalIntake";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useProposalStore, type ProposalAuthor } from "./store";
 import { ProposalElementControls } from "./ProposalElementControls";
 import { ProposalBackgroundControls } from "./ProposalBackgroundControls";
@@ -20,6 +20,9 @@ import {
 import type { ShowToast } from "../../toast";
 import type { Version } from "../../lib/types";
 import type { ProposalPrefBinding } from "./ProposalDock";
+import { imageItemFromCatalogHit } from "./openCatalog";
+import { OpenStickerPicker } from "./OpenStickerPicker";
+import { ensureComposeFonts } from "./composeFonts";
 import "./proposal.css";
 
 type Props = {
@@ -51,6 +54,7 @@ export function ProposalControls({
 }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   const [pickText, setPickText] = useState(false);
+  const [pickCatalog, setPickCatalog] = useState(false);
   const roomPick = useComposeAssetPick({
     versions,
     branches,
@@ -68,6 +72,7 @@ export function ProposalControls({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
   const active = proposal.active;
+  useEffect(() => { ensureComposeFonts(); }, []);
 
   const uploadMaterial = async (files: FileList | null) => {
     if (!canManage || !files?.length) return;
@@ -295,6 +300,14 @@ export function ProposalControls({
             </UniversalIntake>
             <button
               type="button"
+              className={`proposal-action ${pickCatalog ? "is-on" : ""}`}
+              data-testid="poster-catalog-open"
+              onClick={() => setPickCatalog((current) => !current)}
+            >
+              開源圖庫
+            </button>
+            <button
+              type="button"
               className="proposal-action"
               data-testid="poster-pick-room-asset"
               onClick={() => roomPick.setOpen((open) => !open)}
@@ -321,6 +334,15 @@ export function ProposalControls({
               {saving ? "存檔中…" : "存成新版本"}
             </button>
           </div>
+          )}
+          {canManage && pickCatalog && (
+            <OpenStickerPicker
+              onPick={(hit) => {
+                proposal.addImage(imageItemFromCatalogHit(hit));
+                setPickCatalog(false);
+                showToast?.("已加入開源貼圖，拖到想要的位置");
+              }}
+            />
           )}
 
           {canManage && active && active.items.length === 0 && !active.background.imageDataUrl && (

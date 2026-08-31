@@ -716,6 +716,24 @@
 .pquick-head strong { font-size: 13px; }
 .pquick-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
 .pquick-actions .proposal-danger { margin-left: auto; }
+.pcatalog { display: flex; flex-direction: column; gap: 8px; }
+.pcatalog-hits { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.pcatalog-hit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 64px;
+  padding: 6px 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 11px;
+  cursor: pointer;
+}
+.pcatalog-hit img { width: 28px; height: 28px; image-rendering: pixelated; }
+.pcatalog-hit span { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
 /* ---------- mobile proposal dock (no scrim: canvas stays draggable) ---------- */
 @media (max-width: 720px), (orientation: landscape) and (max-height: 520px) and (max-width: 920px) and (pointer: coarse) {
