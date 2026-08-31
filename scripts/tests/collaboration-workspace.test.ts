@@ -31,11 +31,12 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 import { buildDiscussionContext, getSelectedBoardContext, getWhiteboardContext } from "../../src/features/collaboration/context.ts";
 import { discussionPayloadFromNode, stickyFromDiscussion } from "../../src/features/collaboration/links.ts";
 import { boardPermission, canEditBoard, canManageBoards, canParticipateInDiscussion, stickyTextInputProps } from "../../src/features/collaboration/permissions.ts";
-import { applyBoardPatches, applyPendingCloudWrites, replaceBoardGraph, applyPendingNodeEdits, decideNodeWriteRetry, isBrowserOnline, isCloudWriteAcknowledged, reconcileNodes } from "../../src/features/collaboration/offline.ts";
+import { applyBoardPatches, applyPendingCloudWrites, replaceBoardGraph, applyPendingNodeEdits, decideNodeWriteRetry, isBrowserOnline, isCloudWriteAcknowledged, mergeBoardSnapshotNodes, reconcileNodes } from "../../src/features/collaboration/offline.ts";
 import {
   collaborationSliceFromRoom,
   collaborationSliceHasRows,
   insertCollaborationSlice,
+  loadWhiteboardGraph,
   remapCollaborationSlice,
 } from "../../src/cloud/collaborationRepository.ts";
 import type { Room } from "../../src/lib/types.ts";
@@ -58,6 +59,35 @@ function node(id: string, type: WhiteboardNode["nodeType"], x = 0, y = 0, text =
     createdAt: 1, updatedAt: 1, version: 1,
   };
 }
+
+test("離線白板快取會保留較早建立的卡片，不只存最後一次修改", () => {
+  const first = node("first", "text", 0, 0, "先做這件事");
+  const second = node("second", "text", 40, 0, "再找夥伴確認");
+  const elsewhere = { ...node("elsewhere", "text", 0, 0, "別張板"), whiteboardId: "board-2" };
+
+  const restored = mergeBoardSnapshotNodes([first, elsewhere], [second], "board-1");
+  assert.deepEqual(restored.map((item) => item.id).sort(), ["first", "second"]);
+
+  const edited = mergeBoardSnapshotNodes(restored, [{ ...first, content: { text: "先訂場地" } }], "board-1");
+  assert.equal(edited.find((item) => item.id === "first")?.content.text, "先訂場地");
+  assert.equal(edited.length, 2);
+});
+
+test("讀取白板遇到雲端錯誤會拒絕，不假裝成空白白板", async () => {
+  const failure = { data: null, error: { message: "permission denied for table whiteboard_nodes" } };
+  const supabase = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({ eq: async () => failure }),
+      }),
+    }),
+  };
+
+  await assert.rejects(
+    () => loadWhiteboardGraph(supabase as never, "room-1", "board-1"),
+    (error: unknown) => error instanceof CloudError && error.code === "whiteboard-load",
+  );
+});
 
 test("1-2 create and keep multiple boards", () => {
   const boards = [board("a"), board("b")];
