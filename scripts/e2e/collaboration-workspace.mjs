@@ -272,34 +272,39 @@ try {
     const latestMsg = page.locator('[data-testid="discussion-feed"] [data-latest="true"]');
     await latestMsg.getByTestId("discussion-edit").waitFor({ state: "visible", timeout: 15000 });
     const editedBody = "先把招生流程攤在白板上（改過）";
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      if (await page.locator(".rd-msg", { hasText: editedBody }).count()) break;
-      if (!await page.getByTestId("discussion-edit-form").count()) {
-        await latestMsg.getByTestId("discussion-edit").click();
-      }
-      const form = page.getByTestId("discussion-edit-form");
-      await form.waitFor({ state: "visible", timeout: 8000 });
-      await form.evaluate((node, value) => {
-        const input = node.querySelector('[data-testid="discussion-edit-input"]');
-        const save = node.querySelector('[data-testid="discussion-edit-save"]');
-        if (!(input instanceof HTMLTextAreaElement)) throw new Error("no discussion-edit-input");
-        const write = () => Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.call(input, value);
-        write();
-        if (save instanceof HTMLButtonElement) {
-          save.disabled = false;
-          write();
-          save.click();
-        } else if (node instanceof HTMLFormElement) {
-          write();
-          node.requestSubmit();
-        }
+    await latestMsg.scrollIntoViewIfNeeded();
+    if (!await page.getByTestId("discussion-edit-form").count()) {
+      await latestMsg.getByTestId("discussion-edit").click();
+    }
+    const editInput = page.getByTestId("discussion-edit-input");
+    await editInput.waitFor({ state: "visible", timeout: 8000 });
+    await editInput.click();
+    await editInput.fill(editedBody);
+    if ((await editInput.inputValue()) !== editedBody) {
+      await editInput.evaluate((node, value) => {
+        if (!(node instanceof HTMLTextAreaElement)) throw new Error("no discussion-edit-input");
+        Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set?.call(node, value);
+        node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertReplacementText", data: value }));
       }, editedBody);
-      try {
-        await page.locator(".rd-msg", { hasText: editedBody }).first().waitFor({ state: "visible", timeout: 12000 });
-        break;
-      } catch (error) {
-        if (attempt === 4) throw error;
-      }
+    }
+    await page.getByTestId("discussion-edit-save").click();
+    try {
+      await page.waitForFunction(
+        (text) => (document.querySelector('[data-testid="discussion-feed"]')?.innerText ?? "").includes(text),
+        editedBody,
+        { timeout: 15000 },
+      );
+    } catch (error) {
+      mkdirSync("/opt/cursor/artifacts", { recursive: true });
+      await page.screenshot({ path: join("/opt/cursor/artifacts", "discussion_edit_fail_390.png"), fullPage: true });
+      console.log("discussion edit dump", await page.evaluate(() => ({
+        feed: document.querySelector('[data-testid="discussion-feed"]')?.innerText ?? "",
+        form: Boolean(document.querySelector('[data-testid="discussion-edit-form"]')),
+        input: document.querySelector('[data-testid="discussion-edit-input"]') instanceof HTMLTextAreaElement
+          ? document.querySelector('[data-testid="discussion-edit-input"]').value
+          : null,
+      })));
+      throw error;
     }
     check("作者可改自己的文字", (await page.getByTestId("discussion-feed").innerText()).includes("改過"));
     await page.getByTestId("discussion-edited").first().waitFor({ state: "visible", timeout: 8000 });
