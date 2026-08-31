@@ -172,6 +172,22 @@ export function shouldMountFocusSheet(input: {
   return input.hasFocus && !rail;
 }
 
+/**
+ * Incoming room/discussion focus applies once.
+ * 編輯中的另一張卡不可被釘文宣的 focusNodeId 搶走（e2e：選了心智圖還在打字，
+ * 選取卻停在 room_content，更多列沒有 wb-add-child）。
+ */
+export function incomingFocusAction(input: {
+  incomingId: string | null | undefined;
+  appliedId: string | null;
+  editingId: string | null;
+}): "apply" | "consume" | "skip" | "clear" {
+  if (!input.incomingId) return "clear";
+  if (input.appliedId === input.incomingId) return "skip";
+  if (input.editingId && input.editingId !== input.incomingId) return "consume";
+  return "apply";
+}
+
 /** 手機焦點 sheet peek：矮到讓畫布上半與四鍵底欄露得出來。 */
 export const FOCUS_SHEET_PEEK_HEIGHT = 80;
 /** composer 最少高度；鍵盤起來時 sheet 要為它留空。 */

@@ -55,6 +55,7 @@ import {
   isEmptyBoard,
   readBoardSession,
   readSafeAreaBottom,
+  incomingFocusAction,
   shouldMountFocusSheet,
   snapAfterFocusDiscuss,
   writeBoardSession,
@@ -647,12 +648,21 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   // 下次 nodes 變動再試。
   const appliedFocusRef = useRef<string | null>(null);
   useEffect(() => {
-    const focusId = api.focusNodeId;
-    if (!focusId) {
+    const focusId = api.focusNodeId ?? null;
+    const action = incomingFocusAction({
+      incomingId: focusId,
+      appliedId: appliedFocusRef.current,
+      editingId: editingIdRef.current,
+    });
+    if (action === "clear") {
       appliedFocusRef.current = null;
       return;
     }
-    if (appliedFocusRef.current === focusId) return;
+    if (action === "skip") return;
+    if (action === "consume") {
+      appliedFocusRef.current = focusId;
+      return;
+    }
     const node = nodes.find((item) => item.id === focusId);
     if (!node) return;
     appliedFocusRef.current = focusId;

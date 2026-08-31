@@ -23,6 +23,7 @@ import {
   FOCUS_SHEET_COMPOSER_MIN,
   FOCUS_SHEET_PEEK_HEIGHT,
   focusSheetSnapHeights,
+  incomingFocusAction,
   shouldInlineDiscussionRail,
   shouldMountFocusSheet,
   snapAfterFocusDiscuss,
@@ -582,4 +583,13 @@ test("composer 焦點錨帶 versionId／時間／段落；內容卡按鈕不只�
   const app = src("src/App.tsx");
   assert.match(app, /placeFromDiscussion/);
   assert.doesNotMatch(app, /stickyFromDiscussion\(/);
+  assert.match(workspace, /incomingFocusAction/);
+});
+
+test("incoming focus：編輯中的另一張卡不被釘文宣搶走", () => {
+  assert.equal(incomingFocusAction({ incomingId: null, appliedId: "poster", editingId: "mind" }), "clear");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: "poster", editingId: "mind" }), "skip");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: "mind" }), "consume");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: null }), "apply");
+  assert.equal(incomingFocusAction({ incomingId: "poster", appliedId: null, editingId: "poster" }), "apply");
 });
