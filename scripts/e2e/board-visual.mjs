@@ -123,7 +123,7 @@ try {
 
     await page.getByLabel("白板名稱").fill("視覺基準板");
     await page.getByRole("button", { name: "建立白板" }).click();
-    await page.waitForSelector('[data-testid="whiteboard-workspace"] [data-testid="wb-canvas"]', { timeout: 15000 });
+    await page.waitForSelector('[data-testid="whiteboard-workspace"] [data-testid="wb-canvas"]', { timeout: 30000 });
     // 回列表拍「板清單」狀態。用 aria-label，避免 class 對不上或 header 還沒 paint。
     await page.getByRole("button", { name: "回到白板列表" }).click({ timeout: 15000 });
     await page.waitForSelector(".wb-list", { timeout: 10000 });
