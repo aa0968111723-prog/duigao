@@ -22,6 +22,8 @@ export type ColleaguePayload = DiscussionPayload & {
   proposalIds?: string[];
   audit?: boolean;
   proposals?: Array<{ id: string; type: string; label: string }>;
+  treePath?: string;
+  treeRootId?: string;
 };
 
 export function isColleagueMessage(message: {
@@ -67,6 +69,8 @@ export function colleagueWrite(input: {
   triggerUserId: string;
   replyToId?: string;
   nodeId?: string;
+  treePath?: string;
+  treeRootId?: string;
   versionId?: string;
   messageId?: string;
   proposalIds?: string[];
@@ -92,6 +96,8 @@ export function colleagueWrite(input: {
       agent: true,
       agentProvider: GROK_AGENT_PROVIDER,
       nodeId: input.nodeId,
+      treePath: input.treePath,
+      treeRootId: input.treeRootId,
       versionId: input.versionId,
       messageId: input.messageId ?? input.replyToId,
       proposalIds: input.proposalIds ?? proposals.map((item) => item.id),

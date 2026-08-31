@@ -1,0 +1,23 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "書籤這支先補正面師父法語，原有的先不要換；胸章那條北藝有材料，不要跟書籤混談。",
+        "tool_calls": [
+          {
+            "function": {
+              "name": "imagine_image",
+              "arguments": "{\"prompt\":\"202609招生 › 書籤 正面語錄草圖，只要提案，不要改原稿\"}"
+            }
+          },
+          {
+            "function": {
+              "name": "create_plan_draft",
+              "arguments": "{\"title\":\"書籤補法語\",\"text\":\"針對 202609招生 › 書籤\"}"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

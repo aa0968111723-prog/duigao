@@ -44,6 +44,14 @@ import { initialPenState, penDown, penUp, segmentWidths, shouldRejectPointer, ty
 import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
 import { describePreview, planApply, type BoardAiPreview } from "./aiPreview";
 import {
+  enrollmentColleaguePrompt,
+  findEnrollmentTreeRoots,
+  FOCUS_ENROLLMENT_TREE_LABEL,
+  PLANT_ENROLLMENT_TREE_LABEL,
+  plantEnrollmentTree2026,
+  shouldPlantEnrollmentTree,
+} from "../collaboration/enrollmentTree";
+import {
   cameraAfterRemount,
   discussionIdFromNode,
   emptyBoardVerbs,
@@ -233,7 +241,7 @@ const NodeView = memo(function NodeView({
     ...(node.rotation ? { transform: `rotate(${node.rotation}deg)` } : {}),
   };
   return (
-    <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type={node.nodeType}>
+    <div className={className} style={style} data-testid={`wb-node-${node.id}`} data-node-type={node.nodeType} data-enrollment-label={(node.content.text || node.content.title || "").trim() || undefined}>
       {node.locked ? <span className="wb-lock-badge" aria-label="已鎖定">🔒</span> : null}
       <Renderer node={node} editing={editing} canEdit={canEdit} onChangeText={onChangeText} />
     </div>
@@ -1213,6 +1221,42 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     addAtView("flow");
   };
 
+  const plantEnrollmentTree = () => {
+    if (!board) return;
+    const existing = findEnrollmentTreeRoots(liveNodes, edges)[0];
+    if (existing) {
+      setStarterDismissedFor(board.id);
+      setSelected([existing.id]);
+      api.onSelectionFocus?.(existing.id);
+      setCamera(focusCamera(existing, viewport, Math.min(camera.zoom, 1.05)));
+      return;
+    }
+    if (!canEdit) {
+      setNotice("檢視者不能種樹，只能在已有的招生樹上討論。");
+      return;
+    }
+    if (!shouldPlantEnrollmentTree(liveNodes, edges)) return;
+    const planted = plantEnrollmentTree2026({
+      whiteboardId: board.id,
+      roomId: board.roomId,
+      createdBy: "local",
+    });
+    setStarterDismissedFor(board.id);
+    api.onUpsertNodes(planted.nodes, "now");
+    for (const edge of planted.edges) api.onCreateEdge(edge);
+    setSelected([planted.rootId]);
+    api.onSelectionFocus?.(planted.rootId);
+    setCamera(fitCamera(planted.nodes, viewport, 48));
+  };
+
+  const focusEnrollmentBranch = (nodeId: string) => {
+    const next = liveNodes.find((item) => item.id === nodeId);
+    if (!next) return;
+    setSelected([next.id]);
+    api.onSelectionFocus?.(next.id);
+    setCamera(focusCamera(next, viewport, Math.min(camera.zoom, 1.05)));
+  };
+
   const beginRelationship = () => {
     if (!board || !canEdit) return;
     const active = liveNodes.filter((node) => !node.deletedAt);
@@ -1428,7 +1472,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   useEffect(() => {
     if (selected[0]) setFocusSheetSnap("half");
   }, [selected[0]]);
-  const focusCard = selectedNode ? focusCardFromNode(selectedNode) : null;
+  const focusCard = selectedNode ? focusCardFromNode(selectedNode, { nodes: liveNodes, edges }) : null;
   const colleagueSaid = lastColleagueForFocus(api.room.discussion ?? [], focusCard?.nodeId);
   const emptyBoard = isEmptyBoard(liveNodes);
   const roomName = emptyRoomTitle(api.room.title);
@@ -2173,6 +2217,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
               <button type="button" data-testid="wb-start-connect" onClick={beginRelationship}>
                 <span aria-hidden>↦</span><strong>畫關係</strong><small>先點起點，再點終點</small>
               </button>
+              <button type="button" data-testid="wb-start-enrollment-tree" onClick={plantEnrollmentTree}>
+                <span aria-hidden>枝</span>
+                <strong>{findEnrollmentTreeRoots(liveNodes, edges)[0] ? FOCUS_ENROLLMENT_TREE_LABEL : PLANT_ENROLLMENT_TREE_LABEL}</strong>
+                <small>已有 202609招生／2026招生樹就點支線討論；空板才長骨架，不另種玩具樹</small>
+              </button>
             </div>
           </section>
         )}
@@ -2208,6 +2257,8 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     } else if (verb.id === "add-asset") {
                       setContentKind("all");
                       setSheet("content");
+                    } else if (verb.id === "plant-enrollment-tree") {
+                      plantEnrollmentTree();
                     } else if (verb.id === "ask-grok") {
                       if (api.onAskColleague) api.onAskColleague({ prompt: "我們下一步做什麼" });
                       else setSheet("ai");
@@ -2249,10 +2300,25 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             >
               <div className="wb-focus-card is-in-sheet" data-testid="wb-focus-card">
                 <strong>{focusCard.title}</strong>
+                {focusCard.treePath ? <small data-testid="wb-tree-path">{focusCard.treePath}</small> : null}
                 <small>來源：{focusCard.sourceLabel}</small>
                 {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
                 {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
                 {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
+                {focusCard.childBranches.length > 0 ? (
+                  <div className="wb-tree-children" data-testid="wb-tree-children">
+                    <small>點一支就討論那條</small>
+                    {focusCard.childBranches.map((child) => (
+                      <button
+                        key={child.id}
+                        type="button"
+                        data-testid="wb-tree-child"
+                        data-tree-label={child.label}
+                        onClick={() => focusEnrollmentBranch(child.id)}
+                      >{child.label}</button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -2311,8 +2377,12 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   <button type="button" data-testid="wb-share-focus" onClick={() => api.onSetRoomFocus?.(selectedNode.id)}>讓大家看這個</button>
                   {(api.onAskColleague || api.onAskBoardAi) && (
                     <button type="button" data-testid="wb-ask-colleague" onClick={() => {
-                      if (api.onAskColleague) api.onAskColleague({ prompt: "針對這張，我們下一步做什麼？", nodeId: selectedNode.id });
-                      else setSheet("ai");
+                      if (api.onAskColleague) {
+                        api.onAskColleague({
+                          prompt: focusCard.colleaguePrompt || enrollmentColleaguePrompt(focusCard.treePath),
+                          nodeId: selectedNode.id,
+                        });
+                      } else setSheet("ai");
                     }}>問同事</button>
                   )}
                   <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
@@ -2432,8 +2502,12 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   type="button"
                   data-testid="wb-ask-colleague"
                   onClick={() => {
-                    if (api.onAskColleague) api.onAskColleague({ prompt: "針對這張，我們下一步做什麼？", nodeId: selectedNode.id });
-                    else setSheet("ai");
+                    if (api.onAskColleague) {
+                      api.onAskColleague({
+                        prompt: focusCard?.colleaguePrompt || enrollmentColleaguePrompt(focusCard?.treePath),
+                        nodeId: selectedNode.id,
+                      });
+                    } else setSheet("ai");
                   }}
                 >問同事</button>
               )}
@@ -2487,11 +2561,26 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       {focusCard && !phoneFocusSheet && (
         <aside className="wb-focus-card" data-testid="wb-focus-card">
           <strong>{focusCard.title}</strong>
+          {focusCard.treePath ? <small data-testid="wb-tree-path">{focusCard.treePath}</small> : null}
           <small>來源：{focusCard.sourceLabel}</small>
           {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
           {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
           {colleagueSaid ? <small data-testid="wb-colleague-said">{colleagueSaid}</small> : null}
           {api.roomFocusId === focusCard.nodeId ? <small>大家正在看這張</small> : null}
+          {focusCard.childBranches.length > 0 ? (
+            <div className="wb-tree-children" data-testid="wb-tree-children">
+              <small>點一支就討論那條</small>
+              {focusCard.childBranches.map((child) => (
+                <button
+                  key={child.id}
+                  type="button"
+                  data-testid="wb-tree-child"
+                  data-tree-label={child.label}
+                  onClick={() => focusEnrollmentBranch(child.id)}
+                >{child.label}</button>
+              ))}
+            </div>
+          ) : null}
         </aside>
       )}
     </div>,

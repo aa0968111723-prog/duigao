@@ -148,7 +148,7 @@ function requestValue(value: unknown): {
   imagineVideoConfirmed: boolean;
   focusBranchId?: string;
   focusVersionId?: string;
-  boardFocus?: { label: string; nodeId?: string; nodeType?: string; source?: "discussion" | "version" | "schedule" | "none" };
+  boardFocus?: { label: string; nodeId?: string; nodeType?: string; source?: "discussion" | "version" | "schedule" | "none"; treePath?: string; treeRootId?: string };
   workLayerItems?: Array<Record<string, unknown>>;
 } | null {
   const input = asObject(value);
@@ -181,6 +181,8 @@ function requestValue(value: unknown): {
           nodeId: text(focus.nodeId).slice(0, 80) || undefined,
           nodeType: text(focus.nodeType).slice(0, 40) || undefined,
           source,
+          treePath: text(focus.treePath).slice(0, 160) || undefined,
+          treeRootId: text(focus.treeRootId).slice(0, 80) || undefined,
         }
       : undefined,
     workLayerItems: rawItems.slice(0, 12).map((item) => asObject(item)),
@@ -528,6 +530,8 @@ async function handle(request: Request): Promise<Response> {
           nodeId: boardFocus.nodeId,
           nodeType: boardFocus.nodeType,
           source: boardFocus.source,
+          treePath: boardFocus.treePath,
+          treeRootId: boardFocus.treeRootId,
           branchId: focusAsset?.branchId,
           versionId: focusAsset?.versionId,
         }

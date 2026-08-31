@@ -351,6 +351,26 @@ video.wb-media-frame { pointer-events: auto; }
   cursor: pointer;
   font-size: 13px;
 }
+.wb-tree-children {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.wb-tree-children small {
+  flex: 1 0 100%;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.wb-tree-children button {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #eef0ff;
+  color: var(--ink);
+  font-size: 13px;
+}
 .wb-focus-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .wb-focus-card-actions button {
   min-height: 40px;

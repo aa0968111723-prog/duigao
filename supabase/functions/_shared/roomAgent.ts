@@ -87,6 +87,8 @@ export type AgentCard = {
     nodeId?: string;
     nodeType?: string;
     source?: "discussion" | "version" | "schedule" | "none";
+    treePath?: string;
+    treeRootId?: string;
   };
   comments: Array<{ id: string; versionId?: string; body: string; regionSummary?: string }>;
   workLayer?: { proposalId: string; status: string; items: Array<{ id: string; type: string; role?: string; text?: string; approxPosition?: string }> };
@@ -227,7 +229,7 @@ export async function askGrok(input: {
         role: "system",
         content: input.imagineVideoConfirmed
           ? "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。回覆繁中。禁止 web_search 與 x_search。使用者已確認生影估價，若要生影請呼叫 imagine_video。"
-          : "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。回覆繁中。禁止 web_search 與 x_search。生影必須先估價：呼叫 imagine_video 會得到估價卡，使用者確認後才生成。",
+          : "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員。禁止覆寫 version / Storage。若 card.focus.treePath 存在，對準那條招生樹路徑說話。回覆繁中。禁止 web_search 與 x_search。生影必須先估價：呼叫 imagine_video 會得到估價卡，使用者確認後才生成。",
       },
       { role: "user", content: JSON.stringify({ query: input.query.slice(0, 2000), card: input.card }) },
     ],

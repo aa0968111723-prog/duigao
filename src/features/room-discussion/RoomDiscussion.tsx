@@ -29,6 +29,7 @@ import {
   isColleagueMessage,
   showsGrokMentionChip,
 } from "../collaboration/agentColleague";
+import { enrollmentTreePath } from "../collaboration/enrollmentTree";
 import { messagesForFocus } from "../whiteboard/boardFocus";
 import "./discussion.css";
 
@@ -286,7 +287,10 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
   useEffect(() => {
     if (!api.focusNodeId) return;
     const node = (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null;
-    const related = messagesForFocus(messages, node);
+    const related = messagesForFocus(messages, node, {
+      nodes: api.room.whiteboardNodes ?? [],
+      edges: api.room.whiteboardEdges ?? [],
+    });
     const target = related[related.length - 1];
     if (target) jumpToMessage(target.id);
     // 只在焦點切換時捲，不跟新訊息搶最新列。
@@ -473,8 +477,20 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       </section>
       )}
 
-      {api.focusNodeId && messagesForFocus(messages, (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null).length === 0 && (
-        <p className="project-muted" data-testid="focus-discuss-empty">針對這張留言</p>
+      {api.focusNodeId && messagesForFocus(
+        messages,
+        (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId) ?? null,
+        { nodes: api.room.whiteboardNodes ?? [], edges: api.room.whiteboardEdges ?? [] },
+      ).length === 0 && (
+        <p className="project-muted" data-testid="focus-discuss-empty">
+          {(() => {
+            const node = (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId);
+            const path = node
+              ? enrollmentTreePath(node, api.room.whiteboardNodes ?? [], api.room.whiteboardEdges ?? [])
+              : null;
+            return path ? `針對「${path.text}」留言` : "針對這張留言";
+          })()}
+        </p>
       )}
       <div className="rd-feed" data-testid="discussion-feed">
         {messages.map((message) => {
@@ -682,9 +698,16 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               setReply(null);
               return;
             }
+            const focusNode = api.focusNodeId
+              ? (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId)
+              : undefined;
+            const tree = focusNode
+              ? enrollmentTreePath(focusNode, api.room.whiteboardNodes ?? [], api.room.whiteboardEdges ?? [])
+              : null;
             const payload = {
               ...(reply ? { quotedBody: replySnippet(reply) } : {}),
               ...(api.focusNodeId ? { nodeId: api.focusNodeId } : {}),
+              ...(tree ? { treePath: tree.text, treeRootId: tree.rootId } : {}),
             };
             api.onSend({
               body: text,

@@ -217,12 +217,13 @@ test("Focus 表面是明亮紙面，不走深色 overlay", () => {
 
 test("空板文案不含「新步驟」當唯一 CTA", () => {
   const verbs = emptyBoardVerbs();
-  assert.equal(verbs.length, 3);
+  assert.equal(verbs.length, 4);
   assert.ok(verbs.every((item) => !item.label.includes("新步驟")));
   const copy = `${emptyRoomTitle("未命名活動房").label}\n${verbs.map((item) => item.label).join("\n")}`;
   assert.equal(emptyBoardCopyHasLonelyStep(copy), false);
   assert.ok(copy.includes("從對話把一句話釘上來"));
   assert.ok(copy.includes("放一張文宣／素材"));
+  assert.ok(copy.includes("空板長 202609招生骨架"));
   assert.ok(copy.includes("問 Grok"));
   assert.equal(isEmptyBoard([]), true);
   assert.equal(isEmptyBoard([node({ deletedAt: 9 })]), true);
