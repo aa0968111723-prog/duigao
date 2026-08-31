@@ -1449,6 +1449,7 @@ try {
         mkdirSync(join(ROOT, "output", "playwright"), { recursive: true });
         await page.screenshot({ path: join("/opt/cursor/artifacts", "poster-pin-1024.png"), fullPage: true });
         await page.screenshot({ path: join(ROOT, "output", "playwright", "poster-pin-1024-tablet.png"), fullPage: true });
+        await dismissSelection(page);
       }
 
       // 工具列在平板轉成右側直欄（不是底部橫列）
