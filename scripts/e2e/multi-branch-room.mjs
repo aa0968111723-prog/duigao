@@ -644,6 +644,36 @@ try {
       );
       const canvaBranch = rows.room_branches.find((row) => row.name === "Canva 招生海報");
       check("匯入建立了文宣分支（FK 齊備）", Boolean(canvaBranch) && canvaVersion?.branch_id === canvaBranch?.id, `branch=${canvaBranch?.id ?? "none"}`);
+      check("匯入寫入 canva_design_id", Boolean(canvaVersion?.canva_design_id), `design=${canvaVersion?.canva_design_id ?? "none"}`);
+      const oldCanvaId = canvaVersion?.id;
+      const oldCanvaPath = canvaVersion?.image_path;
+      await openRoomPane(page, "open-content-pane");
+      await page.locator('[data-testid="poster-branches"] .project-branch-card').filter({ hasText: "Canva 招生海報" }).click();
+      await page.waitForSelector('[data-testid="canva-sync-version"]', { timeout: 20000 });
+      const beforeCount = rows.versions.filter((row) => row.branch_id === canvaBranch?.id).length;
+      await page.getByTestId("canva-sync-version").click();
+      await page.waitForFunction(
+        (expected) => {
+          const chips = document.querySelectorAll(".m-vchip:not(.m-vchip-add):not(.poster-edit-toggle)");
+          return chips.length >= expected;
+        },
+        beforeCount + 1,
+        { timeout: 30000 },
+      ).catch(() => null);
+      const afterRows = rows.versions.filter((row) => row.branch_id === canvaBranch?.id);
+      const oldStill = afterRows.find((row) => row.id === oldCanvaId);
+      check(
+        "同步這一版只 append：舊 id／path 不變",
+        afterRows.length === beforeCount + 1 && oldStill?.id === oldCanvaId && oldStill?.image_path === oldCanvaPath,
+        `before=${beforeCount} after=${afterRows.length} oldPath=${oldStill?.image_path ?? "gone"}`,
+      );
+      check(
+        "新 version 是新 id、新 path、新 label",
+        afterRows.some((row) => row.id !== oldCanvaId && row.image_path !== oldCanvaPath && row.canva_design_id === canvaVersion?.canva_design_id),
+      );
+      await page.locator("button.m-home").click().catch(() => undefined);
+      await page.waitForFunction(() => !document.querySelector('[data-testid="branch-workspace-overlay"]'), null, { timeout: 20000 });
+      await closePushedPane(page);
     }
 
     // ---- PR-03：語音房（LiveKit）— token 契約與 UI 誠實性 ------------

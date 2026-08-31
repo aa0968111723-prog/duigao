@@ -66,6 +66,12 @@ export type Version = {
   optimizedVideoPath?: string;
   optimized?: boolean;
   sourceFileSize?: number;
+  /** Cloud Storage path. Used to prove append-only sync did not overwrite. */
+  imagePath?: string;
+  /** Canva design this version was imported from. Absent = not a Canva draft. */
+  canvaDesignId?: string;
+  canvaPageId?: string;
+  canvaPageNumber?: number;
 };
 
 /** The versions a picker should offer: everything still on the table. */

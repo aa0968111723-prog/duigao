@@ -1662,13 +1662,13 @@ export function App() {
     [guest, showToast],
   );
 
-  // Canva 文宣匯入（PR-05）：健檢過了入口才存在 — 誠實不可用。
-  const [canvaReady, setCanvaReady] = useState(false);
+  // Canva 文宣匯入：health 沒過入口仍在（三態），不准整座蒸發。
+  const [canvaHealthState, setCanvaHealthState] = useState<import("./lib/canvaContract").CanvaBridgeHealth | null>(null);
   useEffect(() => {
-    if (!cloud.boundRoomId || !room?.projectMode || !isCloudConfigured) { setCanvaReady(false); return; }
+    if (!cloud.boundRoomId || !room?.projectMode || !isCloudConfigured) { setCanvaHealthState(null); return; }
     let cancelled = false;
     void canvaHealth(getSupabase()!).then((health) => {
-      if (!cancelled) setCanvaReady(Boolean(health.ok));
+      if (!cancelled) setCanvaHealthState(health);
     });
     return () => { cancelled = true; };
   }, [cloud.boundRoomId, room?.projectMode]);
@@ -1730,17 +1730,36 @@ export function App() {
     [guest, showToast],
   );
 
+  const syncCanvaVersion = useCallback(
+    async (versionId: string) => {
+      const current = roomRef.current;
+      if (!current || !guest) return;
+      const version = current.versions.find((item) => item.id === versionId);
+      if (!version?.canvaDesignId) return;
+      if (cloudRef.current.boundRoomId && !cloudRef.current.canManageMedia) {
+        showToast("檢視者不能同步 Canva。", { tone: "error" });
+        return;
+      }
+      const { nextPosterVersionLabel } = await import("./features/visual-proposal/saveComposeVersion");
+      const count = current.versions.filter((item) => !version.branchId || item.branchId === version.branchId).length;
+      const result = await importFromCanva(version.canvaDesignId, nextPosterVersionLabel(count), version.branchId);
+      if (!result.ok) showToast(result.message, { tone: "error" });
+    },
+    [guest, importFromCanva, showToast],
+  );
+
   const canvaSheetApi = useMemo(
     () =>
-      canvaReady
+      isCloudConfigured && cloud.boundRoomId && room?.projectMode
         ? {
+            health: canvaHealthState,
             status: () => canvaStatus(getSupabase()!),
             connectUrl: () => canvaConnectUrl(getSupabase()!),
             listDesigns: () => canvaListDesigns(getSupabase()!),
             importDesign: importFromCanva,
           }
         : undefined,
-    [canvaReady, importFromCanva],
+    [canvaHealthState, importFromCanva, cloud.boundRoomId, room?.projectMode],
   );
 
   const createProjectContent = useCallback(
@@ -3528,6 +3547,7 @@ export function App() {
         setChatInput,
         sendChat,
         addFiles,
+        syncCanvaVersion,
         canManage: cloud.boundRoomId ? cloud.canManageMedia : true,
         saveComposeVersion: savePosterComposeVersion,
         setTitle: (title) => {

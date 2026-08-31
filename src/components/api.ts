@@ -123,6 +123,8 @@ export type WorkspaceApi = {
   setChatInput: (v: string) => void;
   sendChat: () => void;
   addFiles: (files: FileList | null) => void;
+  /** 已匯入的 Canva 稿：再打同一 designId，只准 append 新 version。 */
+  syncCanvaVersion?: (versionId: string) => Promise<void>;
   /** Owner/manager only. Reviewer keeps 看稿＋留言. */
   canManage: boolean;
   /** Export the working layer as a new poster version. Never overwrites the old one. */
