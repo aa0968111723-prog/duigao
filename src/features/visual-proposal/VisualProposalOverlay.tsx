@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useProposalStore, type ProposalAuthor, type ProposalItem } from "./store";
 import { OPEN_COMPOSE_PICKER_EVENT } from "./ComposeAssetPicker";
-import { backgroundColorCss, clamp, hexToRgba, objectFitFor, proposalTypeLabel } from "./helpers";
+import { backgroundColorCss, clamp, hexToRgba, insetCrop, nextRotation, nudgeItemPosition, objectFitFor, prepareImageFile, proposalTypeLabel, replaceImageKeepingFrame } from "./helpers";
 import { ensureComposeFonts } from "./composeFonts";
 import "./proposal.css";
 
@@ -54,8 +54,40 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
   const gesture = useRef<Gesture | null>(null);
   const resize = useRef<{ id: string; cx: number; cy: number; startDist: number; startWidth: number } | null>(null);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
+  const [cropping, setCropping] = useState(false);
+  const swapRef = useRef<HTMLInputElement>(null);
 
   const { active, editing, visible, viewMode, compareSplit, selectedItem, layerEditing } = proposal;
+
+  useEffect(() => {
+    if (!editing || !selectedItem) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      const step = event.shiftKey ? 0.02 : 0.01;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        const next = nudgeItemPosition(selectedItem.x, selectedItem.y, -step, 0);
+        proposal.updateItem(selectedItem.id, next);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        const next = nudgeItemPosition(selectedItem.x, selectedItem.y, step, 0);
+        proposal.updateItem(selectedItem.id, next);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        const next = nudgeItemPosition(selectedItem.x, selectedItem.y, 0, -step);
+        proposal.updateItem(selectedItem.id, next);
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        const next = nudgeItemPosition(selectedItem.x, selectedItem.y, 0, step);
+        proposal.updateItem(selectedItem.id, next);
+      } else if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        proposal.deleteItem(selectedItem.id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editing, proposal, selectedItem]);
 
   // 原稿 mode hides the paint — but keep the layer mounted while composing.
   // Hook `editing` is gated on viewMode==="proposal"; layerEditing is the raw
@@ -234,9 +266,38 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
 
       {comparing && (
         <>
-          <span className="proposal-compare-line" style={{ left: `${compareSplit * 100}%` }} aria-hidden />
+          <button
+            type="button"
+            className="proposal-compare-line"
+            data-testid="proposal-compare-line"
+            aria-label="拖動對照"
+            style={{ left: `${compareSplit * 100}%` }}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const layer = event.currentTarget.parentElement;
+              if (!layer) return;
+              const rect = layer.getBoundingClientRect();
+              proposal.setCompareSplit(clamp((event.clientX - rect.left) / (rect.width || 1), 0, 1));
+            }}
+          />
           <span className="proposal-compare-tag proposal-compare-tag-left">原稿</span>
-          <span className="proposal-compare-tag proposal-compare-tag-right">提案</span>
+          <span className="proposal-compare-tag proposal-compare-tag-right">工作層</span>
+          <input
+            type="range"
+            className="proposal-compare-slider"
+            data-testid="proposal-compare-slider"
+            min={0}
+            max={1}
+            step={0.01}
+            value={compareSplit}
+            aria-label="對照位置"
+            onPointerDown={(event) => event.stopPropagation()}
+            onChange={(event) => proposal.setCompareSplit(Number(event.target.value))}
+          />
         </>
       )}
 
@@ -261,6 +322,69 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
       {editing && guides.y != null && <span className="proposal-guide proposal-guide-h" style={{ top: `${guides.y * 100}%` }} aria-hidden />}
 
       {editing && selectedItem && (
+        <div
+          className="pquick-shortcuts"
+          data-testid="poster-item-shortcuts"
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{
+          left: `${selectedItem.x * 100}%`,
+          top: `${Math.min(0.92, selectedItem.y + 0.08) * 100}%`,
+        }}>
+          <button type="button" className="is-on">移動</button>
+          {selectedItem.type === "image" && (
+            <button
+              type="button"
+              className={cropping ? "is-on" : ""}
+              data-testid="poster-item-crop"
+              onClick={() => {
+                proposal.updateItem(selectedItem.id, { crop: insetCrop(selectedItem.crop) });
+                setCropping(true);
+              }}
+            >
+              裁剪
+            </button>
+          )}
+          {selectedItem.type === "image" && (
+            <button type="button" data-testid="poster-item-swap" onClick={() => swapRef.current?.click()}>
+              換圖
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid="poster-item-rotate"
+            onClick={() => proposal.updateItem(selectedItem.id, { rotation: nextRotation(selectedItem.rotation) })}
+          >
+            轉
+          </button>
+          <button
+            type="button"
+            className="is-danger"
+            data-testid="poster-item-delete"
+            onClick={() => proposal.deleteItem(selectedItem.id)}
+          >
+            刪
+          </button>
+        </div>
+      )}
+
+      <input
+        ref={swapRef}
+        type="file"
+        accept="image/*"
+        hidden
+        data-testid="poster-item-swap-file"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (!file || selectedItem?.type !== "image") return;
+          void prepareImageFile(file).then((prepared) => {
+            const next = replaceImageKeepingFrame(selectedItem, prepared.dataUrl, prepared.name);
+            proposal.updateItem(selectedItem.id, { imageDataUrl: next.imageDataUrl, name: next.name, crop: undefined });
+          });
+        }}
+      />
+
+      {editing && selectedItem && (
         <button
           type="button"
           className="proposal-resize-handle"
@@ -281,19 +405,7 @@ export function VisualProposalOverlay({ roomId, versionId, author, compact }: Pr
         {active.status === "accepted" ? "已採用 · " : ""}
         {active.title} · {proposalTypeLabel(active.type)}
       </span>
-      {editing && !compact && (
-        <button
-          type="button"
-          className="proposal-finish"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            proposal.setEditing(false);
-          }}
-        >
-          完成擺放
-        </button>
-      )}
+
     </div>
   );
 }
@@ -327,13 +439,29 @@ const ProposalItemView = memo(function ProposalItemView({ item, selected, onPoin
     return (
       <button
         type="button"
-        className={`proposal-item proposal-image ${selected ? "is-selected" : ""}`}
-        style={shared}
+        className={`proposal-item proposal-image ${selected ? "is-selected" : ""} ${item.crop ? "has-crop" : ""}`}
+        style={{
+          ...shared,
+          ...(item.crop ? { ["--crop-ar" as string]: `${item.crop.width} / ${item.crop.height}` } : {}),
+        }}
         {...handlers}
         aria-label={`素材：${item.name}`}
         aria-pressed={selected}
       >
-        <img src={item.imageDataUrl} alt={item.name} draggable={false} />
+        <span className="proposal-image-crop">
+          <img
+            src={item.imageDataUrl}
+            alt={item.name}
+            draggable={false}
+            style={item.crop ? {
+              width: `${100 / item.crop.width}%`,
+              height: `${100 / item.crop.height}%`,
+              left: `${-item.crop.x / item.crop.width * 100}%`,
+              top: `${-item.crop.y / item.crop.height * 100}%`,
+              maxWidth: "none",
+            } : undefined}
+          />
+        </span>
       </button>
     );
   }
