@@ -67,6 +67,7 @@ export function imagineEditRequest(input: {
   model?: string;
 }): { url: string; body: Record<string, unknown> } {
   const mime = input.mime && /^image\//i.test(input.mime) ? input.mime : "image/png";
+  const dataUri = `data:${mime};base64,${bytesToB64(input.imageBytes)}`;
   return {
     url: IMAGINE_EDIT_URL,
     body: {
@@ -74,7 +75,7 @@ export function imagineEditRequest(input: {
       prompt: input.prompt.slice(0, 4000),
       n: 1,
       response_format: "b64_json",
-      image: `data:${mime};base64,${bytesToB64(input.imageBytes)}`,
+      image: { url: dataUri, type: "image_url" },
     },
   };
 }
