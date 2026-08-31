@@ -83,6 +83,8 @@ export type RoomAgentFocus = {
   nodeId?: string;
   nodeType?: string;
   source?: "discussion" | "version" | "schedule" | "none";
+  treePath?: string;
+  treeRootId?: string;
 };
 
 export type RoomAgentComment = {
@@ -138,6 +140,8 @@ export type RoomAgentCardInput = {
     nodeId?: string;
     nodeType?: string;
     source?: "discussion" | "version" | "schedule" | "none";
+    treePath?: string;
+    treeRootId?: string;
   };
   comments?: Array<{
     id: string;
@@ -287,6 +291,8 @@ export function buildRoomAgentCard(input: RoomAgentCardInput): RoomAgentCard {
         nodeId: text(input.focus.nodeId).slice(0, 80) || undefined,
         nodeType: text(input.focus.nodeType).slice(0, 40) || undefined,
         source: focusSource,
+        treePath: scrubValue(text(input.focus.treePath)).slice(0, 160) || undefined,
+        treeRootId: text(input.focus.treeRootId).slice(0, 80) || undefined,
       }
     : undefined;
 
@@ -499,7 +505,7 @@ export function grokChatRequestBody(input: {
     messages: [
       {
         role: "system",
-        content: "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員，不能代替主辦決定，不能覆寫 version 或 Storage。回覆繁中。禁止 web_search 與 x_search。",
+        content: "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員，不能代替主辦決定，不能覆寫 version 或 Storage。若 card.focus.treePath 存在，對準那條招生樹路徑說話，不要把旁支線混在一起。回覆繁中。禁止 web_search 與 x_search。",
       },
       {
         role: "user",

@@ -32,6 +32,10 @@ const OUT_DIR = join(ROOT, "output", "visual");
 const MOCK_PORT = Number(process.env.DUIGAO_E2E_MOCK_PORT || 54421);
 const APP_PORT = Number(process.env.DUIGAO_E2E_APP_PORT || 4191);
 const MAX_DIFF_PIXELS = 2000;
+// Linux CI and local Chromium rasterize CJK text slightly differently. Keep
+// antialiasing fringes from counting as layout regressions while retaining
+// the pixel-count guard for meaningful visual drift.
+const PIXELMATCH_THRESHOLD = 0.15;
 const UPDATE = process.env.UPDATE_VISUAL === "1";
 
 const SIZES = [
@@ -193,7 +197,7 @@ async function shot(page, name) {
     return;
   }
   const diff = new PNG({ width: baseline.width, height: baseline.height });
-  const diffPixels = pixelmatch(baseline.data, current.data, diff.data, baseline.width, baseline.height, { threshold: 0.12 });
+  const diffPixels = pixelmatch(baseline.data, current.data, diff.data, baseline.width, baseline.height, { threshold: PIXELMATCH_THRESHOLD });
   if (diffPixels > MAX_DIFF_PIXELS) {
     writeFileSync(join(OUT_DIR, `${name}-diff.png`), PNG.sync.write(diff));
   }

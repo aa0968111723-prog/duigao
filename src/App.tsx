@@ -1003,6 +1003,7 @@ export function App() {
     try {
       const askExtra = boardAskContext({
         nodes: roomNow?.whiteboardNodes ?? [],
+        edges: roomNow?.whiteboardEdges ?? [],
         focusNode: focusNode ?? null,
       });
       const response = await askAi({
@@ -1027,6 +1028,8 @@ export function App() {
         triggerUserId: actor,
         replyToId: input.replyToId,
         nodeId: input.nodeId,
+        treePath: askExtra.focus?.treePath,
+        treeRootId: askExtra.focus?.treeRootId,
         proposals: turn.proposals.map((item) => ({ id: item.id, type: item.type, label: item.label })),
       }));
       const boardAdds = boardProposals(turn.proposals);
@@ -1074,6 +1077,7 @@ export function App() {
       : undefined;
     const extra = boardAskContext({
       nodes: current?.whiteboardNodes ?? [],
+      edges: current?.whiteboardEdges ?? [],
       focusNode,
     });
     return askAi({
@@ -3961,6 +3965,7 @@ export function App() {
               .join("\n");
             const askExtra = boardAskContext({
               nodes: context.nodes,
+              edges: roomRef.current?.whiteboardEdges ?? [],
               focusNode: context.selectedIds[0]
                 ? context.nodes.find((node) => node.id === context.selectedIds[0])
                 : undefined,

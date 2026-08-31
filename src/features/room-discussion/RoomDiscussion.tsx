@@ -31,6 +31,7 @@ import {
 } from "../collaboration/agentColleague";
 import { discussionPayloadFromFocusNode, discussionShowsContentActions } from "../collaboration/links";
 import { openContentFromDiscussion } from "../collaboration/boardAnchors";
+import { enrollmentTreePath } from "../collaboration/enrollmentTree";
 import { messagesForFocus } from "../whiteboard/boardFocus";
 import "./discussion.css";
 
@@ -298,7 +299,10 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
 
   useEffect(() => {
     if (!api.focusNodeId) return;
-    const related = messagesForFocus(messages, focusNode);
+    const related = messagesForFocus(messages, focusNode, {
+      nodes: api.room.whiteboardNodes ?? [],
+      edges: api.room.whiteboardEdges ?? [],
+    });
     const target = related[related.length - 1];
     if (target) jumpToMessage(target.id);
     // 只在焦點切換時捲，不跟新訊息搶最新列。
@@ -486,7 +490,14 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
       )}
 
       {api.focusNodeId && !showAllDiscussion && focusedMessages.length === 0 && (
-        <p className="project-muted" data-testid="focus-discuss-empty">針對這張留言</p>
+        <p className="project-muted" data-testid="focus-discuss-empty">
+          {(() => {
+            const path = focusNode
+              ? enrollmentTreePath(focusNode, api.room.whiteboardNodes ?? [], api.room.whiteboardEdges ?? [])
+              : null;
+            return path ? `針對「${path.text}」留言` : "針對這張留言";
+          })()}
+        </p>
       )}
       {api.focusNodeId && messages.length > focusedMessages.length && (
         <button
@@ -712,9 +723,17 @@ export function RoomDiscussion({ api }: { api: RoomDiscussionApi }) {
               setReply(null);
               return;
             }
+            const focusNode = api.focusNodeId
+              ? (api.room.whiteboardNodes ?? []).find((item) => item.id === api.focusNodeId)
+              : undefined;
+            const tree = focusNode
+              ? enrollmentTreePath(focusNode, api.room.whiteboardNodes ?? [], api.room.whiteboardEdges ?? [])
+              : null;
             const payload = {
               ...(reply ? { quotedBody: replySnippet(reply) } : {}),
               ...(focusNode ? discussionPayloadFromFocusNode(focusNode) : {}),
+              ...(api.focusNodeId ? { nodeId: api.focusNodeId } : {}),
+              ...(tree ? { treePath: tree.text, treeRootId: tree.rootId } : {}),
             };
             api.onSend({
               body: text,

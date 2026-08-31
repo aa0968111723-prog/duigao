@@ -3,11 +3,24 @@
  * 房間焦點與本機選取分開；session 活在模組層，切對話／白板不丟。
  */
 import { formatVideoRange } from "../collaboration/nodes";
-import type { WhiteboardNode } from "../collaboration/types";
+import type { WhiteboardEdge, WhiteboardNode } from "../collaboration/types";
+import {
+  PLANT_ENROLLMENT_TREE_LABEL,
+  PLANT_ENROLLMENT_TREE_VERB_ID,
+  enrollmentAskFocus,
+  enrollmentColleaguePrompt,
+  enrollmentTreePath,
+  messagesForEnrollmentFocus,
+} from "../collaboration/enrollmentTree";
 import type { Camera } from "./canvas";
 import type { BoardAiPreview } from "./aiPreview";
 
 export type FocusSource = "discussion" | "version" | "schedule" | "none";
+
+export type TreeBranchChip = {
+  id: string;
+  label: string;
+};
 
 export type BoardFocusCard = {
   nodeId: string;
@@ -16,6 +29,12 @@ export type BoardFocusCard = {
   sourceLabel: string;
   openCommentCount: number;
   lastWriter: string | null;
+  treePath?: string;
+  treeRootId?: string;
+  parentId?: string;
+  parentLabel?: string;
+  childBranches: TreeBranchChip[];
+  colleaguePrompt: string;
 };
 
 export type BoardSession = {
@@ -28,6 +47,7 @@ export type BoardSession = {
 export const EMPTY_BOARD_VERBS = [
   { id: "pin-discussion", label: "從對話把一句話釘上來" },
   { id: "add-asset", label: "放一張文宣／素材" },
+  { id: PLANT_ENROLLMENT_TREE_VERB_ID, label: PLANT_ENROLLMENT_TREE_LABEL },
   { id: "ask-grok", label: "問 Grok「我們下一步做什麼」" },
 ] as const;
 
@@ -137,15 +157,36 @@ function focusCardSourceLabel(node: WhiteboardNode): string {
   return "無來源";
 }
 
-export function focusCardFromNode(node: WhiteboardNode): BoardFocusCard {
+export function focusCardFromNode(
+  node: WhiteboardNode,
+  ctx?: { nodes?: WhiteboardNode[]; edges?: WhiteboardEdge[] },
+): BoardFocusCard {
   const source = nodeFocusSource(node);
+  const path = ctx?.nodes && ctx.edges
+    ? enrollmentTreePath(node, ctx.nodes, ctx.edges)
+    : null;
+  const byId = new Map((ctx?.nodes ?? []).map((item) => [item.id, item]));
+  const labelOf = (id: string | null | undefined) => {
+    if (!id) return "";
+    const item = byId.get(id);
+    return (item?.content.text || item?.content.title || "").trim();
+  };
+  const sourceLabel = path?.text
+    || node.content.sourceLabel?.trim()
+    || focusCardSourceLabel(node);
   return {
     nodeId: node.id,
     title: focusCardTitle(node),
     source,
-    sourceLabel: focusCardSourceLabel(node),
+    sourceLabel,
     openCommentCount: Math.max(0, node.content.openCommentCount ?? 0),
     lastWriter: node.content.lastWriterName?.trim() || null,
+    treePath: path?.text,
+    treeRootId: path?.rootId,
+    parentId: path?.parentId ?? undefined,
+    parentLabel: path && path.labels.length > 1 ? path.labels[path.labels.length - 2] : undefined,
+    childBranches: (path?.childIds ?? []).map((id) => ({ id, label: labelOf(id) })).filter((item) => item.label),
+    colleaguePrompt: enrollmentColleaguePrompt(path?.text),
   };
 }
 
@@ -359,8 +400,13 @@ function branchMatchesFocus(
 export function messagesForFocus<T extends { payload?: FocusPayload; id?: string }>(
   messages: T[],
   node: Pick<WhiteboardNode, "id" | "linkedEntityType" | "linkedEntityId" | "anchor" | "sourceVersionId" | "content"> | null,
+  ctx?: { nodes?: WhiteboardNode[]; edges?: WhiteboardEdge[] },
 ): T[] {
   if (!node) return messages;
+  if (ctx?.nodes && ctx.edges) {
+    const treeRelated = messagesForEnrollmentFocus(messages, node, ctx.nodes, ctx.edges);
+    if (treeRelated) return treeRelated;
+  }
   const discussionId = discussionIdFromNode(node);
   const sectionId = nodeSectionId(node);
   const nodeStart = finiteTime(node.content?.startTime);
@@ -422,29 +468,46 @@ export function roomFocusFromPresence(
 }
 
 export type BoardAskContext = {
-  focus?: { label: string; nodeId?: string; nodeType?: string; source?: FocusSource; sourceLabel?: string };
+  focus?: {
+    label: string;
+    nodeId?: string;
+    nodeType?: string;
+    source?: FocusSource;
+    sourceLabel?: string;
+    treePath?: string;
+    treeRootId?: string;
+  };
   workLayer?: { proposalId: string; status: string; items: ReturnType<typeof workLayerItemsFromNodes> };
 };
 
 /** 問同事／房間 AI：焦點卡 + 板上可見節點短列。不含 Storage path。 */
 export function boardAskContext(input: {
   nodes: WhiteboardNode[];
+  edges?: WhiteboardEdge[];
   focusNode?: WhiteboardNode | null;
 }): BoardAskContext {
   const items = workLayerItemsFromNodes(input.nodes);
-  const card = input.focusNode ? focusCardFromNode(input.focusNode) : undefined;
+  const card = input.focusNode
+    ? focusCardFromNode(input.focusNode, { nodes: input.nodes, edges: input.edges ?? [] })
+    : undefined;
+  const path = input.focusNode && input.edges
+    ? enrollmentTreePath(input.focusNode, input.nodes, input.edges)
+    : null;
+  const ask = enrollmentAskFocus(path, input.nodes);
   return {
     focus: card && input.focusNode
       ? {
-          label: card.title,
+          label: path?.text || card.title,
           nodeId: card.nodeId,
           nodeType: input.focusNode.nodeType,
           source: card.source,
           sourceLabel: card.sourceLabel,
+          treePath: ask.treePath ?? card.treePath,
+          treeRootId: ask.treeRootId ?? card.treeRootId,
         }
       : undefined,
     workLayer: items.length
-      ? { proposalId: "board-visible", status: "visible", items }
+      ? { proposalId: path ? "enrollment-tree" : "board-visible", status: "visible", items }
       : undefined,
   };
 }
