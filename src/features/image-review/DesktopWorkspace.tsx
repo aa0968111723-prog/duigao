@@ -6,6 +6,8 @@ import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { Viewer } from "./Stage";
+import { EditScopeBar } from "./EditScopeBar";
+import { useEditScope } from "./useEditScope";
 import { nextPinNumber, type WorkspaceApi } from "../../components/api";
 import { canShowCanvaSync } from "../../lib/canvaContract";
 
@@ -31,6 +33,7 @@ const COMPARE_MODES: { id: CompareMode; label: string }[] = [
 /** Desktop keeps the familiar three-pane layout: stage, toolbar, side panel. */
 export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   const { room, view, tool, draftPin } = api;
+  const editScope = useEditScope(api, view.versionId, room.id);
 
   useEffect(() => {
     pruneProposalVersions(
@@ -41,7 +44,18 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
 
   return (
     <main className="workspace">
-      <Viewer api={api} />
+      <div className="stage-with-scope">
+        <Viewer api={api} />
+        <EditScopeBar
+          inferred={editScope.inferred}
+          override={editScope.override}
+          onOverride={editScope.setOverride}
+          onGenerate={(forced) => { void editScope.generate(forced); }}
+          busy={editScope.busy}
+          hint={editScope.hint}
+          caption={editScope.caption}
+        />
+      </div>
 
       <div className="toolbar">
         <div className="versions">
@@ -173,6 +187,8 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
               showToast={api.showToast}
               canManage={api.canManage}
               onSaveVersion={api.saveComposeVersion}
+              onGenerateSecondVersion={() => { void editScope.generate("full"); }}
+              onGenerateVisualProposal={() => { void editScope.generate("single"); }}
               versions={api.composeVersions ?? room.versions}
               branches={room.branches}
               listLibrary={api.listComposeLibrary}

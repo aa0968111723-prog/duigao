@@ -1,0 +1,32 @@
+.edit-scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 8px 8px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--ink, #1b1a17);
+}
+.edit-scope-caption { margin: 0; flex: 1 1 180px; min-width: 0; }
+.edit-scope-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.edit-scope-chip { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.edit-scope-flip,
+.edit-scope-generate {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line, #d8d4cc);
+  background: #fff;
+  color: inherit;
+  font-size: 13px;
+}
+.edit-scope-generate { background: var(--accent, #5b4dff); color: #fff; border-color: transparent; }
+.edit-scope-generate:disabled,
+.edit-scope-flip:disabled { opacity: 0.6; }
+.edit-scope-hint { flex: 1 1 100%; margin: 0; color: var(--ink-dim, #5c5850); font-size: 13px; }
+.stage-with-scope { grid-area: stage; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.stage-with-scope .stage-wrap { flex: 1; min-height: 0; }
+@media (max-width: 420px) {
+  .edit-scope-bar { padding: 4px 8px 8px; }
+}

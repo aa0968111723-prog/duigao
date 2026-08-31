@@ -11,6 +11,8 @@ import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { Viewer } from "./Stage";
 import { ImmersiveViewer } from "./ImmersiveViewer";
+import { EditScopeBar } from "./EditScopeBar";
+import { useEditScope } from "./useEditScope";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
 import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "../../components/api";
 import { canShowCanvaSync } from "../../lib/canvaContract";
@@ -53,6 +55,7 @@ export function MobileWorkspace({ api, presence }: Props) {
   const visibleVersionId = room.versions.some((version) => version.id === view.versionId)
     ? view.versionId
     : room.versions[0]?.id ?? view.versionId;
+  const editScope = useEditScope(api, visibleVersionId, room.id);
 
   // Read-only view of every proposal in the room, so 修改點卡 can show its own.
   const roomProposals = useRoomProposals(room.id);
@@ -329,6 +332,15 @@ export function MobileWorkspace({ api, presence }: Props) {
 
       <div className="m-stage-area">
         <Viewer api={api} compact onOpenImmersive={() => setImmersiveOpen(true)} />
+        <EditScopeBar
+          inferred={editScope.inferred}
+          override={editScope.override}
+          onOverride={editScope.setOverride}
+          onGenerate={(forced) => { void editScope.generate(forced); }}
+          busy={editScope.busy}
+          hint={editScope.hint}
+          caption={editScope.caption}
+        />
         {nudge && !task && !draftPin && (
           <div className="m-nudge" role="note">
             <span>還有哪一個地方最需要調整？</span>
@@ -364,6 +376,8 @@ export function MobileWorkspace({ api, presence }: Props) {
             pin={proposalPinBinding}
             canManage={api.canManage}
             onSaveVersion={api.saveComposeVersion}
+            onGenerateSecondVersion={() => { void editScope.generate("full"); }}
+            onGenerateVisualProposal={() => { void editScope.generate("single"); }}
             versions={api.composeVersions ?? room.versions}
             branches={room.branches}
             listLibrary={api.listComposeLibrary}

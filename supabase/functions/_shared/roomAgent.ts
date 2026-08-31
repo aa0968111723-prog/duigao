@@ -46,6 +46,7 @@ export type GrokEnv = {
   xaiKey: string;
   textModel: string;
   imageModel: string;
+  imageEditModel?: string;
   videoModel: string;
   maxUsd: number;
 };
@@ -63,6 +64,7 @@ export function grokEnv(): GrokEnv | null {
     xaiKey,
     textModel: safeModel,
     imageModel: (Deno.env.get("GROK_IMAGE_MODEL") || DEFAULT_GROK_IMAGE_MODEL).trim(),
+    imageEditModel: (Deno.env.get("GROK_IMAGE_EDIT_MODEL") || Deno.env.get("GROK_IMAGE_MODEL") || DEFAULT_GROK_IMAGE_MODEL).trim() || DEFAULT_GROK_IMAGE_MODEL,
     videoModel: (Deno.env.get("GROK_VIDEO_MODEL") || DEFAULT_GROK_VIDEO_MODEL).trim(),
     maxUsd: Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : DEFAULT_MAX_USD,
   };

@@ -47,6 +47,8 @@ type Props = {
   branches?: { id: string; name: string }[];
   listLibrary?: () => Promise<LibraryAsset[]>;
   resolveMaterial?: (material: ComposeMaterial) => Promise<string>;
+  onGenerateSecondVersion?: () => void;
+  onGenerateVisualProposal?: () => void;
 };
 
 type Panel = "none" | "element" | "compare" | "list";
@@ -75,6 +77,8 @@ export function ProposalDock({
   branches,
   listLibrary,
   resolveMaterial,
+  onGenerateSecondVersion,
+  onGenerateVisualProposal,
 }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   const materialRef = useRef<HTMLInputElement>(null);
@@ -199,6 +203,20 @@ export function ProposalDock({
 
   return (
     <section className="pdock" aria-label="視覺提案" ref={rootRef}>
+      {(onGenerateSecondVersion || onGenerateVisualProposal) && (
+        <div className="proposal-manual-generate">
+          {onGenerateVisualProposal && (
+            <button type="button" className="proposal-quiet" data-testid="manual-generate-proposal" onClick={onGenerateVisualProposal}>
+              生成視覺提案
+            </button>
+          )}
+          {onGenerateSecondVersion && (
+            <button type="button" className="proposal-quiet" data-testid="manual-generate-second" onClick={onGenerateSecondVersion}>
+              依修改生第二版
+            </button>
+          )}
+        </div>
+      )}
       {proposal.error && (
         <div className="proposal-error" role="alert">
           <span>{proposal.error}</span>
