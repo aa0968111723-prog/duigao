@@ -1,0 +1,23 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "招生短片這支節奏偏快，先把 0:12 後的社團段放慢半拍，不要動主視覺那條線。",
+        "tool_calls": [
+          {
+            "function": {
+              "name": "imagine_image",
+              "arguments": "{\"prompt\":\"2026招生樹 › 影片 › 招生短片 封面草圖，社團擺攤，不要改原稿\"}"
+            }
+          },
+          {
+            "function": {
+              "name": "create_plan_draft",
+              "arguments": "{\"title\":\"招生短片節奏改一版\",\"text\":\"針對 2026招生樹 › 影片 › 招生短片\"}"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

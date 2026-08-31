@@ -179,6 +179,8 @@ export type RoomContextRequest = {
     nodeType?: string;
     source?: "discussion" | "version" | "schedule" | "none";
     label?: string;
+    treePath?: string;
+    treeRootId?: string;
   };
   workLayer?: {
     proposalId?: string;
@@ -464,6 +466,7 @@ export function contextCacheKey(roomId: string, request: RoomContextRequest, ana
     // Confirm re-ask must not reuse the unconfirmed quote. undefined/false share.
     imagineVideoConfirmed: request.imagineVideoConfirmed === true,
     focusNodeId: request.focus?.nodeId ?? null,
+    treePath: request.focus?.treePath ?? null,
     workLayerIds: (request.workLayer?.items ?? [])
       .map((item) => typeof item.id === "string" ? item.id : "")
       .filter(Boolean)

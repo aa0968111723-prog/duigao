@@ -44,6 +44,10 @@ import { initialPenState, penDown, penUp, segmentWidths, shouldRejectPointer, ty
 import { describeRestore, planRestore, type BoardSnapshot, type BoardVersionSummary } from "./versions";
 import { describePreview, planApply, type BoardAiPreview } from "./aiPreview";
 import {
+  enrollmentColleaguePrompt,
+  plantEnrollmentTree2026,
+} from "../collaboration/enrollmentTree";
+import {
   cameraAfterRemount,
   discussionIdFromNode,
   emptyBoardVerbs,
@@ -1428,7 +1432,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
   useEffect(() => {
     if (selected[0]) setFocusSheetSnap("half");
   }, [selected[0]]);
-  const focusCard = selectedNode ? focusCardFromNode(selectedNode) : null;
+  const focusCard = selectedNode ? focusCardFromNode(selectedNode, { nodes: liveNodes, edges }) : null;
   const colleagueSaid = lastColleagueForFocus(api.room.discussion ?? [], focusCard?.nodeId);
   const emptyBoard = isEmptyBoard(liveNodes);
   const roomName = emptyRoomTitle(api.room.title);
@@ -2208,6 +2212,21 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                     } else if (verb.id === "add-asset") {
                       setContentKind("all");
                       setSheet("content");
+                    } else if (verb.id === "plant-enrollment-tree") {
+                      if (!board || !canEdit) {
+                        setNotice("檢視者不能種樹，只能在已有的招生樹上討論。");
+                        return;
+                      }
+                      const planted = plantEnrollmentTree2026({
+                        whiteboardId: board.id,
+                        roomId: board.roomId,
+                        createdBy: "local",
+                      });
+                      api.onUpsertNodes(planted.nodes, "now");
+                      for (const edge of planted.edges) api.onCreateEdge(edge);
+                      setSelected([planted.rootId]);
+                      const root = planted.nodes.find((item) => item.id === planted.rootId);
+                      if (root) setCamera(focusCamera(root, viewport, camera.zoom));
                     } else if (verb.id === "ask-grok") {
                       if (api.onAskColleague) api.onAskColleague({ prompt: "我們下一步做什麼" });
                       else setSheet("ai");
@@ -2249,6 +2268,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
             >
               <div className="wb-focus-card is-in-sheet" data-testid="wb-focus-card">
                 <strong>{focusCard.title}</strong>
+                {focusCard.treePath ? <small data-testid="wb-tree-path">{focusCard.treePath}</small> : null}
                 <small>來源：{focusCard.sourceLabel}</small>
                 {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
                 {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
@@ -2311,8 +2331,12 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   <button type="button" data-testid="wb-share-focus" onClick={() => api.onSetRoomFocus?.(selectedNode.id)}>讓大家看這個</button>
                   {(api.onAskColleague || api.onAskBoardAi) && (
                     <button type="button" data-testid="wb-ask-colleague" onClick={() => {
-                      if (api.onAskColleague) api.onAskColleague({ prompt: "針對這張，我們下一步做什麼？", nodeId: selectedNode.id });
-                      else setSheet("ai");
+                      if (api.onAskColleague) {
+                        api.onAskColleague({
+                          prompt: focusCard.colleaguePrompt || enrollmentColleaguePrompt(focusCard.treePath),
+                          nodeId: selectedNode.id,
+                        });
+                      } else setSheet("ai");
                     }}>問同事</button>
                   )}
                   <button type="button" data-testid="wb-discuss-this" onClick={() => api.onShareNode(selectedNode)}>分享至討論</button>
@@ -2432,8 +2456,12 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   type="button"
                   data-testid="wb-ask-colleague"
                   onClick={() => {
-                    if (api.onAskColleague) api.onAskColleague({ prompt: "針對這張，我們下一步做什麼？", nodeId: selectedNode.id });
-                    else setSheet("ai");
+                    if (api.onAskColleague) {
+                      api.onAskColleague({
+                        prompt: focusCard?.colleaguePrompt || enrollmentColleaguePrompt(focusCard?.treePath),
+                        nodeId: selectedNode.id,
+                      });
+                    } else setSheet("ai");
                   }}
                 >問同事</button>
               )}
@@ -2487,6 +2515,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       {focusCard && !phoneFocusSheet && (
         <aside className="wb-focus-card" data-testid="wb-focus-card">
           <strong>{focusCard.title}</strong>
+          {focusCard.treePath ? <small data-testid="wb-tree-path">{focusCard.treePath}</small> : null}
           <small>來源：{focusCard.sourceLabel}</small>
           {focusCard.openCommentCount > 0 ? <small>未完成修改點 {focusCard.openCommentCount}</small> : null}
           {focusCard.lastWriter ? <small>最後寫：{focusCard.lastWriter}</small> : null}
