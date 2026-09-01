@@ -2,6 +2,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { uid } from "../../lib/id";
 import { cloneProposalDocsToVersion } from "./saveComposeVersion";
 import { mergeActiveByVersionForHydrate, mergeProposalDocsForHydrate } from "./mergeHydrate";
+import { parseCrop, replaceImageKeepingBox, resetImageGeometry, type CropInsets } from "./quickEdit";
 
 export type ProposalAlign = "left" | "center" | "right";
 export type TextRole = "title" | "subtitle" | "body" | "date" | "place" | "cta" | "custom";
@@ -77,8 +78,8 @@ export type ProposalImageItem = ProposalItemBase & {
   type: "image";
   name: string;
   imageDataUrl: string;
-  /** Normalized 0–1 box inside the bitmap. Absent = show the whole image. */
-  crop?: ImageCrop;
+  /** Insets `{l,t,r,b}` or box `{x,y,width,height}`. Display is CSS-only. */
+  crop?: CropInsets | ImageCrop;
 };
 
 /** A plain colour block: the cheapest way to say "put something solid here". */
@@ -244,7 +245,7 @@ export function normalizeItem(raw: unknown): ProposalItem | null {
   if (item.type === "image") {
     const img = item as Partial<ProposalImageItem>;
     if (typeof img.imageDataUrl !== "string") return null;
-    const crop = normalizeCrop(img.crop);
+    const crop = parseCrop(img.crop) ?? normalizeCrop(img.crop);
     return {
       ...base,
       type: "image",
@@ -1080,7 +1081,24 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
     [commit],
   );
 
-  const resetItemPosition = useCallback((id: string) => updateItem(id, { x: 0.5, y: 0.5, rotation: 0 }), [updateItem]);
+  const resetItemPosition = useCallback(
+    (id: string) => {
+      const item = active?.items.find((entry) => entry.id === id);
+      if (!item) return;
+      if (item.type === "image") updateItem(id, resetImageGeometry(item));
+      else updateItem(id, { x: 0.5, y: 0.5, rotation: 0 });
+    },
+    [active, updateItem],
+  );
+
+  const replaceSelectedImage = useCallback(
+    (src: { imageDataUrl: string; name: string }) => {
+      if (!selectedItem || selectedItem.type !== "image") return;
+      const next = replaceImageKeepingBox(selectedItem, src);
+      updateItem(selectedItem.id, { imageDataUrl: next.imageDataUrl, name: next.name });
+    },
+    [selectedItem, updateItem],
+  );
 
   const setBackground = useCallback(
     (patch: Partial<ProposalBackground>) => commit((doc) => ({ ...doc, background: { ...doc.background, ...patch } })),
@@ -1159,6 +1177,7 @@ export function useProposalStore(roomId: string, versionId: string, author: Prop
     duplicateItem,
     reorderItem,
     resetItemPosition,
+    replaceSelectedImage,
     setBackground,
     setBackgroundLive,
     removeBackgroundImage,
@@ -1193,6 +1212,22 @@ export function startComposeEditing(roomId: string, versionId: string, author: P
     selectedItemId: null,
   });
   persist(roomId);
+}
+
+/** Leave compose without writing versions. Work-layer docs stay in the store. */
+export function stopComposeEditing(roomId: string): void {
+  const current = snapshot(roomId);
+  set(roomId, {
+    ...current,
+    editing: false,
+    selectedItemId: null,
+    viewMode: "original",
+  });
+}
+
+export function composeLayerFlags(roomId: string): { editing: boolean; viewMode: string } {
+  const current = snapshot(roomId);
+  return { editing: current.editing, viewMode: current.viewMode };
 }
 
 /** Copy the working layer onto a newly saved version. Old version docs stay. */
