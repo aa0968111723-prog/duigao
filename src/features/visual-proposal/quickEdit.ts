@@ -33,8 +33,31 @@ export function isIdentityCrop(raw: Partial<CropInsets> | null | undefined): boo
 
 export function parseCrop(raw: unknown): CropInsets | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  const crop = clampCrop(raw as Partial<CropInsets>);
+  const candidate = raw as Partial<CropInsets>;
+  if (typeof candidate.l !== "number" && typeof candidate.t !== "number" && typeof candidate.r !== "number" && typeof candidate.b !== "number") {
+    return undefined;
+  }
+  const crop = clampCrop(candidate);
   return isIdentityCrop(crop) ? undefined : crop;
+}
+
+export function isBoxCrop(raw: unknown): raw is { x: number; y: number; width: number; height: number } {
+  if (!raw || typeof raw !== "object") return false;
+  const crop = raw as { x?: unknown; y?: unknown; width?: unknown; height?: unknown; l?: unknown };
+  return typeof crop.x === "number" && typeof crop.y === "number" && typeof crop.width === "number" && typeof crop.height === "number" && typeof crop.l !== "number";
+}
+
+export function toInsets(raw: Partial<CropInsets> | { x: number; y: number; width: number; height: number } | null | undefined): CropInsets {
+  if (!raw) return IDENTITY_CROP;
+  if (isBoxCrop(raw)) {
+    return clampCrop({
+      l: raw.x,
+      t: raw.y,
+      r: 1 - raw.x - raw.width,
+      b: 1 - raw.y - raw.height,
+    });
+  }
+  return clampCrop(raw);
 }
 
 /** CSS clip-path insets for the working-layer <img>. Box size stays x/y/width. */

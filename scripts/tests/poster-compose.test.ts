@@ -5,7 +5,16 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { branchOpenCommentCount, normalizeRoomBranches } from "../../src/lib/roomBranches.ts";
 import type { Room, RoomBranch } from "../../src/lib/types.ts";
-import type { VisualProposal } from "../../src/features/visual-proposal/store.ts";
+import type { ProposalImageItem, VisualProposal } from "../../src/features/visual-proposal/store.ts";
+import {
+  addProposalItem,
+  getProposalDocs,
+  normalizeDoc,
+  shouldSyncComposeSession,
+  startComposeEditing,
+  undoProposalEdits,
+  updateProposalItem,
+} from "../../src/features/visual-proposal/store.ts";
 import { mergeProposalDocsForHydrate } from "../../src/features/visual-proposal/mergeHydrate.ts";
 import { isComposePaperVersion } from "../../src/features/visual-proposal/composePaper.ts";
 import {
@@ -22,7 +31,7 @@ import {
   versionIdentitiesUnchanged,
   type VersionIdentity,
 } from "../../src/features/visual-proposal/saveComposeVersion.ts";
-import { FONT_STYLES } from "../../src/features/visual-proposal/helpers.ts";
+import { FONT_STYLES, clampCrop, createImageItem, insetCrop, nextRotation, nudgeItemPosition, replaceImageKeepingFrame } from "../../src/features/visual-proposal/helpers.ts";
 import { COMPOSE_FONT_FACES } from "../../src/features/visual-proposal/composeFonts.ts";
 import { imageItemFromCatalogHit, searchOpenStickers } from "../../src/features/visual-proposal/openCatalog.ts";
 
@@ -114,6 +123,104 @@ test("未 canManage 沒有編輯這張或存成新版本", () => {
   assert.match(dock, /canManage &&/);
   assert.match(dock, /poster-save-version/);
   assert.match(dock, /proposal\.setEditing\(canManage\)/);
+});
+
+test("crop JSON round-trip、undo 還原、換圖保留框", () => {
+  const crop = clampCrop({ x: 0.1, y: 0.12, width: 0.7, height: 0.6 });
+  const seeded = { ...createImageItem("data:image/png;base64,OLDOLDOLDOLDOLDOLD", "舊圖"), x: 0.31, y: 0.44, width: 22, rotation: 15, crop };
+  const hydrated = normalizeDoc({
+    id: "vp_crop",
+    versionId: "v_crop",
+    title: "工作層",
+    items: [seeded],
+  });
+  assert.ok(hydrated);
+  const image = hydrated.items[0] as ProposalImageItem;
+  assert.equal(image.type, "image");
+  assert.deepEqual(image.crop, crop);
+  const afterIdb = normalizeDoc(JSON.parse(JSON.stringify(hydrated)));
+  assert.deepEqual((afterIdb!.items[0] as ProposalImageItem).crop, crop);
+
+  const author = { id: "u1", name: "主辦", color: "#3d6b8c" };
+  const roomId = `crop-undo-${Date.now()}`;
+  const live = createImageItem("data:image/png;base64,OLDOLDOLDOLDOLDOLD", "舊圖");
+  startComposeEditing(roomId, "v_crop", author);
+  addProposalItem(roomId, "v_crop", author, live);
+  const tighter = insetCrop(crop);
+  updateProposalItem(roomId, "v_crop", author, live.id, { crop: tighter });
+  const patched = getProposalDocs(roomId).find((doc) => doc.versionId === "v_crop");
+  assert.deepEqual((patched?.items.find((row) => row.id === live.id) as ProposalImageItem).crop, tighter);
+  undoProposalEdits(roomId);
+  const restored = getProposalDocs(roomId).find((doc) => doc.versionId === "v_crop");
+  assert.equal((restored?.items.find((row) => row.id === live.id) as ProposalImageItem | undefined)?.crop, undefined);
+
+  const swapped = replaceImageKeepingFrame({ ...seeded, crop: tighter }, "data:image/png;base64,NEWNEWNEWNEWNEWNEW", "新圖");
+  assert.equal(swapped.x, 0.31);
+  assert.equal(swapped.width, 22);
+  assert.equal(swapped.rotation, 15);
+  assert.equal(swapped.crop, undefined);
+  assert.deepEqual(nudgeItemPosition(0.5, 0.5, -0.01, 0.02), { x: 0.49, y: 0.52 });
+  assert.equal(nextRotation(350, 15), 5);
+
+  const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
+  const css = src("src/features/visual-proposal/proposal.css");
+  const mobile = src("src/features/image-review/MobileWorkspace.tsx");
+  assert.match(overlay, /has-crop/);
+  assert.match(overlay, /--crop-ar/);
+  assert.match(css, /proposal-image\.has-crop \.proposal-image-crop/);
+  assert.match(css, /aspect-ratio:\s*var\(--crop-ar/);
+  assert.match(css, /\.proposal-image \{[\s\S]{0,80}overflow:\s*hidden/);
+  assert.match(overlay, /data-testid="poster-item-shortcuts"/);
+  assert.match(overlay, /移動/);
+  assert.match(overlay, /裁剪/);
+  assert.match(overlay, /換圖/);
+  assert.match(mobile, /setEditing\(false\)/);
+  assert.match(mobile, /composeExitRef/);
+  assert.match(mobile, /shouldSyncComposeSession/);
+  assert.equal(shouldSyncComposeSession(true, false, false), true);
+  assert.equal(shouldSyncComposeSession(true, false, true), false);
+  assert.equal(shouldSyncComposeSession(false, false, false), false);
+});
+
+test("compose 對照滑桿在圖下緣，版本並排鎖單張", () => {
+  const overlay = src("src/features/visual-proposal/VisualProposalOverlay.tsx");
+  const mobile = src("src/features/image-review/MobileWorkspace.tsx");
+  const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
+  const css = src("src/features/visual-proposal/proposal.css");
+  assert.match(overlay, /data-testid="proposal-compare-slider"/);
+  assert.match(overlay, /data-testid="proposal-compare-line"/);
+  assert.match(overlay, /setCompareSplit/);
+  assert.match(overlay, /工作層/);
+  assert.match(css, /proposal-compare-slider/);
+  assert.match(css, /touch-action:\s*none/);
+  assert.match(mobile, /proposalMode && view\.compareMode !== "single"/);
+  assert.match(desktop, /composing && view\.compareMode !== "single"/);
+  assert.match(desktop, /compareMode: "single"/);
+});
+
+test("compose 單一皮：Dock 五鍵、完成出口、無 pin 鍵", () => {
+  const desktop = src("src/features/image-review/DesktopWorkspace.tsx");
+  const mobile = src("src/features/image-review/MobileWorkspace.tsx");
+  const dock = src("src/features/visual-proposal/ProposalDock.tsx");
+  assert.match(desktop, /composing \? \(/);
+  assert.match(desktop, /ProposalDock/);
+  assert.match(desktop, /layerEditing/);
+  assert.doesNotMatch(desktop, /ProposalControls/);
+  assert.match(desktop, /composing \? \([\s\S]*?<ProposalDock[\s\S]*?: \([\s\S]*className="toolbar"/);
+  assert.doesNotMatch(desktop, /composing \? \([\s\S]*?修改點[\s\S]*?<ProposalDock/);
+  assert.match(mobile, /proposalSession \? \([\s\S]*?<ProposalDock[\s\S]*?: \([\s\S]*sheetVisible/);
+  assert.doesNotMatch(mobile, /proposalSession \? \([\s\S]*?>修改<\/[\s\S]*?<ProposalDock/);
+  assert.match(dock, /＋文字/);
+  assert.match(dock, /＋素材/);
+  assert.match(dock, /比較/);
+  assert.match(dock, /存成新版本/);
+  assert.match(dock, /data-testid="compose-exit"/);
+  assert.match(dock, /data-testid="poster-save-version"/);
+  const barAt = dock.indexOf("className=\"pdock-bar\"");
+  const pinInBar = dock.slice(barAt).indexOf("修改點");
+  assert.equal(pinInBar < 0, true);
+  const saveAbove = dock.indexOf("poster-save-version");
+  assert.ok(saveAbove > barAt);
 });
 
 test("App 存成新版本走 shipped composeSaveOrReject，不是旁路重寫", () => {

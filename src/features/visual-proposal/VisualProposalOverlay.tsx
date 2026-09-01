@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState, type CSSProperties, type PointerEven
 import { useProposalStore, type ProposalAuthor, type ProposalItem } from "./store";
 import { OPEN_COMPOSE_PICKER_EVENT } from "./ComposeAssetPicker";
 import { backgroundColorCss, clamp, hexToRgba, objectFitFor, prepareImageFile, proposalTypeLabel } from "./helpers";
+import type { ImageCrop } from "./store";
 import { ensureComposeFonts } from "./composeFonts";
 import { OpenStickerPicker } from "./OpenStickerPicker";
 import { QuickEditBar } from "./QuickEditBar";
@@ -13,7 +14,9 @@ import {
   cropClipPath,
   cropObjectPosition,
   IDENTITY_CROP,
+  isBoxCrop,
   nudgePosition,
+  toInsets,
   type CropHandle,
   type CropInsets,
 } from "./quickEdit";
@@ -107,7 +110,7 @@ export function VisualProposalOverlay({
   const cancelCrop = () => {
     setCropMode(false);
     setQuickTool("move");
-    setCropDraft(selectedItem?.type === "image" ? clampCrop(selectedItem.crop) : IDENTITY_CROP);
+    setCropDraft(selectedItem?.type === "image" ? toInsets(selectedItem.crop) : IDENTITY_CROP);
   };
 
   const replaceFromFile = async (file: File) => {
@@ -340,7 +343,7 @@ export function VisualProposalOverlay({
     if (!selectedItem || selectedItem.type !== "image") return;
     setQuickTool("crop");
     setCropMode(true);
-    setCropDraft(clampCrop(selectedItem.crop));
+    setCropDraft(toInsets(selectedItem.crop));
     onBeginCrop?.();
   };
 
@@ -462,9 +465,38 @@ export function VisualProposalOverlay({
 
       {comparing && (
         <>
-          <span className="proposal-compare-line" style={{ left: `${compareSplit * 100}%` }} aria-hidden />
+          <button
+            type="button"
+            className="proposal-compare-line"
+            data-testid="proposal-compare-line"
+            aria-label="拖動對照"
+            style={{ left: `${compareSplit * 100}%` }}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const layer = event.currentTarget.parentElement;
+              if (!layer) return;
+              const rect = layer.getBoundingClientRect();
+              proposal.setCompareSplit(clamp((event.clientX - rect.left) / (rect.width || 1), 0, 1));
+            }}
+          />
           <span className="proposal-compare-tag proposal-compare-tag-left">原稿</span>
-          <span className="proposal-compare-tag proposal-compare-tag-right">提案</span>
+          <span className="proposal-compare-tag proposal-compare-tag-right">工作層</span>
+          <input
+            type="range"
+            className="proposal-compare-slider"
+            data-testid="proposal-compare-slider"
+            min={0}
+            max={1}
+            step={0.01}
+            value={compareSplit}
+            aria-label="對照位置"
+            onPointerDown={(event) => event.stopPropagation()}
+            onChange={(event) => proposal.setCompareSplit(Number(event.target.value))}
+          />
         </>
       )}
 
@@ -506,28 +538,30 @@ export function VisualProposalOverlay({
       )}
 
       {showQuick && selectedItem && (
-        <QuickEditBar
-          item={selectedItem}
-          tool={quickTool}
-          cropping={cropMode}
-          onTool={(tool) => {
-            if (tool === "crop") startCrop();
-            else cancelCrop();
-          }}
-          onRotate={(delta) => {
-            proposal.updateItem(selectedItem.id, { rotation: clamp(selectedItem.rotation + delta, -180, 180) });
-          }}
-          onCenter={(axis) => proposal.updateItem(selectedItem.id, { [axis]: 0.5 })}
-          onReplace={() => {
-            setStickerOpen(false);
-            setReplaceOpen(true);
-          }}
-          onDelete={() => proposal.deleteItem(selectedItem.id)}
-          onCropConfirm={confirmCrop}
-          onCropCancel={cancelCrop}
-          onNudgeStart={startNudge}
-          onNudgeEnd={stopNudge}
-        />
+        <div data-testid="poster-item-shortcuts" aria-label="移動 裁剪 換圖">
+          <QuickEditBar
+            item={selectedItem}
+            tool={quickTool}
+            cropping={cropMode}
+            onTool={(tool) => {
+              if (tool === "crop") startCrop();
+              else cancelCrop();
+            }}
+            onRotate={(delta) => {
+              proposal.updateItem(selectedItem.id, { rotation: clamp(selectedItem.rotation + delta, -180, 180) });
+            }}
+            onCenter={(axis) => proposal.updateItem(selectedItem.id, { [axis]: 0.5 })}
+            onReplace={() => {
+              setStickerOpen(false);
+              setReplaceOpen(true);
+            }}
+            onDelete={() => proposal.deleteItem(selectedItem.id)}
+            onCropConfirm={confirmCrop}
+            onCropCancel={cancelCrop}
+            onNudgeStart={startNudge}
+            onNudgeEnd={stopNudge}
+          />
+        </div>
       )}
 
       {replaceOpen && canManage && editing && (
@@ -579,19 +613,7 @@ export function VisualProposalOverlay({
         {active.status === "accepted" ? "已採用 · " : ""}
         {active.title} · {proposalTypeLabel(active.type)}
       </span>
-      {editing && !compact && (
-        <button
-          type="button"
-          className="proposal-finish"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            proposal.setEditing(false);
-          }}
-        >
-          完成擺放
-        </button>
-      )}
+
     </div>
   );
 }
@@ -599,7 +621,7 @@ export function VisualProposalOverlay({
 type ItemViewProps = {
   item: ProposalItem;
   selected: boolean;
-  crop?: CropInsets;
+  crop?: CropInsets | ImageCrop;
   cropping?: boolean;
   onPointerDown: (e: ReactPointerEvent<HTMLElement>, item: ProposalItem) => void;
   onPointerMove: (e: ReactPointerEvent<HTMLElement>) => void;
@@ -638,23 +660,43 @@ const ProposalItemView = memo(function ProposalItemView({
   };
 
   if (item.type === "image") {
-    const clip = cropClipPath(crop);
-    const objectPosition = cropObjectPosition(crop);
+    const box = isBoxCrop(crop) ? crop : isBoxCrop(item.crop) ? item.crop : undefined;
+    const insets = crop && !isBoxCrop(crop) ? crop : undefined;
+    const clip = cropClipPath(insets);
+    const objectPosition = cropObjectPosition(insets);
     return (
       <div className={`proposal-item-wrap ${selected ? "is-selected-wrap" : ""}`} style={shared}>
         <button
           type="button"
-          className={`proposal-item proposal-image ${selected ? "is-selected" : ""}`}
+          className={`proposal-item proposal-image ${selected ? "is-selected" : ""} ${box ? "has-crop" : ""}`}
+          style={box ? { ["--crop-ar" as string]: `${box.width} / ${box.height}` } : undefined}
           {...handlers}
           aria-label={`素材：${item.name}`}
           aria-pressed={selected}
         >
-          <img
-            src={item.imageDataUrl}
-            alt={item.name}
-            draggable={false}
-            style={clip || objectPosition ? { clipPath: clip, objectPosition } : undefined}
-          />
+          {box ? (
+            <span className="proposal-image-crop">
+              <img
+                src={item.imageDataUrl}
+                alt={item.name}
+                draggable={false}
+                style={{
+                  width: `${100 / box.width}%`,
+                  height: `${100 / box.height}%`,
+                  left: `${-box.x / box.width * 100}%`,
+                  top: `${-box.y / box.height * 100}%`,
+                  maxWidth: "none",
+                }}
+              />
+            </span>
+          ) : (
+            <img
+              src={item.imageDataUrl}
+              alt={item.name}
+              draggable={false}
+              style={clip || objectPosition ? { clipPath: clip, objectPosition } : undefined}
+            />
+          )}
         </button>
         {cropping &&
           CROP_HANDLES.map((handle) => (

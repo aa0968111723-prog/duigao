@@ -22,12 +22,36 @@
 .proposal-compare-line {
   position: absolute;
   top: 0;
-  bottom: 0;
+  bottom: 28px;
   z-index: 9;
-  width: 0;
-  border-left: 2px solid rgba(255, 255, 255, 0.9);
+  width: 18px;
+  margin-left: -9px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ew-resize;
+}
+.proposal-compare-line::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 8px;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-  pointer-events: none;
+}
+.proposal-compare-slider {
+  position: absolute;
+  z-index: 11;
+  left: 10%;
+  right: 10%;
+  bottom: 6px;
+  width: auto;
+  pointer-events: auto;
+  touch-action: none;
 }
 .proposal-compare-tag {
   position: absolute;
@@ -112,6 +136,114 @@
   font-weight: 700;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.pquick-shortcuts {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, 0);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 16px rgba(20, 24, 40, 0.16);
+  pointer-events: auto;
+}
+.pquick-shortcuts button {
+  flex: none;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pquick-shortcuts button.is-on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.pquick-shortcuts button.is-danger { color: #b42318; }
+.proposal-image {
+  overflow: hidden;
+  display: block;
+  line-height: 0;
+}
+.proposal-image-crop {
+  display: block;
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+.proposal-image.has-crop .proposal-image-crop {
+  aspect-ratio: var(--crop-ar, 1);
+  height: auto;
+  overflow: hidden;
+}
+.proposal-image.has-crop .proposal-image-crop img {
+  position: absolute;
+  inset: auto;
+  max-width: none;
+  height: auto;
+}
+
+/* Desktop / 768+ compose: same five-key dock as phone, parked in the toolbar row. */
+.workspace.is-compose .pdock {
+  grid-area: toolbar;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: rgba(255, 255, 255, 0.98);
+  border-top: 1px solid var(--line-soft);
+}
+.workspace.is-compose .pdock-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.project-room.is-tablet-split .workspace.is-compose {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: "stage" "toolbar";
+}
+.project-room.is-tablet-split .workspace.is-compose .panel {
+  display: none;
+}
+@media (min-width: 768px) {
+  .workspace.is-compose .pdock-act,
+  .workspace.is-compose .pdock-done {
+    font-size: 12px;
+    min-height: 44px;
+  }
+}
+.workspace.is-compose .pdock-act,
+.workspace.is-compose .pdock-done {
+  min-height: 44px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.workspace.is-compose .pdock-act {
+  border: 1px solid var(--line);
+  background: var(--raise);
+  color: var(--ink);
+}
+.workspace.is-compose .pdock-act.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.workspace.is-compose .pdock-done {
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
 }
 
 .compose-asset-picker {
@@ -815,7 +947,12 @@
     cursor: pointer;
   }
   /* Five fixed actions — the whole point of the 2.0 dock. */
-  .pdock-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .pdock-bar {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
   .pdock-act,
   .pdock-done {
     min-height: 46px;
