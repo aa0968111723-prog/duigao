@@ -42,17 +42,20 @@ export function fitCamera(
   pad = 28,
 ): Camera {
   if (!nodes.length) return { x: 24, y: 24, zoom: 1 };
+  const vw = Math.max(1, viewport.width || 0);
+  const vh = Math.max(1, viewport.height || 0);
   const minX = Math.min(...nodes.map((node) => node.x));
   const minY = Math.min(...nodes.map((node) => node.y));
   const maxX = Math.max(...nodes.map((node) => node.x + node.width));
   const maxY = Math.max(...nodes.map((node) => node.y + node.height));
   const width = Math.max(1, maxX - minX);
   const height = Math.max(1, maxY - minY);
-  const zoom = clampZoom(Math.min((viewport.width - pad * 2) / width, (viewport.height - pad * 2) / height, 1.15));
+  const zoom = clampZoom(Math.min((vw - pad * 2) / width, (vh - pad * 2) / height, 1.15));
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   return {
-    zoom,
-    x: (viewport.width - width * zoom) / 2 - minX * zoom,
-    y: (viewport.height - height * zoom) / 2 - minY * zoom,
+    zoom: safeZoom,
+    x: (vw - width * safeZoom) / 2 - minX * safeZoom,
+    y: (vh - height * safeZoom) / 2 - minY * safeZoom,
   };
 }
 

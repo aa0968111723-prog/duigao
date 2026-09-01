@@ -389,16 +389,14 @@ try {
     await page.waitForFunction(() => window.innerWidth <= 390, null, { timeout: 5000 });
 
     await page.getByRole("button", { name: "白板", exact: true }).click();
-    await page.getByLabel("白板名稱").fill("招生規劃");
-    await page.getByRole("button", { name: "建立白板" }).click();
     await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 10000 });
     check("可建立並打開白板", await page.getByTestId("wb-canvas").count() === 1);
-    check("空板先顯示三個下一步", await page.getByTestId("wb-empty-starter").count() === 1
-      && await page.getByTestId("wb-start-step").count() === 1
-      && await page.getByTestId("wb-start-poster").count() === 1
-      && await page.getByTestId("wb-start-connect").count() === 1);
-    check("空板可種 2026招生樹", await page.getByTestId("wb-start-enrollment-tree").count() === 1);
-    await page.getByTestId("wb-start-step").click();
+    check("空板四個動詞", await page.getByTestId("wb-empty-board").count() === 1
+      && await page.getByTestId("wb-empty-pin-discussion").count() === 1
+      && await page.getByTestId("wb-empty-add-asset").count() === 1
+      && await page.getByTestId("wb-empty-plant-enrollment-tree").count() === 1
+      && await page.getByTestId("wb-empty-ask-grok").count() === 1);
+    await page.getByTestId("wb-tool-sticky").click();
     await page.waitForSelector("textarea.wb-node-text", { timeout: 5000 });
     check("寫下一步驟會直接聚焦文字卡", await page.locator("textarea.wb-node-text").evaluate((el) => document.activeElement === el));
     await fillEditing(page, "先寫活動流程");
@@ -413,7 +411,7 @@ try {
       const posterMsg = page.locator(".rd-msg", { hasText: "擺攤文宣" }).first();
       check("文宣討論卡有打開內容", await posterMsg.getByRole("button", { name: "打開內容" }).count() >= 1);
       await posterMsg.getByRole("button", { name: "加入白板" }).click();
-      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
+      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "活動規劃" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       await page.waitForSelector('[data-node-type="room_content"]', { timeout: 10000 });
       const firstCount = await page.locator("[data-node-type='room_content']").count();
@@ -427,7 +425,7 @@ try {
       await page.waitForSelector(".wb-list", { timeout: 10000 });
       await page.getByRole("button", { name: "對話", exact: true }).click();
       await page.locator(".rd-msg", { hasText: "擺攤文宣" }).first().getByRole("button", { name: "加入白板" }).click();
-      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
+      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "活動規劃" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       const secondCount = await page.locator("[data-node-type='room_content']").count();
       check("同一張文宣第二次加入不複製", secondCount === firstCount, `${firstCount}→${secondCount}`);
@@ -957,7 +955,7 @@ try {
       await page.waitForFunction(() => document.querySelector('[data-testid="discussion-feed"]')?.textContent?.includes("擺攤動線要重排"), null, { timeout: 15000 });
       const sourceMsg = page.locator(".rd-msg", { hasText: "擺攤動線要重排" }).first();
       await sourceMsg.getByRole("button", { name: "加入白板" }).click();
-      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "招生規劃" }).click();
+      await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "活動規劃" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       await page.waitForSelector('[data-testid="wb-focus-sheet"], [data-testid="wb-node-actions"]', { state: "attached", timeout: 10000 });
       await openFocusActions(page);
@@ -1447,8 +1445,6 @@ try {
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.waitForFunction(() => window.innerWidth >= 1000, null, { timeout: 5000 });
       await page.getByRole("button", { name: "白板", exact: true }).click();
-      await page.getByLabel("白板名稱").fill("平板板");
-      await page.getByRole("button", { name: "建立白板" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       await page.setViewportSize({ width: 1024, height: 768 });
       await page.waitForFunction(
@@ -1717,10 +1713,8 @@ try {
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
       await page.getByRole("button", { name: "白板", exact: true }).click();
-      await page.getByLabel("白板名稱").fill("202609招生");
-      await page.getByRole("button", { name: "建立白板" }).click();
-      await page.waitForSelector('[data-testid="wb-start-enrollment-tree"]', { timeout: 10000 });
-      await page.getByTestId("wb-start-enrollment-tree").click();
+      await page.waitForSelector('[data-testid="wb-empty-plant-enrollment-tree"]', { timeout: 10000 });
+      await page.getByTestId("wb-empty-plant-enrollment-tree").click();
       await page.waitForSelector('[data-testid="wb-tree-children"]', { timeout: 8000 });
       check("骨架列出 202609 支線", await page.locator('[data-testid="wb-tree-child"][data-tree-label="書籤"]').count() >= 1
         && await page.locator('[data-testid="wb-tree-child"][data-tree-label="胸章"]').count() >= 1);
@@ -1758,8 +1752,6 @@ try {
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
       await page.getByRole("button", { name: "白板", exact: true }).click();
-      await page.getByLabel("白板名稱").fill("橫向板");
-      await page.getByRole("button", { name: "建立白板" }).click();
       await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
       const layout = await page.evaluate(() => {
         const rail = document.querySelector('[data-testid="wb-side-rail"]');
