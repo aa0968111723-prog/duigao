@@ -585,6 +585,63 @@
   gap: 8px;
 }
 
+.compose-exit-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 36px;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.compose-exit-bar span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compose-exit-bar button {
+  flex: none;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pquick-shortcuts {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+}
+.compose-stage-col {
+  grid-area: stage;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.compose-stage-col .stage-wrap { flex: 1; min-height: 0; }
+.compose-stage-col .stage-with-scope { flex: 1; min-height: 0; }
+html.is-compose .pdock,
+.workspace.is-compose .pdock,
+.m-app.is-proposal .pdock {
+  animation: compose-dock-in 150ms ease;
+}
+html.is-compose .coach { display: none; }
+@keyframes compose-dock-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
 .proposal-manual-generate {
   display: flex;
   flex-wrap: wrap;
@@ -955,6 +1012,8 @@
   }
   .pdock-act,
   .pdock-done {
+    flex: 1 0 auto;
+    min-width: 4.4rem;
     min-height: 46px;
     padding: 0 4px;
     border-radius: 10px;

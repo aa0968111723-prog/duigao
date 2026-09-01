@@ -502,7 +502,8 @@ export function VisualProposalOverlay({
 
       {editing && active.items.length === 0 && !background.imageDataUrl && (
         <p className="poster-compose-empty-hint" data-testid="poster-compose-empty-hint">
-          把 logo、照片丟上來，或
+          把 logo、照片丟上來。拼完存成新版本。原稿不會被改。
+          {" "}
           <button
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
@@ -513,7 +514,6 @@ export function VisualProposalOverlay({
           >
             從房間撿
           </button>
-          。拼完按存成新版本。
         </p>
       )}
 

@@ -8,7 +8,7 @@ type Props = {
 
 const MODES: { key: ProposalViewMode; label: string; hint: string }[] = [
   { key: "original", label: "原稿", hint: "完全乾淨的原始文宣" },
-  { key: "proposal", label: "提案", hint: "只看這個提案的樣子" },
+  { key: "proposal", label: "工作層", hint: "只看這個工作層的樣子" },
   { key: "compare", label: "對照", hint: "左邊原稿、右邊提案，拖滑桿比對" },
 ];
 
