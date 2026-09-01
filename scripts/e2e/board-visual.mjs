@@ -118,7 +118,17 @@ try {
     await page.getByRole("button", { name: "建立活動房" }).click();
     await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
     await page.getByRole("button", { name: "白板", exact: true }).click();
-    await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 15000 });
+    await page.waitForSelector('[data-testid="whiteboard-workspace"], [data-testid="whiteboard-list"]', { timeout: 30000 });
+    if (await page.getByTestId("whiteboard-list").count()) {
+      const existing = page.getByTestId("whiteboard-list").locator("button.wb-card").first();
+      if (await existing.count()) {
+        await existing.click();
+      } else {
+        await page.getByLabel("白板名稱").fill("活動規劃");
+        await page.getByRole("button", { name: "建立白板" }).click();
+      }
+    }
+    await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 20000 });
 
     // 決定性資料：直接塞 mock 列（20 節點網格），避免 UI 建立的座標抖動
     const boardId = "11111111-1111-4111-8111-111111111111";
