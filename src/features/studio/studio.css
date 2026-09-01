@@ -1,0 +1,22 @@
+.home-pick-studio .home-pick-icon {
+  background: var(--accent-soft, #ecebff);
+  color: var(--accent, #6157ef);
+}
+.home-pick-studio .home-pick-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.studio-entry-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft, #ecebff);
+  color: var(--ink, #1a1c1e);
+  font-size: 13px;
+  line-height: 1.5;
+}
