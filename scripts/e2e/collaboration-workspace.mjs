@@ -67,6 +67,22 @@ function serveStatic(root, port) {
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
 }
 
+async function enterWhiteboard(page) {
+  await page.getByRole("button", { name: "白板", exact: true }).click();
+  await page.waitForSelector('[data-testid="whiteboard-workspace"], [data-testid="whiteboard-list"]', { timeout: 30000 });
+  if (await page.getByTestId("whiteboard-list").count()) {
+    const existing = page.getByTestId("whiteboard-list").locator("button.wb-card").first();
+    if (await existing.count()) {
+      await existing.click();
+    } else {
+      await page.getByLabel("白板名稱").fill("活動規劃");
+      await page.getByRole("button", { name: "建立白板" }).click();
+    }
+  }
+  await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 20000 });
+  await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+}
+
 async function chooseCreate(page, name, type, file) {
   const sheet = page.getByTestId("create-content-sheet");
   if (!await sheet.count()) {
@@ -1712,18 +1728,7 @@ try {
       await page.click("button.btn-primary");
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
-      await page.getByRole("button", { name: "白板", exact: true }).click();
-      await page.waitForSelector('[data-testid="whiteboard-workspace"], [data-testid="whiteboard-list"]', { timeout: 30000 });
-      if (await page.getByTestId("whiteboard-list").count()) {
-        const existing = page.getByTestId("whiteboard-list").locator("button.wb-card").first();
-        if (await existing.count()) {
-          await existing.click();
-        } else {
-          await page.getByLabel("白板名稱").fill("活動規劃");
-          await page.getByRole("button", { name: "建立白板" }).click();
-        }
-      }
-      await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 20000 });
+      await enterWhiteboard(page);
       await page.waitForSelector('[data-testid="wb-empty-plant-enrollment-tree"]', { timeout: 15000 });
       await page.getByTestId("wb-empty-plant-enrollment-tree").click();
       await page.waitForSelector('[data-testid="wb-tree-children"]', { timeout: 8000 });
@@ -1762,21 +1767,23 @@ try {
       await page.click("button.btn-primary");
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
-      await page.getByRole("button", { name: "白板", exact: true }).click();
-      await page.waitForSelector('[data-testid="wb-canvas"]', { timeout: 15000 });
+      await enterWhiteboard(page);
+      await page.waitForSelector('[data-testid="wb-compact-toolbar"]', { state: "attached", timeout: 10000 });
       const layout = await page.evaluate(() => {
         const rail = document.querySelector('[data-testid="wb-side-rail"]');
         const focus = document.querySelector('[data-testid="whiteboard-workspace"]');
-        const bar = document.querySelector(".wb-focus-bottom");
-        const barBox = bar.getBoundingClientRect();
+        const bar = document.querySelector('[data-testid="wb-compact-toolbar"]') || document.querySelector(".wb-focus-bottom");
+        const barBox = bar?.getBoundingClientRect();
         return {
           railShown: Boolean(rail) && getComputedStyle(rail).display !== "none",
-          focusLeft: Math.round(focus.getBoundingClientRect().left),
-          toolbarVertical: barBox.height > barBox.width,
+          focusLeft: Math.round(focus?.getBoundingClientRect().left ?? 0),
+          toolbarVertical: Boolean(barBox) && barBox.height > barBox.width,
         };
       });
       check("手機橫向不進 Split View（F3：寬 926px 但高只有 428px）", !layout.railShown && layout.focusLeft === 0, JSON.stringify(layout));
       check("手機橫向的工具列維持底部橫列", !layout.toolbarVertical, JSON.stringify(layout));
+    } catch (error) {
+      check("手機橫向 Split View 判定", false, error instanceof Error ? error.message : String(error));
     } finally {
       await landscape.close();
     }
