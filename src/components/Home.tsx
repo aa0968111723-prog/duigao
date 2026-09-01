@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Room } from "../lib/types";
 import { roomMediaType } from "../lib/types";
 import { VIDEO_LIMIT_HINT } from "../features/video-review/media";
+import { StudioPicks } from "../features/studio/StudioPicks";
 import { isCloudConfigured, isProductionBuild } from "../cloud/config";
 import { BrandMark } from "./BrandMark";
 import { UniversalIntake } from "./UniversalIntake";
@@ -108,6 +109,7 @@ export function Home({ recent, isGuestSession, onFiles, onVideoFiles, videoAvail
           <small>選擇最適合的空間</small>
         </div>
         <div className="home-picks">
+          <StudioPicks onImage={onFiles} onVideo={onVideoFiles} videoAvailable={videoAvailable} />
           <button type="button" className="home-pick home-pick-project" onClick={onCreateProject}>
             <span className="home-pick-icon"><ProjectIcon /></span>
             <span className="home-pick-copy"><b>建立活動房</b><small>把文宣、影片、企劃放在同一間</small></span>

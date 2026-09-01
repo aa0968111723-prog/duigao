@@ -1,9 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { StudioRoot } from "./features/studio/StudioRoot";
 import { upgradeLegacyShareUrl } from "./cloud/legacy";
 import "./styles.css";
 import "./mobile.css";
+import "./features/studio/studio.css";
 
 // An old `#room=<6碼>` link opened by its owner becomes the real cloud invite
 // URL before React reads the address bar, so the room loads the modern way and
@@ -13,6 +15,7 @@ upgradeLegacyShareUrl();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
+    <StudioRoot />
   </StrictMode>,
 );
 
