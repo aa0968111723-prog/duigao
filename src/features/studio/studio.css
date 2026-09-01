@@ -1,0 +1,134 @@
+.home-pick-studio .home-pick-icon {
+  background: var(--accent-soft, #ecebff);
+  color: var(--accent, #6157ef);
+}
+.home-pick-studio .home-pick-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.studio-entry-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft, #ecebff);
+  color: var(--ink, #1a1c1e);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.studio-app {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  background: #0f1216;
+  color: #f4f5f7;
+}
+.studio-app-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  background: #171b22;
+}
+.studio-app-bar strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+.studio-app-ghost,
+.studio-app-done,
+.studio-app-tools button {
+  border: 0;
+  border-radius: 12px;
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+.studio-app-ghost {
+  background: transparent;
+  color: #d7dbe3;
+}
+.studio-app-done {
+  background: #6157ef;
+  color: #fff;
+  font-weight: 700;
+}
+.studio-app-done:disabled {
+  opacity: .6;
+}
+.studio-app-tools {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #12151b;
+}
+.studio-app-tools button {
+  background: #232833;
+  color: #f4f5f7;
+}
+.studio-app-bg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 13px;
+  color: #c5cad3;
+}
+.studio-app-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  overflow: auto;
+}
+.studio-app-canvas {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
+}
+.studio-el {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 1px dashed transparent;
+  background: transparent;
+  color: inherit;
+  cursor: grab;
+  touch-action: none;
+  overflow: hidden;
+}
+.studio-el.is-selected {
+  border-color: #7c75f5;
+}
+.studio-app-inspect,
+.studio-app-hint {
+  margin: 0;
+  padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+  background: #171b22;
+  font-size: 13px;
+}
+.studio-app-inspect {
+  display: grid;
+  gap: 6px;
+}
+.studio-app-inspect input {
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid #2c3340;
+  background: #0f1216;
+  color: #f4f5f7;
+  padding: 0 10px;
+}
