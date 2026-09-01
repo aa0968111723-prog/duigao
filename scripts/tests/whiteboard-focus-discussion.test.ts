@@ -10,6 +10,7 @@ import test from "node:test";
 import {
   boardAskContext,
   cameraAfterRemount,
+  DEFAULT_WHITEBOARD_TITLE,
   discussionIdFromNode,
   emptyBoardCopyHasLonelyStep,
   emptyBoardVerbs,
@@ -19,12 +20,14 @@ import {
   isEmptyBoard,
   messagesForFocus,
   nodeFocusSource,
+  resolveWhiteboardTabEnter,
   roomFocusFromPresence,
   FOCUS_SHEET_COMPOSER_MIN,
   FOCUS_SHEET_PEEK_HEIGHT,
   focusSheetSnapHeights,
   incomingFocusAction,
   shouldInlineDiscussionRail,
+  shouldMountEmptyStarter,
   shouldMountFocusSheet,
   snapAfterFocusDiscuss,
   snapAfterSelectionOrEdit,
@@ -41,14 +44,21 @@ import {
 import { canEditDiscussion, isMemberActor } from "../../src/features/collaboration/discussionHonesty";
 import {
   colleagueBubbleClass,
+  colleagueFailureKind,
+  colleagueTurnFromResponse,
+  colleagueTurnInputFromAsk,
   colleagueWrite,
   createCommentAsColleague,
   GROK_COLLEAGUE_NAME,
+  GROK_SEND_FAILED_COPY,
+  GROK_TOMBSTONE_COPY,
   isColleagueMessage,
   lastColleagueForFocus,
   mentionsGrok,
   showsGrokMentionChip,
 } from "../../src/features/collaboration/agentColleague";
+import { plantEnrollmentTree2026 } from "../../src/features/collaboration/enrollmentTree";
+import { fitCamera } from "../../src/features/whiteboard/canvas";
 import { layoutOriginFromFocus } from "../../src/features/whiteboard/aiPreview";
 import { FIRST_LAYER_TABS } from "../../src/features/multi-room/roomChrome";
 import type { DiscussionMessage, WhiteboardNode } from "../../src/features/collaboration/types";
@@ -242,6 +252,80 @@ test("空板文案不含「新步驟」當唯一 CTA", () => {
   const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
   assert.match(workspace, /wb-empty-board/);
   assert.doesNotMatch(workspace, /wb-empty-board[\s\S]{0,400}新步驟/);
+});
+
+test("進白板立刻開板；空板四動詞會長卡；相機對準；Grok 失敗不是墓碑", () => {
+  assert.deepEqual(FIRST_LAYER_TABS, ["對話", "白板"]);
+  assert.equal(resolveWhiteboardTabEnter({
+    boards: [],
+    activeBoardId: null,
+    canCreate: true,
+  }).kind, "create");
+  assert.equal((resolveWhiteboardTabEnter({
+    boards: [],
+    activeBoardId: null,
+    canCreate: true,
+  }) as { title: string }).title, DEFAULT_WHITEBOARD_TITLE);
+  assert.deepEqual(resolveWhiteboardTabEnter({
+    boards: [{ id: "b2", updatedAt: 20 }, { id: "b1", updatedAt: 9 }],
+    activeBoardId: null,
+    canCreate: true,
+  }), { kind: "open", id: "b2" });
+  assert.deepEqual(resolveWhiteboardTabEnter({
+    boards: [{ id: "b1", updatedAt: 9 }],
+    activeBoardId: "b1",
+    canCreate: true,
+  }), { kind: "keep" });
+  assert.equal(resolveWhiteboardTabEnter({
+    boards: [],
+    activeBoardId: null,
+    canCreate: false,
+  }).kind, "none");
+
+  assert.equal(shouldMountEmptyStarter({ canEdit: true, liveCount: 0, lonelyBlankStep: false }), false);
+  assert.equal(shouldMountEmptyStarter({ canEdit: true, liveCount: 1, lonelyBlankStep: true }), true);
+  assert.equal(shouldMountEmptyStarter({ canEdit: false, liveCount: 1, lonelyBlankStep: true }), false);
+
+  const planted = plantEnrollmentTree2026({
+    whiteboardId: "b1",
+    roomId: "r1",
+    createdBy: "u1",
+    idFn: (() => { let n = 0; return () => `t${++n}`; })(),
+  });
+  assert.ok(planted.nodes.length >= 2);
+  assert.ok(planted.nodes.some((item) => item.content.text === "202609招生"));
+  const fitted = fitCamera(planted.nodes, { width: 390, height: 520 }, 48);
+  assert.ok(Number.isFinite(fitted.x) && Number.isFinite(fitted.y) && fitted.zoom > 0);
+  const zeroFit = fitCamera(planted.nodes, { width: 0, height: 0 }, 48);
+  assert.ok(Number.isFinite(zeroFit.x) && Number.isFinite(zeroFit.y) && zeroFit.zoom > 0);
+
+  const room = src("src/features/multi-room/MultiBranchRoom.tsx");
+  assert.match(room, /resolveWhiteboardTabEnter/);
+  const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  const emptyBoardAt = workspace.indexOf('data-testid="wb-empty-board"');
+  assert.ok(emptyBoardAt > 0);
+  assert.match(workspace.slice(emptyBoardAt - 80, emptyBoardAt + 140), /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
+  assert.match(workspace, /shouldMountEmptyStarter/);
+  assert.match(workspace, /stickyFromDiscussion/);
+  assert.match(workspace, /placePosterRegion/);
+  assert.match(workspace, /對話裡還沒有可以釘的句子/);
+  assert.match(workspace, /房間還沒有文宣可以放上來/);
+
+  const unavailable = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: null,
+    agent: { status: "unavailable" },
+  }));
+  assert.equal(unavailable.body, GROK_SEND_FAILED_COPY);
+  assert.doesNotMatch(unavailable.body, /已收回|我看過了/);
+  assert.equal(colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: { text: "先點書籤。" },
+    agent: { status: "ok" },
+  })).body, "先點書籤。");
+  assert.equal(colleagueFailureKind(new Error("unconfigured")), "unconfigured");
+  assert.notEqual(GROK_SEND_FAILED_COPY, GROK_TOMBSTONE_COPY);
+  const app = src("src/App.tsx");
+  assert.match(app, /colleagueTurnInputFromAsk/);
+  assert.doesNotMatch(app, /AI 沒有回應，我沒有假裝已讀/);
 });
 
 test("討論儲存讀 textarea 的值，不依賴可能還沒跟上的 editDraft", () => {

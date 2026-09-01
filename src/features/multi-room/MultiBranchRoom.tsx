@@ -23,6 +23,7 @@ import type {
 } from "../collaboration/types";
 import { RoomDiscussion } from "../room-discussion/RoomDiscussion";
 import { WhiteboardWorkspace } from "../whiteboard/WhiteboardWorkspace";
+import { resolveWhiteboardTabEnter } from "../whiteboard/boardFocus";
 import { ScheduleAgenda } from "../schedule/ScheduleAgenda";
 import { sourceOpenTarget } from "../schedule/links";
 import { uuid } from "../../lib/id";
@@ -1258,7 +1259,16 @@ export function MultiBranchRoom({ api }: { api: MultiBranchRoomApi }) {
               <section className="project-section" data-testid="discuss-workspace">
                 <div className="rd-tabs" role="tablist" aria-label="討論">
                   <button type="button" className={discussPane === "chat" ? "is-active" : ""} onClick={() => { setDiscussPane("chat"); api.onOpenWhiteboard(null); api.onFocusNode?.(null); setLocalFocusId(null); }}>對話</button>
-                  <button type="button" className={discussPane === "board" ? "is-active" : ""} onClick={() => setDiscussPane("board")}>白板</button>
+                  <button type="button" className={discussPane === "board" ? "is-active" : ""} onClick={() => {
+                    setDiscussPane("board");
+                    const action = resolveWhiteboardTabEnter({
+                      boards: api.room.whiteboards ?? [],
+                      activeBoardId: api.activeWhiteboardId,
+                      canCreate: api.canManage,
+                    });
+                    if (action.kind === "open") api.onOpenWhiteboard(action.id);
+                    else if (action.kind === "create") api.onCreateWhiteboard(action.title);
+                  }}>白板</button>
                 </div>
                 {discussPane === "calendar" ? (
                   <div className={tabletUp ? "sched-split-host" : undefined} data-testid={tabletUp ? "schedule-split" : undefined}>

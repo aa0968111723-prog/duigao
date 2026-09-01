@@ -63,6 +63,38 @@ export function emptyBoardCopyHasLonelyStep(copy: string): boolean {
   return copy.includes("新步驟") && !EMPTY_BOARD_VERBS.some((verb) => copy.includes(verb.label));
 }
 
+/** starter 只留給「板上只剩一張空白新步驟」。空板走 wb-empty-board 四動詞。 */
+export function shouldMountEmptyStarter(input: {
+  canEdit: boolean;
+  liveCount: number;
+  lonelyBlankStep: boolean;
+}): boolean {
+  return input.canEdit && input.lonelyBlankStep && input.liveCount === 1;
+}
+
+export const DEFAULT_WHITEBOARD_TITLE = "活動規劃";
+
+/**
+ * 點第一層「白板」時要立刻開一塊板：已開就留、有板開最近的、沒板就建。
+ * 不准停在 BoardList 空白宇宙。
+ */
+export function resolveWhiteboardTabEnter(input: {
+  boards: Array<{ id: string; archivedAt?: number | null; updatedAt: number }>;
+  activeBoardId?: string | null;
+  canCreate: boolean;
+}): { kind: "keep" } | { kind: "open"; id: string } | { kind: "create"; title: string } | { kind: "none" } {
+  const live = input.boards.filter((board) => !board.archivedAt);
+  if (input.activeBoardId && live.some((board) => board.id === input.activeBoardId)) {
+    return { kind: "keep" };
+  }
+  if (live.length) {
+    const newest = [...live].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return { kind: "open", id: newest.id };
+  }
+  if (input.canCreate) return { kind: "create", title: DEFAULT_WHITEBOARD_TITLE };
+  return { kind: "none" };
+}
+
 export function emptyRoomTitle(title: string | undefined | null): { label: string; unnamed: boolean } {
   const trimmed = (title ?? "").trim();
   if (!trimmed || trimmed === "未命名活動房") {

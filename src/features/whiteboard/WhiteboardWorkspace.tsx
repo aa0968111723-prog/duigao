@@ -65,6 +65,7 @@ import {
   readSafeAreaBottom,
   incomingFocusAction,
   snapAfterSelectionOrEdit,
+  shouldMountEmptyStarter,
   shouldMountFocusSheet,
   snapAfterFocusDiscuss,
   writeBoardSession,
@@ -1254,7 +1255,10 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
       setNotice("檢視者不能種樹，只能在已有的招生樹上討論。");
       return;
     }
-    if (!shouldPlantEnrollmentTree(liveNodes, edges)) return;
+    if (!shouldPlantEnrollmentTree(liveNodes, edges)) {
+      setNotice("這塊板已經有招生骨架。點一支開始討論。");
+      return;
+    }
     const planted = plantEnrollmentTree2026({
       whiteboardId: board.id,
       roomId: board.roomId,
@@ -1554,9 +1558,11 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
     && ["", "新步驟"].includes(String(activeNodes[0].content.text ?? "").trim())
     ? activeNodes[0]
     : null;
-  const showStarter = canEdit
-    && starterDismissedFor !== board?.id
-    && (activeNodes.length === 0 || Boolean(starterNode));
+  const showStarter = shouldMountEmptyStarter({
+    canEdit: canEdit && starterDismissedFor !== board?.id,
+    liveCount: activeNodes.length,
+    lonelyBlankStep: Boolean(starterNode),
+  });
   const stepSourceNode = (
     selectedNode && (selectedNode.nodeType === "flow" || selectedNode.nodeType === "text" || selectedNode.nodeType === "mindmap")
       ? selectedNode
@@ -2344,7 +2350,7 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
           </div>
         )}
         {emptyBoard && !showStarter && (
-          <div className="wb-empty-board" data-testid="wb-empty-board">
+          <div className="wb-empty-board" data-testid="wb-empty-board" onPointerDown={(event) => event.stopPropagation()}>
             <span className="wb-empty-kicker">活動規劃白板</span>
             <strong>{roomName.label}</strong>
             {roomName.unnamed && api.onRenameRoom ? (
@@ -2362,17 +2368,37 @@ export function WhiteboardWorkspace({ api }: { api: WhiteboardApi }) {
                   data-testid={`wb-empty-${verb.id}`}
                   onClick={() => {
                     if (verb.id === "pin-discussion") {
-                      if (api.onPinFromDiscussion) api.onPinFromDiscussion();
-                      else if (api.onToggleRail && !api.railVisible) api.onToggleRail();
-                      else api.onOpenDiscussionMessage?.("");
+                      const pinable = [...(api.room.discussion ?? [])].reverse().find((item) =>
+                        !item.deletedAt && item.body?.trim() && !item.payload?.audit,
+                      );
+                      if (!pinable) {
+                        setNotice("對話裡還沒有可以釘的句子。");
+                        return;
+                      }
+                      if (!board || !canEdit) {
+                        setNotice("檢視者不能把對話釘上白板。");
+                        return;
+                      }
+                      const sticky = stickyFromDiscussion(pinable, board.id, "local");
+                      api.onUpsertNode(sticky, "now");
+                      record(nodeCreateDraft(nextOpId(), sticky));
+                      setSelected([sticky.id]);
+                      setCamera(focusCamera(sticky, viewport));
                     } else if (verb.id === "add-asset") {
-                      setContentKind("all");
-                      setSheet("content");
+                      const poster = (api.room.branches ?? []).find((item) =>
+                        item.status !== "archived" && item.branchType === "poster",
+                      );
+                      if (poster) {
+                        const placed = placePosterRegion(poster);
+                        if (placed) setCamera(focusCamera(placed, viewport));
+                        return;
+                      }
+                      setNotice("房間還沒有文宣可以放上來。");
                     } else if (verb.id === "plant-enrollment-tree") {
                       plantEnrollmentTree();
                     } else if (verb.id === "ask-grok") {
                       if (api.onAskColleague) api.onAskColleague({ prompt: "我們下一步做什麼" });
-                      else setSheet("ai");
+                      else setNotice("AI 服務尚未設定");
                     }
                   }}
                 >{verb.label}</button>
