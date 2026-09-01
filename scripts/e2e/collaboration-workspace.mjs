@@ -1480,12 +1480,12 @@ try {
         const rail = page.getByTestId("wb-side-rail");
         const posterMsg = rail.locator(".rd-msg", { hasText: "擺攤文宣" }).first();
         await posterMsg.getByRole("button", { name: "加入白板" }).click();
-        await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "平板板" }).click();
+        await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "活動規劃" }).click();
         await page.waitForSelector('[data-node-type="room_content"]', { timeout: 10000 });
         const firstCount = await page.locator("[data-node-type='room_content']").count();
         check("平板：文宣卡加入白板是圖不是字卡", firstCount >= 1 && (await page.locator('[data-testid="wb-media-image"]').count()) >= 1);
         await posterMsg.getByRole("button", { name: "加入白板" }).click();
-        await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "平板板" }).click();
+        await page.getByRole("dialog", { name: "加入白板" }).getByRole("button", { name: "活動規劃" }).click();
         const secondCount = await page.locator("[data-node-type='room_content']").count();
         check("平板：同一張文宣第二次加入不複製", secondCount === firstCount, `${firstCount}→${secondCount}`);
         mkdirSync("/opt/cursor/artifacts", { recursive: true });
@@ -1713,7 +1713,18 @@ try {
       await page.getByRole("button", { name: "建立活動房" }).click();
       await page.waitForSelector('[data-testid="multi-branch-room"]', { timeout: 30000 });
       await page.getByRole("button", { name: "白板", exact: true }).click();
-      await page.waitForSelector('[data-testid="wb-empty-plant-enrollment-tree"]', { timeout: 10000 });
+      await page.waitForSelector('[data-testid="whiteboard-workspace"], [data-testid="whiteboard-list"]', { timeout: 30000 });
+      if (await page.getByTestId("whiteboard-list").count()) {
+        const existing = page.getByTestId("whiteboard-list").locator("button.wb-card").first();
+        if (await existing.count()) {
+          await existing.click();
+        } else {
+          await page.getByLabel("白板名稱").fill("活動規劃");
+          await page.getByRole("button", { name: "建立白板" }).click();
+        }
+      }
+      await page.waitForSelector('[data-testid="whiteboard-workspace"]', { timeout: 20000 });
+      await page.waitForSelector('[data-testid="wb-empty-plant-enrollment-tree"]', { timeout: 15000 });
       await page.getByTestId("wb-empty-plant-enrollment-tree").click();
       await page.waitForSelector('[data-testid="wb-tree-children"]', { timeout: 8000 });
       check("骨架列出 202609 支線", await page.locator('[data-testid="wb-tree-child"][data-tree-label="書籤"]').count() >= 1
