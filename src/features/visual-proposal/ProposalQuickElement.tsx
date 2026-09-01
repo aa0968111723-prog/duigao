@@ -1,5 +1,7 @@
+import { useRef } from "react";
+import { INTAKE_PROFILES } from "../../components/UniversalIntake";
 import { useProposalStore, type ProposalAuthor } from "./store";
-import { FONT_STYLES } from "./helpers";
+import { FONT_STYLES, prepareImageFile } from "./helpers";
 import { LiveColor, LiveRange } from "./controls-kit";
 import type { ShowToast } from "../../toast";
 
@@ -17,12 +19,26 @@ type Props = {
  */
 export function ProposalQuickElement({ roomId, versionId, author, showToast }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
+  const replaceRef = useRef<HTMLInputElement>(null);
   const selected = proposal.selectedItem;
   if (!selected) return null;
 
   const remove = () => {
     proposal.deleteItem(selected.id);
     showToast("已刪除元素", { action: { label: "復原", onClick: () => proposal.undo() } });
+  };
+
+  const replaceImage = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (replaceRef.current) replaceRef.current.value = "";
+    if (!file || selected.type !== "image") return;
+    try {
+      const prepared = await prepareImageFile(file);
+      proposal.updateItem(selected.id, { imageDataUrl: prepared.dataUrl, name: prepared.name });
+      showToast(prepared.note ?? "已換圖");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "換圖失敗", { tone: "error" });
+    }
   };
 
   const kind = selected.type === "text" ? "文字" : selected.type === "image" ? "素材" : "色塊";
@@ -33,6 +49,24 @@ export function ProposalQuickElement({ roomId, versionId, author, showToast }: P
         <strong>{kind}</strong>
         <span className="proposal-muted">在文宣上拖曳可移動，兩指可縮放</span>
       </div>
+      <div className="pquick-shortcuts" role="group" aria-label="選中元素">
+        <span className="proposal-chip">移動</span>
+        {selected.type === "image" && (
+          <button type="button" className="proposal-chip" onClick={() => replaceRef.current?.click()}>
+            換圖
+          </button>
+        )}
+        <button type="button" className="proposal-chip proposal-danger" onClick={remove}>
+          刪
+        </button>
+      </div>
+      <input
+        ref={replaceRef}
+        className="proposal-file"
+        type="file"
+        accept={INTAKE_PROFILES.proposal.accept}
+        onChange={(e) => void replaceImage(e.target.files)}
+      />
 
       {selected.type === "text" && (
         <>

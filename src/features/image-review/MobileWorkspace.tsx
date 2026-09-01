@@ -3,8 +3,8 @@ import type { ColorMode, CompareMode } from "../../lib/types";
 import type { CollabStatus } from "../../lib/peer";
 import { useViewport } from "../../hooks/useViewport";
 import { loadFlag, saveFlag } from "../../lib/store";
-import { ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
-import { pruneProposalVersions, shouldSyncComposeSession, startComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
+import { ComposeExitBar, ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
+import { pruneProposalVersions, shouldSyncComposeSession, startComposeEditing, stopComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
@@ -106,6 +106,7 @@ export function MobileWorkspace({ api, presence }: Props) {
     onOpen: (commentId: string) => {
       const target = room.comments.find((c) => c.id === commentId);
       composeExitRef.current = true;
+      stopComposeEditing(room.id);
       proposalStore.setEditing(false);
       setProposalSession(null);
       if (!target) return;
@@ -124,6 +125,15 @@ export function MobileWorkspace({ api, presence }: Props) {
       room.versions.map((v) => v.id),
     );
   }, [room.id, room.versions]);
+
+  const exitCompose = () => {
+    composeExitRef.current = true;
+    stopComposeEditing(room.id);
+    proposalStore.setEditing(false);
+    proposalStore.setViewMode("original");
+    proposalStore.selectItem(null);
+    setProposalSession(null);
+  };
 
   useEffect(() => {
     if (composeExitRef.current) {
@@ -258,9 +268,16 @@ export function MobileWorkspace({ api, presence }: Props) {
     else setComposeInset(0);
   }, [draftPin]);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("is-compose", proposalMode);
+    return () => document.documentElement.classList.remove("is-compose");
+  }, [proposalMode]);
+
   return (
     <div
       className={`m-app ${proposalMode ? "is-proposal" : ""}`}
+      data-testid="editor-mode"
+      data-mode={proposalMode ? "compose" : "review"}
       style={{
         ["--m-peek" as string]: sheetVisible && hasThread ? "52px" : "0px",
         ["--m-status" as string]: task ? "44px" : "0px",
@@ -346,8 +363,16 @@ export function MobileWorkspace({ api, presence }: Props) {
         )}
       </div>
 
+      {proposalMode && (
+        <ComposeExitBar
+          title={proposalStore.active?.title || "提案"}
+          onExit={exitCompose}
+        />
+      )}
+
       <div className="m-stage-area">
         <Viewer api={api} compact onOpenImmersive={() => setImmersiveOpen(true)} />
+        {!proposalMode && (
         <EditScopeBar
           inferred={editScope.inferred}
           override={editScope.override}
@@ -357,6 +382,7 @@ export function MobileWorkspace({ api, presence }: Props) {
           hint={editScope.hint}
           caption={editScope.caption}
         />
+        )}
         {nudge && !task && !draftPin && (
           <div className="m-nudge" role="note">
             <span>還有哪一個地方最需要調整？</span>
@@ -386,11 +412,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             versionId={visibleVersionId}
             author={api.guest}
             showToast={api.showToast}
-            onExit={() => {
-              composeExitRef.current = true;
-              proposalStore.setEditing(false);
-              setProposalSession(null);
-            }}
+            onExit={exitCompose}
             onHeight={setDockHeight}
             intent={proposalSession.intent}
             pin={proposalPinBinding}
