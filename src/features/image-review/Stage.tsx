@@ -402,9 +402,12 @@ export function Stage({
   }, [zoomable]);
 
   const gestureTool = tool === "draw" || tool === "region";
+  const overlayBusy = () =>
+    Boolean(contentRef.current?.querySelector(".proposal-layer.is-editing, [data-cropping='true']"));
 
   const onDown = (e: ReactPointerEvent) => {
     if (!interactive) return;
+    if (overlayBusy()) return;
     if (gestureTool) {
       const p = relative(e);
       if (!p) return;
@@ -450,6 +453,7 @@ export function Stage({
    */
   const onClick = (e: ReactMouseEvent) => {
     if (!interactive || tool === "region") return;
+    if (overlayBusy()) return;
     // Zoomable pan mode handles taps from pointer-up so a double tap can be
     // recognised before the browser's synthetic click arrives.
     if (zoomable && tool === "pan") return;
@@ -684,7 +688,15 @@ export function Stage({
             data-density={pins.length > 10 ? "dense" : undefined}
             style={{ left: frame.left, top: frame.top, width: frame.width, height: frame.height }}
           >
-            <VisualProposalOverlay roomId={room.id} versionId={version.id} author={guest} compact={compact} />
+            <VisualProposalOverlay
+              roomId={room.id}
+              versionId={version.id}
+              author={guest}
+              compact={compact}
+              canManage={api.canManage}
+              showToast={api.showToast}
+              onBeginCrop={() => api.setTool("pan")}
+            />
 
             {annotationsVisible && (
             <>
