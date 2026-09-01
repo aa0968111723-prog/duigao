@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ColorMode, CompareMode, Tool } from "../../lib/types";
-import { ProposalDock } from "../visual-proposal/ProposalDock";
-import { pruneProposalVersions, startComposeEditing, useProposalStore } from "../visual-proposal/store";
+import { ComposeExitBar, ProposalDock } from "../visual-proposal/ProposalDock";
+import { ProposalQuickElement } from "../visual-proposal/ProposalQuickElement";
+import { pruneProposalVersions, startComposeEditing, stopComposeEditing, useProposalStore } from "../visual-proposal/store";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
@@ -35,7 +36,8 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   const { room, view, tool, draftPin } = api;
   const editScope = useEditScope(api, view.versionId, room.id);
   const proposal = useProposalStore(room.id, view.versionId, api.guest);
-  const composing = proposal.layerEditing;
+  const [composeSession, setComposeSession] = useState(false);
+  const composing = composeSession;
 
   useEffect(() => {
     pruneProposalVersions(
@@ -45,26 +47,61 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   }, [room.id, room.versions]);
 
   useEffect(() => {
+    document.documentElement.classList.toggle("is-compose", composing);
+    return () => document.documentElement.classList.remove("is-compose");
+  }, [composing]);
+
+  useEffect(() => {
+    if (proposal.layerEditing && !composeSession) setComposeSession(true);
+  }, [proposal.layerEditing, composeSession]);
+
+  useEffect(() => {
     if (composing && view.compareMode !== "single") {
       api.setView({ ...view, compareMode: "single" });
     }
   }, [api, composing, view]);
 
+  const enterCompose = () => {
+    api.setTool("pan");
+    api.selectPin(null);
+    if (api.canManage) startComposeEditing(room.id, view.versionId, api.guest);
+    else {
+      proposal.setViewMode("proposal");
+      proposal.setEditing(false);
+    }
+    setComposeSession(true);
+  };
+
+  const exitCompose = () => {
+    stopComposeEditing(room.id);
+    proposal.setEditing(false);
+    proposal.setViewMode("original");
+    proposal.selectItem(null);
+    setComposeSession(false);
+  };
+
   return (
-    <main className={`workspace${composing ? " is-compose" : ""}`}>
-      <div className="stage-with-scope">
-        <Viewer api={api} />
-        {!composing && (
-        <EditScopeBar
-          inferred={editScope.inferred}
-          override={editScope.override}
-          onOverride={editScope.setOverride}
-          onGenerate={(forced) => { void editScope.generate(forced); }}
-          busy={editScope.busy}
-          hint={editScope.hint}
-          caption={editScope.caption}
-        />
-        )}
+    <main
+      className={`workspace${composing ? " is-compose" : ""}`}
+      data-testid="editor-mode"
+      data-mode={composing ? "compose" : "review"}
+    >
+      <div className="compose-stage-col">
+        {composing && <ComposeExitBar title={proposal.active?.title || "提案"} onExit={exitCompose} />}
+        <div className="stage-with-scope">
+          <Viewer api={api} />
+          {!composing && (
+          <EditScopeBar
+            inferred={editScope.inferred}
+            override={editScope.override}
+            onOverride={editScope.setOverride}
+            onGenerate={(forced) => { void editScope.generate(forced); }}
+            busy={editScope.busy}
+            hint={editScope.hint}
+            caption={editScope.caption}
+          />
+          )}
+        </div>
       </div>
 
       {composing ? (
@@ -73,7 +110,7 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
           versionId={view.versionId}
           author={api.guest}
           showToast={api.showToast}
-          onExit={() => proposal.setEditing(false)}
+          onExit={exitCompose}
           canManage={api.canManage}
           onSaveVersion={api.saveComposeVersion}
           onGenerateSecondVersion={() => { void editScope.generate("full"); }}
@@ -192,11 +229,7 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             type="button"
             className="poster-edit-toggle"
             data-testid="poster-edit-toggle"
-            onClick={() => {
-              api.setTool("pan");
-              api.selectPin(null);
-              startComposeEditing(room.id, view.versionId, api.guest);
-            }}
+            onClick={enterCompose}
           >
             編輯這張
           </button>
@@ -207,7 +240,7 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
       </div>
       )}
 
-      <SidePanel api={api} />
+      <SidePanel api={api} composing={composing} />
 
       {draftPin && (
         <div className="compose-backdrop" onPointerDown={() => !api.form.body.trim() && api.cancelPin()}>
@@ -229,11 +262,29 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   );
 }
 
-function SidePanel({ api }: { api: WorkspaceApi }) {
-  const { room } = api;
+function SidePanel({ api, composing }: { api: WorkspaceApi; composing: boolean }) {
+  const { room, view } = api;
   const [tab, setTab] = useState<"comments" | "chat">("comments");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
   const chatRef = useRef<HTMLInputElement>(null);
+
+  if (composing) {
+    return (
+      <aside className="panel">
+        <div className="panel-tabs">
+          <button type="button" className="on">選中元素</button>
+        </div>
+        <div className="panel-body">
+          <ProposalQuickElement
+            roomId={room.id}
+            versionId={view.versionId}
+            author={api.guest}
+            showToast={api.showToast}
+          />
+        </div>
+      </aside>
+    );
+  }
 
   const sendChat = () => {
     api.sendChat();

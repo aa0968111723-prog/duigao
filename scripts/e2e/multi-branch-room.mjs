@@ -278,6 +278,8 @@ try {
     await page.getByTestId("poster-edit-toggle").click();
     await page.waitForSelector('[data-testid="poster-save-version"]', { timeout: 15000 });
     await page.waitForSelector('[data-testid="poster-compose-canvas"]', { timeout: 15000 });
+    const plusAssetOpen = page.getByRole("button", { name: "＋素材" });
+    if (await plusAssetOpen.count()) await plusAssetOpen.click();
     await page.getByTestId("poster-pick-room-asset").waitFor({ state: "visible", timeout: 10000 });
     check("房間素材按鈕看得到", await page.getByTestId("poster-pick-room-asset").count() === 1);
     check("空畫布提示在", await page.getByTestId("poster-compose-empty-hint").count() >= 1);
