@@ -47,6 +47,8 @@ type Props = {
   branches?: { id: string; name: string }[];
   listLibrary?: () => Promise<LibraryAsset[]>;
   resolveMaterial?: (material: ComposeMaterial) => Promise<string>;
+  onGenerateSecondVersion?: () => void;
+  onGenerateVisualProposal?: () => void;
 };
 
 type Panel = "none" | "element" | "compare" | "list";
@@ -57,7 +59,7 @@ export function ComposeExitBar({ title, onExit }: { title: string; onExit: () =>
   return (
     <div className="compose-exit-bar">
       <span>工作層 · {title}</span>
-      <button type="button" data-testid="compose-exit" onClick={onExit}>
+      <button type="button" onClick={onExit}>
         完成
       </button>
     </div>
@@ -88,6 +90,8 @@ export function ProposalDock({
   branches,
   listLibrary,
   resolveMaterial,
+  onGenerateSecondVersion,
+  onGenerateVisualProposal,
 }: Props) {
   const proposal = useProposalStore(roomId, versionId, author);
   const materialRef = useRef<HTMLInputElement>(null);
@@ -214,6 +218,20 @@ export function ProposalDock({
 
   return (
     <section className="pdock" aria-label="視覺提案" ref={rootRef}>
+      {(onGenerateSecondVersion || onGenerateVisualProposal) && (
+        <div className="proposal-manual-generate">
+          {onGenerateVisualProposal && (
+            <button type="button" className="proposal-quiet" data-testid="manual-generate-proposal" onClick={onGenerateVisualProposal}>
+              生成視覺提案
+            </button>
+          )}
+          {onGenerateSecondVersion && (
+            <button type="button" className="proposal-quiet" data-testid="manual-generate-second" onClick={onGenerateSecondVersion}>
+              依修改生第二版
+            </button>
+          )}
+        </div>
+      )}
       {proposal.error && (
         <div className="proposal-error" role="alert">
           <span>{proposal.error}</span>
@@ -374,7 +392,7 @@ export function ProposalDock({
           {saving ? "存檔中…" : "存成新版本"}
         </button>
         )}
-        <button type="button" className="pdock-done" onClick={onExit}>
+        <button type="button" className="pdock-done" data-testid="compose-exit" onClick={onExit}>
           完成
         </button>
       </nav>

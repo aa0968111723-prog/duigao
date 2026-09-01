@@ -6,6 +6,7 @@
 import { asObject, asText } from "./roomContext.ts";
 
 export const IMAGINE_IMAGE_URL = "https://api.x.ai/v1/images/generations";
+export const IMAGINE_EDIT_URL = "https://api.x.ai/v1/images/edits";
 export const IMAGINE_VIDEO_URL = "https://api.x.ai/v1/videos/generations";
 export const DEFAULT_IMAGE_MODEL = "grok-imagine-image";
 export const DEFAULT_VIDEO_MODEL = "grok-imagine-video";
@@ -17,15 +18,64 @@ export type ImagineFetch = (input: string, init?: { method?: string; headers?: R
   arrayBuffer?(): Promise<ArrayBuffer>;
 }>;
 
+function safeImagineModel(value: string | undefined, fallback: string): string {
+  const model = (value || fallback).trim() || fallback;
+  if (/grok-4\.6|grok-4-6|grok-4\.5|grok-4-5/i.test(model)) return fallback;
+  return model;
+}
+
+export function imagineEditModel(env: Record<string, string | undefined> = {}): string {
+  return safeImagineModel(env.GROK_IMAGE_EDIT_MODEL || env.GROK_IMAGE_MODEL, DEFAULT_IMAGE_MODEL);
+}
+
+export function visualEditPromptForScope(scope: "single" | "full", label: string, bodyText: string): string {
+  const body = bodyText.trim();
+  if (scope === "single") {
+    const spot = label.trim() || "這一處";
+    return `只改 ${spot} 這一處，其餘構圖、底、主體不變。${body}`.trim().slice(0, 4000);
+  }
+  return `依修改改整張。${body}`.trim().slice(0, 4000);
+}
+
 export function imagineImageRequest(input: { prompt: string; size?: string; model?: string }): { url: string; body: Record<string, unknown> } {
   return {
     url: IMAGINE_IMAGE_URL,
     body: {
-      model: (input.model || DEFAULT_IMAGE_MODEL).trim() || DEFAULT_IMAGE_MODEL,
+      model: safeImagineModel(input.model, DEFAULT_IMAGE_MODEL),
       prompt: input.prompt.slice(0, 4000),
       n: 1,
       response_format: "b64_json",
       ...(input.size ? { size: input.size } : {}),
+    },
+  };
+}
+
+function bytesToB64(bytes: Uint8Array): string {
+  const chunk = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/** Source image is already on Edge (from Storage). Client never sends bytes. */
+export function imagineEditRequest(input: {
+  prompt: string;
+  imageBytes: Uint8Array;
+  mime?: string;
+  model?: string;
+}): { url: string; body: Record<string, unknown> } {
+  const mime = input.mime && /^image\//i.test(input.mime) ? input.mime : "image/png";
+  const dataUri = `data:${mime};base64,${bytesToB64(input.imageBytes)}`;
+  return {
+    url: IMAGINE_EDIT_URL,
+    body: {
+      model: safeImagineModel(input.model, DEFAULT_IMAGE_MODEL),
+      prompt: input.prompt.slice(0, 4000),
+      n: 1,
+      response_format: "b64_json",
+      image: { url: dataUri, type: "image_url" },
     },
   };
 }
@@ -84,6 +134,43 @@ export async function executeImagineImage(input: {
   fetchFn?: ImagineFetch;
 }): Promise<{ ok: true; bytes: Uint8Array; mime: string; model: string } | { ok: false; refused?: boolean; error: string }> {
   const req = imagineImageRequest({ prompt: input.prompt, size: input.size, model: input.model });
+  const fetchFn = input.fetchFn ?? (fetch as ImagineFetch);
+  const response = await fetchFn(req.url, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${input.apiKey}` },
+    body: JSON.stringify(req.body),
+  });
+  const contentType = response.headers.get("content-type");
+  const text = await response.text();
+  if (looksLikeHtml(text, contentType)) return { ok: false, error: "SPA_HTML" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return { ok: false, error: "INVALID_PAYLOAD" }; }
+  const image = parseImagineImageResponse(parsed);
+  if ("error" in image && image.error.startsWith("url:")) {
+    const url = image.error.slice(4);
+    const downloaded = await fetchFn(url, { method: "GET" });
+    const buf = downloaded.arrayBuffer ? await downloaded.arrayBuffer() : undefined;
+    if (!buf) return { ok: false, error: "IMAGINE_EMPTY" };
+    return { ok: true, bytes: new Uint8Array(buf), mime: downloaded.headers.get("content-type") || "image/png", model: asText(req.body.model) };
+  }
+  if ("error" in image) return { ok: false, error: image.error };
+  return { ok: true, bytes: image.bytes, mime: image.mime, model: asText(req.body.model) };
+}
+
+export async function executeImagineEdit(input: {
+  prompt: string;
+  imageBytes: Uint8Array;
+  mime?: string;
+  model?: string;
+  apiKey: string;
+  fetchFn?: ImagineFetch;
+}): Promise<{ ok: true; bytes: Uint8Array; mime: string; model: string } | { ok: false; refused?: boolean; error: string }> {
+  const req = imagineEditRequest({
+    prompt: input.prompt,
+    imageBytes: input.imageBytes,
+    mime: input.mime,
+    model: input.model,
+  });
   const fetchFn = input.fetchFn ?? (fetch as ImagineFetch);
   const response = await fetchFn(req.url, {
     method: "POST",

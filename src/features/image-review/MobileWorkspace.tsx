@@ -4,13 +4,15 @@ import type { CollabStatus } from "../../lib/peer";
 import { useViewport } from "../../hooks/useViewport";
 import { loadFlag, saveFlag } from "../../lib/store";
 import { ComposeExitBar, ProposalDock, type ProposalIntent } from "../visual-proposal/ProposalDock";
-import { pruneProposalVersions, startComposeEditing, stopComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
+import { pruneProposalVersions, shouldSyncComposeSession, startComposeEditing, stopComposeEditing, useProposalStore, useRoomProposals } from "../visual-proposal/store";
 import { DragSheet, ModalSheet, type SheetSnap } from "../../components/BottomSheet";
 import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { Viewer } from "./Stage";
 import { ImmersiveViewer } from "./ImmersiveViewer";
+import { EditScopeBar } from "./EditScopeBar";
+import { useEditScope } from "./useEditScope";
 import { IconChat, IconEye, IconMore, IconPen, IconPin } from "../../components/icons";
 import { nextPinNumber, pinNumber, versionLabel, type WorkspaceApi } from "../../components/api";
 import { canShowCanvaSync } from "../../lib/canvaContract";
@@ -50,9 +52,11 @@ export function MobileWorkspace({ api, presence }: Props) {
   const [immersiveOpen, setImmersiveOpen] = useState(false);
   const chatRef = useRef<HTMLInputElement>(null);
   const proposalMode = proposalSession != null;
+  const composeExitRef = useRef(false);
   const visibleVersionId = room.versions.some((version) => version.id === view.versionId)
     ? view.versionId
     : room.versions[0]?.id ?? view.versionId;
+  const editScope = useEditScope(api, visibleVersionId, room.id);
 
   // Read-only view of every proposal in the room, so 修改點卡 can show its own.
   const roomProposals = useRoomProposals(room.id);
@@ -77,6 +81,7 @@ export function MobileWorkspace({ api, presence }: Props) {
     if (target.versionId !== view.versionId) {
       api.setView({ ...view, versionId: target.versionId, compareMode: "single" });
     }
+    composeExitRef.current = false;
     setProposalSession({ intent: { kind: "create", linkedCommentId: commentId } });
   };
 
@@ -87,6 +92,7 @@ export function MobileWorkspace({ api, presence }: Props) {
     api.setTool("pan");
     api.selectPin(null);
     if (doc.versionId !== view.versionId) api.setView({ ...view, versionId: doc.versionId, compareMode: "single" });
+    composeExitRef.current = false;
     proposalStore.selectProposal(proposalId);
     setProposalSession({ intent: { kind: "open", proposalId } });
   };
@@ -99,6 +105,7 @@ export function MobileWorkspace({ api, presence }: Props) {
     },
     onOpen: (commentId: string) => {
       const target = room.comments.find((c) => c.id === commentId);
+      composeExitRef.current = true;
       stopComposeEditing(room.id);
       proposalStore.setEditing(false);
       setProposalSession(null);
@@ -120,6 +127,7 @@ export function MobileWorkspace({ api, presence }: Props) {
   }, [room.id, room.versions]);
 
   const exitCompose = () => {
+    composeExitRef.current = true;
     stopComposeEditing(room.id);
     proposalStore.setEditing(false);
     proposalStore.setViewMode("original");
@@ -128,10 +136,20 @@ export function MobileWorkspace({ api, presence }: Props) {
   };
 
   useEffect(() => {
-    if (proposalStore.layerEditing && !proposalSession) {
+    if (composeExitRef.current) {
+      if (!proposalStore.layerEditing) composeExitRef.current = false;
+      return;
+    }
+    if (shouldSyncComposeSession(proposalStore.layerEditing, proposalSession != null, false)) {
       setProposalSession({ intent: null });
     }
   }, [proposalStore.layerEditing, proposalSession]);
+
+  useEffect(() => {
+    if (proposalMode && view.compareMode !== "single") {
+      api.setView({ ...view, compareMode: "single" });
+    }
+  }, [api, proposalMode, view]);
 
   // A cloud room may finish replacing its local id while the compose overlay is
   // opening. Re-assert the plain「編輯這張」session against the room/version now
@@ -328,6 +346,7 @@ export function MobileWorkspace({ api, presence }: Props) {
             className="m-vchip poster-edit-toggle"
             data-testid="poster-edit-toggle"
             onClick={() => {
+              composeExitRef.current = false;
               api.setTool("pan");
               api.selectPin(null);
               startComposeEditing(room.id, visibleVersionId, api.guest);
@@ -353,6 +372,17 @@ export function MobileWorkspace({ api, presence }: Props) {
 
       <div className="m-stage-area">
         <Viewer api={api} compact onOpenImmersive={() => setImmersiveOpen(true)} />
+        {!proposalMode && (
+        <EditScopeBar
+          inferred={editScope.inferred}
+          override={editScope.override}
+          onOverride={editScope.setOverride}
+          onGenerate={(forced) => { void editScope.generate(forced); }}
+          busy={editScope.busy}
+          hint={editScope.hint}
+          caption={editScope.caption}
+        />
+        )}
         {nudge && !task && !draftPin && (
           <div className="m-nudge" role="note">
             <span>還有哪一個地方最需要調整？</span>
@@ -388,6 +418,8 @@ export function MobileWorkspace({ api, presence }: Props) {
             pin={proposalPinBinding}
             canManage={api.canManage}
             onSaveVersion={api.saveComposeVersion}
+            onGenerateSecondVersion={() => { void editScope.generate("full"); }}
+            onGenerateVisualProposal={() => { void editScope.generate("single"); }}
             versions={api.composeVersions ?? room.versions}
             branches={room.branches}
             listLibrary={api.listComposeLibrary}
@@ -613,6 +645,7 @@ export function MobileWorkspace({ api, presence }: Props) {
               type="button"
               className="m-row"
               onClick={() => {
+                composeExitRef.current = false;
                 api.setTool("pan");
                 api.selectPin(null);
                 setMore(false);

@@ -7,6 +7,8 @@ import { CommentCard } from "../discussion/CommentCard";
 import { PinFields } from "../discussion/PinFields";
 import { UniversalIntake } from "../../components/UniversalIntake";
 import { Viewer } from "./Stage";
+import { EditScopeBar } from "./EditScopeBar";
+import { useEditScope } from "./useEditScope";
 import { nextPinNumber, type WorkspaceApi } from "../../components/api";
 import { canShowCanvaSync } from "../../lib/canvaContract";
 
@@ -32,6 +34,7 @@ const COMPARE_MODES: { id: CompareMode; label: string }[] = [
 /** Desktop keeps the familiar three-pane layout: stage, toolbar, side panel. */
 export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   const { room, view, tool, draftPin } = api;
+  const editScope = useEditScope(api, view.versionId, room.id);
   const proposal = useProposalStore(room.id, view.versionId, api.guest);
   const [composeSession, setComposeSession] = useState(false);
   const composing = composeSession;
@@ -51,6 +54,12 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
   useEffect(() => {
     if (proposal.layerEditing && !composeSession) setComposeSession(true);
   }, [proposal.layerEditing, composeSession]);
+
+  useEffect(() => {
+    if (composing && view.compareMode !== "single") {
+      api.setView({ ...view, compareMode: "single" });
+    }
+  }, [api, composing, view]);
 
   const enterCompose = () => {
     api.setTool("pan");
@@ -73,15 +82,50 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
 
   return (
     <main
-      className={`workspace ${composing ? "is-compose" : ""}`}
+      className={`workspace${composing ? " is-compose" : ""}`}
       data-testid="editor-mode"
       data-mode={composing ? "compose" : "review"}
     >
       <div className="compose-stage-col">
         {composing && <ComposeExitBar title={proposal.active?.title || "提案"} onExit={exitCompose} />}
-        <Viewer api={api} />
+        <div className="stage-with-scope">
+          <Viewer api={api} />
+          {!composing && (
+          <EditScopeBar
+            inferred={editScope.inferred}
+            override={editScope.override}
+            onOverride={editScope.setOverride}
+            onGenerate={(forced) => { void editScope.generate(forced); }}
+            busy={editScope.busy}
+            hint={editScope.hint}
+            caption={editScope.caption}
+          />
+          )}
+        </div>
       </div>
 
+      {composing ? (
+        <ProposalDock
+          roomId={room.id}
+          versionId={view.versionId}
+          author={api.guest}
+          showToast={api.showToast}
+          onExit={exitCompose}
+          canManage={api.canManage}
+          onSaveVersion={api.saveComposeVersion}
+          onGenerateSecondVersion={() => { void editScope.generate("full"); }}
+          onGenerateVisualProposal={() => { void editScope.generate("single"); }}
+          versions={api.composeVersions ?? room.versions}
+          branches={room.branches}
+          listLibrary={api.listComposeLibrary}
+          resolveMaterial={api.resolveComposeMaterial}
+          pref={{
+            prefs: room.proposalPrefs ?? [],
+            userId: api.guest.id,
+            onChoose: (choice) => api.setProposalPref(view.versionId, choice),
+          }}
+        />
+      ) : (
       <div className="toolbar">
         <div className="versions">
           {room.versions.map((v) => (
@@ -96,7 +140,7 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
               {v.label}
             </button>
           ))}
-          {api.canManage && !composing && (
+          {api.canManage && (
             <UniversalIntake profile="poster" mode="zone" onFiles={api.addFiles} className="upload upload-inline">
               <span className="upload-icon">＋</span>
               <span className="upload-text">加一版</span>
@@ -104,27 +148,6 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
           )}
         </div>
 
-        {composing ? (
-          <ProposalDock
-            roomId={room.id}
-            versionId={view.versionId}
-            author={api.guest}
-            showToast={api.showToast}
-            onExit={exitCompose}
-            canManage={api.canManage}
-            onSaveVersion={api.saveComposeVersion}
-            versions={api.composeVersions ?? room.versions}
-            branches={room.branches}
-            listLibrary={api.listComposeLibrary}
-            resolveMaterial={api.resolveComposeMaterial}
-            pref={{
-              prefs: room.proposalPrefs ?? [],
-              userId: api.guest.id,
-              onChoose: (choice) => api.setProposalPref(view.versionId, choice),
-            }}
-          />
-        ) : (
-          <>
         <div className="tool-group">
           {TOOLS.map((t) => (
             <button
@@ -211,16 +234,11 @@ export function DesktopWorkspace({ api }: { api: WorkspaceApi }) {
             編輯這張
           </button>
         )}
-        <button type="button" className="btn btn-sm" onClick={enterCompose}>
-          視覺提案
-        </button>
-
         <button className="btn btn-sm" onClick={api.undo} disabled={!api.canUndo}>
           復原
         </button>
-          </>
-        )}
       </div>
+      )}
 
       <SidePanel api={api} composing={composing} />
 

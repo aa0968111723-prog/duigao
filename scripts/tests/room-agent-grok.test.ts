@@ -28,10 +28,20 @@ import { applyVisualWorkLayer } from "../../src/ai/applyVisualWorkLayer.ts";
 import type { AiProposal } from "../../src/ai/proposals.ts";
 import { askGrok } from "../../supabase/functions/_shared/roomAgent.ts";
 import {
+  executeImagineEdit,
   executeImagineImage,
   executeImagineVideo,
+  imagineEditRequest,
+  IMAGINE_EDIT_URL,
   storeImagineAsset,
+  visualEditPromptForScope,
 } from "../../supabase/functions/_shared/imagine.ts";
+import {
+  canGenerateEdit,
+  editScopeInputFromWorkspace,
+  inferEditScope,
+  visualEditPrompt,
+} from "../../src/ai/editScope.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -310,6 +320,7 @@ test("askGrok calls Imagine for image and only quotes unconfirmed video", async 
     xaiKey: "xai-test",
     textModel: DEFAULT_GROK_TEXT_MODEL,
     imageModel: "grok-imagine-image",
+    imageEditModel: "grok-imagine-image",
     videoModel: "grok-imagine-video",
     maxUsd: 0.05,
   };
@@ -394,3 +405,157 @@ test("RoomAiSheet confirm re-asks with imagineVideoConfirmed instead of applying
   assert.match(app, /applyVisualWorkLayer/);
   assert.match(app, /upsertProposal/);
 });
+
+test("inferEditScope: one pin 主標看不清 is single with short label", () => {
+  const result = inferEditScope({ pins: [{ body: "主標看不清" }] });
+  assert.equal(result.scope, "single");
+  assert.equal(result.label, "主標");
+  assert.equal(result.reason, "heuristic");
+  assert.equal(canGenerateEdit({ pins: [{ body: "主標看不清" }] }), true);
+});
+
+test("inferEditScope: large region or keywords become full; empty does not generate", () => {
+  assert.equal(inferEditScope({ pins: [], regionArea: 0.45 }).scope, "full");
+  assert.equal(inferEditScope({ pins: [{ body: "整張重排" }] }).scope, "full");
+  assert.equal(inferEditScope({ pins: [{ body: "底換掉" }] }).scope, "full");
+  assert.equal(inferEditScope({ pins: [{ body: "整體調亮" }] }).scope, "full");
+  const empty = inferEditScope({ pins: [], regionArea: 0 });
+  assert.equal(empty.scope, null);
+  assert.equal(empty.reason, "empty");
+  assert.equal(canGenerateEdit({ pins: [], regionArea: 0 }), false);
+});
+
+test("inferEditScope: human override beats heuristic", () => {
+  const over = inferEditScope({ pins: [{ body: "主標看不清" }], override: "full" });
+  assert.equal(over.scope, "full");
+  assert.equal(over.reason, "override");
+  const back = inferEditScope({ pins: [{ body: "整張重排" }], override: "single" });
+  assert.equal(back.scope, "single");
+  assert.equal(back.reason, "override");
+});
+
+test("editScopeInputFromWorkspace: draft pin 主標看不清 is single and can generate", () => {
+  const input = editScopeInputFromWorkspace({
+    versionId: "v1",
+    comments: [],
+    draftPin: { versionId: "v1", x: 0.42, y: 0.18 },
+    formBody: "主標看不清",
+  });
+  assert.equal(input.pins.length, 1);
+  assert.equal(canGenerateEdit(input), true);
+  const result = inferEditScope(input);
+  assert.equal(result.scope, "single");
+  assert.equal(result.label, "主標");
+});
+
+test("editScopeInputFromWorkspace: empty or other-version draft does not generate", () => {
+  const empty = editScopeInputFromWorkspace({
+    versionId: "v1",
+    comments: [],
+    draftPin: null,
+    formBody: "主標看不清",
+  });
+  assert.equal(canGenerateEdit(empty), false);
+  assert.equal(inferEditScope(empty).scope, null);
+  const other = editScopeInputFromWorkspace({
+    versionId: "v1",
+    comments: [],
+    draftPin: { versionId: "v2", x: 0.4, y: 0.2 },
+    formBody: "主標看不清",
+  });
+  assert.equal(canGenerateEdit(other), false);
+});
+
+test("visual edit prompt: single contains 只改; full contains 整張", () => {
+  const single = visualEditPrompt({ scope: "single", label: "主標", bodyText: "主標看不清" });
+  assert.match(single, /只改 主標 這一處/);
+  assert.match(single, /其餘構圖、底、主體不變/);
+  const full = visualEditPrompt({ scope: "full", label: "整張", bodyText: "整體調亮" });
+  assert.match(full, /整張/);
+  assert.equal(visualEditPromptForScope("single", "logo", "這個 logo"), visualEditPrompt({ scope: "single", label: "logo", bodyText: "這個 logo" }));
+});
+
+test("imagineEditRequest POSTs /images/edits and store path stays proposals", async () => {
+  const req = imagineEditRequest({ prompt: "只改 主標 這一處", imageBytes: new Uint8Array([1, 2, 3]) });
+  assert.equal(req.url, IMAGINE_EDIT_URL);
+  assert.match(String(req.body.prompt), /只改/);
+  assert.doesNotMatch(String(req.body.model), /grok-4\.6|grok-4-6/);
+  const image = req.body.image as { url?: string; type?: string };
+  assert.equal(typeof req.body.image, "object");
+  assert.equal(typeof image.url, "string");
+  assert.match(String(image.url), /^data:image\/png;base64,/);
+  assert.doesNotMatch(JSON.stringify(req.body.image), /^"/);
+  const urls: string[] = [];
+  let posted: Record<string, unknown> | undefined;
+  const edited = await executeImagineEdit({
+    prompt: "依修改改整張",
+    imageBytes: new Uint8Array([9, 8, 7]),
+    apiKey: "xai-test",
+    fetchFn: async (url, init) => {
+      urls.push(url);
+      posted = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ data: [{ b64_json: Buffer.from("PNG").toString("base64") }] }),
+      };
+    },
+  });
+  assert.equal(edited.ok, true);
+  assert.ok(urls.some((url) => url.includes("/images/edits")));
+  const postedImage = posted?.image as { url?: string };
+  assert.equal(typeof posted?.image, "object");
+  assert.match(String(postedImage.url), /^data:image\/png;base64,/);
+});
+
+test("single apply after edit leaves version storage path unchanged", async () => {
+  const before = "rooms/abc/versions/v1/poster.png";
+  const proposal: AiProposal = {
+    id: "edit-main",
+    type: "imagine_image",
+    label: "改 主標",
+    requiresExtraConfirm: false,
+    source: "agent",
+    payload: {
+      proposalId: "11111111-2222-4333-8444-555555555555",
+      workLayerRef: "rooms/abc/proposals/11111111-2222-4333-8444-555555555555/a1.png",
+      preview: "已生成視覺提案，尚未成為正式版本",
+      scope: "single",
+    },
+  };
+  const result = await applyVisualWorkLayer({
+    proposal,
+    version: { id: "v1", imagePath: before },
+    roomId: "abc",
+    authorName: "主辦",
+    upsert: async () => 1,
+  });
+  assert.equal(result.versionImagePath, before);
+  assert.equal(applyMustNotChangeVersionStorage(before, result.versionImagePath), true);
+  assert.match(String(result.cloudProposal.payload.workLayerRef), /\/proposals\//);
+  assert.doesNotMatch(String(result.cloudProposal.payload.workLayerRef), /\/versions\//);
+});
+
+test("review UI has edit-scope chip and generate; no-key copy; no 已收回", () => {
+  const bar = readFileSync(resolve(ROOT, "src/features/image-review/EditScopeBar.tsx"), "utf8");
+  const desktop = readFileSync(resolve(ROOT, "src/features/image-review/DesktopWorkspace.tsx"), "utf8");
+  const hook = readFileSync(resolve(ROOT, "src/features/image-review/useEditScope.ts"), "utf8");
+  const mobile = readFileSync(resolve(ROOT, "src/features/image-review/MobileWorkspace.tsx"), "utf8");
+  const controls = readFileSync(resolve(ROOT, "src/features/visual-proposal/ProposalControls.tsx"), "utf8");
+  const edge = readFileSync(resolve(ROOT, "supabase/functions/room-ai-context/index.ts"), "utf8");
+  const env = readFileSync(resolve(ROOT, ".env.example"), "utf8");
+  assert.match(bar, /data-testid="edit-scope-chip"/);
+  assert.match(bar, /data-testid="edit-scope-generate"/);
+  assert.match(desktop, /EditScopeBar/);
+  assert.match(hook, /editScopeInputFromWorkspace/);
+  assert.match(mobile, /EditScopeBar/);
+  assert.match(controls, /生成視覺提案/);
+  assert.match(controls, /依修改生第二版/);
+  assert.doesNotMatch(desktop, /生第二版[\s\S]{0,80}生提案/);
+  assert.match(edge, /visualEdit/);
+  assert.match(edge, /images\/edits|executeImagineEdit/);
+  assert.doesNotMatch(edge, /這則已收回/);
+  assert.match(env, /GROK_IMAGE_EDIT_MODEL/);
+  assert.doesNotMatch(env, /VITE_XAI/);
+});
+
