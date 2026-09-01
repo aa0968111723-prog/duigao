@@ -1,8 +1,8 @@
 /**
- * 對稿 ⇄ 圖影編輯器（Canva 式）iframe 契約。
+ * 對稿 ⇄ 圖影編輯器（Canva 式）契約。
  *
  * 邊界：
- *  - 編輯器活在 VITE_STUDIO_ORIGIN；對稿只開 overlay、收 PNG／WebM。
+ *  - 對稿自己就是編輯器（#studio / duigao:open-studio）。VITE_STUDIO_ORIGIN 有填才走 iframe /bridge?。
  *  - 匯出永遠是新檔，走既有 onFiles / onVideoFiles，成為房間新版本。
  *  - 原稿不被修改（只標記、不改原稿）。
  *  - 沒有 OAuth、沒有 token；client 只認識 origin + postMessage。
@@ -22,6 +22,23 @@ export const STUDIO_ENTRY_TESTID = {
 } as const;
 
 export type StudioKind = "poster" | "video";
+
+export type OpenStudioDetail = {
+  kind: StudioKind;
+  name?: string;
+  width?: number;
+  height?: number;
+  roomId?: string;
+  embed?: boolean;
+  onExport?: (file: File, payload: StudioExportPayload) => void;
+  onCancel?: () => void;
+};
+
+export type StudioHash = {
+  kind: StudioKind;
+  name: string;
+  embed: boolean;
+};
 
 export type StudioExportPayload = {
   kind: StudioKind;
@@ -67,8 +84,36 @@ export function studioOrigin(): string {
   return "";
 }
 
+/** 對稿自己就是編輯器，入口永遠可開。VITE_STUDIO_ORIGIN 只決定 iframe 還是原生。 */
 export function isStudioConfigured(): boolean {
-  return isStudioOrigin(studioOrigin());
+  return true;
+}
+
+/**
+ * `#studio` 開原生編輯器。`#room=` 是活動房深鏈，不跟它搶。
+ * `#studio?room=` 也讓路，避免鑲入參數誤傷房間連結。
+ */
+export function parseStudioHash(hash: string | null | undefined): StudioHash | null {
+  const raw = String(hash ?? "");
+  if (!raw.startsWith("#studio")) return null;
+  const rest = raw.slice("#studio".length);
+  if (rest && rest[0] !== "?") return null;
+  const params = new URLSearchParams(rest.startsWith("?") ? rest.slice(1) : "");
+  if (params.has("room")) return null;
+  return {
+    kind: params.get("kind") === "video" ? "video" : "poster",
+    name: params.get("name") ?? "",
+    embed: params.get("embed") === "1" || params.get("embed") === "true",
+  };
+}
+
+export function postStudioToParent(message: StudioToParent, targetOrigin = "*"): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.parent?.postMessage(message, targetOrigin);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function isStudioMessage(data: unknown): data is StudioToParent {
@@ -104,17 +149,27 @@ export function fileFromStudioPayload(payload: StudioExportPayload | null | unde
   return null;
 }
 
-export function openStudio(opts: {
-  kind: StudioKind;
-  name?: string;
-  width?: number;
-  height?: number;
-  roomId?: string;
-  onExport: (file: File, payload: StudioExportPayload) => void;
-  onCancel?: () => void;
-}): { close: () => void } | null {
+export function openStudio(opts: OpenStudioDetail): { close: () => void } | null {
+  if (typeof document === "undefined") return null;
   const origin = studioOrigin();
-  if (!isStudioOrigin(origin) || typeof document === "undefined") return null;
+  if (!isStudioOrigin(origin)) {
+    const detail: OpenStudioDetail = {
+      kind: opts.kind === "video" ? "video" : "poster",
+      name: opts.name,
+      width: opts.width,
+      height: opts.height,
+      roomId: opts.roomId,
+      embed: Boolean(opts.embed),
+      onExport: opts.onExport,
+      onCancel: opts.onCancel,
+    };
+    window.dispatchEvent(new CustomEvent<OpenStudioDetail>("duigao:open-studio", { detail }));
+    return {
+      close: () => {
+        window.dispatchEvent(new Event("duigao:close-studio"));
+      },
+    };
+  }
 
   const kind: StudioKind = opts.kind === "video" ? "video" : "poster";
   const params = new URLSearchParams();
@@ -161,7 +216,7 @@ export function openStudio(opts: {
     }
     if (ev.data.type === "inlay:export") {
       const file = fileFromStudioPayload(ev.data.payload);
-      if (file) opts.onExport(file, ev.data.payload);
+      if (file) opts.onExport?.(file, ev.data.payload);
       close();
     }
     if (ev.data.type === "inlay:cancel") {
