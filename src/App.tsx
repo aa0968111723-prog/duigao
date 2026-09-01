@@ -150,11 +150,12 @@ import { boardPollWrite, canEditDiscussion, canTombstoneDiscussion, decisionDraf
 import { discussionPayloadFromNode, placeFromDiscussion } from "./features/collaboration/links";
 import {
   auditWrite,
+  colleagueFailureKind,
   colleagueTurnFromResponse,
+  colleagueTurnInputFromAsk,
   colleagueWrite,
   createCommentAsColleague,
   mentionsGrok,
-  SPEND_LIMIT_COPY,
 } from "./features/collaboration/agentColleague";
 import { applyDeadlineToNode, eventFromBoardNode, eventFromDiscussion, nodeFromScheduleEvent, sourceOpenTarget } from "./features/schedule/links";
 import { adoptPersistedScheduleEvent } from "./features/schedule/events";
@@ -1014,16 +1015,11 @@ export function App() {
         focus: askExtra.focus,
         workLayer: askExtra.workLayer,
       });
-      const spendExceeded = Boolean(
-        response.agent?.status === "spend_exceeded"
-        || /上限/.test(response.answer?.text ?? ""),
-      );
-      const turn = colleagueTurnFromResponse({
-        answer: response.answer?.text,
-        unconfigured: response.agent?.status === "unconfigured",
-        spendExceeded,
+      const turn = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+        answer: response.answer,
+        agent: response.agent,
         proposals: proposalsFromResponse(response),
-      });
+      }));
       for (const proposal of turn.proposals) colleagueProposalRef.current.set(proposal.id, proposal);
       sendDiscussionRef.current(colleagueWrite({
         body: turn.body,
@@ -1056,14 +1052,14 @@ export function App() {
         }
       }
     } catch (error) {
-      const unconfigured = error instanceof Error && /尚未設定|unconfigured/i.test(error.message);
-      const spendExceeded = error instanceof Error && /上限/.test(error.message);
+      const kind = colleagueFailureKind(error);
+      const turn = colleagueTurnFromResponse({
+        unconfigured: kind === "unconfigured",
+        spendExceeded: kind === "spend",
+        failed: kind === "failed",
+      });
       sendDiscussionRef.current(colleagueWrite({
-        body: unconfigured
-          ? "AI 服務尚未設定"
-          : spendExceeded
-            ? SPEND_LIMIT_COPY
-            : "AI 沒有回應，我沒有假裝已讀。",
+        body: turn.body,
         triggerUserId: actor,
         replyToId: input.replyToId,
         nodeId: input.nodeId,
@@ -3577,7 +3573,7 @@ export function App() {
           onReject={(reason) => showToast(reason, { tone: "error" })}
           onSendLink={sendLink}
           resolveAssetUrl={resolveAssetUrl}
-          onAskColleague={isCloudConfigured && cloud.boundRoomId ? (input) => { void askColleague(input); } : undefined}
+          onAskColleague={isCloudConfigured && cloud.boundRoomId ? (input) => askColleague(input) : undefined}
         />
       )
     : undefined;
@@ -3931,7 +3927,7 @@ export function App() {
         // ---- WB06：板內 AI（提案→預覽→套用→稽核） ----
         // 只在雲端房掛（房間 AI 需要 Supabase）— 本機房不擺按不動的入口。
         ...(isCloudConfigured && cloud.boundRoomId ? {
-          onAskColleague: (input) => { void askColleague(input); },
+          onAskColleague: (input) => askColleague(input),
         onSetRoomFocus: setRoomFocus,
         onApplyColleagueProposal: (proposalId) => {
           const proposal = colleagueProposalRef.current.get(proposalId);

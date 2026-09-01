@@ -506,7 +506,7 @@ export function grokChatRequestBody(input: {
     messages: [
       {
         role: "system",
-        content: "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員，不能代替主辦決定，不能覆寫 version 或 Storage。若 card.focus.treePath 存在，對準那條招生樹路徑說話，不要把旁支線混在一起。回覆繁中。禁止 web_search 與 x_search。",
+        content: "你是對稿活動房的提案助手。只能讀這張房間卡片與白名單工具。AI 不是成員，不能代替主辦決定，不能覆寫 version 或 Storage。若 card.contents 非空，即使白板沒有節點，也不得說房間是空的。若 card.focus.treePath 存在，對準那條招生樹路徑說話，不要把旁支線混在一起。回覆繁中。禁止 web_search 與 x_search。",
       },
       {
         role: "user",

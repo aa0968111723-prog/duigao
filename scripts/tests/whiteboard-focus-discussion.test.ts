@@ -11,9 +11,12 @@ import {
   boardAskContext,
   cameraAfterRemount,
   discussionIdFromNode,
+  EMPTY_BOARD_GUIDE,
   emptyBoardCopyHasLonelyStep,
   emptyBoardVerbs,
   emptyRoomTitle,
+  shouldMountEmptyStarter,
+  TREE_PLANTED_HINT,
   focusCardFromNode,
   focusNodeIdFromSelection,
   isEmptyBoard,
@@ -38,17 +41,30 @@ import {
   placeRoomContentFromDiscussion,
   stickyFromDiscussion,
 } from "../../src/features/collaboration/links";
-import { canEditDiscussion, isMemberActor } from "../../src/features/collaboration/discussionHonesty";
+import { canEditDiscussion, isMemberActor, unreadCount } from "../../src/features/collaboration/discussionHonesty";
 import {
+  AGENT_UNCONFIGURED_COLLEAGUE_COPY,
   colleagueBubbleClass,
+  colleagueFailureKind,
+  colleagueTurnFromResponse,
+  colleagueTurnInputFromAsk,
   colleagueWrite,
   createCommentAsColleague,
   GROK_COLLEAGUE_NAME,
+  GROK_SEND_FAILED_COPY,
+  GROK_THINKING_HINT,
+  GROK_TOMBSTONE_COPY,
   isColleagueMessage,
   lastColleagueForFocus,
   mentionsGrok,
   showsGrokMentionChip,
+  SPEND_LIMIT_COPY,
 } from "../../src/features/collaboration/agentColleague";
+import {
+  displayEnrollmentTreePath,
+  plantEnrollmentTree2026,
+  shouldPlantEnrollmentTree,
+} from "../../src/features/collaboration/enrollmentTree";
 import { layoutOriginFromFocus } from "../../src/features/whiteboard/aiPreview";
 import { FIRST_LAYER_TABS } from "../../src/features/multi-room/roomChrome";
 import type { DiscussionMessage, WhiteboardNode } from "../../src/features/collaboration/types";
@@ -230,6 +246,8 @@ test("Focus 表面是明亮紙面，不走深色 overlay", () => {
 test("空板文案不含「新步驟」當唯一 CTA", () => {
   const verbs = emptyBoardVerbs();
   assert.equal(verbs.length, 4);
+  assert.equal(verbs[0].id, "plant-enrollment-tree");
+  assert.equal(verbs[3].id, "ask-grok");
   assert.ok(verbs.every((item) => !item.label.includes("新步驟")));
   const copy = `${emptyRoomTitle("未命名活動房").label}\n${verbs.map((item) => item.label).join("\n")}`;
   assert.equal(emptyBoardCopyHasLonelyStep(copy), false);
@@ -237,6 +255,9 @@ test("空板文案不含「新步驟」當唯一 CTA", () => {
   assert.ok(copy.includes("放一張文宣／素材"));
   assert.ok(copy.includes("空板長 202609招生骨架"));
   assert.ok(copy.includes("問 Grok"));
+  assert.ok(copy.indexOf("空板長 202609招生骨架") < copy.indexOf("問 Grok"));
+  assert.equal(shouldMountEmptyStarter({ canEdit: true, emptyBoard: true, lonelyBlankStep: false }), false);
+  assert.equal(shouldMountEmptyStarter({ canEdit: true, emptyBoard: false, lonelyBlankStep: true }), true);
   assert.equal(isEmptyBoard([]), true);
   assert.equal(isEmptyBoard([node({ deletedAt: 9 })]), true);
   const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
@@ -592,6 +613,96 @@ test("composer 焦點錨帶 versionId／時間／段落；內容卡按鈕不只�
   assert.match(workspace, /incomingFocusAction/);
   assert.match(workspace, /childSourceNode/);
   assert.match(workspace, /stepSourceNode/);
+});
+
+test("問 Grok 失敗是活氣泡不是墓碑；未讀略過墓碑與 pending", () => {
+  const unconfigured = colleagueTurnFromResponse({ unconfigured: true });
+  const spend = colleagueTurnFromResponse({ spendExceeded: true });
+  const failed = colleagueTurnFromResponse({ failed: true });
+  const ok = colleagueTurnFromResponse({ answer: "先點書籤。" });
+  assert.equal(unconfigured.body, AGENT_UNCONFIGURED_COLLEAGUE_COPY);
+  assert.equal(spend.body, SPEND_LIMIT_COPY);
+  assert.equal(failed.body, GROK_SEND_FAILED_COPY);
+  assert.equal(ok.body, "先點書籤。");
+  for (const body of [unconfigured.body, spend.body, failed.body, ok.body]) {
+    assert.doesNotMatch(body, /已收回/);
+  }
+  assert.equal(colleagueFailureKind(new Error("unconfigured")), "unconfigured");
+  assert.equal(colleagueFailureKind(new Error("上限")), "spend");
+  assert.equal(colleagueFailureKind(new Error("TypeError: fetch")), "failed");
+  const write = colleagueWrite({ body: failed.body, triggerUserId: "u1" });
+  assert.equal(write.payload.agent, true);
+  assert.notEqual(write.body, GROK_TOMBSTONE_COPY);
+  const live = message({ id: "a", createdAt: 10 });
+  const tomb = message({ id: "b", createdAt: 20, deletedAt: 21, payload: { agent: true } });
+  const pending = message({ id: "c", createdAt: 30, payload: { agent: true, pending: true } });
+  assert.equal(unreadCount([live, tomb, pending], { lastReadMessageId: "a" }), 0);
+  assert.match(GROK_TOMBSTONE_COPY, /已收回/);
+  const app = src("src/App.tsx");
+  assert.match(app, /colleagueTurnFromResponse/);
+  assert.match(app, /colleagueTurnInputFromAsk/);
+  assert.match(app, /colleagueFailureKind/);
+  assert.doesNotMatch(app, /AI 沒有回應，我沒有假裝已讀/);
+  const unavailable = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: null,
+    agent: { status: "unavailable" },
+  }));
+  assert.equal(unavailable.body, GROK_SEND_FAILED_COPY);
+  const nullAnswer = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: null,
+    agent: { status: "ok" },
+  }));
+  assert.equal(nullAnswer.body, GROK_SEND_FAILED_COPY);
+  const emptyAnswer = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: { text: "   " },
+    agent: { provider: "grok-room-agent", status: "ready" },
+  }));
+  assert.equal(emptyAnswer.body, GROK_SEND_FAILED_COPY);
+  assert.doesNotMatch(unavailable.body, /我看過了/);
+  const liveOk = colleagueTurnFromResponse(colleagueTurnInputFromAsk({
+    answer: { text: "先點書籤。" },
+    agent: { status: "ok" },
+  }));
+  assert.equal(liveOk.body, "先點書籤。");
+});
+
+test("空板種樹在問 Grok 之前；有引導片；選書籤看得到 treePath", () => {
+  const verbs = emptyBoardVerbs();
+  assert.ok(verbs.findIndex((item) => item.id === "plant-enrollment-tree")
+    < verbs.findIndex((item) => item.id === "ask-grok"));
+  assert.match(EMPTY_BOARD_GUIDE, /一次只討論一支/);
+  const workspace = src("src/features/whiteboard/WhiteboardWorkspace.tsx");
+  const emptyBoardAt = workspace.indexOf('data-testid="wb-empty-board"');
+  const emptyBoardTag = workspace.slice(emptyBoardAt - 80, emptyBoardAt + 120);
+  assert.match(emptyBoardTag, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
+  assert.match(workspace, /wb-guide-video/);
+  assert.match(workspace, /wb-tree-hint/);
+  assert.match(workspace, /wb-colleague-hint/);
+  assert.match(workspace, /TREE_PLANTED_HINT|點一支開始討論/);
+  assert.match(workspace, /GROK_THINKING_HINT|同事想一下/);
+  assert.doesNotMatch(workspace, /youtube\.com|iframe/);
+  const emptyAt = workspace.indexOf('data-testid="wb-empty-board"');
+  const starterAt = workspace.indexOf('data-testid="wb-empty-starter"');
+  assert.ok(emptyAt > 0 && starterAt > 0);
+  const planted = plantEnrollmentTree2026({ whiteboardId: "b1", roomId: "r1", createdBy: "u1", idFn: (() => { let n = 0; return () => `t${++n}`; })() });
+  assert.equal(shouldPlantEnrollmentTree(planted.nodes, planted.edges), false);
+  const bookmark = planted.nodes.find((item) => item.content.text === "書籤")!;
+  const card = focusCardFromNode(bookmark, { nodes: planted.nodes, edges: planted.edges });
+  assert.equal(card.treePath, "202609招生 › 書籤");
+  assert.equal(displayEnrollmentTreePath(["202609招生", "印製招募文案", "正"]), "… › 印製招募文案 › 正");
+  assert.match(TREE_PLANTED_HINT, /書籤/);
+  assert.equal(GROK_THINKING_HINT, "同事想一下…");
+  const drawer = src("src/features/room-discussion/RoomDiscussion.tsx");
+  assert.match(drawer, /還沒有人寫下決策。問同事只會給提案。/);
+  assert.deepEqual(FIRST_LAYER_TABS, ["對話", "白板"]);
+  const css = src("src/features/whiteboard/whiteboard.css");
+  assert.match(css, /min\(420px,\s*calc\(100% - 32px\)\)/);
+  assert.match(css, /\.wb-guide-video \{[\s\S]*?max-height:\s*160px/);
+  const prompt = src("src/ai/roomAgentContract.ts");
+  assert.match(prompt, /contents 非空[\s\S]*不得說房間是空的/);
+  assert.match(prompt, /禁止 web_search/);
+  const source = src("public/guides/SOURCE.txt");
+  assert.match(source, /GUIDE_VIDEO=PLACEHOLDER/);
 });
 
 test("incoming focus：編輯中的另一張卡不被釘文宣搶走", () => {

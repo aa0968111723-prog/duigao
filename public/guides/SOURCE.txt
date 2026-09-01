@@ -1,0 +1,3 @@
+GUIDE_VIDEO=PLACEHOLDER
+Solid color 390x160 silent clip. Not a recording of product UI.
+Cannot capture a real empty-board → plant → bookmark flow in this environment.

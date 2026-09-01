@@ -13,6 +13,8 @@ export const GROK_AGENT_PROVIDER = "grok-room-agent";
 export const GROK_MENTION_LABEL = "Grok・討論同事";
 export const AGENT_UNCONFIGURED_COLLEAGUE_COPY = "AI 服務尚未設定";
 export const SPEND_LIMIT_COPY = "這一回合花費已達上限";
+export const GROK_SEND_FAILED_COPY = "這則沒送出，請再問一次。";
+export const GROK_THINKING_HINT = "同事想一下…";
 export const GROK_TOMBSTONE_COPY = "Grok 這則已收回";
 export const GROK_APPLIED_BOARD_COPY = "已放到板上，你們可再拖位置";
 
@@ -24,6 +26,7 @@ export type ColleaguePayload = DiscussionPayload & {
   proposals?: Array<{ id: string; type: string; label: string }>;
   treePath?: string;
   treeRootId?: string;
+  pending?: boolean;
 };
 
 export function isColleagueMessage(message: {
@@ -122,6 +125,7 @@ export function colleagueTurnFromResponse(input: {
   answer?: string;
   unconfigured?: boolean;
   spendExceeded?: boolean;
+  failed?: boolean;
   proposals?: AiProposal[];
 }): {
   body: string;
@@ -133,6 +137,9 @@ export function colleagueTurnFromResponse(input: {
   if (input.spendExceeded) {
     return { body: SPEND_LIMIT_COPY, proposals: [] };
   }
+  if (input.failed) {
+    return { body: GROK_SEND_FAILED_COPY, proposals: [] };
+  }
   const all = input.proposals ?? [];
   const comments = all.filter((item) => item.type === "create_comment");
   const cards = all.filter((item) => item.type !== "create_comment").slice(0, 3);
@@ -141,6 +148,43 @@ export function colleagueTurnFromResponse(input: {
     : "";
   const body = (input.answer || fromComment || "我看過了，還沒有具體下一步。").trim();
   return { body, proposals: cards };
+}
+
+export function colleagueFailureKind(error: unknown): "unconfigured" | "spend" | "failed" {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/尚未設定|unconfigured/i.test(message)) return "unconfigured";
+  if (/上限|spend/i.test(message)) return "spend";
+  return "failed";
+}
+
+/** Map HTTP 200 ask results (including answer:null / unavailable) onto turn flags. */
+export function colleagueTurnInputFromAsk(result: {
+  answer?: { text?: string } | null;
+  agent?: { status?: string } | null;
+  proposals?: AiProposal[];
+}): {
+  answer?: string;
+  unconfigured?: boolean;
+  spendExceeded?: boolean;
+  failed?: boolean;
+  proposals?: AiProposal[];
+} {
+  const status = (result.agent?.status ?? "").toLowerCase();
+  if (status === "unconfigured") return { unconfigured: true };
+  if (status === "spend_exceeded" || /上限/.test(result.answer?.text ?? "")) {
+    return { spendExceeded: true };
+  }
+  const text = result.answer?.text?.trim() ?? "";
+  if (
+    status === "unavailable"
+    || status === "error"
+    || status === "failed"
+    || result.answer == null
+    || !text
+  ) {
+    return { failed: true };
+  }
+  return { answer: text, proposals: result.proposals };
 }
 
 /** create_comment 採用後必須長成同事氣泡，不可頂著觸發者發言。 */
