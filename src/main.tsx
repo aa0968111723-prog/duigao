@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { StudioRoot } from "./features/studio/StudioRoot";
 import { upgradeLegacyShareUrl } from "./cloud/legacy";
 import "./styles.css";
 import "./mobile.css";
@@ -14,6 +15,7 @@ upgradeLegacyShareUrl();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
+    <StudioRoot />
   </StrictMode>,
 );
 

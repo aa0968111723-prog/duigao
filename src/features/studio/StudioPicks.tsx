@@ -1,10 +1,6 @@
 import { useState } from "react";
 import { staticFileList } from "../../components/UniversalIntake";
-import {
-  STUDIO_ENTRY_COPY,
-  isStudioConfigured,
-  openStudio,
-} from "../../lib/studioEmbed";
+import { STUDIO_ENTRY_COPY, openStudio } from "../../lib/studioEmbed";
 import "./studio.css";
 
 type Props = {
@@ -32,18 +28,13 @@ function ClipIcon() {
 }
 
 /**
- * 首頁「做一張圖／做一段影片」。匯出檔案交給既有上傳入口，
- * 不另開權限、不改原稿。
+ * 首頁「做一張圖／做一段影片」。打開對稿自己的 Canva 式編輯器，
+ * 匯出檔案交給既有上傳入口，不另開權限、不改原稿。
  */
 export function StudioPicks({ onImage, onVideo, videoAvailable }: Props) {
-  const configured = isStudioConfigured();
   const [hint, setHint] = useState<string | null>(null);
 
   function start(kind: "poster" | "video") {
-    if (!configured) {
-      setHint(STUDIO_ENTRY_COPY["not-configured"]);
-      return;
-    }
     setHint(null);
     const opened = openStudio({
       kind,
@@ -52,6 +43,9 @@ export function StudioPicks({ onImage, onVideo, videoAvailable }: Props) {
         const list = staticFileList([file]);
         if (kind === "video") onVideo(list);
         else onImage(list);
+      },
+      onCancel() {
+        /* stay on home */
       },
     });
     if (!opened) setHint(STUDIO_ENTRY_COPY["not-configured"]);
