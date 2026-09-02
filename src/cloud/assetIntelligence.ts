@@ -25,6 +25,7 @@ import { DocumentUnderstandingProvider, PdfReader } from "../ai/documentUndersta
 import { VideoUnderstandingProvider } from "../ai/videoUnderstanding";
 import { answerDuigaoRoomContext } from "../ai/aiOsRoomContext";
 import { acceptAssetAiPolicyAck } from "./assetAiPolicyAck";
+import { acceptHumanAssetMetadataAck } from "./assetHumanMetadataAck";
 import { ensureSession } from "./auth";
 import { getSupabase } from "./client";
 import { isCloudConfigured } from "./config";
@@ -241,10 +242,6 @@ function assertResponse(value: unknown): RoomContextResponse {
   return response as RoomContextResponse;
 }
 
-/**
- * Read only the bounded intelligence slice for a room. No signed media URL is
- * requested here; a review workspace loads media through its existing path.
- */
 export async function listIntelligentAssets(
   supabase: SupabaseClient,
   roomId: string,
@@ -318,11 +315,6 @@ export async function listIntelligentAssets(
   return { assets, jobs, relations: (relationsResult.data ?? []).map(relationFromRow) };
 }
 
-/**
- * Client-side document / video understanding for assets that already have
- * text or duration but no persisted chunks/segments yet. Original media is
- * never fetched or rewritten.
- */
 function fillLocalUnderstanding(asset: IntelligentAsset): void {
   const extracted = typeof asset.metadata.extracted_text === "string"
     ? PdfReader.extractText(asset.metadata.extracted_text)
@@ -367,10 +359,6 @@ function fillLocalUnderstanding(asset: IntelligentAsset): void {
 
 export async function registerIntelligentAsset(supabase: SupabaseClient, input: RegisterAssetInput): Promise<IntelligentAsset> {
   const userId = await ensureSession(supabase);
-  // A version is a distinct reviewable asset even when its bytes match another
-  // version. Standalone imports can still use their content hash as the
-  // idempotency key, while version-linked assets retain separate provenance
-  // and let the analysis worker reuse the sibling result safely.
   const sourceKey = input.versionId
     ? `version:${input.versionId}`
     : input.contentHash
@@ -414,7 +402,7 @@ export async function setHumanAssetMetadata(
   input: { assetId: string; roomId: string; title?: string; summary?: string; tags?: string[]; structuredData?: Record<string, unknown> },
 ): Promise<void> {
   const userId = await ensureSession(supabase);
-  const { error } = await supabase.from("asset_human_metadata").upsert({
+  const { data, error } = await supabase.from("asset_human_metadata").upsert({
     asset_id: input.assetId,
     room_id: input.roomId,
     title: input.title?.trim() || null,
@@ -422,15 +410,11 @@ export async function setHumanAssetMetadata(
     tags: (input.tags ?? []).map((tag) => tag.trim()).filter(Boolean).slice(0, 30),
     structured_data: input.structuredData ?? {},
     updated_by: userId,
-  }, { onConflict: "asset_id" });
+  }, { onConflict: "asset_id" }).select("asset_id").maybeSingle();
   if (error) throw error;
+  acceptHumanAssetMetadataAck(data);
 }
 
-/**
- * AI policy is deliberately separate from human metadata. Database RLS limits
- * this mutation to owner/editor roles; reviewers can see the current policy
- * but cannot change where an asset's contents may go.
- */
 export async function setAssetAiPolicy(
   supabase: SupabaseClient,
   input: { assetId: string; aiReadable: boolean; externalAiAllowed: boolean },
@@ -465,11 +449,6 @@ export async function removeAssetRelation(supabase: SupabaseClient, relationId: 
   if (error) throw error;
 }
 
-/**
- * Context is cached after the server has applied membership and AI-readability
- * filters. The cache key includes analysis versions so re-analysis invalidates
- * stale answers without ever caching Storage bytes.
- */
 export async function askRoomContext(
   supabase: SupabaseClient,
   roomId: string,
